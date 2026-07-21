@@ -1,0 +1,111 @@
+"""Deterministic answer-confidence model (Phase 2, Part 19) — replaces
+using raw vector similarity as "answer confidence." A 27% cosine score is
+NOT the same thing as "how confident should the admin be in this answer,"
+especially now that a chunk can be selected primarily on keyword/heading
+evidence with a low vector score (see rag/hybrid_scoring.py).
+
+This is intentionally simple and deterministic (no LLM call, no learned
+model) — a conservative, explainable scoring function over the SAME
+signals already computed by hybrid_scoring.py, generic across any domain.
+"""
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+
+@dataclass
+class ConfidenceResult:
+    answer_confidence: float          # 0-1, the ONE number meant for end users/admins
+    answerability: str                 # "direct_answer" | "partial_answer" | "no_information"
+    raw_vector_similarity: Optional[float]   # top chunk's raw cosine score, shown separately, never relabeled as confidence
+    hybrid_retrieval_score: Optional[float]  # top chunk's hybrid_score
+    evidence_count: int
+    reason: str
+
+
+def _classify_answerability(chunks: List[Dict], is_calculated: bool) -> str:
+    if is_calculated:
+        return "direct_answer"
+    if not chunks:
+        return "no_information"
+    has_direct = any(c.get("classification") == "direct_evidence" for c in chunks)
+    has_any_support = any(c.get("classification") in
+                           ("direct_evidence", "supporting_evidence", "structured_deterministic")
+                           for c in chunks)
+    if has_direct:
+        return "direct_answer"
+    if has_any_support:
+        return "partial_answer"
+    # Only weak_semantic (or nothing) survived — no real evidence.
+    return "partial_answer" if chunks else "no_information"
+
+
+def compute_confidence(chunks: List[Dict]) -> ConfidenceResult:
+    """`chunks` is the FINAL selected-evidence list (already filtered/
+    ranked by rag/hybrid_scoring.py) — never the raw candidate pool.
+    Confidence is built from: how many chunks actually support the
+    answer, whether any has strong (heading/keyword) evidence vs. only a
+    vector-similarity guess, and evidence count — never from a single
+    cosine number alone."""
+    if not chunks:
+        return ConfidenceResult(
+            answer_confidence=0.0, answerability="no_information",
+            raw_vector_similarity=None, hybrid_retrieval_score=None,
+            evidence_count=0, reason="No chunks were retrieved or survived relevance filtering.",
+        )
+
+    is_calculated = any(c.get("is_calculated") for c in chunks)
+    top = chunks[0]
+    raw_vector = top.get("score")
+    hybrid = top.get("hybrid_score")
+    answerability = _classify_answerability(chunks, is_calculated)
+
+    if is_calculated:
+        confidence = 0.97
+        reason = "A deterministic calculation was performed against the source data (not a similarity guess)."
+    elif answerability == "direct_answer":
+        # Strong lexical evidence (heading/keyword) is the dominant signal
+        # here — a 27% raw vector score with an exact heading match is
+        # trustworthy in a way a 27% score with zero lexical support isn't.
+        support_bonus = min(0.15, 0.05 * sum(
+            1 for c in chunks if c.get("classification") in ("direct_evidence", "supporting_evidence")))
+        confidence = min(0.95, 0.75 + support_bonus)
+        reason = ("At least one chunk has a direct keyword/heading match for the question — "
+                   "confidence reflects lexical evidence strength, not raw vector similarity.")
+    elif answerability == "partial_answer":
+        has_supporting = any(c.get("classification") == "supporting_evidence" for c in chunks)
+        # Evidence Agreement (customer-demo P0 fix): a SINGLE weak/semantic
+        # chunk is still a low-confidence guess, but several (3+) retrieved
+        # chunks that all survived retrieval on the same topic are a real
+        # corroborating signal, not one lucky vector match — e.g. a broad
+        # "summarize the company" question that legitimately pulls in
+        # multiple related FAQ rows, none of which individually has an
+        # exact heading/keyword match. Never applies to a single chunk.
+        multi_chunk_agreement = len(chunks) >= 3
+        if has_supporting or multi_chunk_agreement:
+            confidence = 0.55
+            reason = ("Multiple related chunks were retrieved and agree on the same topic — "
+                       "confidence reflects that corroborating breadth, not a single weak match.") \
+                if multi_chunk_agreement and not has_supporting else \
+                ("Related information was found but no chunk directly and fully answers the "
+                 "question — confidence reflects partial support.")
+        else:
+            confidence = 0.35
+            reason = ("Related information was found but no chunk directly and fully answers the "
+                       "question — confidence reflects partial support.")
+    else:
+        confidence = 0.15
+        reason = "No supporting evidence was found for this question."
+
+    return ConfidenceResult(
+        answer_confidence=round(confidence, 4), answerability=answerability,
+        raw_vector_similarity=raw_vector, hybrid_retrieval_score=hybrid,
+        evidence_count=len(chunks), reason=reason,
+    )
+
+
+def confidence_label(score: float) -> str:
+    if score >= 0.75:
+        return "High"
+    if score >= 0.45:
+        return "Medium"
+    return "Low"

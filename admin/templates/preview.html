@@ -1,0 +1,1675 @@
+{% extends "base.html" %}
+{% set active = "preview" %}
+
+{% block title %}AI Playground — Shipify Admin{% endblock %}
+{% block topbar_title %}AI Playground{% endblock %}
+
+{% block extra_head %}
+<style>
+.pg-status-bar{display:flex;flex-wrap:wrap;gap:0;background:rgba(27,79,155,.07);border:1px solid rgba(27,79,155,.2);border-radius:12px;margin-bottom:16px;overflow:hidden}
+.pg-status-item{flex:1 1 0;padding:10px 20px;border-right:1px solid rgba(255,255,255,.06);min-width:110px;overflow:hidden}
+.pg-status-item:last-child{border-right:none}
+.pg-status-label{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:rgba(232,237,245,.35);margin-bottom:3px;white-space:nowrap}
+.pg-status-value{font-size:12.5px;font-weight:600;color:#e8edf5;white-space:normal;overflow-wrap:break-word;line-height:1.3}
+.pg-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+.pg-dot-healthy{background:#34d399}
+.pg-dot-warning{background:#fcd34d}
+.pg-dot-error{background:#ef4444}
+
+
+.pg-layout{display:grid;grid-template-columns:minmax(300px,40%) 1fr;gap:16px;align-items:start}
+@media (max-width:960px){.pg-layout{grid-template-columns:1fr}}
+
+.pg-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;display:flex;flex-direction:column;height:calc(100vh - 260px);min-height:520px}
+.pg-panel-header{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.pg-panel-title{font-size:12px;font-weight:600;color:rgba(232,237,245,.6);text-transform:uppercase;letter-spacing:.05em}
+
+.pg-conv-list{overflow-y:auto;flex:1;padding:10px 14px}
+.pg-msg{margin-bottom:14px;max-width:92%}
+.pg-msg-user{margin-left:auto;text-align:right}
+.pg-msg-bubble{display:inline-block;padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.6;text-align:left}
+.pg-msg-user .pg-msg-bubble{background:rgba(27,79,155,.3);color:#e8edf5;border-bottom-right-radius:3px}
+.pg-msg-ai .pg-msg-bubble{background:rgba(255,255,255,.05);color:rgba(232,237,245,.9);border-bottom-left-radius:3px;white-space:pre-wrap}
+.pg-msg-meta{font-size:10px;color:rgba(232,237,245,.3);margin-top:3px}
+
+.pg-chunk-card{border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:9px 11px;margin-bottom:7px;cursor:pointer;transition:border-color .15s;overflow-wrap:break-word;word-break:break-word}
+.pg-chunk-card:hover{border-color:rgba(245,166,35,.4)}
+.pg-chunk-card.expanded{border-color:rgba(245,166,35,.5)}
+.pg-chunk-top{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px}
+.pg-chunk-sim{font-weight:700}
+.pg-chunk-file{color:rgba(232,237,245,.55);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.pg-chunk-meta{font-size:10px;color:rgba(232,237,245,.35);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap}
+.pg-chunk-preview{font-size:11.5px;color:rgba(232,237,245,.6);margin-top:6px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pg-chunk-full{font-size:11.5px;color:rgba(232,237,245,.75);margin-top:6px;white-space:pre-wrap;line-height:1.6}
+.pg-att-badge{display:inline-flex;align-items:center;gap:3px;font-size:9.5px;color:#a78bfa;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.25);border-radius:10px;padding:1px 7px}
+
+.pg-input-row{border-top:1px solid rgba(255,255,255,.06);padding:10px 14px;flex-shrink:0}
+.pg-input-wrap{display:flex;gap:8px}
+.pg-input{flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e8edf5;padding:9px 12px;font-size:13px;resize:none;font-family:inherit}
+.pg-input:focus{outline:none;border-color:rgba(245,166,35,.5)}
+.pg-input-textwrap{position:relative;flex:1;display:flex}
+.pg-input-textwrap .pg-input{width:100%}
+.pg-placeholder-overlay{
+  position:absolute; left:12px; top:9px; right:12px;
+  font-size:13px; line-height:1.4; color:rgba(232,237,245,.35);
+  pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  opacity:0; transition:opacity .2s ease;
+}
+.pg-placeholder-overlay.visible{opacity:1}
+
+.pg-tabs{display:flex;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
+.pg-tab{padding:10px 16px;font-size:12px;font-weight:600;color:rgba(232,237,245,.4);cursor:pointer;border-bottom:2px solid transparent}
+.pg-tab.active{color:#F5A623;border-bottom-color:#F5A623}
+.pg-tab-content{flex:1;overflow-y:auto;padding:16px}
+.pg-tab-pane{display:none}
+.pg-tab-pane.active{display:block}
+
+.pg-confidence{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.pg-confidence-high{background:rgba(52,211,153,.12);color:#34d399;border:1px solid rgba(52,211,153,.3)}
+.pg-confidence-medium{background:rgba(252,211,77,.1);color:#fcd34d;border:1px solid rgba(252,211,77,.3)}
+.pg-confidence-low{background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+
+.pg-meta-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:12px}
+.pg-meta-cell{background:rgba(255,255,255,.03);border-radius:8px;padding:8px 10px}
+.pg-meta-cell-label{font-size:9.5px;color:rgba(232,237,245,.35);text-transform:uppercase;letter-spacing:.04em}
+.pg-meta-cell-value{font-size:12.5px;color:#e8edf5;font-weight:600;margin-top:2px}
+
+.pg-stage{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.pg-stage:last-child{border-bottom:none}
+.pg-stage-icon{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+.pg-stage-success{background:rgba(52,211,153,.15);color:#34d399}
+.pg-stage-failed{background:rgba(239,68,68,.15);color:#fca5a5}
+.pg-stage-skipped{background:rgba(255,255,255,.06);color:rgba(232,237,245,.35)}
+.pg-stage-triggered{background:rgba(252,211,77,.15);color:#fcd34d}
+.pg-stage-name{flex:1;font-size:12.5px;color:#e8edf5}
+.pg-stage-detail{font-size:10.5px;color:rgba(232,237,245,.4)}
+.pg-stage-duration{font-size:11px;color:rgba(232,237,245,.45);font-family:monospace}
+
+.pg-svc-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 10px;border-radius:14px;margin:3px}
+.pg-svc-success{background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.25)}
+.pg-svc-failed{background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.25)}
+.pg-svc-skipped{background:rgba(255,255,255,.04);color:rgba(232,237,245,.35);border:1px solid rgba(255,255,255,.1)}
+
+.pg-json{background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:14px;font-size:11.5px;line-height:1.6;white-space:pre-wrap;overflow-x:auto;font-family:'SF Mono','Fira Code',monospace;color:rgba(232,237,245,.8);max-height:70vh;overflow-y:auto}
+.pg-copy-btn{font-size:10.5px;padding:3px 9px;background:rgba(255,255,255,.06);color:rgba(232,237,245,.6);border:1px solid rgba(255,255,255,.12);border-radius:6px;cursor:pointer}
+.pg-copy-btn:hover{background:rgba(255,255,255,.12)}
+.pg-copy-btn.pg-copied,.pg-copy-icon.pg-copied{color:#34d399;border-color:rgba(52,211,153,.4)}
+.pg-copy-icon{font-size:11px;line-height:1;padding:2px 5px;margin-left:5px;background:transparent;color:rgba(232,237,245,.4);
+  border:1px solid rgba(255,255,255,.1);border-radius:5px;cursor:pointer;vertical-align:middle}
+.pg-copy-icon:hover{background:rgba(255,255,255,.1);color:rgba(232,237,245,.8)}
+.pg-copy-icon:focus-visible,.pg-copy-btn:focus-visible{outline:2px solid #60a5fa;outline-offset:1px}
+
+/* Customer-demo P0 fix: reintroduces a Customer/Developer view toggle
+   scoped to .pg-layout3 (not <body>, to avoid touching any other admin
+   page). Customer mode hides numeric confidence/"Low Confidence" and the
+   Prompt/Pipeline/Raw JSON tabs — Answer/Sources/Attachments only.
+   Developer mode (toggle it on) restores everything, unchanged from
+   before. Default is Customer mode for tomorrow's demo. */
+.dev-only{display:block}
+.dev-only-inline{display:inline-flex}
+.pg-layout3.pg-customer-mode .dev-only{display:none}
+.pg-layout3.pg-customer-mode .dev-only-inline{display:none}
+.pg-mode-toggle{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:rgba(232,237,245,.6);
+  border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:4px 10px;cursor:pointer;user-select:none}
+.pg-mode-toggle:hover{background:rgba(255,255,255,.06)}
+
+/* ── Prompt Template selector — custom listbox matching the dark navy
+   enterprise theme (native <select> can't be restyled cross-browser to
+   remove its white dropdown menu, hence a custom combobox). ── */
+.pg-header-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.pg-prompt-field{display:flex;flex-direction:column;gap:5px;min-width:240px}
+.pg-prompt-field-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.pg-prompt-select{position:relative;width:280px;max-width:100%}
+.pg-prompt-trigger{
+  width:100%;height:40px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  background:var(--navy);border:1px solid var(--glass-border);border-radius:10px;
+  padding:0 12px;color:var(--text);font-size:12.5px;cursor:pointer;text-align:left;
+}
+.pg-prompt-trigger:hover{border-color:rgba(245,166,35,.35)}
+.pg-prompt-trigger:focus-visible,.pg-prompt-trigger.open{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(245,166,35,.18)}
+.pg-prompt-trigger-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.pg-prompt-trigger-chevron{flex-shrink:0;transition:transform .15s;color:var(--text-muted)}
+.pg-prompt-trigger.open .pg-prompt-trigger-chevron{transform:rotate(180deg)}
+.pg-prompt-menu{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;
+  background:var(--navy);border:1px solid var(--glass-border);border-radius:10px;
+  max-height:260px;overflow-y:auto;box-shadow:0 12px 32px -8px rgba(0,0,0,.6);
+  display:none;padding:4px;
+}
+.pg-prompt-menu.open{display:block}
+.pg-prompt-option{padding:8px 10px;border-radius:6px;font-size:12.5px;color:var(--text);cursor:pointer;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;justify-content:space-between;gap:6px}
+.pg-prompt-option:hover,.pg-prompt-option.highlighted{background:var(--surface-hover)}
+.pg-prompt-option[aria-selected="true"]{color:var(--amber)}
+.pg-prompt-option[aria-selected="true"]::after{content:"✓";flex-shrink:0}
+.pg-prompt-empty,.pg-prompt-loading,.pg-prompt-error{padding:10px;font-size:12px;color:var(--text-muted)}
+.pg-prompt-error{color:#fca5a5}
+@media (max-width:720px){
+  .pg-header-row{flex-direction:column}
+  .pg-prompt-select{width:100%}
+}
+
+/* ── AI Session sidebar ── */
+.pg-layout3{display:grid;grid-template-columns:220px minmax(280px,34%) 1fr;gap:14px;align-items:start}
+@media (max-width:1300px){.pg-layout3{grid-template-columns:200px 1fr}}
+@media (max-width:960px){.pg-layout3{grid-template-columns:1fr}}
+
+.sess-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;display:flex;flex-direction:column;height:calc(100vh - 260px);min-height:520px}
+.sess-header{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
+.sess-new-btn{width:100%;background:rgba(245,166,35,.15);color:#F5A623;border:1px solid rgba(245,166,35,.35);border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:8px}
+.sess-new-btn:hover{background:rgba(245,166,35,.25)}
+.sess-search{width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e8edf5;padding:6px 9px;font-size:11.5px;margin-bottom:8px}
+.sess-date-filter{width:100%;max-width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:#e8edf5;border-radius:7px;padding:6px 9px;font-size:11.5px;cursor:pointer;appearance:auto}
+.sess-date-filter:focus{outline:none;border-color:rgba(245,166,35,.4)}
+.sess-date-filter option{background:#0d1932;color:#e8edf5}
+.sess-list{flex:1;overflow-y:auto;padding:6px}
+.sess-item{padding:9px 10px;border-radius:8px;cursor:pointer;margin-bottom:3px;border:1px solid transparent;position:relative}
+.sess-item:hover{background:rgba(255,255,255,.04)}
+.sess-item.active{background:rgba(245,166,35,.1);border-color:rgba(245,166,35,.3)}
+.sess-item-q{font-size:12px;color:#e8edf5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.sess-item-meta{font-size:9.5px;color:rgba(232,237,245,.35);margin-top:3px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.sess-status-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.sess-status-completed{background:#34d399}
+.sess-status-running{background:#fcd34d}
+.sess-status-failed{background:#fca5a5}
+.sess-status-cancelled{background:rgba(232,237,245,.3)}
+.sess-compare-cb{position:absolute;top:8px;right:8px}
+.sess-actions{display:flex;gap:5px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.06);flex-wrap:wrap}
+.sess-action-btn{flex:1;min-width:60px;font-size:10px;padding:5px 6px;background:rgba(255,255,255,.04);color:rgba(232,237,245,.6);border:1px solid rgba(255,255,255,.1);border-radius:6px;cursor:pointer}
+.sess-action-btn:hover{background:rgba(255,255,255,.08)}
+
+/* ── Explainability ── */
+.explain-row{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.explain-row:last-child{border-bottom:none}
+.explain-icon{font-size:15px;flex-shrink:0}
+.explain-label{font-size:11.5px;font-weight:700;color:#e8edf5;margin-bottom:3px}
+.explain-value{font-size:12px;color:rgba(232,237,245,.65);line-height:1.6}
+
+/* ── Compare modal ── */
+.cmp-overlay{display:none;position:fixed;inset:0;z-index:900;background:rgba(6,14,30,.9);backdrop-filter:blur(6px);align-items:center;justify-content:center}
+.cmp-overlay.open{display:flex}
+.cmp-box{background:rgba(13,25,50,.98);border:1px solid rgba(27,79,155,.4);border-radius:16px;padding:24px;width:90vw;max-width:1100px;max-height:88vh;overflow-y:auto}
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px}
+.cmp-col{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px}
+.cmp-field-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:rgba(232,237,245,.35);margin:10px 0 4px}
+.cmp-field-value{font-size:12px;color:#e8edf5;white-space:pre-wrap;line-height:1.6;max-height:160px;overflow-y:auto;background:rgba(0,0,0,.2);border-radius:6px;padding:8px}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Row 1: title + description (left), Prompt Template selector (right) -->
+<div class="page-header pg-header-row">
+  <div>
+    <div class="page-title">AI Playground</div>
+    <div class="page-sub">Test, debug, and validate the full AI pipeline — retrieval, calculation, prompts, and answers.</div>
+  </div>
+  <div class="pg-prompt-field">
+    <label class="pg-prompt-field-label" id="pg-prompt-label">Prompt Template</label>
+    <div class="pg-prompt-select" id="pg-prompt-select">
+      <button type="button" class="pg-prompt-trigger" id="pg-prompt-trigger"
+              aria-haspopup="listbox" aria-expanded="false" aria-controls="pg-prompt-menu"
+              aria-labelledby="pg-prompt-label pg-prompt-trigger-text">
+        <span class="pg-prompt-trigger-label" id="pg-prompt-trigger-text">Loading prompt templates…</span>
+        <svg class="pg-prompt-trigger-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none">
+          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <ul class="pg-prompt-menu" id="pg-prompt-menu" role="listbox" aria-labelledby="pg-prompt-label" tabindex="-1"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- Row 2: system status cards -->
+<div class="pg-status-bar" id="pg-status-bar">
+  <div class="pg-status-item"><div class="pg-status-label">Provider</div><div class="pg-status-value" id="st-provider">—</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Model</div><div class="pg-status-value" id="st-model">—</div></div>
+  <div class="pg-status-item" id="st-embed-wrap"><div class="pg-status-label">Embedding</div><div class="pg-status-value" id="st-embed">—</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Policies</div><div class="pg-status-value" id="st-policies">—</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Knowledge</div><div class="pg-status-value" id="st-knowledge">—</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Chunks</div><div class="pg-status-value" id="st-chunks">—</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Latency</div><div class="pg-status-value" id="st-latency">—</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Knowledge Graph</div><div class="pg-status-value">Enabled</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Import Mode</div><div class="pg-status-value">Full Auto</div></div>
+  <div class="pg-status-item"><div class="pg-status-label">Status</div><div class="pg-status-value" id="st-status">—</div></div>
+</div>
+
+<!-- Split Layout -->
+<div class="pg-layout3 pg-customer-mode" id="pg-layout3-root">
+  <div style="grid-column:1/-1;display:flex;justify-content:flex-end;margin-bottom:2px">
+    <span class="pg-mode-toggle" id="pg-mode-toggle" onclick="togglePgMode()">👤 Customer Mode (click for Developer Mode)</span>
+  </div>
+  <!-- SESSIONS SIDEBAR -->
+  <div class="sess-panel">
+    <div class="sess-header">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span class="pg-panel-title">AI Sessions</span>
+      </div>
+      <button class="sess-new-btn" onclick="createNewSession()">+ New Session</button>
+      <input class="sess-search" id="sess-search" placeholder="Search sessions…" oninput="debouncedLoadSessions()">
+      <select class="sess-date-filter" id="sess-date-filter" onchange="setDateFilter(this.value)" title="Date Filter">
+        <option value="">📅 All Sessions</option>
+        <option value="today">📅 Today</option>
+        <option value="yesterday">📅 Yesterday</option>
+        <option value="7d">📅 Last 7 Days</option>
+        <option value="30d">📅 Last 30 Days</option>
+      </select>
+    </div>
+    <div class="sess-list" id="sess-list">
+      <div style="text-align:center;padding:20px 8px;color:rgba(232,237,245,.3);font-size:11.5px">No sessions yet.</div>
+    </div>
+    <div class="sess-actions">
+      <button class="sess-action-btn" onclick="renameCurrentSession()">Rename</button>
+      <button class="sess-action-btn" onclick="duplicateCurrentSession()">Duplicate</button>
+      <button class="sess-action-btn" onclick="clearCurrentConversation()">Clear</button>
+      <button class="sess-action-btn" onclick="deleteCurrentSession()" style="color:#fca5a5">Delete</button>
+      <button class="sess-action-btn" onclick="openCompare()">⇄ Compare (<span id="cmp-count">0</span>)</button>
+    </div>
+  </div>
+
+  <!-- Conversation -->
+  <div class="pg-panel">
+    <div class="pg-panel-header">
+      <span class="pg-panel-title" id="pg-session-name">Conversation</span>
+      <div style="display:flex;gap:6px">
+        <button class="pg-copy-btn" onclick="exportSession('md')">Export MD</button>
+        <button class="pg-copy-btn" onclick="exportSession('json')">Export JSON</button>
+        <button class="pg-copy-btn" onclick="exportSession('pdf')">Export PDF</button>
+      </div>
+    </div>
+    <div class="pg-conv-list" id="pg-conv-list">
+      <div style="text-align:center;padding:30px 10px;color:rgba(232,237,245,.3);font-size:12.5px">
+        Ask a question below to start testing the AI pipeline.
+      </div>
+    </div>
+    <div class="pg-input-row">
+      <div class="pg-input-wrap">
+        <div class="pg-input-textwrap">
+          <textarea class="pg-input" id="pg-question" rows="2" placeholder="e.g. ยอดขายเดือน 5 บวกเดือน 8 เท่าไหร่ / What is the return policy?"></textarea>
+          <div class="pg-placeholder-overlay" id="pg-placeholder-overlay" aria-hidden="true"></div>
+        </div>
+        <button class="btn btn-primary" id="pg-ask-btn" onclick="askQuestion()" style="white-space:nowrap">Ask</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Tabs -->
+  <div class="pg-panel">
+    <div class="pg-tabs">
+      <div class="pg-tab active" data-tab="answer" onclick="switchTab('answer')">Answer</div>
+      <div class="pg-tab dev-only" data-tab="prompt" onclick="switchTab('prompt')">Prompt</div>
+      <div class="pg-tab dev-only" data-tab="pipeline" onclick="switchTab('pipeline')">Pipeline</div>
+      <div class="pg-tab dev-only" data-tab="json" onclick="switchTab('json')">Raw JSON</div>
+      <div class="pg-tab" data-tab="explain" onclick="switchTab('explain')">Explainability</div>
+      <div class="pg-tab" data-tab="chunks" onclick="switchTab('chunks')">Retrieved Chunks</div>
+    </div>
+    <div class="pg-tab-content">
+      <div class="pg-tab-pane active" id="tab-answer">
+        <div style="text-align:center;padding:40px 10px;color:rgba(232,237,245,.3);font-size:13px" id="pg-answer-empty">
+          No answer yet — ask a question on the left.
+        </div>
+        <div id="pg-answer-content" style="display:none"></div>
+      </div>
+      <div class="pg-tab-pane" id="tab-prompt">
+        <div id="pg-prompt-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No prompt built yet.</div>
+      </div>
+      <div class="pg-tab-pane" id="tab-pipeline">
+        <div id="pg-pipeline-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No pipeline run yet.</div>
+      </div>
+      <div class="pg-tab-pane" id="tab-json">
+        <div id="pg-json-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No response yet.</div>
+      </div>
+      <div class="pg-tab-pane" id="tab-explain">
+        <div id="pg-explain-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No answer yet to explain.</div>
+      </div>
+      <div class="pg-tab-pane" id="tab-chunks">
+        <div id="pg-chunks-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No answer yet — ask a question on the left.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Compare Sessions Modal -->
+<div class="cmp-overlay" id="cmp-overlay">
+  <div class="cmp-box">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="modal-title" style="margin:0">⇄ Compare Sessions</div>
+      <button class="modal-close" onclick="closeCompare()" style="position:static">✕</button>
+    </div>
+    <div id="cmp-content">Select exactly two sessions (checkboxes in the list) then click Compare.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var _lastResult = null;
+var _conversation = [];
+var _sessionId = null;
+var _sessions = [];
+var _dateFilter = '';
+var _compareSelection = [];
+var _searchDebounce = null;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function currentTab() {
+  var el = document.querySelector('.pg-tab.active');
+  return el ? el.dataset.tab : 'answer';
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.pg-tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab === name); });
+  document.querySelectorAll('.pg-tab-pane').forEach(function(p){ p.classList.toggle('active', p.id === 'tab-' + name); });
+}
+
+// Customer/Developer view toggle (customer-demo P0 fix) — Customer mode
+// (default) hides numeric confidence/"Low Confidence" and the
+// Prompt/Pipeline/Raw JSON tabs; never changes any underlying score,
+// only what's rendered. Scoped to #pg-layout3-root, not <body>.
+function togglePgMode() {
+  var root = document.getElementById('pg-layout3-root');
+  var label = document.getElementById('pg-mode-toggle');
+  var isCustomer = root.classList.toggle('pg-customer-mode');
+  label.textContent = isCustomer
+    ? '👤 Customer Mode (click for Developer Mode)'
+    : '🛠️ Developer Mode (click for Customer Mode)';
+  if (!isCustomer) return;
+  // Leaving a dev-only tab active in customer mode would show a blank
+  // pane (tab hidden via CSS but still "active") — fall back to Answer.
+  var activeTab = document.querySelector('.pg-tab.active');
+  if (activeTab && activeTab.classList.contains('dev-only')) switchTab('answer');
+}
+
+/* ══════════════ Prompt Template selector (custom listbox) ══════════════
+   AI Playground always runs in Developer mode now (no Normal/Developer
+   toggle, no Options popover) — this is the only control left in the
+   header. Loads real templates from the Prompt Studio API/database
+   (never hardcoded), supports keyboard navigation, and preserves/
+   restores selection across session switches via each session's own
+   prompt_template_id (see selectSession()). */
+var _promptTemplates = [];
+var _selectedTemplateId = null;
+
+function loadPromptTemplates() {
+  var trigger = document.getElementById('pg-prompt-trigger-text');
+  var menu = document.getElementById('pg-prompt-menu');
+  trigger.textContent = 'Loading prompt templates…';
+  menu.innerHTML = '<li class="pg-prompt-loading">Loading prompt templates…</li>';
+
+  fetch('/admin/api/ai/prompts?is_active=true')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (!d.ok) { throw new Error(d.error || 'request failed'); }
+      _promptTemplates = d.prompts || [];
+      if (!_promptTemplates.length) {
+        trigger.textContent = 'No active prompt templates available';
+        menu.innerHTML = '<li class="pg-prompt-empty">No active prompt templates available</li>';
+        return;
+      }
+      if (!_selectedTemplateId || !_promptTemplates.some(function(t){ return t.id === _selectedTemplateId; })) {
+        var def = _promptTemplates.find(function(t){ return t.is_default; });
+        _selectedTemplateId = (def || _promptTemplates[0]).id;
+      }
+      renderPromptMenu();
+      updatePromptTriggerLabel();
+    })
+    .catch(function(e) {
+      trigger.textContent = 'Unable to load prompt templates';
+      menu.innerHTML = '<li class="pg-prompt-error">Unable to load prompt templates</li>';
+    });
+}
+
+function _promptLabel(t) {
+  return t.name + ' (v' + t.version + ')' + (t.tone ? ' — ' + t.tone : '');
+}
+
+function renderPromptMenu() {
+  var menu = document.getElementById('pg-prompt-menu');
+  menu.innerHTML = _promptTemplates.map(function(t, i) {
+    var selected = t.id === _selectedTemplateId;
+    return '<li class="pg-prompt-option" role="option" id="pg-prompt-opt-' + i + '" ' +
+      'data-id="' + esc(t.id) + '" aria-selected="' + selected + '" title="' + esc(_promptLabel(t)) + '" ' +
+      'onclick="selectPromptTemplate(\'' + esc(t.id) + '\')">' +
+      '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(_promptLabel(t)) + '</span></li>';
+  }).join('');
+}
+
+function updatePromptTriggerLabel() {
+  var t = _promptTemplates.find(function(x){ return x.id === _selectedTemplateId; });
+  var label = document.getElementById('pg-prompt-trigger-text');
+  label.textContent = t ? _promptLabel(t) : 'Select a prompt template';
+  label.title = t ? _promptLabel(t) : '';
+}
+
+function selectPromptTemplate(id) {
+  _selectedTemplateId = id;
+  updatePromptTriggerLabel();
+  renderPromptMenu();
+  closePromptMenu();
+}
+
+function openPromptMenu() {
+  document.getElementById('pg-prompt-trigger').classList.add('open');
+  document.getElementById('pg-prompt-trigger').setAttribute('aria-expanded', 'true');
+  document.getElementById('pg-prompt-menu').classList.add('open');
+}
+
+function closePromptMenu() {
+  document.getElementById('pg-prompt-trigger').classList.remove('open');
+  document.getElementById('pg-prompt-trigger').setAttribute('aria-expanded', 'false');
+  document.getElementById('pg-prompt-menu').classList.remove('open');
+}
+
+function togglePromptMenu() {
+  var isOpen = document.getElementById('pg-prompt-menu').classList.contains('open');
+  if (isOpen) closePromptMenu(); else openPromptMenu();
+}
+
+(function initPromptSelect() {
+  var trigger = document.getElementById('pg-prompt-trigger');
+  var menu = document.getElementById('pg-prompt-menu');
+
+  trigger.addEventListener('click', function() { togglePromptMenu(); });
+
+  trigger.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePromptMenu(); }
+    else if (e.key === 'Escape') { closePromptMenu(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); openPromptMenu(); _movePromptHighlight(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); openPromptMenu(); _movePromptHighlight(-1); }
+  });
+
+  menu.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { closePromptMenu(); trigger.focus(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); _movePromptHighlight(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _movePromptHighlight(-1); }
+    else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      var hl = menu.querySelector('.pg-prompt-option.highlighted');
+      if (hl) { selectPromptTemplate(hl.dataset.id); trigger.focus(); }
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!document.getElementById('pg-prompt-select').contains(e.target)) closePromptMenu();
+  });
+
+  loadPromptTemplates();
+})();
+
+/* ══════════════ Rotating placeholder examples ══════════════
+   Showcases the full platform (Excel calculation, RAG Q&A, document
+   summarization, Thai/English) instead of only the old Excel-calculation
+   example. Examples live in their own array (playgroundPlaceholderExamples)
+   so they can later be swapped for a fetch from Settings/Prompt Studio/
+   localization/DB without touching the rotation logic below. */
+var playgroundPlaceholderExamples = [
+  "บริษัทมีบริการอะไร?",
+  "มิชชั่นของบริษัทคืออะไร?",
+  "โกดังจีนอยู่ที่ไหน?",
+  "ขอทราบนโยบายการคืนสินค้า",
+  "สินค้านี้รับประกันกี่ปี?",
+  "สรุป Company Profile ให้หน่อย",
+  "ยอดกำไรเดือน 5 + เดือน 8 เท่าไหร่?",
+  "What services does the company provide?",
+  "What is the return policy?",
+  "Where is the China warehouse?",
+  "Summarize this document.",
+  "What is the company's mission?",
+];
+
+(function initPlaygroundPlaceholder() {
+  var textarea = document.getElementById('pg-question');
+  var overlay = document.getElementById('pg-placeholder-overlay');
+  if (!textarea || !overlay || !playgroundPlaceholderExamples.length) return;
+
+  // ROOT CAUSE of the reported overlap bug: the overlay was rendered on
+  // top of the textarea's own NATIVE placeholder text without ever
+  // clearing that native `placeholder` attribute — so the browser drew
+  // its own placeholder string AND this custom rotating overlay
+  // simultaneously in the same area, which is what looked like
+  // "duplicated/overlapping" text. The fix: mirror the original
+  // placeholder into aria-label FIRST (so screen readers keep a label),
+  // THEN clear the native attribute so only the overlay ever renders
+  // visible placeholder text — never both at once.
+  textarea.setAttribute('aria-label', textarea.placeholder || 'Ask a question');
+  textarea.setAttribute('placeholder', '');
+
+  var index = 0;
+  var rotateTimer = null;
+
+  function showExample(i) {
+    overlay.textContent = playgroundPlaceholderExamples[i];
+  }
+
+  function fadeToNext() {
+    overlay.classList.remove('visible'); // fade out (200ms, via CSS transition)
+    setTimeout(function() {
+      index = (index + 1) % playgroundPlaceholderExamples.length;
+      showExample(index);
+      overlay.classList.add('visible'); // fade in (200ms)
+    }, 200);
+  }
+
+  function startRotation() {
+    if (rotateTimer) return; // already running
+    rotateTimer = setInterval(fadeToNext, 4000);
+  }
+
+  function stopRotation() {
+    if (rotateTimer) { clearInterval(rotateTimer); rotateTimer = null; }
+  }
+
+  function syncVisibility() {
+    var isEmpty = textarea.value.length === 0;
+    overlay.classList.toggle('visible', isEmpty);
+    if (isEmpty) startRotation(); else stopRotation();
+  }
+
+  textarea.addEventListener('input', syncVisibility);   // pause while typing
+  textarea.addEventListener('blur', syncVisibility);     // resume on blur (if empty)
+  textarea.addEventListener('focus', syncVisibility);
+
+  showExample(index);
+  syncVisibility();
+})();
+
+function _movePromptHighlight(dir) {
+  var menu = document.getElementById('pg-prompt-menu');
+  var options = Array.prototype.slice.call(menu.querySelectorAll('.pg-prompt-option'));
+  if (!options.length) return;
+  var idx = options.findIndex(function(o){ return o.classList.contains('highlighted'); });
+  options.forEach(function(o){ o.classList.remove('highlighted'); });
+  idx = (idx + dir + options.length) % options.length;
+  options[idx].classList.add('highlighted');
+  options[idx].scrollIntoView({block: 'nearest'});
+}
+
+function resetConversationUI() {
+  _conversation = [];
+  _lastResult = null;
+  document.getElementById('pg-conv-list').innerHTML =
+    '<div style="text-align:center;padding:30px 10px;color:rgba(232,237,245,.3);font-size:12.5px">Ask a question below to start testing the AI pipeline.</div>';
+  document.getElementById('pg-chunks-content').innerHTML = 'No answer yet — ask a question on the left.';
+  document.getElementById('pg-answer-empty').style.display = '';
+  document.getElementById('pg-answer-content').style.display = 'none';
+  document.getElementById('pg-answer-content').innerHTML = '';
+  document.getElementById('pg-prompt-content').innerHTML = 'No prompt built yet.';
+  document.getElementById('pg-pipeline-content').innerHTML = 'No pipeline run yet.';
+  document.getElementById('pg-json-content').innerHTML = 'No response yet.';
+  document.getElementById('pg-explain-content').innerHTML = 'No answer yet to explain.';
+}
+
+/* ══════════════ AI Session Management ══════════════ */
+function createNewSession() {
+  _sessionId = null;
+  document.getElementById('pg-session-name').textContent = 'New Session';
+  resetConversationUI();
+  document.querySelectorAll('.sess-item').forEach(function(el){ el.classList.remove('active'); });
+}
+
+function debouncedLoadSessions() {
+  clearTimeout(_searchDebounce);
+  _searchDebounce = setTimeout(loadSessions, 250);
+}
+
+function setDateFilter(f) {
+  _dateFilter = f;
+  document.getElementById('sess-date-filter').value = f;
+  loadSessions();
+}
+
+function loadSessions() {
+  var search = document.getElementById('sess-search').value.trim();
+  var params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (_dateFilter) params.set('date_filter', _dateFilter);
+  fetch('/admin/playground/sessions?' + params.toString())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      _sessions = d.sessions || [];
+      renderSessionList();
+    })
+    .catch(function(){});
+}
+
+function sessionStatusDot(status) {
+  return '<span class="sess-status-dot sess-status-' + esc(status || 'completed') + '"></span>';
+}
+
+function renderSessionList() {
+  var holder = document.getElementById('sess-list');
+  if (!_sessions.length) {
+    holder.innerHTML = '<div style="text-align:center;padding:20px 8px;color:rgba(232,237,245,.3);font-size:11.5px">No sessions yet — ask a question to start one.</div>';
+    return;
+  }
+  holder.innerHTML = _sessions.map(function(s) {
+    var checked = _compareSelection.indexOf(s.id) !== -1 ? 'checked' : '';
+    return '<div class="sess-item' + (s.id === _sessionId ? ' active' : '') + '" onclick="selectSession(\'' + s.id + '\')">' +
+      '<input type="checkbox" class="sess-compare-cb" ' + checked + ' onclick="event.stopPropagation();toggleCompareSelect(\'' + s.id + '\',this.checked)">' +
+      '<div class="sess-item-q">' + esc(s.name || s.last_question || 'New Session') + '</div>' +
+      '<div class="sess-item-meta">' + sessionStatusDot(s.status) + esc(s.status || 'completed') +
+        (s.model ? ' &middot; ' + esc(s.model) : '') +
+        (s.avg_latency_ms ? ' &middot; ' + Math.round(s.avg_latency_ms) + 'ms' : '') +
+        ' &middot; ' + timeAgoShort(s.updated_at) +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function timeAgoShort(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  if (mins < 1440) return Math.floor(mins/60) + 'h ago';
+  return Math.floor(mins/1440) + 'd ago';
+}
+
+function traceToD(session, assistantMsg) {
+  var trace = (assistantMsg && assistantMsg.trace) || {};
+  return {
+    session_id: session.id,
+    answer: assistantMsg ? assistantMsg.content : '',
+    chunks: trace.chunks || [],
+    context: (trace.prompt || {}).context || '',
+    prompt: trace.prompt || {template_name:'—', template_version:'—', system_prompt:'', final_prompt:''},
+    policy: trace.policy || {escalate:false, active_count:0, verdicts:[], notes:[]},
+    pipeline: ((assistantMsg && assistantMsg.events) || []).map(function(e){
+      return {name: e.stage_name, status: e.status, duration_ms: e.duration_ms, detail: e.detail};
+    }),
+    services_used: trace.services_used || [],
+    metadata: trace.metadata || {},
+  };
+}
+
+function selectSession(id) {
+  fetch('/admin/playground/sessions/' + id)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      var session = d.session;
+      _sessionId = session.id;
+      document.getElementById('pg-session-name').textContent = session.name || 'Session';
+      document.querySelectorAll('.sess-item').forEach(function(el){ el.classList.remove('active'); });
+      renderSessionList();
+
+      // Restore this session's own prompt template selection (Part 6:
+      // "switching AI sessions should preserve or restore the correct
+      // prompt selection") — falls back to leaving the current selection
+      // untouched if this session never recorded one or it's no longer
+      // in the loaded template list.
+      if (session.prompt_template_id && _promptTemplates.some(function(t){ return t.id === session.prompt_template_id; })) {
+        _selectedTemplateId = session.prompt_template_id;
+        updatePromptTriggerLabel();
+        renderPromptMenu();
+      }
+
+      _conversation = (session.messages || []).map(function(m){
+        return m.role === 'user'
+          ? {role: 'user', text: m.content}
+          : {role: 'ai', text: m.content, meta: (m.confidence_label ? Math.round((m.confidence||0)*100) + '% confidence · ' : '') + (m.latency_ms ? Math.round(m.latency_ms) + ' ms' : '')};
+      });
+      renderConversation();
+
+      var lastAssistant = null;
+      for (var i = session.messages.length - 1; i >= 0; i--) {
+        if (session.messages[i].role === 'assistant') { lastAssistant = session.messages[i]; break; }
+      }
+      if (lastAssistant) {
+        var dObj = traceToD(session, lastAssistant);
+        _lastResult = dObj;
+        renderChunks(dObj.chunks);
+        renderAnswer(dObj);
+        renderPrompt(dObj);
+        renderPipeline(dObj);
+        renderJson(dObj);
+        renderExplain(dObj);
+      } else {
+        _lastResult = null;
+        renderChunks([]);
+        document.getElementById('pg-answer-empty').style.display = '';
+        document.getElementById('pg-answer-content').style.display = 'none';
+      }
+    })
+    .catch(function(){});
+}
+
+function renameCurrentSession() {
+  if (!_sessionId) { alert('Select or start a session first.'); return; }
+  var current = _sessions.find(function(s){ return s.id === _sessionId; });
+  uiPrompt('Rename session', (current && current.name) || '', 'Rename Session').then(function(name) {
+    if (!name) return;
+    fetch('/admin/playground/sessions/' + _sessionId, {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name}),
+    }).then(function(){
+      document.getElementById('pg-session-name').textContent = name;
+      loadSessions();
+    });
+  });
+}
+
+function deleteCurrentSession() {
+  // If the admin has checked one or more sessions (the same checkboxes
+  // used for Compare), Delete acts on ALL of them — checking boxes then
+  // clicking Delete is the natural "pick the ones I want gone" gesture,
+  // and it was silently deleting only _sessionId (a single session)
+  // before, which looked like "I checked two but only one got deleted."
+  var idsToDelete = _compareSelection.length ? _compareSelection.slice() : (_sessionId ? [_sessionId] : []);
+  if (!idsToDelete.length) { alert('Select or start a session first.'); return; }
+  var msg = idsToDelete.length > 1
+    ? 'Delete these ' + idsToDelete.length + ' sessions? This cannot be undone.'
+    : 'Delete this session? This cannot be undone.';
+  uiConfirm(msg, 'Delete Session' + (idsToDelete.length > 1 ? 's' : '')).then(function(ok) {
+    if (!ok) return;
+    Promise.all(idsToDelete.map(function(id){
+      return fetch('/admin/playground/sessions/' + id, { method: 'DELETE' });
+    })).then(function(){
+      _compareSelection = [];
+      document.getElementById('cmp-count').textContent = '0';
+      if (idsToDelete.indexOf(_sessionId) !== -1) createNewSession();
+      loadSessions();
+    });
+  });
+}
+
+function duplicateCurrentSession() {
+  if (!_sessionId) { alert('Select or start a session first.'); return; }
+  fetch('/admin/playground/sessions/' + _sessionId + '/duplicate', { method: 'POST' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      loadSessions();
+      selectSession(d.session.id);
+    });
+}
+
+function clearCurrentConversation() {
+  if (!_sessionId) { alert('Select or start a session first.'); return; }
+  uiConfirm('Clear all messages in this session? The session itself will be kept.', 'Clear Conversation').then(function(ok) {
+    if (!ok) return;
+    fetch('/admin/playground/sessions/' + _sessionId + '/clear', { method: 'POST' })
+      .then(function(){ resetConversationUI(); loadSessions(); });
+  });
+}
+
+function exportSession(fmt) {
+  if (!_sessionId) { alert('Select or start a session first.'); return; }
+  window.open('/admin/playground/sessions/' + _sessionId + '/export.' + fmt, '_blank');
+}
+
+/* ── Compare Sessions ── */
+function toggleCompareSelect(id, checked) {
+  // This array is shared by two features: bulk-Delete (any number of
+  // sessions) and Compare (exactly 2). It used to auto-evict the oldest
+  // entry once a 3rd box was checked (`if (length > 2) shift()`) so
+  // Compare could never end up with more than 2 — but that silently
+  // unchecked whatever the admin selected first, capping bulk-Delete at
+  // ~2-3 selections with no way to select more. Compare's "exactly 2"
+  // requirement is validated at Compare-click time (openCompare(),
+  // below) instead — selection itself is never truncated.
+  var idx = _compareSelection.indexOf(id);
+  if (checked && idx === -1) _compareSelection.push(id);
+  if (!checked && idx !== -1) _compareSelection.splice(idx, 1);
+  document.getElementById('cmp-count').textContent = _compareSelection.length;
+  // Checking the compare box is also a strong "I'm looking at this
+  // session" signal — select it as the active session too, so
+  // Rename/Duplicate/Clear/Delete act on the session the admin just
+  // checked, instead of silently doing nothing (or acting on a stale
+  // previously-selected session) because _sessionId was never set.
+  if (checked && id !== _sessionId) selectSession(id);
+}
+
+function openCompare() {
+  if (_compareSelection.length !== 2) { alert('Select exactly two sessions (checkboxes) to compare.'); return; }
+  fetch('/admin/playground/sessions/compare?a=' + _compareSelection[0] + '&b=' + _compareSelection[1])
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { alert(d.error || 'Could not compare sessions'); return; }
+      renderCompare(d.diff);
+      document.getElementById('cmp-overlay').classList.add('open');
+    });
+}
+
+function closeCompare() {
+  document.getElementById('cmp-overlay').classList.remove('open');
+}
+
+function cmpField(label, a, b) {
+  return '<div class="cmp-field-label">' + esc(label) + '</div>' +
+    '<div class="cmp-grid"><div class="cmp-field-value">' + esc(a == null ? 'Not available' : a) + '</div>' +
+    '<div class="cmp-field-value">' + esc(b == null ? 'Not available' : b) + '</div></div>';
+}
+
+function renderCompare(diff) {
+  var html = '<div class="cmp-grid" style="margin-top:0">' +
+    '<div class="cmp-col"><strong>' + esc(diff.a.name) + '</strong></div>' +
+    '<div class="cmp-col"><strong>' + esc(diff.b.name) + '</strong></div></div>' +
+    cmpField('Question', diff.a.question, diff.b.question) +
+    cmpField('Answer', diff.answer_diff.a, diff.answer_diff.b) +
+    cmpField('Retrieved Chunks', (diff.chunks_diff.a||[]).join(', ') || '(none)', (diff.chunks_diff.b||[]).join(', ') || '(none)') +
+    cmpField('Policies Triggered', (diff.policy_diff.a||[]).join(', ') || '(none)', (diff.policy_diff.b||[]).join(', ') || '(none)') +
+    cmpField('Latency (ms)', diff.latency_diff.a, diff.latency_diff.b) +
+    cmpField('Total Tokens', diff.tokens_diff.a, diff.tokens_diff.b) +
+    cmpField('Prompt', diff.prompt_diff.a, diff.prompt_diff.b);
+  document.getElementById('cmp-content').innerHTML = html;
+}
+
+function renderConversation() {
+  var html = _conversation.map(function(m) {
+    if (m.role === 'user') {
+      return '<div class="pg-msg pg-msg-user"><div class="pg-msg-bubble">'+esc(m.text)+'</div></div>';
+    }
+    return '<div class="pg-msg pg-msg-ai"><div class="pg-msg-bubble">'+esc(m.text)+'</div>' +
+      '<div class="pg-msg-meta">'+esc(m.meta || '')+'</div></div>';
+  }).join('');
+  var list = document.getElementById('pg-conv-list');
+  list.innerHTML = html;
+  list.scrollTop = list.scrollHeight;
+}
+
+function confidenceClass(label) {
+  return label === 'High' ? 'pg-confidence-high' : label === 'Medium' ? 'pg-confidence-medium' : 'pg-confidence-low';
+}
+
+function showChunksLoading() {
+  document.getElementById('pg-chunks-content').innerHTML =
+    '<div style="text-align:center;padding:30px 10px;color:rgba(232,237,245,.35);font-size:12.5px">Retrieving relevant knowledge...</div>';
+}
+
+function showChunksError(message) {
+  document.getElementById('pg-chunks-content').innerHTML =
+    '<div style="text-align:center;padding:30px 10px;color:#fca5a5;font-size:12.5px">' + esc(message || 'Could not load retrieved chunks.') + '</div>';
+}
+
+/* RetrievedChunksPanel — renders into the "Retrieved Chunks" tab (right
+ * panel). Reuses the SAME chunk objects the Answer/Explainability tabs
+ * already have (d.chunks) — no separate fetch, no duplicated state. */
+function renderChunks(chunks) {
+  var holder = document.getElementById('pg-chunks-content');
+  if (!chunks || !chunks.length) {
+    holder.innerHTML = '<div style="text-align:center;padding:30px 10px;color:rgba(232,237,245,.3);font-size:12.5px">No retrieved chunks for this answer.</div>';
+    return;
+  }
+  var excluded = _lastResult && _lastResult.excluded_candidates || [];
+  var excludedHtml = excluded.length
+    ? '<div style="margin-top:14px;padding:8px 10px;background:rgba(252,165,165,.05);border:1px solid rgba(252,165,165,.15);border-radius:6px">' +
+      '<div style="color:#fca5a5;font-weight:600;font-size:11px;margin-bottom:4px">🚫 ' + excluded.length + ' candidate(s) excluded (never sent to the LLM)</div>' +
+      excluded.map(function(e) {
+        return '<div style="font-size:10.5px;color:rgba(232,237,245,.55);margin-top:3px">' +
+          esc(e.file_name || 'unknown') + (e.section_title ? ' · ' + esc(e.section_title) : '') +
+          ' — <span style="color:rgba(252,165,165,.8)">' + esc(e.exclusion_reason || e.classification || 'excluded') + '</span></div>';
+      }).join('') + '</div>'
+    : '';
+  holder.innerHTML = '<div style="font-size:11px;color:rgba(232,237,245,.4);margin-bottom:10px">' + chunks.length + ' chunk' + (chunks.length !== 1 ? 's' : '') + ' retrieved</div>' +
+    chunks.map(function(c, i) {
+    var simPct = Math.round((c.score || 0) * 100);
+    var simColor = simPct >= 90 ? '#34d399' : simPct >= 75 ? '#93c5fd' : '#fcd34d';
+    var attBadge = (c.attachments && c.attachments.length)
+      ? '<span class="pg-att-badge">📎 ' + c.attachments.length + '</span>' : '';
+    var fileLabel = c.source || c.file_name || 'unknown';
+    var metaBits = [];
+    if (c.category) metaBits.push(esc(c.category));
+    if (c.page_number) metaBits.push('page ' + c.page_number);
+    if (c.chunk_index != null) metaBits.push('chunk ' + c.chunk_index);
+    if (c.heading_path && c.heading_path.length) metaBits.push(esc(c.heading_path.join(' > ')));
+    else if (c.section_title) metaBits.push(esc(c.section_title));
+    // Hybrid retrieval score breakdown (rag/hybrid_scoring.py) — shows
+    // WHY this chunk survived filtering: a low vector score can still be
+    // included when keyword/heading evidence is strong (e.g. an exact
+    // heading match), which a vector-only view would hide.
+    var scoreBreakdown = (c.keyword_score != null || c.heading_score != null)
+      ? '<div class="pg-chunk-meta" style="margin-top:4px">' +
+        'Vector ' + Math.round((c.score||0)*100) + '% · Keyword ' + Math.round((c.keyword_score||0)*100) + '% · ' +
+        'Heading ' + Math.round((c.heading_score||0)*100) + '% · Graph ' + Math.round((c.graph_score||0)*100) + '% · ' +
+        'Hybrid ' + Math.round((c.hybrid_score||0)*100) + '%' +
+        (c.rerank_score != null ? ' · Rerank ' + Math.round(c.rerank_score*100) + '%' : '') +
+        (c.raw_vector_rank != null ? ' · Raw rank #' + c.raw_vector_rank : '') +
+        (c.classification ? ' · <span style="color:#a78bfa">' + esc(c.classification.replace(/_/g,' ')) + '</span>' : '') +
+        (c.from_lexical_search ? ' · <span style="color:#93c5fd">via lexical search</span>' : '') +
+        '</div>' +
+        (c.evidence_label ? '<div class="pg-chunk-meta" style="margin-top:2px">Evidence type: ' +
+          '<span style="color:#fcd34d;font-weight:600">' + esc(c.evidence_label.replace(/_/g,' ')) + '</span>' +
+          '</div>' : '') +
+        (c.matched_query || c.matched_heading ? '<div class="pg-chunk-meta" style="margin-top:2px">' +
+          (c.matched_query ? 'Matched query: <i>' + esc(c.matched_query) + '</i>' : '') +
+          (c.matched_heading ? (c.matched_query ? ' · ' : '') + 'Matched heading: <i>' + esc(c.matched_heading) + '</i>' : '') +
+          '</div>' : '')
+      : '';
+    // Evidence classification (rag/evidence_classifier.py) — a DIFFERENT
+    // axis from the hybrid-scoring classification above: does this chunk
+    // directly answer the specific attribute asked, or is it merely
+    // related background on the same document/entity. Not every
+    // retrieved/prompted chunk is "cited" — see Sources above, which
+    // only lists chunks with cited=true.
+    var evColors = {DIRECT_EVIDENCE:'#34d399', PARTIAL_EVIDENCE:'#fcd34d', RELATED_CONTEXT:'#93c5fd', IRRELEVANT:'rgba(232,237,245,.4)'};
+    var evidenceBadge = c.evidence_classification
+      ? '<div class="pg-chunk-meta" style="margin-top:4px">' +
+        '<span style="color:' + (evColors[c.evidence_classification] || '#93c5fd') + ';font-weight:600">' +
+        esc(c.evidence_classification.replace(/_/g,' ')) + '</span>' +
+        ' · Used in answer: ' + (c.evidence_classification === 'IRRELEVANT' ? 'no' : 'optional') +
+        ' · Cited: ' + (c.cited ? '<span style="color:#34d399">Yes</span>' : 'No') +
+        '</div>' : '';
+    var embeddingProvenance = (c.embedding_provider || c.embedding_model)
+      ? '<div class="pg-chunk-meta" style="margin-top:2px;opacity:.75">' +
+        '🧬 ' + esc(c.embedding_provider || '?') + ' / ' + esc(c.embedding_model || '?') +
+        (c.embedding_dimensions ? ' (' + c.embedding_dimensions + 'd)' : '') +
+        (c.embedding_version ? ' · ' + esc(c.embedding_version) : '') +
+        '</div>' : '';
+    // Vision+OCR ingestion provenance (services/pdf_page_pipeline.py) —
+    // shown only for chunks that came from a PDF page, so an answer
+    // sourced from an OCR'd/Vision-analyzed page is clearly labeled.
+    var extractionProvenance = c.extraction_method
+      ? '<div class="pg-chunk-meta" style="margin-top:2px">' +
+        '📄 ' + esc(c.page_type || '?') + ' · method: ' + esc(c.extraction_method) +
+        (c.text_quality_score != null ? ' · quality ' + Math.round(c.text_quality_score * 100) + '%' : '') +
+        (c.ocr_confidence ? ' · OCR conf ' + Math.round(c.ocr_confidence * 100) + '%' : '') +
+        (c.vision_used ? ' · <span style="color:#a78bfa">Vision used</span>' : '') +
+        (c.extraction_warnings && c.extraction_warnings.length
+          ? ' · <span style="color:#fca5a5" title="' + esc(c.extraction_warnings.join(' ')) + '">⚠ warnings</span>' : '') +
+        '</div>' : '';
+    // AI Knowledge Analyzer output (services/knowledge_analyzer.py) —
+    // shown here so Developer Mode users can see WHY a chunk was split
+    // the way it was, without opening Raw JSON.
+    var kaBits = [];
+    if (c.knowledge_type) kaBits.push('<span class="pg-att-badge">🧠 ' + esc(c.knowledge_type) + '</span>');
+    if (c.chunk_strategy) kaBits.push('<span class="pg-att-badge">✂ ' + esc(c.chunk_strategy) + '</span>');
+    var suggestedQ = (c.suggested_questions && c.suggested_questions.length)
+      ? '<div class="pg-chunk-meta" style="margin-top:4px;color:#93c5fd">💡 ' + esc(c.suggested_questions[0]) + '</div>' : '';
+    // Knowledge Graph context (services/knowledge_graph_service.py) —
+    // shows WHY the AI selected this chunk in relational terms, e.g.
+    // "Shipify → provides → Shipping Service". Additive only; never
+    // shown as a replacement for the chunk text itself below it.
+    var graphContext = (c.graph_context && c.graph_context.length)
+      ? '<div class="pg-chunk-meta" style="margin-top:6px;padding:6px 8px;background:rgba(167,139,250,.06);' +
+        'border:1px solid rgba(167,139,250,.2);border-radius:6px">' +
+        '<div style="color:#a78bfa;font-weight:600;margin-bottom:3px">🕸️ Graph Context</div>' +
+        c.graph_context.map(function(g){
+          return '<div>' + esc(g.source) + ' <span style="color:#a78bfa">→ ' + esc(g.relation) + ' →</span> ' + esc(g.target) + '</div>';
+        }).join('') + '</div>' : '';
+    return '<div class="pg-chunk-card" id="chunk-card-'+i+'" onclick="toggleChunk('+i+')">' +
+      '<div class="pg-chunk-top">' +
+        '<span class="pg-chunk-sim" style="color:'+simColor+'">' + simPct + '%</span>' +
+        '<span class="pg-chunk-file" title="' + esc(fileLabel) + '">' + esc(fileLabel) + '</span>' +
+        attBadge + kaBits.join('') +
+      '</div>' +
+      '<div class="pg-chunk-meta">' + metaBits.join(' • ') + '</div>' +
+      scoreBreakdown + evidenceBadge + embeddingProvenance + extractionProvenance + suggestedQ + graphContext +
+      '<div class="pg-chunk-preview" id="chunk-preview-'+i+'">' + esc((c.text||'').slice(0,150)) + '</div>' +
+      '<div class="pg-chunk-full" id="chunk-full-'+i+'" style="display:none">' + esc(c.text||'') + copyIconBtn(c.text, 'dev-only-inline', 'Copy chunk text') + '</div>' +
+      '<div style="font-size:10.5px;color:#93c5fd;margin-top:6px" id="chunk-toggle-label-'+i+'">Expand chunk</div>' +
+    '</div>';
+  }).join('') + excludedHtml;
+}
+
+function toggleChunk(i) {
+  var card = document.getElementById('chunk-card-' + i);
+  var preview = document.getElementById('chunk-preview-' + i);
+  var full = document.getElementById('chunk-full-' + i);
+  var label = document.getElementById('chunk-toggle-label-' + i);
+  var expanded = card.classList.toggle('expanded');
+  preview.style.display = expanded ? 'none' : '';
+  full.style.display = expanded ? '' : 'none';
+  if (label) label.textContent = expanded ? 'Collapse chunk' : 'Expand chunk';
+}
+
+function renderAnswer(d) {
+  document.getElementById('pg-answer-empty').style.display = 'none';
+  var box = document.getElementById('pg-answer-content');
+  box.style.display = '';
+
+  var m = d.metadata;
+  var confClass = confidenceClass(m.confidence_label);
+  var attachmentsHtml = '';
+  var allAtts = [];
+  (d.chunks || []).forEach(function(c) { (c.attachments || []).forEach(function(a) { allAtts.push(a); }); });
+  if (allAtts.length) {
+    attachmentsHtml = '<div style="margin-top:14px"><div class="pg-panel-title" style="margin-bottom:8px">Attachments</div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+      allAtts.map(function(a) {
+        var isImg = (a.mime_type||'').startsWith('image/');
+        return '<div style="border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px;width:120px">' +
+          (isImg && a.public_url ? '<img src="'+esc(a.public_url)+'" style="width:100%;height:70px;object-fit:cover;border-radius:5px;margin-bottom:6px">' : '<div style="height:70px;display:flex;align-items:center;justify-content:center;font-size:24px">📎</div>') +
+          '<div style="font-size:10px;color:#e8edf5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(a.filename||'')+'</div>' +
+          (a.public_url ? '<a href="'+esc(a.public_url)+'" target="_blank" style="font-size:10px;color:#93c5fd">Download</a>' : '') +
+        '</div>';
+      }).join('') + '</div></div>';
+  }
+
+  // Sources = only chunks the evidence classifier + sentence-support
+  // check (rag/evidence_classifier.py) actually selected as citations —
+  // NOT every retrieved/prompted chunk. A related-context chunk (same
+  // entity, useful background) can still appear in Retrieved Chunks
+  // without being listed here as a source of the answer's claims.
+  var sourcesHtml = (d.chunks || []).filter(function(c){return c.cited;}).map(function(c) {
+    var i = (d.chunks || []).indexOf(c);
+    return '<div style="font-size:11.5px;color:rgba(232,237,245,.55);padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)" onmouseover="highlightChunk('+i+',true)" onmouseout="highlightChunk('+i+',false)">' +
+      esc(c.citation) + copyIconBtn(c.citation, '', 'Copy source citation') + '</div>';
+  }).join('');
+
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">' +
+      '<span class="pg-confidence dev-only-inline ' + confClass + '">' + Math.round(m.confidence*100) + '% · ' + esc(m.confidence_label) + ' Confidence' +
+        (m.answerability ? ' <span style="opacity:.6;font-weight:400">(' + esc(m.answerability.replace(/_/g,' ')) + ')</span>' : '') + '</span>' +
+      '<div style="display:flex;gap:6px">' +
+        '<button class="pg-copy-btn" onclick="copyValue(' + JSON.stringify(d.answer) + ', this)">Copy Answer</button>' +
+        '<button class="pg-copy-btn" onclick="copyValue(' + JSON.stringify((d.chunks||[]).filter(c=>c.cited).map(c=>c.citation).filter(Boolean).join('\\n')) + ', this)">Copy Citations</button>' +
+        '<button class="pg-copy-btn dev-only-inline" onclick="copyAnswerJson(this)">Copy Answer JSON</button>' +
+        '<button class="pg-copy-btn dev-only-inline" onclick="copyAllDebug(this)">Copy All Debug</button>' +
+        '<button class="pg-copy-btn" onclick="explainAnswer()">🔍 Explain Answer</button>' +
+      '</div>' +
+    '</div>' +
+    // When segmentation split the answer into multiple bubbles, show
+    // each message_parts entry as its own chat bubble — "Copy Answer"
+    // above still uses the full canonical d.answer unchanged.
+    ((d.segmentation_applied && (d.message_parts || []).length > 1)
+      ? '<div style="display:flex;flex-direction:column;gap:8px">' +
+          d.message_parts.map(function(part, i) {
+            return '<div style="font-size:13.5px;line-height:1.75;color:#e8edf5;white-space:pre-wrap;' +
+              'background:rgba(255,255,255,.03);border-radius:8px;padding:12px 14px;border:1px solid rgba(255,255,255,.06);' +
+              'max-width:92%;position:relative">' +
+              '<span style="position:absolute;top:6px;right:10px;font-size:9px;color:rgba(232,237,245,.3)">' + (i+1) + '/' + d.message_parts.length + '</span>' +
+              esc(part) + '</div>';
+          }).join('') +
+        '</div>'
+      : '<div style="font-size:13.5px;line-height:1.75;color:#e8edf5;white-space:pre-wrap;background:rgba(255,255,255,.03);border-radius:8px;padding:14px;border:1px solid rgba(255,255,255,.06)">' + esc(d.answer) + '</div>') +
+    // Attachment Planner's SELECTED attachments, shown as placeholder
+    // cards in planned order — separate from the generic "every chunk's
+    // attachments" block below (unchanged, still shown for full debug
+    // visibility).
+    ((d.attachment_plan && d.attachment_plan.should_send && (d.selected_attachments || []).length)
+      ? '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+          d.selected_attachments.map(function(a) {
+            return '<div style="border:1px dashed rgba(245,166,35,.4);border-radius:8px;padding:8px;width:110px;text-align:center">' +
+              (a.type === 'image' ? '<div style="font-size:20px">🖼️</div>' : '<div style="font-size:20px">📎</div>') +
+              '<div style="font-size:9px;color:rgba(232,237,245,.5);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.filename || a.purpose || 'attachment') +
+              copyIconBtn(a.filename || '', '', 'Copy attachment filename') + '</div>' +
+              (a.url ? '<div>' + copyIconBtn(a.url, '', 'Copy attachment URL') + '</div>' : '') +
+            '</div>';
+          }).join('') +
+        '</div>'
+      : '') +
+    (sourcesHtml ? '<div style="margin-top:14px"><div class="pg-panel-title" style="margin-bottom:6px">Sources</div>' + sourcesHtml + '</div>' : '') +
+    attachmentsHtml +
+    '<div class="pg-meta-grid">' +
+      metaCell('Model', m.model) + metaCell('Embedding Model', m.embedding_model) +
+      metaCell('Temperature', m.temperature) + metaCell('Input Tokens', m.input_tokens) +
+      metaCell('Output Tokens', m.output_tokens) + metaCell('Latency', m.latency_ms + ' ms') +
+      metaCell('Est. Cost', '$' + m.estimated_cost_usd) + metaCell('Retrieved Chunks', m.retrieved_chunks) +
+      metaCell('Embedding Provider', m.embedding_provider) + metaCell('Embedding Dimensions', m.embedding_dimensions) +
+      metaCell('Embedding Version', m.embedding_version) +
+      metaCell('Raw Vector Similarity', m.raw_vector_similarity != null ? Math.round(m.raw_vector_similarity*100) + '%' : '—') +
+      metaCell('Hybrid Retrieval Score', m.hybrid_retrieval_score != null ? Math.round(m.hybrid_retrieval_score*100) + '%' : '—') +
+    '</div>';
+}
+
+function metaCell(label, value) {
+  return '<div class="pg-meta-cell"><div class="pg-meta-cell-label">'+esc(label)+'</div>' +
+    '<div class="pg-meta-cell-value">'+esc(value) + copyIconBtn(value, 'dev-only-inline', 'Copy ' + label) + '</div></div>';
+}
+
+function highlightChunk(i, on) {
+  var card = document.getElementById('chunk-card-' + i);
+  if (card) card.style.borderColor = on ? '#F5A623' : '';
+}
+
+function renderPrompt(d) {
+  var p = d.prompt;
+  document.getElementById('pg-prompt-content').innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+      '<div><strong style="color:#e8edf5">'+esc(p.template_name)+'</strong> <span style="color:rgba(232,237,245,.4);font-size:11px">v'+esc(p.template_version)+'</span></div>' +
+      '<button class="pg-copy-btn" onclick="copyText('+JSON.stringify(p.final_prompt)+')">Copy Prompt</button>' +
+    '</div>' +
+    '<div class="pg-panel-title" style="margin-bottom:6px">System Prompt</div>' +
+    '<div class="pg-json" style="margin-bottom:14px">' + esc(p.system_prompt) + '</div>' +
+    '<div class="pg-panel-title" style="margin-bottom:6px">Retrieved Context</div>' +
+    '<div class="pg-json" style="margin-bottom:14px">' + esc(d.context || '(none)') + '</div>' +
+    '<div class="pg-panel-title" style="margin-bottom:6px">Final Prompt (sent to LLM)</div>' +
+    '<div class="pg-json">' + esc(p.final_prompt) + '</div>';
+}
+
+function stageIconClass(status) {
+  return {success:'pg-stage-success', failed:'pg-stage-failed', skipped:'pg-stage-skipped', triggered:'pg-stage-triggered'}[status] || 'pg-stage-skipped';
+}
+function stageIconChar(status) {
+  return {success:'✓', failed:'✕', skipped:'—', triggered:'!'}[status] || '?';
+}
+
+function renderPipeline(d) {
+  var stagesHtml = (d.pipeline || []).map(function(s) {
+    return '<div class="pg-stage">' +
+      '<div class="pg-stage-icon '+stageIconClass(s.status)+'">'+stageIconChar(s.status)+'</div>' +
+      '<div class="pg-stage-name">'+esc(s.name)+'<div class="pg-stage-detail">'+esc(s.detail||'')+'</div></div>' +
+      '<div class="pg-stage-duration">'+Number(s.duration_ms||0).toFixed(1)+' ms</div>' +
+    '</div>';
+  }).join('');
+
+  var svcHtml = (d.services_used || []).map(function(s) {
+    return '<span class="pg-svc-chip pg-svc-'+esc(s.status)+'">'+esc(s.name)+' · '+esc(s.status)+'</span>';
+  }).join('');
+
+  var policyHtml = (d.policy.verdicts || []).map(function(v) {
+    return '<div class="pg-stage"><div class="pg-stage-icon '+stageIconClass(v.status)+'">'+stageIconChar(v.status)+'</div>' +
+      '<div class="pg-stage-name">'+esc(v.name)+'<div class="pg-stage-detail">'+esc(v.detail)+'</div></div></div>';
+  }).join('');
+
+  document.getElementById('pg-pipeline-content').innerHTML =
+    '<div class="pg-panel-title" style="margin-bottom:8px">Execution Timeline (total: '+d.metadata.latency_ms+' ms)</div>' +
+    '<div style="margin-bottom:18px">' + stagesHtml + '</div>' +
+    '<div class="pg-panel-title" style="margin-bottom:8px">System Components</div>' +
+    '<div style="margin-bottom:18px">' + svcHtml + '</div>' +
+    '<div class="pg-panel-title" style="margin-bottom:8px">AI Policies Applied ('+d.policy.active_count+' active)</div>' +
+    '<div>' + policyHtml + '</div>';
+}
+
+function renderJson(d) {
+  var text = JSON.stringify(d, null, 2);
+  document.getElementById('pg-json-content').innerHTML =
+    '<div style="display:flex;justify-content:flex-end;margin-bottom:8px">' +
+      '<button class="pg-copy-btn" onclick="copyText('+JSON.stringify(text)+')">Copy JSON</button>' +
+    '</div>' +
+    '<div class="pg-json">' + esc(text) + '</div>';
+}
+
+function copyText(text) {
+  copyValue(text, null);
+}
+
+// Reusable Copy Button component (Part 10, P0 2026-07-21) — copies the
+// EXACT raw value (never truncated UI text), preserves line breaks,
+// shows temporary "Copied" feedback (resets after ~1.5s), works on
+// desktop and mobile, falls back to a hidden textarea + execCommand for
+// browsers without the async Clipboard API, no third-party dependency.
+function copyValue(value, btnEl) {
+  var text = value == null ? '' : String(value);
+  function showCopied() {
+    if (!btnEl) return;
+    var original = btnEl.getAttribute('data-original-label') || btnEl.textContent;
+    btnEl.setAttribute('data-original-label', original);
+    btnEl.textContent = 'Copied';
+    btnEl.classList.add('pg-copied');
+    clearTimeout(btnEl._copyResetTimer);
+    btnEl._copyResetTimer = setTimeout(function () {
+      btnEl.textContent = original;
+      btnEl.classList.remove('pg-copied');
+    }, 1500);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(showCopied).catch(function () { _fallbackCopy(text, showCopied); });
+  } else {
+    _fallbackCopy(text, showCopied);
+  }
+}
+
+function _fallbackCopy(text, onDone) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  if (onDone) onDone();
+}
+
+// Inline copy-icon button generator — `value` is the RAW text to copy
+// (JSON-escaped for safe embedding in the onclick attribute), `cls`
+// lets a caller add "dev-only"/"dev-only-inline" so it's hidden in
+// Customer Mode where appropriate (Part 10, item 8). stopPropagation
+// keeps a click from also expanding/collapsing the parent card (item 10).
+function copyIconBtn(value, cls, ariaLabel) {
+  var safeValue = JSON.stringify(value == null ? '' : String(value));
+  var label = ariaLabel || 'Copy value';
+  return '<button type="button" class="pg-copy-icon ' + (cls || '') + '" ' +
+    'aria-label="' + esc(label) + '" title="' + esc(label) + '" ' +
+    'onclick="event.stopPropagation(); copyValue(' + safeValue + ', this)">📋</button>';
+}
+
+function explainAnswer() {
+  switchTab('explain');
+}
+
+// Copy Answer JSON (Part 11, P0 2026-07-21) — a clean, redacted payload
+// for pasting into a bug report/ticket. Any key that looks like a
+// secret/credential/signed-URL token is stripped before copying — never
+// depend on the caller to remember to do this.
+var _SECRET_KEY_RE = /(api[_-]?key|secret|token|password|credential|signature|authoriz)/i;
+var _SIGNED_URL_PARAM_RE = /[?&](x-amz-signature|x-amz-credential|signature|token|sig)=/i;
+
+function _redactSecrets(value) {
+  if (Array.isArray(value)) return value.map(_redactSecrets);
+  if (value && typeof value === 'object') {
+    var out = {};
+    Object.keys(value).forEach(function (k) {
+      if (_SECRET_KEY_RE.test(k)) { out[k] = '[REDACTED]'; return; }
+      out[k] = _redactSecrets(value[k]);
+    });
+    return out;
+  }
+  if (typeof value === 'string' && _SIGNED_URL_PARAM_RE.test(value)) {
+    return value.split('?')[0] + '?[REDACTED_SIGNED_PARAMS]';
+  }
+  return value;
+}
+
+function copyAnswerJson(btnEl) {
+  var d = _lastResult;
+  if (!d) return;
+  var payload = _redactSecrets({
+    answer: d.answer,
+    messages: d.messages || (d.message_parts || []).map(function (p) { return { type: 'text', content: p }; }),
+    citations: (d.chunks || []).filter(function (c) { return c.cited; }).map(function (c) { return c.citation; }),
+    attachments: d.selected_attachments || [],
+    confidence: d.metadata ? d.metadata.confidence : null,
+    intent: d.actionable_intent,
+    entities: d.intent_entities,
+    canonical_query: (d.query_expansion || {}).canonical_query,
+    retrieved_chunks: (d.chunks || []).map(function (c) { return { section_title: c.section_title, score: c.score }; }),
+  });
+  copyValue(JSON.stringify(payload, null, 2), btnEl);
+}
+
+// Copy All Debug (Part 10, item 7) — every Developer Mode field for
+// this turn in one paste, redacted the same way as Copy Answer JSON.
+function copyAllDebug(btnEl) {
+  var d = _lastResult;
+  if (!d) return;
+  copyValue(JSON.stringify(_redactSecrets(d), null, 2), btnEl);
+}
+
+function renderExplain(d) {
+  if (!d) return;
+  var chunkList = (d.chunks || []).map(function(c,i){
+    return (i+1)+'. '+ esc(c.citation || c.source || c.file_name || 'unknown') + ' (similarity '+Math.round((c.score||0)*100)+'%)';
+  }).join('<br>');
+  var policyList = (d.policy.verdicts || []).filter(function(v){return v.status==='triggered';}).map(function(v){
+    return '- ' + esc(v.name) + ': ' + esc(v.detail);
+  }).join('<br>');
+  var toolCalls = (d.services_used || []).filter(function(s){ return s.status !== 'skipped'; })
+    .map(function(s){ return esc(s.name) + ' (' + esc(s.status) + ')'; }).join(', ');
+  var confReason = d.metadata.confidence_label === 'High'
+      ? 'Top retrieved chunk had high similarity (or a deterministic calculation was used).'
+      : d.metadata.confidence_label === 'Medium'
+      ? 'Retrieved chunks had moderate similarity — answer may be partial.'
+      : 'No strongly matching chunks were found — answer may be unreliable.';
+
+  var qe = d.query_expansion || {};
+  // Phase 1 (rag/query_understanding.py) adds detected_intent/
+  // normalized_query/rewritten_query alongside the pre-existing
+  // original_query/detected_language/expanded_queries — shown in this
+  // SAME panel, no new Explainability row/layout added.
+  var qeHtml = qe.original_query
+    ? 'Original Query: <i>' + esc(qe.original_query) + '</i>' + copyIconBtn(qe.original_query, 'dev-only-inline', 'Copy Original Query') + '<br>' +
+      (qe.normalized_query && qe.normalized_query !== qe.original_query
+        ? 'Normalized Query: <i>' + esc(qe.normalized_query) + '</i>' + copyIconBtn(qe.normalized_query, 'dev-only-inline', 'Copy Normalized Query') + '<br>' : '') +
+      'Detected Intent: ' + esc(qe.detected_intent || '—') + '<br>' +
+      'Detected Language: ' + esc(qe.detected_language || '—') + '<br>' +
+      (qe.rewritten_query && qe.rewritten_query !== qe.normalized_query
+        ? 'Rewritten Query: <i>' + esc(qe.rewritten_query) + '</i>' + copyIconBtn(qe.rewritten_query, 'dev-only-inline', 'Copy Rewritten Query') + '<br>' : '') +
+      (qe.canonical_query
+        ? 'Canonical Query: <i>' + esc(qe.canonical_query) + '</i>' + copyIconBtn(qe.canonical_query, 'dev-only-inline', 'Copy Canonical Query') + '<br>' : '') +
+      'Expanded Queries:' + copyIconBtn((qe.expanded_queries || []).join('\n'), 'dev-only-inline', 'Copy all Expanded Queries') + '<br>' +
+      (qe.expanded_queries || []).map(function(v){ return '- ' + esc(v); }).join('<br>')
+    : 'No query expansion data available.';
+
+  // Query Spell Correction (rag/spell_correction.py) — deterministic,
+  // pure Python, no LLM. Shown BEFORE Query Expansion since it runs
+  // first in the pipeline (Normalize -> Spell Correction -> Follow-up
+  // Resolution -> ... -> Hybrid Retrieval).
+  var spellHtml = (qe.raw_query != null)
+    ? 'Original Query: <i>' + esc(qe.raw_query) + '</i>' + copyIconBtn(qe.raw_query, 'dev-only-inline', 'Copy Original Query') + '<br>' +
+      'Corrected Query: <i>' + esc(qe.spell_corrected_query) + '</i>' + copyIconBtn(qe.spell_corrected_query, 'dev-only-inline', 'Copy Corrected Query') + '<br>' +
+      'Correction Confidence: ' + Math.round((qe.spell_correction_confidence != null ? qe.spell_correction_confidence : 1) * 100) + '%<br>' +
+      'Corrections Applied:<br>' +
+      ((qe.spell_corrections || []).length
+        ? qe.spell_corrections.map(function(c){ return '- ' + esc(c.from) + ' &rarr; ' + esc(c.to); }).join('<br>')
+        : '(none)') +
+      // Semantic Invariant Guard (rag/semantic_guard.py, Part 15) —
+      // Developer Mode only; a rejected proposal never reached the
+      // customer in any form (Corrected Query above is already safe).
+      (qe.rejected_correction
+        ? '<br><span style="color:#fcd34d">Correction suggestion rejected: <i>' + esc(qe.rejected_correction) +
+          '</i><br>Reason: ' + esc(qe.rejection_reason || '') + '</span>'
+        : '')
+    : 'No spell correction data available.';
+
+  // Conversation Intelligence Phase 1 — Conversation State Engine (rag/
+  // conversation_state.py). Additive panel, shown BEFORE Canonical Query
+  // Rewrite per spec — reuses the same conversation_state object the
+  // pipeline already computed (result.conversation_state), never a
+  // second computation in the UI.
+  var cs = d.conversation_state || {};
+  var csConf = cs.conversation_confidence || {};
+  var csChanges = cs.state_changes || {};
+  var csChangesStr = Object.keys(csChanges).length
+    ? Object.keys(csChanges).map(function(k){ return k + ': ' + esc(csChanges[k].from) + ' &rarr; ' + esc(csChanges[k].to); }).join('<br>')
+    : '(none)';
+  var csEntities = ['location', 'transport', 'payment', 'warehouse', 'order_type', 'tracking', 'product']
+    .map(function(k){ return [k, cs[k]]; }).filter(function(p){ return p[1]; })
+    .map(function(p){ return p[0] + '=' + esc(p[1]); }).join(', ') || '(none)';
+  var conversationStateHtml = (cs.topic != null)
+    ? 'Topic: <strong>' + esc(cs.topic) + '</strong>' + (cs.subtopic ? ' / ' + esc(cs.subtopic) : '') + '<br>' +
+      'Intent: ' + esc(cs.intent || 'unknown') + '<br>' +
+      'Entities: ' + csEntities + '<br>' +
+      'State Changes: ' + csChangesStr + '<br>' +
+      'Transition: ' + esc(cs.transition || '—') + '<br>' +
+      'Conversation Confidence: ' + Math.round((csConf.overall||0)*100) + '% ' +
+      '(topic ' + Math.round((csConf.topic_confidence||0)*100) + '%, entity ' + Math.round((csConf.entity_confidence||0)*100) + '%, ' +
+      'transition ' + Math.round((csConf.transition_confidence||0)*100) + '%)'
+    : 'No conversation state data available.';
+
+  // Information Collection Engine / Slot Filling Engine (services/
+  // slot_filling_engine.py) — Developer Mode panel. sf is null when no
+  // ERP-backed intent was detected this turn.
+  var sf = d.slot_filling_state || null;
+  var slotFillingHtml = sf
+    ? 'Intent: <strong>' + esc(sf.intent) + '</strong><br>' +
+      'Required Slots: ' + esc(JSON.stringify(sf.required_slots)) + '<br>' +
+      'Collected: ' + (Object.keys(sf.collected_slots||{}).length ? esc(JSON.stringify(sf.collected_slots)) : '(none)') + '<br>' +
+      'Missing: ' + (sf.missing_slots && sf.missing_slots.length ? esc(JSON.stringify(sf.missing_slots)) : '(none — complete)') + '<br>' +
+      'Next Expected Slot: ' + esc(sf.next_expected_slot || '—') + '<br>' +
+      'Collection Complete: ' + (sf.is_complete ? 'Yes' : 'No') + '<br>' +
+      'Retry Count: ' + sf.retry_count + ' / ' + sf.max_retry + '<br>' +
+      'Escalation Decision: ' + (sf.escalation_required ? ('Yes — ' + esc(sf.escalation_reason)) : 'No')
+    : 'No ERP-backed intent detected this turn.';
+
+  // Conversation Resolver 2.0 + Canonical Query Rewrite (rag/
+  // query_resolution.py, rag/canonical_query.py) — additive keys on the
+  // same query_expansion object, shown as their own row between Spell
+  // Correction and Query Expansion (matches the pipeline order).
+  var conversationHtml = (qe.resolved_query != null)
+    ? 'Previous User Topic: ' + esc(qe.prev_user_topic || '—') + '<br>' +
+      'Detected Follow-up Type: ' + esc(qe.followup_type || 'none') + '<br>' +
+      'Entities Carried Forward: ' + (qe.entities_carried && Object.keys(qe.entities_carried).length
+        ? Object.keys(qe.entities_carried).map(function(k){ return k + '=' + qe.entities_carried[k]; }).join(', ')
+        : '(none)') + '<br>' +
+      'Resolved Query: <i>' + esc(qe.resolved_query) + '</i>' + copyIconBtn(qe.resolved_query, 'dev-only-inline', 'Copy Resolved Query') + '<br>' +
+      'Resolution Confidence: ' + Math.round((qe.resolution_confidence != null ? qe.resolution_confidence : 1) * 100) + '%<br>' +
+      '<br>Canonical Query: <i>' + esc(qe.canonical_query || qe.resolved_query) + '</i>' + copyIconBtn(qe.canonical_query || qe.resolved_query, 'dev-only-inline', 'Copy Canonical Query') + '<br>' +
+      'Rewrite Applied: ' + (qe.rewrite_applied ? 'Yes' : 'No') + '<br>' +
+      'Rewrite Reason: ' + esc(qe.rewrite_reason || '—') + '<br>' +
+      'Rewrite Confidence: ' + Math.round((qe.rewrite_confidence != null ? qe.rewrite_confidence : 0) * 100) + '%'
+    : 'No conversation resolution data available.';
+
+  // Knowledge Synonym Engine (rag/synonym_service.py) — canonical terms
+  // detected in the query + every synonym now also being searched for,
+  // mapped to its canonical term. Purely additive to the existing Query
+  // Expansion panel's data (qe.canonical_terms/qe.synonyms_used are new
+  // keys on the SAME query_expansion object) — shown as its own row.
+  var synHtml = (qe.canonical_terms && qe.canonical_terms.length)
+    ? 'Canonical Terms:<br>' + qe.canonical_terms.map(function(t){ return '- ' + esc(t); }).join('<br>') +
+      '<br><br>Synonyms Used:<br>' +
+      (qe.synonyms_used || []).map(function(s){ return '- ' + esc(s.term) + ' &rarr; ' + esc(s.canonical); }).join('<br>')
+    : 'No synonym groups matched this query.';
+
+  // Human-like Multi-Message Replies (services/message_segmenter.py) —
+  // reply_mode / segmentation_applied / message_count / segment_reasons,
+  // additive Explainability fields (requirement: does not change
+  // retrieval, prompt selection, or policy layout).
+  var segHtml = 'Reply Mode: ' + esc((d.reply_mode_used || 'auto').charAt(0).toUpperCase() + (d.reply_mode_used || 'auto').slice(1)) + '<br>' +
+    'Segmentation Applied: ' + (d.segmentation_applied ? 'Yes' : 'No') + '<br>' +
+    'Message Count: ' + (d.message_count != null ? d.message_count : 1) + '<br>' +
+    'Boundary Types Used: ' + ((d.boundary_types || []).length ? esc(d.boundary_types.join(', ')) : 'none') + '<br>' +
+    'Reason: ' + ((d.segment_reasons || []).length ? esc(d.segment_reasons.join('; ')) : 'not applicable');
+
+  // Conversation Intelligence — Unified Intent Classification (rag/
+  // query_understanding.py::classify_actionable_intent()). Compact,
+  // additive Explainability section — does not replace the existing
+  // Query Expansion/Synonyms panels above.
+  var entitiesObj = d.intent_entities || {};
+  var entitiesStr = Object.keys(entitiesObj).filter(function(k){ return entitiesObj[k]; })
+    .map(function(k){ return k + '=' + entitiesObj[k]; }).join(', ') || '(none)';
+  var intentHtml = 'Broad Intent: ' + esc(d.broad_intent || 'unknown') + '<br>' +
+    'Actionable Intent: ' + esc(d.actionable_intent || 'unknown') + '<br>' +
+    'Confidence: ' + Math.round((d.intent_confidence || 0) * 100) + '%<br>' +
+    'Requested Attributes: ' + ((d.requested_attributes || []).length ? esc(d.requested_attributes.join(', ')) : '(none)') + '<br>' +
+    'Entities: ' + esc(entitiesStr);
+
+  // Answer Planner (services/answer_planner.py).
+  var ap = d.answer_plan || {};
+  var answerPlanHtml = 'Answer Goal: ' + esc(ap.answer_goal || '—') + '<br>' +
+    (ap.answer_type ? 'Answer Type: ' + esc(ap.answer_type) + '<br>' : '') +
+    'Must Include: ' + ((ap.required_facts || []).length ? esc(ap.required_facts.join(', ')) : '(none)') + '<br>' +
+    'Optional: ' + ((ap.optional_facts || []).length ? esc(ap.optional_facts.join(', ')) : '(none)') + '<br>' +
+    'Excluded: ' + ((ap.excluded_facts || []).length ? esc(ap.excluded_facts.join(', ')) : '(none)') + '<br>' +
+    'Clarification Required: ' + (ap.clarification_required ? ('Yes — ' + esc(ap.clarification_question || '')) : 'No') +
+    copyIconBtn(JSON.stringify(ap, null, 2), 'dev-only-inline', 'Copy Answer Plan JSON');
+
+  // Attachment Planner (services/attachment_planner.py).
+  var atp = d.attachment_plan || {};
+  var attachmentPlanHtml = 'Send Attachment: ' + (atp.should_send ? 'Yes' : 'No') + '<br>' +
+    'Selected Files: ' + ((atp.selected_attachments || []).length
+      ? esc(atp.selected_attachments.map(function(a){ return a.filename || a.url; }).join(', ')) : '(none)') + '<br>' +
+    'Ordering: ' + ((atp.attachment_order || []).length ? esc(atp.attachment_order.join(' → ')) : '(none)') + '<br>' +
+    'Reason: ' + esc(atp.selection_reason || '—');
+
+  // Phase 2 (AI Playground Intelligence Pipeline) — Metadata Match /
+  // Document Purpose, Context Builder Summary, Retrieval Confidence.
+  // Reuses this SAME Explainability tab/panel structure, just more rows.
+  var purposesSeen = (d.chunks || []).map(function(c){ return c.document_purpose; }).filter(Boolean);
+  var uniquePurposes = purposesSeen.filter(function(p, i){ return purposesSeen.indexOf(p) === i; });
+  var matchedCount = (d.chunks || []).filter(function(c){ return c.metadata_match && (c.metadata_match.matched_fields||[]).length > 0; }).length;
+  var metadataHtml = 'Detected Intent: ' + esc(qe.detected_intent || '—') + '<br>' +
+    'Document Purpose(s) seen: ' + (uniquePurposes.length ? esc(uniquePurposes.join(', ')) : '—') + '<br>' +
+    'Metadata-matched chunks: ' + matchedCount + '/' + (d.chunks||[]).length;
+
+  var cb = d.context_builder_summary || {};
+  var cbHtml = cb.original_count != null
+    ? cb.original_count + ' candidate chunk(s) → ' + cb.final_count + ' final context chunk(s)<br>' +
+      '- Duplicates removed: ' + (cb.duplicates_removed||0) + '<br>' +
+      '- Chunks merged: ' + (cb.chunks_merged||0) + '<br>' +
+      '- Repeated lines compressed: ' + (cb.compressed_lines_removed||0) + '<br>' +
+      '- Source document(s): ' + ((cb.source_documents||[]).join(', ') || '—')
+    : 'No context builder data available.';
+
+  var rc = d.retrieval_confidence_components || {};
+  var rcHtml = d.retrieval_confidence != null
+    ? '<strong>' + Math.round((d.retrieval_confidence||0)*100) + '%</strong><br>' +
+      'Semantic: ' + Math.round((rc.semantic_score||0)*100) + '% · ' +
+      'Keyword: ' + Math.round((rc.keyword_score||0)*100) + '% · ' +
+      'Heading: ' + Math.round((rc.heading_score||0)*100) + '%<br>' +
+      'Metadata: ' + Math.round((rc.metadata_score||0)*100) + '% · ' +
+      'Citation coverage: ' + Math.round((rc.citation_coverage||0)*100) + '%<br>' +
+      'Document agreement: ' + Math.round((rc.document_agreement||0)*100) + '% · ' +
+      'Chunk agreement: ' + Math.round((rc.chunk_agreement||0)*100) + '%'
+    : 'No retrieval confidence data available.';
+
+  document.getElementById('pg-explain-content').innerHTML =
+    '<div class="explain-row"><span class="explain-icon">🎯</span><div>' +
+      '<div class="explain-label">Why this answer was generated</div>' +
+      '<div class="explain-value">Retrieved ' + (d.chunks||[]).length + ' chunk(s) from Knowledge Base, built a prompt using them, and asked ' + esc(d.metadata.model||'the model') + ' to answer strictly from that context.</div>' +
+    '</div></div>' +
+    // Knowledge Gap Handling (Part 10) — Developer Mode only; never
+    // shown in Customer Mode, never alters the answer itself.
+    (d.company_profile_warning
+      ? '<div class="explain-row dev-only"><span class="explain-icon">⚠️</span><div>' +
+          '<div class="explain-label">Knowledge Gap Warning</div>' +
+          '<div class="explain-value" style="color:#fcd34d">' + esc(d.company_profile_warning) + '</div>' +
+        '</div></div>'
+      : '') +
+    '<div class="explain-row"><span class="explain-icon">🔤</span><div>' +
+      '<div class="explain-label">Spell Correction</div>' +
+      '<div class="explain-value">' + spellHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🧭</span><div>' +
+      '<div class="explain-label">Conversation State</div>' +
+      '<div class="explain-value">' + conversationStateHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">📝</span><div>' +
+      '<div class="explain-label">Slot Filling (Information Collection Engine)</div>' +
+      '<div class="explain-value">' + slotFillingHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">💭</span><div>' +
+      '<div class="explain-label">Conversation Resolver &amp; Canonical Query Rewrite</div>' +
+      '<div class="explain-value">' + conversationHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🌐</span><div>' +
+      '<div class="explain-label">Query Expansion (Thai-English / synonyms)</div>' +
+      '<div class="explain-value">' + qeHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🔗</span><div>' +
+      '<div class="explain-label">Query Synonyms</div>' +
+      '<div class="explain-value">' + synHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">📄</span><div>' +
+      '<div class="explain-label">Which chunks were used</div>' +
+      '<div class="explain-value">' + (chunkList || 'No chunks were retrieved for this question.') + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🛡️</span><div>' +
+      '<div class="explain-label">Which AI Policies were applied</div>' +
+      '<div class="explain-value">Policy Set: <strong>' + esc(d.policy.policy_set_name || 'Standard Policy') + '</strong><br>' +
+        (policyList || 'No policies were triggered.') + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">📝</span><div>' +
+      '<div class="explain-label">Which Prompt Version was used</div>' +
+      '<div class="explain-value">' + esc(d.prompt.template_name) + ' v' + esc(d.prompt.template_version) + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🔧</span><div>' +
+      '<div class="explain-label">Which Tool Calls executed</div>' +
+      '<div class="explain-value">' + (toolCalls || 'No tool calls executed.') + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">📊</span><div>' +
+      '<div class="explain-label">Why confidence is ' + esc(d.metadata.confidence_label || 'unknown') + '</div>' +
+      '<div class="explain-value">' + Math.round((d.metadata.confidence||0)*100) + '% — ' + confReason + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🏷️</span><div>' +
+      '<div class="explain-label">Metadata Match / Document Purpose</div>' +
+      '<div class="explain-value">' + metadataHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🧩</span><div>' +
+      '<div class="explain-label">Context Builder Summary</div>' +
+      '<div class="explain-value">' + cbHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">📈</span><div>' +
+      '<div class="explain-label">Retrieval Confidence</div>' +
+      '<div class="explain-value">' + rcHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">💬</span><div>' +
+      '<div class="explain-label">Message Segmentation</div>' +
+      '<div class="explain-value">' + segHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">🧭</span><div>' +
+      '<div class="explain-label">Intent Understanding</div>' +
+      '<div class="explain-value">' + intentHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">📋</span><div>' +
+      '<div class="explain-label">Answer Plan</div>' +
+      '<div class="explain-value">' + answerPlanHtml + '</div>' +
+    '</div></div>' +
+    '<div class="explain-row"><span class="explain-icon">📎</span><div>' +
+      '<div class="explain-label">Attachment Plan</div>' +
+      '<div class="explain-value">' + attachmentPlanHtml + '</div>' +
+    '</div></div>';
+}
+
+function askQuestion() {
+  var input = document.getElementById('pg-question');
+  var question = input.value.trim();
+  if (!question) return;
+
+  _conversation.push({role: 'user', text: question});
+  renderConversation();
+  input.value = '';
+  // Programmatic value changes don't fire a native 'input' event — dispatch
+  // one so the rotating placeholder overlay resumes now that the text has
+  // been cleared (see initPlaygroundPlaceholder()'s syncVisibility()).
+  input.dispatchEvent(new Event('input'));
+
+  var btn = document.getElementById('pg-ask-btn');
+  btn.disabled = true; btn.textContent = 'Thinking…';
+  showChunksLoading();
+
+  // Top K / temperature / max tokens are no longer set from this page —
+  // the backend resolves them from the selected prompt template's own
+  // configuration, then AI/model configuration, then server-side
+  // defaults (see /admin/playground/ask). Only template_id (from the
+  // Prompt Template selector) is sent.
+  fetch('/admin/playground/ask', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      question: question,
+      session_id: _sessionId,
+      template_id: _selectedTemplateId,
+    }),
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Ask';
+      if (!d.ok) {
+        _conversation.push({role: 'ai', text: 'Error: ' + (d.error || 'unknown error'), meta: ''});
+        renderConversation();
+        showChunksError(d.error);
+        return;
+      }
+      _lastResult = d;
+      if (d.session_id) {
+        _sessionId = d.session_id;
+        document.getElementById('pg-session-name').textContent = (d.session && d.session.name) || question.slice(0, 60);
+      }
+      _conversation.push({
+        role: 'ai', text: d.answer,
+        meta: Math.round(d.metadata.confidence*100) + '% confidence · ' + d.metadata.latency_ms + ' ms · ' + d.metadata.model,
+      });
+      renderConversation();
+      renderChunks(d.chunks || []);
+      renderAnswer(d);
+      renderPrompt(d);
+      renderPipeline(d);
+      renderJson(d);
+      renderExplain(d);
+      refreshStatusBar();
+      loadSessions();
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Ask';
+      _conversation.push({role: 'ai', text: 'Network error: ' + e, meta: ''});
+      renderConversation();
+      showChunksError('Network error: ' + e);
+    });
+}
+
+document.getElementById('pg-question').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askQuestion(); }
+});
+
+function statusDot(status) {
+  return '<span class="pg-dot pg-dot-' + esc(status) + '"></span>';
+}
+
+function refreshStatusBar() {
+  fetch('/admin/playground/status')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (!d.ok) return;
+      document.getElementById('st-provider').textContent = d.provider;
+      document.getElementById('st-model').textContent = d.model;
+      document.getElementById('st-embed').textContent = d.embedding_model +
+        (d.embedding_dimensions ? ' (' + d.embedding_dimensions + 'd)' : '');
+      // Prompt/Storage/Analysis Profile cards were removed from the header
+      // (already surfaced in Prompt Studio / AI Playground template
+      // selector, Tools -> Storage, and Settings respectively) — the
+      // underlying data (d.prompt_template, d.prompt_version,
+      // d.storage_provider) is still returned by the API and used
+      // elsewhere; it's just no longer rendered into this status bar.
+      document.getElementById('st-policies').textContent = d.active_policies + ' Active';
+      document.getElementById('st-knowledge').textContent = d.knowledge_files.toLocaleString() + ' Files';
+      document.getElementById('st-chunks').textContent = d.chunks.toLocaleString();
+      document.getElementById('st-latency').textContent = d.avg_latency_ms ? (d.avg_latency_ms/1000).toFixed(2) + ' s' : '—';
+      document.getElementById('st-status').innerHTML = statusDot(d.status) + d.status.charAt(0).toUpperCase() + d.status.slice(1);
+    })
+    .catch(function(){});
+}
+
+refreshStatusBar();
+loadSessions();
+</script>
+{% endblock %}

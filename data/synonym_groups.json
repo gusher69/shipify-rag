@@ -1,0 +1,37 @@
+[
+  {
+    "id": "location",
+    "canonical_term": "พิกัด",
+    "synonyms": ["โลเคชั่น", "location", "map", "google map", "แผนที่", "gps"]
+  },
+  {
+    "id": "warehouse",
+    "canonical_term": "โกดัง",
+    "synonyms": ["warehouse", "คลังสินค้า", "จุดรับสินค้า", "จุดส่งสินค้า", "สาขารับสินค้า"]
+  },
+  {
+    "id": "rate",
+    "canonical_term": "เรท",
+    "synonyms": ["ราคา", "rate", "ค่าขนส่ง", "อัตราค่าขนส่ง"]
+  },
+  {
+    "id": "cbm",
+    "canonical_term": "CBM",
+    "synonyms": ["คิว", "Cubic Meter", "ลูกบาศก์เมตร"]
+  },
+  {
+    "id": "invoice",
+    "canonical_term": "ใบกำกับ",
+    "synonyms": ["VAT", "Invoice", "ใบกำกับภาษี"]
+  },
+  {
+    "id": "tracking",
+    "canonical_term": "Tracking",
+    "synonyms": ["ติดตาม", "เช็คสถานะ", "ตรวจสอบสถานะ", "Track", "Tracking Number"]
+  },
+  {
+    "id": "company",
+    "canonical_term": "บริษัท",
+    "synonyms": ["องค์กร", "Shipify", "Fasttrade", "About", "Company Profile", "แนะนำบริษัท", "ธุรกิจ", "Business", "Overview"]
+  }
+]
