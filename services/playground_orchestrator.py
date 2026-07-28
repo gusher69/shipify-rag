@@ -194,6 +194,41 @@ def run_playground_turn(
                          f"conf={conversation['confidence']:.2f})" if resolved_question != corrected_question
                          else "not a follow-up — used as-is"))
 
+    # 0a1. Active Slot-Filling Flow (P0, 2026-07-22, rag/slot_filling_flow.py)
+    #      — checked here, BEFORE intent classification/retrieval even
+    #      run, so a bare reply like "4*6" supplying dimensions for an
+    #      active shipping-cost-calculation flow is never misclassified
+    #      as a standalone arithmetic question. Returns None (no-op) for
+    #      every other turn: no active flow, cancellation, an explicit
+    #      new topic, or an explicit math request — in every such case
+    #      the rest of the pipeline runs completely unchanged.
+    from rag.slot_filling_flow import resolve_slot_filling_turn, resolve_bare_math_expression
+    dimension_slot_result = resolve_slot_filling_turn(corrected_question, history)
+    # Data entry vs math — a bare arithmetic expression with NO active
+    # slot-filling flow is still evaluated directly as math (Part "Data
+    # Entry vs Math", test "explicit math still works when no active
+    # flow exists") — never a general eval(), see rag/slot_filling_flow.py.
+    bare_math_result = None if dimension_slot_result else resolve_bare_math_expression(corrected_question, history)
+    if dimension_slot_result:
+        stages.append(Stage("Active Slot-Filling Flow", "success", 0.0,
+                             f"shipping_cost_calculation — captured={dimension_slot_result['captured_slots']}, "
+                             f"missing={dimension_slot_result['missing_slots']}"))
+        if dimension_slot_result["flow_complete"]:
+            # All required slots collected — hand off to the EXISTING
+            # deterministic Excel Calculation Engine (rag/calculator.py)
+            # by synthesizing a complete analytical question from the
+            # captured values, rather than reimplementing shipping-cost
+            # math here. Never invents a value: every number came from
+            # what the customer actually typed across this flow's turns.
+            cs = dimension_slot_result["captured_slots"]
+
+            def _fmt(v):
+                return str(int(v)) if float(v).is_integer() else str(v)
+            dims_str = "x".join(_fmt(v) for v in cs["dimension_values"])
+            resolved_question = (f"คำนวณค่าขนส่งขนาด {dims_str} {cs['dimension_unit']} "
+                                  f"น้ำหนัก {_fmt(cs['weight'])} {cs['weight_unit']}")
+            corrected_question = resolved_question
+
     # 0a2. Conversation State Engine (Conversation Intelligence Phase 1,
     #      rag/conversation_state.py) — deterministic, no LLM call. Wraps
     #      Conversation Resolver 2.0 (never re-implements entity
@@ -550,7 +585,31 @@ def run_playground_turn(
     slot_filling_escalation = slot_state is not None and slot_state["escalation_required"]
     slot_filling_complete = slot_state is not None and slot_state["is_complete"]
 
-    if answer_plan["clarification_required"]:
+    if bare_math_result:
+        value = bare_math_result["value"]
+        value_str = str(int(value)) if float(value).is_integer() else str(round(value, 4))
+        answer_text = f"{bare_math_result['expression']} = {value_str}"
+        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                             "bare arithmetic expression, no active flow — evaluated directly, no LLM call"))
+        services_used.append({"name": "LLMService", "status": "skipped"})
+        input_tokens = output_tokens = 0
+        llm_latency = 0.0
+        llm_failed = False
+    elif dimension_slot_result and not dimension_slot_result["flow_complete"]:
+        # Active Slot-Filling Flow (shipping_cost_calculation) still has
+        # missing slots — the deterministic, template-built message asks
+        # only for what's actually missing; never an LLM call, never a
+        # standalone arithmetic evaluation of the customer's dimension
+        # values (the exact bug this fix exists for).
+        answer_text = dimension_slot_result["message"]
+        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                             "active slot-filling flow incomplete — deterministic missing-slot message used, "
+                             "no LLM call, no standalone math"))
+        services_used.append({"name": "LLMService", "status": "skipped"})
+        input_tokens = output_tokens = 0
+        llm_latency = 0.0
+        llm_failed = False
+    elif answer_plan["clarification_required"]:
         answer_text = answer_plan["clarification_question"]
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                              "clarification requested — deterministic template used, no LLM call"))
@@ -634,7 +693,11 @@ def run_playground_turn(
     #      clarification turn never sends an attachment — "no irrelevant
     #      attachment" (Part 7's clarification requirement).
     t0 = time.time()
-    if answer_plan["clarification_required"]:
+    if dimension_slot_result and not dimension_slot_result["flow_complete"]:
+        attachment_plan = {"should_send": False, "selected_attachments": [], "attachment_order": [],
+                            "selection_reason": "active slot-filling flow — no attachment until dimensions/weight are complete",
+                            "omitted_attachments": []}
+    elif answer_plan["clarification_required"]:
         attachment_plan = {"should_send": False, "selected_attachments": [], "attachment_order": [],
                             "selection_reason": "clarification turn — no attachment until the customer answers",
                             "omitted_attachments": []}
@@ -665,7 +728,8 @@ def run_playground_turn(
     t0 = time.time()
     messaging_settings = get_messaging_settings(policy_set)
     is_fallback_answer = llm_failed or conf_result.answerability == "no_information"
-    is_clarification = answer_plan["clarification_required"]
+    is_clarification = answer_plan["clarification_required"] or (
+        dimension_slot_result is not None and not dimension_slot_result["flow_complete"])
     is_slot_filling_turn = slot_filling_active or slot_filling_escalation or slot_filling_complete
     segmented = segment_message(
         answer_text,

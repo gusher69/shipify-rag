@@ -416,16 +416,35 @@ def auth(request: Request):
         return RedirectResponse(url="/admin/login", status_code=302)
     return None
 
+
+def require_developer_feature(request: Request, feature_key: str):
+    """Server-side route guard (Developer Mode milestone, Access Control
+    requirement) — Category A pages (AI Evaluation / Production
+    Validation / Business Action Center) must deny direct access when
+    their feature isn't VISIBLE per services/developer_mode.py, never
+    relying only on the sidebar link being hidden. Redirects to Settings
+    with an explanatory query param rather than a bare 404, so an admin
+    who bookmarked the URL understands why and how to restore it.
+    Call AFTER auth(request) — this never substitutes for login."""
+    from services.developer_mode import is_feature_route_accessible
+    if not is_feature_route_accessible(feature_key):
+        return RedirectResponse(url="/admin/settings?dev_feature_blocked=1", status_code=302)
+    return None
+
 def render(template: str, context: dict):
     """TemplateResponse + ห้าม browser เก็บ cache ทุกรูปแบบ
 
     Also injects `sidebar` (computed from sidebar_config.SIDEBAR_CONFIG for
     whatever `active` this call passed) into every template's context —
     the single place the sidebar's data reaches Jinja, so no individual
-    route handler needs to know the sidebar exists.
+    route handler needs to know the sidebar exists. `developer_mode` is
+    injected the same way (Developer Mode milestone) — the single place
+    the "Developer Mode" badge's on/off state reaches every template.
     """
     from admin.sidebar_config import get_sidebar
+    from services.developer_mode import is_developer_mode_enabled
     context.setdefault("sidebar", get_sidebar())
+    context.setdefault("developer_mode", is_developer_mode_enabled())
     r = templates.TemplateResponse(template, context)
     r.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
     r.headers["Pragma"] = "no-cache"
@@ -508,12 +527,25 @@ def _write_env(updates: dict):
         if k not in updated:
             result.append(f"{k}={v}")
     ENV_PATH.write_text("\n".join(result) + "\n", encoding="utf-8")
+    # Also update the live process environment — services/developer_mode.py
+    # re-reads os.getenv("DEVELOPER_MODE", ...) on every call (never
+    # cached at import time, unlike config.py's module-level constants),
+    # so this is what makes the Developer Mode toggle take effect
+    # immediately, no restart required, while every other existing
+    # setting's file-only-until-restart behavior is unchanged.
+    import os as _os
+    for k, v in updates.items():
+        _os.environ[k] = v
 
 SECTION_KEYS = {
-    "ai":       ["OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_EMBED_MODEL"],
-    "supabase": ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"],
-    "line":     ["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"],
-    "admin":    ["ADMIN_USERNAME", "ADMIN_PASSWORD"],
+    "ai":        ["OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_EMBED_MODEL"],
+    "supabase":  ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"],
+    "line":      ["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"],
+    "admin":     ["ADMIN_USERNAME", "ADMIN_PASSWORD"],
+    # Developer Mode milestone — same persistence mechanism (the .env
+    # file, read/written via _read_env()/_write_env() above), no new
+    # storage layer, no localStorage.
+    "developer": ["DEVELOPER_MODE"],
 }
 
 @app.get("/admin/settings", response_class=HTMLResponse)
@@ -3384,7 +3416,8 @@ async def playground_ask(request: Request):
 @app.get("/admin/ai/benchmark", response_class=HTMLResponse)
 async def benchmark_page(request: Request):
     if (r := auth(request)): return r
-    return render("benchmark.html", {"request": request, "active": "rag-benchmark"})
+    if (r := require_developer_feature(request, "rag_benchmark")): return r
+    return render("benchmark.html", {"request": request, "active": "rag_benchmark"})
 
 
 @app.get("/admin/api/benchmark/datasets")
@@ -3686,7 +3719,8 @@ async def api_compare_benchmark_runs(request: Request):
 @app.get("/admin/ai/validation", response_class=HTMLResponse)
 async def validation_page(request: Request):
     if (r := auth(request)): return r
-    return render("validation.html", {"request": request, "active": "ai-validation"})
+    if (r := require_developer_feature(request, "ai_validation")): return r
+    return render("validation.html", {"request": request, "active": "ai_validation"})
 
 
 @app.post("/admin/api/validation/run")
@@ -3761,7 +3795,8 @@ async def api_validation_report(request: Request, validation_id: str):
 @app.get("/admin/ai/business-actions", response_class=HTMLResponse)
 async def business_actions_page(request: Request):
     if (r := auth(request)): return r
-    return render("business_actions.html", {"request": request, "active": "business-actions"})
+    if (r := require_developer_feature(request, "business_action_center")): return r
+    return render("business_actions.html", {"request": request, "active": "business_action_center"})
 
 
 @app.get("/admin/api/business-actions")
@@ -3787,18 +3822,74 @@ async def api_list_business_actions(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+_DUPLICATE_KEY_MARKERS = ("duplicate key value violates unique constraint", "already exists", "23505")
+
+
+def _is_duplicate_key_error(exc: Exception) -> bool:
+    return any(marker in str(exc) for marker in _DUPLICATE_KEY_MARKERS)
+
+
+def _duplicate_action_response(action_key: str, existing_id: Optional[str] = None):
+    """Never expose the raw PostgreSQL unique-constraint error to the
+    admin — surface a friendly, actionable choice instead."""
+    return JSONResponse({
+        "ok": False, "error_type": "duplicate_action",
+        "error": "Business Action already exists.",
+        "action_key": action_key, "existing_action_id": existing_id,
+        "options": ["update_existing", "save_as_new", "rename_action", "cancel"],
+    }, status_code=409)
+
+
 @app.post("/admin/api/business-actions")
 async def api_create_business_action(request: Request):
     if (r := auth(request)): return r
     body = await request.json()
-    if not (body.get("action_key") or "").strip() or not (body.get("name") or "").strip():
+    action_key = (body.get("action_key") or "").strip()
+    if not action_key or not (body.get("name") or "").strip():
         return JSONResponse({"ok": False, "error": "action_key and name are required"}, status_code=400)
     from services.business_action_registry import get_registry
+    reg = get_registry(get_sb())
+    existing = reg.get_by_key(action_key)
+    if existing:
+        return _duplicate_action_response(action_key, existing.get("id"))
     try:
-        action = get_registry(get_sb()).create(body, created_by=_current_admin_user(request))
+        action = reg.create(body, created_by=_current_admin_user(request))
         return JSONResponse({"ok": True, "action": action})
     except Exception as e:
+        if _is_duplicate_key_error(e):
+            return _duplicate_action_response(action_key)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.get("/admin/api/business-actions/list-for-playground")
+async def api_list_business_actions_for_playground(request: Request):
+    """Business Action Framework + ERP Sync milestone, Phase 6 — a
+    lightweight listing (id/key/name/category/action_type/enabled/
+    parameters) for the Playground's manual Business Action tester.
+    Read-only, never routed through the Decision Engine (paused per this
+    milestone) — the admin picks and runs an action directly.
+
+    Registered BEFORE the bare "/{action_id}" route below — FastAPI/
+    Starlette matches path routes in registration order, and a bare
+    `{action_id}: str` path parameter would otherwise greedily match the
+    literal segment "list-for-playground" as if it were an action id."""
+    if (r := auth(request)): return r
+    from services.business_action_registry import get_registry
+    reg = get_registry(get_sb())
+    actions = reg.list()
+    out = []
+    for a in actions:
+        full = reg.get_full(a["id"], mask_secrets=True)
+        full_params = (full.get("parameters") or []) if full else []
+        out.append({
+            "id": a["id"], "action_key": a.get("action_key"), "name": a.get("name"),
+            "display_name": a.get("display_name"), "category": a.get("category"),
+            "action_type": a.get("action_type"), "enabled": a.get("enabled"),
+            "parameters": [{"name": p.get("name"), "display_name": p.get("display_name"),
+                            "required": p.get("required"), "example_value": p.get("example_value")}
+                           for p in full_params],
+        })
+    return JSONResponse({"ok": True, "actions": out})
 
 
 @app.get("/admin/api/business-actions/{action_id}")
@@ -3981,15 +4072,42 @@ async def api_ai_auto_setup_analyze(request: Request):
     body = await request.json()
     user_input = (body.get("user_input") or body.get("api_input") or "").strip()
     business_purpose = (body.get("business_purpose") or "").strip() or user_input
+    search_info = (body.get("search_info") or "").strip()
     example_questions = [q for q in (body.get("example_questions") or []) if q and q.strip()][:10]
     if not user_input:
         return JSONResponse({"ok": False, "error": "กรุณาวางลิงก์ API, cURL, เอกสาร หรืออธิบายสิ่งที่ต้องการ"}, status_code=400)
     from services.ai_auto_setup_service import analyze_capability
+    from services.business_action_registry import get_registry
     try:
-        result = analyze_capability(user_input, business_purpose, example_questions)
+        existing_actions = get_registry(get_sb()).list()
+    except Exception:
+        existing_actions = []  # Similarity Engine degrades to create_new if the list can't be fetched.
+    try:
+        result = analyze_capability(user_input, business_purpose, example_questions,
+                                     search_info=search_info, existing_actions=existing_actions)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"AI analysis failed: {str(e)}"}, status_code=502)
     return JSONResponse({"ok": True, **result})
+
+
+@app.post("/admin/api/business-actions/ai-auto-setup/detect-endpoints")
+async def api_ai_auto_setup_detect_endpoints(request: Request):
+    """Postman Collection / OpenAPI-Swagger multi-endpoint detection —
+    pure local parsing (no LLM call). Lets Stage 1 show a selectable
+    endpoint checklist BEFORE the admin commits to analyzing (and
+    potentially creating) one Business Action per endpoint. Returns
+    an empty list for any input that isn't a multi-endpoint document —
+    the normal single-endpoint cURL/plain-text flow is unaffected."""
+    if (r := auth(request)): return r
+    body = await request.json()
+    document_text = body.get("document_text") or body.get("user_input") or ""
+    from services.ai_auto_setup_service import detect_endpoints_from_document, cluster_endpoints
+    try:
+        endpoints = detect_endpoints_from_document(document_text)
+        clusters = cluster_endpoints(endpoints)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"Endpoint detection failed: {str(e)}"}, status_code=502)
+    return JSONResponse({"ok": True, "endpoints": endpoints, "is_multi": len(endpoints) > 1, "clusters": clusters})
 
 
 @app.post("/admin/api/business-actions/ai-auto-setup/expand-questions")
@@ -4008,6 +4126,27 @@ async def api_ai_auto_setup_expand_questions(request: Request):
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"ขยายตัวอย่างไม่สำเร็จ: {str(e)}"}, status_code=502)
     return JSONResponse({"ok": True, "suggestions": suggestions})
+
+
+@app.post("/admin/api/business-actions/ai-auto-setup/suggest-questions")
+async def api_ai_auto_setup_suggest_questions(request: Request):
+    """AI Suggested Questions (bring-back feature) — generates 10-20
+    realistic customer questions for a capability before the Business
+    Action is saved. Never saves anything itself."""
+    if (r := auth(request)): return r
+    body = await request.json()
+    display_name = (body.get("display_name") or "").strip()
+    if not display_name:
+        return JSONResponse({"ok": False, "error": "กรุณาระบุชื่อความสามารถ"}, status_code=400)
+    description = (body.get("description") or "").strip()
+    category = (body.get("category") or "").strip()
+    existing_questions = [q for q in (body.get("existing_questions") or []) if q and q.strip()]
+    from services.ai_auto_setup_service import generate_suggested_questions
+    try:
+        questions = generate_suggested_questions(display_name, description, category, existing_questions)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"สร้างตัวอย่างคำถามไม่สำเร็จ: {str(e)}"}, status_code=502)
+    return JSONResponse({"ok": True, "questions": questions})
 
 
 @app.post("/admin/api/business-actions/ai-auto-setup/save")
@@ -4033,17 +4172,70 @@ async def api_ai_auto_setup_save(request: Request):
     existing = reg.get_by_key(action_key) if action_key else None
     requested_enabled = bool(body.get("enabled", False))
 
+    # Pre-save existence check (Part 5C, level 1) — MUST look past
+    # soft-deleted rows too. get_by_key() alone missed a key that
+    # belonged to a soft-deleted action, so the code fell through to
+    # reg.create() and hit the real Postgres unique constraint, leaking
+    # a raw DB error (the actual reported bug). resolve_duplicate lets
+    # the client explicitly say how a previously-surfaced duplicate
+    # should be resolved, bypassing this check for that one call.
+    resolve = body.get("resolve_duplicate") or {}
+    if not existing and action_key and not resolve.get("target_action_id"):
+        any_row = reg.get_by_key_including_deleted(action_key)
+        if any_row:
+            return JSONResponse({
+                "ok": False, "success": False, "error_type": "duplicate_action",
+                "error": "A Business Action with this key already exists.",
+                "message": "A Business Action with this key already exists.",
+                "action_key": action_key, "existing_action_id": any_row.get("id"),
+                "options": ["update_existing", "save_as_new", "rename_action", "cancel"],
+            }, status_code=409)
+
+    # "Update Existing" resolution — the client resends the SAME save
+    # call with resolve_duplicate.target_action_id set to the row the
+    # duplicate modal identified. If that row was soft-deleted, restore
+    # it first so update() doesn't leave a dangling deleted row still
+    # occupying the key.
+    if resolve.get("target_action_id"):
+        target = reg.get(resolve["target_action_id"]) or reg.get_by_key_including_deleted(action_key)
+        if target and target.get("deleted_at"):
+            reg.restore(target["id"], updated_by=_current_admin_user(request))
+        existing = reg.get(resolve["target_action_id"]) if target else None
+
     # The FINAL type is whatever the admin confirmed (either the AI's
     # high-confidence detection, or the interpretation they picked at
     # medium confidence) — `proposal.action_type` is what the client
     # sends after that resolution; `detected_action_type` is kept only
     # as the original AI signal for Developer Details / audit purposes.
+    # Preserve any admin edits already made in the Advanced Editor's
+    # Routing tab across re-runs of this AI-save endpoint — but still
+    # let a first-time save populate the full AI-generated draft
+    # (Parts 5 & 6: AI Behaviour / Routing auto-completion) rather than
+    # leaving those fields blank.
+    existing_routing = (existing.get("setup_metadata") or {}).get("routing") if existing else None
+    routing_metadata = existing_routing or {
+        "source_preference": proposal.get("routing_recommendation") or "erp_only",
+        "when_to_call": proposal.get("when_to_call") or proposal.get("detection_reason"),
+        "when_not_to_call": proposal.get("when_not_to_call"),
+        "clarification_question": proposal.get("clarification_question"),
+        "rag_combination": proposal.get("rag_combination") or "no_rag",
+        "confidence_threshold": proposal.get("confidence_threshold_recommendation"),
+        "intent": proposal.get("category"),
+        "keywords": proposal.get("keywords") or [],
+    }
+
     action_payload = {
         "action_key": action_key, "name": proposal.get("action_name"),
         "display_name": proposal.get("display_name"), "description": proposal.get("description"),
         "action_type": proposal.get("action_type") or proposal.get("detected_action_type") or "API",
         "category": proposal.get("category"),
         "ai_description": proposal.get("description"), "search_keywords": proposal.get("keywords") or [],
+        # AI Behaviour tab — previously left blank by this endpoint even
+        # when the AI proposal included useful drafts for them.
+        "business_description": proposal.get("business_description"),
+        "success_prompt": proposal.get("success_prompt"),
+        "failure_prompt": proposal.get("failure_prompt"),
+        "follow_up_prompt": proposal.get("follow_up_prompt"),
         "setup_source": "ai_auto_setup",
         "setup_metadata": {
             "conditions": proposal.get("conditions") or [], "warnings": proposal.get("warnings") or [],
@@ -4055,6 +4247,11 @@ async def api_ai_auto_setup_save(request: Request):
             "detected_action_type": proposal.get("detected_action_type"),
             "detection_confidence": proposal.get("detection_confidence"),
             "detection_reason": proposal.get("detection_reason"),
+            "search_info": proposal.get("search_info"),
+            "when_to_call": proposal.get("when_to_call") or proposal.get("detection_reason"),
+            # RAG-vs-ERP Routing Configuration — never wired into the
+            # Decision Engine yet, stored for later consumption only.
+            "routing": routing_metadata,
         },
     }
     if existing:
@@ -4135,9 +4332,25 @@ async def api_ai_auto_setup_save(request: Request):
             reg.set_enabled(action_id, True)
             action = reg.get_full(action_id)
 
-        return JSONResponse({"ok": True, "action": reg.get_full(action_id), "was_update": bool(existing)})
+        return JSONResponse({"ok": True, "success": True, "action": reg.get_full(action_id), "was_update": bool(existing)})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        # Pre-save check above handles the normal case; this is
+        # defense-in-depth (Part 5C, level 2) for anything that slips
+        # through — a race between the check and the insert, for
+        # instance. NEVER forward the raw exception (constraint names,
+        # SQLSTATE, stack traces) to the browser.
+        if _is_duplicate_key_error(e):
+            any_row = reg.get_by_key_including_deleted(action_key) if action_key else None
+            return JSONResponse({
+                "ok": False, "success": False, "error_type": "duplicate_action",
+                "error": "A Business Action with this key already exists.",
+                "message": "A Business Action with this key already exists.",
+                "action_key": action_key, "existing_action_id": any_row.get("id") if any_row else None,
+                "options": ["update_existing", "save_as_new", "rename_action", "cancel"],
+            }, status_code=409)
+        return JSONResponse({
+            "ok": False, "success": False, "error": "Unable to save the Business Action. Please try again or review the configuration.",
+        }, status_code=400)
 
 
 @app.get("/admin/api/credentials")
@@ -4298,6 +4511,28 @@ async def api_business_action_enable_check(request: Request, action_id: str):
     from services.business_action_registry import get_registry
     check = get_registry(get_sb()).validate_can_enable(action_id)
     return JSONResponse({"ok": True, **check})
+
+
+@app.post("/admin/api/business-actions/{action_id}/execute")
+async def api_execute_business_action(request: Request, action_id: str):
+    """Business Action Framework + ERP Sync milestone, Phase 6 — the
+    GENERIC manual execution endpoint for the Playground's Business
+    Action tester. Unlike /test above (REST/HTTP-specific — builds an
+    HTTP request from `execution.endpoint`), this calls
+    services/action_executor.py::ActionExecutor.execute() directly, so
+    it works for EVERY action_type (API/RAG/TOOL/WEBHOOK/...), including
+    the TOOL-type mock-provider actions from
+    tools/seed_business_action_providers.py. Never touches the Decision
+    Engine (explicitly paused this milestone) or LINE OA — this is a
+    direct Registry -> Executor -> Provider call, exactly per the
+    existing architecture."""
+    if (r := auth(request)): return r
+    body = await request.json()
+    from services.action_executor import ActionExecutor
+    executor = ActionExecutor(get_sb())
+    params = {k: v for k, v in (body.get("parameters") or {}).items() if v not in (None, "")}
+    result = executor.execute(action_id, context={"action_params": params})
+    return JSONResponse({"ok": True, "result": result})
 
 
 @app.post("/admin/api/business-actions/{action_id}/test")

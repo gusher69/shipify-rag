@@ -1,0 +1,1175 @@
+{% extends "base.html" %}
+{% set active = "file-library" %}
+{% block title %}File Library — Shipify Admin{% endblock %}
+{% block topbar_title %}File Library{% endblock %}
+
+{% block extra_head %}
+<style>
+@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+/* ── Status badges ── */
+.sbadge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;border-radius:20px;padding:3px 10px;white-space:nowrap}
+.sb-completed{color:#a78bfa;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.3)}
+.sb-pending  {color:#fcd34d;background:rgba(252,211,77,.08);border:1px solid rgba(252,211,77,.25)}
+.sb-failed   {color:#fca5a5;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3)}
+.sb-inactive {color:rgba(232,237,245,.35);background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}
+.sb-uploaded {color:rgba(232,237,245,.55);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1)}
+.sb-deleted  {color:#f87171;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2)}
+
+/* ── Dropdown (portal — rendered in body to escape overflow containers) ── */
+.row-actions{display:inline-flex;gap:6px;align-items:center}
+/* .dd-portal is injected via JS into body — not clipped by table overflow */
+.dd-item{display:flex;align-items:center;gap:9px;padding:7px 12px;border-radius:7px;font-size:12px;color:rgba(232,237,245,.75);cursor:pointer;white-space:nowrap;transition:background .1s;background:none;border:none;width:100%;text-align:left}
+.dd-item:hover{background:rgba(27,79,155,.28);color:#e8edf5}
+.dd-item.red{color:#fca5a5}
+.dd-item.red:hover{background:rgba(239,68,68,.15)}
+.dd-item.green{color:#34d399}
+.dd-item.green:hover{background:rgba(52,211,153,.12)}
+.dd-sep{height:1px;background:rgba(255,255,255,.07);margin:3px 4px}
+
+/* ── File table ── */
+.ftable{width:100%;border-collapse:collapse}
+.ftable th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:rgba(232,237,245,.32);padding:0 10px 10px;text-align:left;white-space:nowrap}
+.ftable td{padding:9px 10px;border-top:1px solid rgba(255,255,255,.05);vertical-align:middle}
+.ftable tbody tr{transition:background .1s}
+.ftable tbody tr:hover{background:rgba(27,79,155,.07)}
+.ftable tbody tr.is-deleted{opacity:.45}
+
+/* ── Filters ── */
+.filter-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:rgba(27,79,155,.06);border:1px solid rgba(27,79,155,.18);border-radius:12px}
+.filter-inp,.filter-sel{background:rgba(255,255,255,.06);border:1px solid rgba(27,79,155,.25);color:#e8edf5;border-radius:7px;padding:6px 10px;font-size:12px;outline:none;height:32px}
+.filter-inp{width:200px}
+.filter-sel{min-width:120px}
+.filter-inp:focus,.filter-sel:focus{border-color:rgba(27,79,155,.6)}
+.filter-sel option{background:#0d1932}
+.filter-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:rgba(232,237,245,.55);cursor:pointer;padding:5px 10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:7px;white-space:nowrap;height:32px;user-select:none;transition:all .15s}
+.filter-toggle:hover{background:rgba(255,255,255,.08);color:#e8edf5}
+.filter-toggle.active-tog{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);color:#fca5a5}
+
+/* ── Bulk bar ── */
+.bulk-bar{display:none;align-items:center;gap:10px;padding:8px 14px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.25);border-radius:10px;margin-bottom:12px}
+
+/* ── Modals ── */
+.modal-ov{display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);backdrop-filter:blur(8px);align-items:center;justify-content:center}
+.modal-ov.open{display:flex}
+.modal-box{background:rgba(13,25,50,.98);border:1px solid rgba(27,79,155,.4);border-radius:20px;padding:30px 34px;width:540px;max-width:94vw;max-height:88vh;overflow-y:auto;position:relative;animation:fadeIn .18s ease}
+.modal-box.wide{width:680px}
+.modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:rgba(232,237,245,.4);cursor:pointer;font-size:18px;line-height:1;padding:4px}
+.modal-close:hover{color:#e8edf5}
+.modal-title{font-size:16px;font-weight:700;color:#e8edf5;margin-bottom:18px}
+
+/* ── Forms ── */
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.form-grp{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.form-lbl{font-size:11.5px;color:rgba(232,237,245,.48)}
+.form-inp2,.form-sel2,.form-ta{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;width:100%;box-sizing:border-box}
+.form-inp2:focus,.form-sel2:focus,.form-ta:focus{border-color:rgba(27,79,155,.7)}
+.form-ta{resize:vertical;min-height:72px}
+.form-sel2 option{background:#0d1932}
+
+/* ── Detail grid ── */
+.det-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 20px}
+.det-lbl{font-size:10.5px;color:rgba(232,237,245,.35);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.det-val{font-size:12.5px;color:#e8edf5}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- ── Header ── -->
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px">
+  <div>
+    <div class="page-title">File Library</div>
+    <div class="page-sub">Successfully synced knowledge — indexed and available for RAG search.</div>
+  </div>
+  <a href="/admin/documents" class="btn btn-primary" style="flex-shrink:0;text-decoration:none">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 7l4-5 4 5M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Import Files
+  </a>
+</div>
+
+<!-- ── Filters ── -->
+<div class="filter-bar">
+  <input type="text" id="f-search" class="filter-inp" placeholder="Search by file name…" oninput="applyFilters()">
+  <select id="f-status" class="filter-sel" onchange="applyFilters()">
+    <option value="">All Files</option>
+    <option value="completed">Synced</option>
+  </select>
+  <select id="f-type" class="filter-sel" onchange="applyFilters()">
+    <option value="">All Types</option>
+    <option value="pdf">PDF</option>
+    <option value="docx">DOCX / DOC</option>
+    <option value="md">Markdown</option>
+    <option value="txt">TXT</option>
+  </select>
+  <select id="f-scope" class="filter-sel" onchange="applyFilters()">
+    <option value="">All Scopes</option>
+    {% for s in scopes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+  </select>
+  <button type="button" class="btn" style="background:rgba(255,255,255,.05);color:rgba(232,237,245,.5);border:1px solid rgba(255,255,255,.1);padding:5px 12px;font-size:12px;height:32px" onclick="clearFilters()">Clear</button>
+  <span id="f-count" style="font-size:12px;color:rgba(232,237,245,.35);margin-left:auto"></span>
+</div>
+
+<!-- ── Bulk action bar ── -->
+<div class="bulk-bar" id="bulk-bar">
+  <span id="bulk-count" style="font-size:12px;color:rgba(245,166,35,.8);font-weight:600">0 selected</span>
+  <div style="height:16px;width:1px;background:rgba(255,255,255,.1)"></div>
+  <button type="button" onclick="bulkDelete()" class="btn" style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.3);padding:5px 14px;font-size:12px;height:30px">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M5.5 4v8.5h5V4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Delete Selected
+  </button>
+  <button type="button" onclick="clearSelection()" style="margin-left:auto;background:none;border:none;color:rgba(232,237,245,.35);cursor:pointer;font-size:12px;padding:0">✕ Clear</button>
+</div>
+
+<!-- ── File table ── -->
+<div class="card">
+  <div style="overflow-x:auto">
+    <table class="ftable" id="lib-table">
+      <thead>
+        <tr>
+          <th style="width:34px"><input type="checkbox" id="chk-all" onchange="toggleAll(this)" style="width:15px;height:15px;cursor:pointer;accent-color:#F5A623"></th>
+          <th>Filename</th>
+          <th style="width:65px">Type</th>
+          <th style="width:75px">Size</th>
+          <th style="width:130px">Scope</th>
+          <th style="width:75px">Chunks</th>
+          <th style="width:130px">Uploaded</th>
+          <th style="width:130px">Last Synced</th>
+          <th style="width:110px">Status</th>
+          <th style="text-align:right;width:130px">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="lib-body">
+        {% for f in all_files %}
+        <tr class="lib-row {% if f.deleted_at %}is-deleted{% endif %}"
+            data-filename="{{ f.filename }}"
+            data-fileid="{{ f.id }}"
+            data-scope="{{ f.scope or '' }}"
+            data-platform="{{ f.platform or '' }}"
+            data-category="{{ f.category or '' }}"
+            data-tags="{{ f.tags or '' }}"
+            data-description="{{ f.description or '' }}"
+            data-status="{{ f.status or 'uploaded' }}"
+            data-chunks="{{ f.chunk_count or 0 }}"
+            data-synced="{{ f.synced_at or '' }}"
+            data-uploaded="{{ f.uploaded_at or '' }}"
+            data-error="{{ (f.last_error or '')[:200] }}"
+            data-size="{{ f.size or 0 }}"
+            data-deleted="{{ 'yes' if f.deleted_at else 'no' }}"
+            data-ondisk="{{ 'yes' if f.on_disk else 'no' }}"
+            style="display:none">
+          <td><input type="checkbox" class="row-chk" data-id="{{ f.id }}" data-name="{{ f.filename }}" onchange="updateBulkBar()" style="width:15px;height:15px;cursor:pointer;accent-color:#F5A623"></td>
+          <td>
+            <strong style="font-size:12.5px;color:#e8edf5;display:block">{{ f.filename }}</strong>
+            <div style="font-size:11px;color:rgba(232,237,245,.35);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
+              {% if f.scope %}<span style="color:rgba(147,197,253,.7)">{{ f.scope }}</span>{% endif %}
+              {% if f.platform %}<span style="color:rgba(167,139,250,.6)">{{ f.platform }}</span>{% endif %}
+              {% if f.deleted_at %}<span style="color:#f87171">(deleted)</span>{% endif %}
+            </div>
+          </td>
+          <td>
+            {% if f.filename.endswith('.pdf') %}<span class="badge badge-red">PDF</span>
+            {% elif f.filename.endswith('.docx') or f.filename.endswith('.doc') %}<span class="badge badge-blue">Word</span>
+            {% elif f.filename.endswith('.md') %}<span class="badge badge-green">MD</span>
+            {% else %}<span class="badge badge-gray">TXT</span>{% endif %}
+          </td>
+          <td style="color:rgba(232,237,245,.5);font-size:12px;white-space:nowrap">
+            {% set sz = f.size or 0 %}
+            {% if sz > 1048576 %}{{ "%.1f"|format(sz/1048576) }} MB
+            {% elif sz > 1024 %}{{ "%.1f"|format(sz/1024) }} KB
+            {% else %}{{ sz }} B{% endif %}
+          </td>
+          <td style="font-size:11.5px;color:rgba(232,237,245,.55)">{{ f.scope or '—' }}</td>
+          <td style="color:#a78bfa;font-size:12px;font-weight:600">{{ f.chunk_count or '—' }}</td>
+          <td style="font-size:11.5px;color:rgba(232,237,245,.4);white-space:nowrap">
+            <span class="ts-bkk">{{ f.uploaded_at or '' }}</span>
+          </td>
+          <td style="font-size:11.5px;color:rgba(232,237,245,.4);white-space:nowrap">
+            {% if f.synced_at %}<span class="ts-bkk">{{ f.synced_at }}</span>{% else %}<span style="color:#fcd34d">Not synced</span>{% endif %}
+          </td>
+          <td>
+            {% if f.deleted_at %}
+              <span class="sbadge sb-deleted">Deleted</span>
+            {% elif f.status == 'failed' %}
+              <span class="sbadge sb-failed" title="{{ f.last_error or '' }}">❌ Failed</span>
+            {% elif f.status == 'inactive' %}
+              <span class="sbadge sb-inactive">Inactive</span>
+            {% elif f.synced_at and f.last_error %}
+              <span class="sbadge sb-pending" title="{{ f.last_error }}">⚠️ Completed with Warnings</span>
+            {% elif f.synced_at %}
+              <span class="sbadge sb-completed">✓ Synced</span>
+            {% elif f.status == 'uploaded' %}
+              <span class="sbadge sb-uploaded">Uploaded</span>
+            {% else %}
+              <span class="sbadge sb-pending">Pending</span>
+            {% endif %}
+          </td>
+          <td style="text-align:right">
+            <div class="row-actions">
+              {% if f.on_disk and not f.deleted_at %}
+              <a href="/admin/view/{{ f.filename }}" target="_blank"
+                 style="display:inline-flex;align-items:center;gap:5px;background:rgba(27,79,155,.18);color:#93c5fd;border:1px solid rgba(27,79,155,.35);border-radius:7px;padding:5px 11px;font-size:12px;text-decoration:none;transition:background .15s"
+                 onmouseover="this.style.background='rgba(27,79,155,.35)'" onmouseout="this.style.background='rgba(27,79,155,.18)'">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                Download
+              </a>
+              {% endif %}
+              <button type="button"
+                      data-dd-trigger="{{ f.id }}"
+                      onclick="event.preventDefault();event.stopPropagation();openPortalDD(this,'{{ f.id }}')"
+                      style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);color:rgba(232,237,245,.7);border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:5px 10px;font-size:12px;cursor:pointer;transition:background .15s"
+                      onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
+                More
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div id="lib-empty" style="display:none;text-align:center;padding:40px;color:rgba(232,237,245,.35);font-size:13px">
+      No files match the current filters.
+    </div>
+    {% if not all_files %}
+    <div class="empty" style="padding:40px">
+      <div class="empty-icon">📂</div>
+      <div class="empty-text">No synced files yet.<br><span style="font-size:12px">Upload files in <a href="/admin/documents" style="color:#93c5fd">Knowledge Base</a>, then sync them to make them available here.</span></div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ═══════ DETAIL MODAL ═══════ -->
+<div class="modal-ov" id="detail-modal" onclick="if(event.target===this)closeModal('detail-modal')">
+  <div class="modal-box wide">
+    <button type="button" class="modal-close" onclick="closeModal('detail-modal')">✕</button>
+    <div class="modal-title" id="detail-title">File Details</div>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<!-- ═══════ EDIT METADATA MODAL ═══════ -->
+<div class="modal-ov" id="meta-modal" onclick="if(event.target===this)closeModal('meta-modal')">
+  <div class="modal-box">
+    <button type="button" class="modal-close" onclick="closeModal('meta-modal')">✕</button>
+    <div class="modal-title">Edit Metadata</div>
+    <input type="hidden" id="meta-fid">
+    <div class="form-row">
+      <div class="form-grp"><label class="form-lbl">Knowledge Scope</label>
+        <select id="meta-scope" class="form-sel2">{% for s in scopes %}<option value="{{ s }}" {% if s == "General Knowledge" %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+      </div>
+      <div class="form-grp"><label class="form-lbl">Platform / Source</label>
+        <select id="meta-platform" class="form-sel2">{% for p in platforms %}<option value="{{ p }}" {% if p == "Internal System" %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-grp"><label class="form-lbl">Category</label><input type="text" id="meta-category" class="form-inp2"></div>
+      <div class="form-grp"><label class="form-lbl">Tags (comma separated)</label><input type="text" id="meta-tags" class="form-inp2"></div>
+    </div>
+    <div class="form-grp"><label class="form-lbl">Description</label><textarea id="meta-desc" class="form-ta"></textarea></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button type="button" onclick="closeModal('meta-modal')" class="btn" style="background:rgba(255,255,255,.05);color:rgba(232,237,245,.6);border:1px solid rgba(255,255,255,.1)">Cancel</button>
+      <button type="button" onclick="saveMeta()" class="btn btn-primary">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ CHUNKS MODAL ═══════ -->
+<div class="modal-ov" id="chunks-modal" onclick="if(event.target===this)closeModal('chunks-modal')">
+  <div class="modal-box wide">
+    <button type="button" class="modal-close" onclick="closeModal('chunks-modal')">✕</button>
+    <div class="modal-title" id="chunks-title">Chunks</div>
+    <input type="text" id="chunks-search" class="form-inp2" placeholder="Search chunks…" oninput="filterChunks()" style="margin-bottom:14px">
+    <div id="chunks-content" style="max-height:55vh;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- ═══════ EXCEL PREVIEW MODAL ═══════ -->
+<div class="modal-ov" id="excel-preview-modal" onclick="if(event.target===this)closeModal('excel-preview-modal')">
+  <div class="modal-box wide">
+    <button type="button" class="modal-close" onclick="closeModal('excel-preview-modal')">✕</button>
+    <div class="modal-title" id="excel-preview-title">Excel Preview</div>
+    <div id="excel-preview-content" style="max-height:70vh;overflow-y:auto;font-size:12px"></div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── Build in-memory file list from DOM ──
+var _allFiles = {};
+var _showDeleted = false;
+var _allChunks = [];
+
+document.querySelectorAll('.lib-row').forEach(function(r) {
+  _allFiles[r.dataset.fileid] = {
+    filename: r.dataset.filename, scope: r.dataset.scope, platform: r.dataset.platform,
+    category: r.dataset.category, tags: r.dataset.tags, description: r.dataset.description,
+    status: r.dataset.status, chunks: r.dataset.chunks, synced: r.dataset.synced,
+    uploaded: r.dataset.uploaded, error: r.dataset.error, size: r.dataset.size,
+    deleted: r.dataset.deleted === 'yes', ondisk: r.dataset.ondisk === 'yes',
+  };
+});
+
+// ── Modal helpers ──
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── Portal dropdown (renders in body — not clipped by overflow:auto containers) ──
+var _ddPortal = null;
+var _ddOpenId = null;
+
+function _ensurePortal() {
+  if (_ddPortal) return;
+  _ddPortal = document.createElement('div');
+  _ddPortal.id = 'dd-portal';
+  _ddPortal.style.cssText =
+    'display:none;position:fixed;z-index:9000;' +
+    'background:rgba(10,20,45,.98);border:1px solid rgba(27,79,155,.4);' +
+    'border-radius:10px;padding:4px;min-width:192px;' +
+    'box-shadow:0 8px 32px rgba(0,0,0,.55);animation:fadeIn .12s ease';
+  document.body.appendChild(_ddPortal);
+}
+
+function closeAllDD() {
+  if (_ddPortal) _ddPortal.style.display = 'none';
+  _ddOpenId = null;
+}
+
+function openPortalDD(btn, fileId) {
+  _ensurePortal();
+  if (_ddOpenId === fileId) { closeAllDD(); return; }
+
+  var f = _allFiles[fileId];
+  if (!f) return;
+
+  var fid  = fileId;
+  var name = f.filename;
+
+  _ddPortal.innerHTML =
+    '<button type="button" class="dd-item" onclick="closeAllDD();resyncFile(\''+fid+'\',\''+esc(name)+'\')">' +
+      '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M13.5 8A5.5 5.5 0 1 1 3.2 4.5M3 2v3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Re-sync' +
+    '</button>' +
+    '<button type="button" class="dd-item" onclick="closeAllDD();viewDetail(\''+fid+'\')">' +
+      '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M8 7v4M8 5.5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>View Details' +
+    '</button>' +
+    '<button type="button" class="dd-item" onclick="closeAllDD();viewChunks(\''+fid+'\',\''+esc(name)+'\')">' +
+      '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>View Chunks' +
+    '</button>' +
+    '<button type="button" class="dd-item" onclick="closeAllDD();editMeta(\''+fid+'\')">' +
+      '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11 2.5l2.5 2.5-8 8H3V10.5l8-8z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>Edit Metadata' +
+    '</button>' +
+    '<div class="dd-sep"></div>' +
+    '<button type="button" class="dd-item red" onclick="closeAllDD();confirmDelete(\''+fid+'\',\''+esc(name)+'\')">' +
+      '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M5.5 4v8.5h5V4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Delete' +
+    '</button>';
+
+  // Position relative to the trigger button
+  var rect = btn.getBoundingClientRect();
+  var portalH = 200;
+  var spaceBelow = window.innerHeight - rect.bottom;
+  var top = spaceBelow >= portalH ? rect.bottom + 4 : rect.top - portalH - 4;
+  top = Math.max(8, Math.min(top, window.innerHeight - portalH - 8));
+
+  _ddPortal.style.display = 'block';
+  _ddPortal.style.top     = top + 'px';
+  _ddPortal.style.left    = 'auto';
+  _ddPortal.style.right   = (window.innerWidth - rect.right) + 'px';
+
+  // Clamp left edge if right-aligned panel overflows left side
+  var portalW = 192;
+  var computedLeft = rect.right - portalW;
+  if (computedLeft < 8) {
+    _ddPortal.style.right = 'auto';
+    _ddPortal.style.left  = Math.max(8, rect.left) + 'px';
+  }
+
+  _ddOpenId = fileId;
+}
+
+document.addEventListener('click', function(e) {
+  if (!_ddPortal || _ddPortal.style.display === 'none') return;
+  if (_ddPortal.contains(e.target)) return;
+  if (e.target.closest('[data-dd-trigger]')) return;
+  closeAllDD();
+});
+document.addEventListener('scroll', closeAllDD, true);
+
+// ── Filters ──
+function toggleDeleted() {
+  _showDeleted = !_showDeleted;
+  var btn = document.getElementById('f-deleted-btn');
+  if (_showDeleted) btn.classList.add('active-tog'); else btn.classList.remove('active-tog');
+  applyFilters();
+}
+
+function clearFilters() {
+  document.getElementById('f-search').value = '';
+  document.getElementById('f-status').value = '';
+  document.getElementById('f-type').value = '';
+  document.getElementById('f-scope').value = '';
+  applyFilters();
+}
+
+function applyFilters() {
+  var search = document.getElementById('f-search').value.toLowerCase().trim();
+  var status = document.getElementById('f-status').value;
+  var type   = document.getElementById('f-type').value;
+  var scope  = document.getElementById('f-scope').value;
+
+  var rows = document.querySelectorAll('.lib-row');
+  var visible = 0;
+
+  rows.forEach(function(row) {
+    var fname   = (row.dataset.filename || '').toLowerCase();
+    var rStatus = row.dataset.status || '';
+    var rScope  = row.dataset.scope || '';
+    var isDeleted = row.dataset.deleted === 'yes';
+    var rSynced = row.dataset.synced;
+    var ext     = fname.split('.').pop();
+
+    // Always hide deleted unless show deleted is on
+    if (isDeleted && !_showDeleted) { row.style.display = 'none'; return; }
+
+    // Search
+    if (search && fname.indexOf(search) === -1) { row.style.display = 'none'; return; }
+
+    // Status filter
+    if (status) {
+      if (status === 'completed' && (!rSynced || rStatus === 'failed' || rStatus === 'inactive')) { row.style.display = 'none'; return; }
+      if (status === 'pending'   && (rSynced  || rStatus === 'failed' || rStatus === 'inactive')) { row.style.display = 'none'; return; }
+      if (status === 'failed'    && rStatus !== 'failed') { row.style.display = 'none'; return; }
+      if (status === 'inactive'  && rStatus !== 'inactive') { row.style.display = 'none'; return; }
+      if (status === 'uploaded'  && rStatus !== 'uploaded') { row.style.display = 'none'; return; }
+    }
+
+    // Type filter
+    if (type) {
+      if (type === 'docx' && ext !== 'docx' && ext !== 'doc') { row.style.display = 'none'; return; }
+      else if (type !== 'docx' && type !== ext) { row.style.display = 'none'; return; }
+    }
+
+    // Scope filter
+    if (scope && rScope !== scope) { row.style.display = 'none'; return; }
+
+    row.style.display = '';
+    visible++;
+  });
+
+  var total = document.querySelectorAll('.lib-row').length;
+  document.getElementById('f-count').textContent = visible + ' / ' + total + ' files';
+  var emptyEl = document.getElementById('lib-empty');
+  if (emptyEl) emptyEl.style.display = (visible === 0 && total > 0) ? 'block' : 'none';
+
+  // Reset checkboxes
+  document.querySelectorAll('.row-chk').forEach(function(c){ c.checked = false; });
+  updateBulkBar();
+}
+
+// Pre-fill search from ?search= URL param (used by Sync Activity detail links)
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var q = params.get('search');
+  if (q) {
+    var inp = document.getElementById('f-search');
+    if (inp) { inp.value = q; inp.style.borderColor = 'rgba(147,197,253,.6)'; }
+  }
+})();
+
+// Run initial filter (hides deleted by default)
+applyFilters();
+
+// ── Bulk selection ──
+function toggleAll(master) {
+  document.querySelectorAll('.lib-row').forEach(function(row) {
+    if (row.style.display !== 'none') {
+      var chk = row.querySelector('.row-chk');
+      if (chk) chk.checked = master.checked;
+    }
+  });
+  updateBulkBar();
+}
+
+function clearSelection() {
+  document.querySelectorAll('.row-chk').forEach(function(c){ c.checked = false; });
+  var m = document.getElementById('chk-all'); if (m) { m.checked = false; m.indeterminate = false; }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  var chk = document.querySelectorAll('.row-chk:checked');
+  var all = document.querySelectorAll('.lib-row:not([style*="display: none"]) .row-chk');
+  var bar = document.getElementById('bulk-bar');
+  bar.style.display = chk.length ? 'flex' : 'none';
+  document.getElementById('bulk-count').textContent = chk.length + ' selected';
+  var m = document.getElementById('chk-all');
+  if (m) { m.indeterminate = chk.length > 0 && chk.length < all.length; m.checked = chk.length === all.length && all.length > 0; }
+}
+
+function getSelectedIds() {
+  var ids = [];
+  document.querySelectorAll('.row-chk:checked').forEach(function(c){ ids.push({ id: c.dataset.id, name: c.dataset.name }); });
+  return ids;
+}
+
+// ── Bulk actions ──
+function bulkSync() {
+  var sel = getSelectedIds(); if (!sel.length) return;
+  showConfirm({
+    icon:'🔄', title:'Sync ' + sel.length + ' file(s)?',
+    message: 'Re-sync ' + sel.length + ' selected file(s) to the AI RAG knowledge base?',
+    okText:'Start Sync', okColor:'#F5A623',
+    onOk: function() {
+      // Navigate to documents page and trigger sync for these files
+      window.location.href = '/admin/documents';
+    }
+  });
+}
+
+function bulkDelete() {
+  var sel = getSelectedIds(); if (!sel.length) return;
+  var n = sel.length;
+  var names = sel.map(function(s){ return s.name; });
+  var shown = names.slice(0, 5);
+  var extra = names.length > 5 ? names.length - 5 : 0;
+  var fileList = shown.map(function(name){
+    return '<div style="padding:3px 0;font-size:12px;color:rgba(232,237,245,.65)">• ' + esc(name) + '</div>';
+  }).join('') + (extra ? '<div style="padding:3px 0;font-size:12px;color:rgba(232,237,245,.4)">+' + extra + ' more</div>' : '');
+  showConfirm({
+    icon: '',
+    title: 'Delete Selected Files',
+    message: '<p style="margin:0 0 10px">You are about to permanently delete <strong style="color:#e8edf5">' + n + ' file' + (n!==1?'s':'') + '</strong>. This operation will also remove all associated chunks, embeddings, metadata, and RAG search data.</p>' +
+      '<div style="background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.18);border-radius:8px;padding:8px 12px;margin-bottom:10px">' + fileList + '</div>' +
+      '<p style="margin:0;color:#fca5a5;font-size:12px;font-weight:600">This action cannot be undone.</p>',
+    okText: 'Delete ' + n + ' File' + (n!==1?'s':''), okColor: '#ef4444', isHtml: true,
+    onOk: function() { deleteWithProgress(names); }
+  });
+}
+
+// ── Row actions ──
+function syncOneFile(fileId, filename) {
+  window.location.href = '/admin/documents?sync=' + encodeURIComponent(fileId);
+}
+function resyncFile(fileId, filename) { syncOneFile(fileId, filename); }
+
+function viewError(fileId) {
+  var f = _allFiles[fileId]; if (!f) return;
+  showConfirm({
+    icon:'❌', title:'Sync Error — ' + f.filename,
+    message: '<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:12px;font-size:12px;color:#fca5a5;font-family:monospace;word-break:break-all">' +
+      esc(f.error || 'No error message recorded.') + '</div>',
+    isHtml: true, okText:'Close', hideCancelBtn: true, onOk: function(){}
+  });
+}
+
+function viewDetail(fileId) {
+  var f = _allFiles[fileId]; if (!f) return;
+  document.getElementById('detail-title').textContent = f.filename;
+  var ext = f.filename.split('.').pop().toUpperCase();
+  var szB = parseInt(f.size) || 0;
+  var szStr = szB > 1048576 ? (szB/1048576).toFixed(1)+' MB' : szB > 1024 ? (szB/1024).toFixed(1)+' KB' : szB+' B';
+  document.getElementById('detail-content').innerHTML =
+    '<div class="det-grid" style="margin-bottom:16px">' +
+    di('Filename', f.filename) + di('File Type', ext) + di('File Size', szStr) +
+    di('Knowledge Scope', f.scope || '—') + di('Platform / Source', f.platform || '—') + di('Category', f.category || '—') +
+    di('Tags', f.tags || '—') + di('Status', f.status || '—') +
+    di('Chunks', f.chunks || '0') +
+    di('Uploaded', fmtBKK(f.uploaded)) +
+    di('Last Synced', fmtBKK(f.synced)) +
+    (f.error ? '<div style="grid-column:1/-1"><div class="det-lbl">Last Error</div><div class="det-val" style="color:#fca5a5;font-size:11.5px">'+esc(f.error)+'</div></div>' : '') +
+    '</div>' +
+    (f.description ? '<div style="margin-bottom:14px"><div class="det-lbl">Description</div><div class="det-val" style="margin-top:4px;font-size:12.5px;color:rgba(232,237,245,.7)">'+esc(f.description)+'</div></div>' : '') +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">' +
+    (f.ondisk ? '<a href="/admin/view/'+encodeURIComponent(f.filename)+'" target="_blank" class="btn" style="background:rgba(27,79,155,.18);color:#93c5fd;border:1px solid rgba(27,79,155,.35)">Download</a>' : '') +
+    '<button type="button" onclick="closeModal(\'detail-modal\');viewChunks(\''+fileId+'\',\''+esc(f.filename)+'\')" class="btn" style="background:rgba(255,255,255,.06);color:rgba(232,237,245,.7);border:1px solid rgba(255,255,255,.12)">View Chunks</button>' +
+    '<button type="button" onclick="closeModal(\'detail-modal\');editMeta(\''+fileId+'\')" class="btn" style="background:rgba(255,255,255,.06);color:rgba(232,237,245,.7);border:1px solid rgba(255,255,255,.12)">Edit Metadata</button>' +
+    (['XLSX','XLS','CSV'].indexOf(ext) !== -1
+      ? '<button type="button" onclick="closeModal(\'detail-modal\');viewExcelPreview(\''+fileId+'\',\''+esc(f.filename)+'\')" class="btn" style="background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3)">Excel Preview</button>'
+      : '') +
+    '</div>' +
+    '<div style="margin-top:16px">' +
+      '<div class="det-lbl" style="margin-bottom:8px">Attachments</div>' +
+      '<div id="att-list-'+fileId+'" style="font-size:12px;color:rgba(232,237,245,.4)">Loading…</div>' +
+    '</div>' +
+    '<div style="margin-top:16px">' +
+      '<div class="det-lbl" style="margin-bottom:8px">Knowledge Items (Q&amp;A rows)</div>' +
+      '<div id="ki-list-'+fileId+'" style="font-size:12px;color:rgba(232,237,245,.4)">Loading…</div>' +
+    '</div>';
+  openModal('detail-modal');
+  loadAttachments(fileId);
+  loadKnowledgeItems(fileId);
+}
+
+function loadKnowledgeItems(fileId) {
+  var box = document.getElementById('ki-list-' + fileId);
+  fetch('/admin/files/' + fileId + '/knowledge-items')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (!box) return;
+      if (!d.ok) { box.innerHTML = '<span style="color:#fca5a5">Failed to load: '+esc(d.error||'unknown error')+'</span>'; return; }
+      var items = d.items || [];
+      if (!items.length) { box.innerHTML = '<span style="color:rgba(232,237,245,.3)">Not a Q&amp;A file — no knowledge items.</span>'; return; }
+      box.innerHTML = items.map(function(it) {
+        var atts = it.attachments || [];
+        var attHtml = atts.length
+          ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + atts.map(function(a) {
+              var isImg = (a.mime_type||'').startsWith('image/');
+              return a.public_url
+                ? (isImg
+                    ? '<a href="'+esc(a.public_url)+'" target="_blank"><img src="'+esc(a.public_url)+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px" title="'+esc(a.original_filename||a.filename)+'"></a>'
+                    : '<a href="'+esc(a.public_url)+'" target="_blank" class="btn" style="padding:3px 8px;font-size:10.5px;background:rgba(27,79,155,.15);color:#93c5fd;border:1px solid rgba(27,79,155,.3)">'+esc(a.original_filename||a.filename)+'</a>')
+                : '<span style="font-size:10.5px;color:rgba(232,237,245,.35)">📎 '+esc(a.original_filename||a.filename)+' (no url)</span>';
+            }).join('') + '</div>'
+          : '';
+        return '<div style="border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 10px;margin-bottom:6px">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px">' +
+            '<div style="font-size:11.5px;color:#e8edf5;flex:1"><strong>Q:</strong> '+esc(it.question||'—')+'</div>' +
+            '<button type="button" onclick="deleteKnowledgeItem(\''+it.id+'\',\''+fileId+'\')" class="btn" style="padding:2px 8px;font-size:10.5px;background:rgba(239,68,68,.08);color:#fca5a5;border:1px solid rgba(239,68,68,.25);flex-shrink:0">Delete</button>' +
+          '</div>' +
+          '<div style="font-size:11px;color:rgba(232,237,245,.55);margin-top:2px"><strong>A:</strong> '+esc(it.answer||'—')+'</div>' +
+          attHtml +
+        '</div>';
+      }).join('');
+    })
+    .catch(function() { if (box) box.innerHTML = '<span style="color:#fca5a5">Network error.</span>'; });
+}
+
+function deleteKnowledgeItem(itemId, fileId) {
+  showConfirm({
+    title: 'Delete Knowledge Item', okText: 'Delete', okColor: '#ef4444',
+    message: 'Delete this Q&A item and its attachments?',
+    onOk: function() {
+      fetch('/admin/knowledge-items/' + itemId, { method: 'DELETE' })
+        .then(function(r){ return r.json(); })
+        .then(function(d) {
+          if (d.ok) loadKnowledgeItems(fileId);
+          else alert('Delete failed: ' + (d.error || 'unknown error'));
+        })
+        .catch(function(){ alert('Network error.'); });
+    }
+  });
+}
+
+function loadAttachments(fileId) {
+  var box = document.getElementById('att-list-' + fileId);
+  fetch('/admin/files/' + fileId + '/attachments')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (!box) return; // modal closed before this resolved
+      if (!d.ok) { box.innerHTML = '<span style="color:#fca5a5">Failed to load attachments: '+esc(d.error||'unknown error')+'</span>'; return; }
+      var atts = d.attachments || [];
+      if (!atts.length) { box.innerHTML = '<span style="color:rgba(232,237,245,.3)">No attachments.</span>'; return; }
+      box.innerHTML = atts.map(function(a) {
+        var isImg = (a.mime_type || '').startsWith('image/');
+        var thumb = isImg && a.public_url
+          ? '<img src="'+esc(a.public_url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0">'
+          : '<div style="width:44px;height:44px;border-radius:6px;background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">📎</div>';
+        var sizeStr = a.file_size ? (a.file_size > 1048576 ? (a.file_size/1048576).toFixed(1)+' MB' : (a.file_size/1024).toFixed(1)+' KB') : '';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:6px">' +
+          thumb +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-size:12px;color:#e8edf5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(a.original_filename || a.filename)+'</div>' +
+            '<div style="font-size:10.5px;color:rgba(232,237,245,.4)">'+esc(a.attachment_type||'file')+' · '+esc(sizeStr)+' · '+esc(a.storage_provider||'')+(a.sheet_name?' · row '+a.row_index+' ('+esc(a.sheet_name)+')':'')+'</div>' +
+          '</div>' +
+          (a.public_url ? '<a href="'+esc(a.public_url)+'" target="_blank" class="btn" style="padding:4px 9px;font-size:11px;background:rgba(27,79,155,.15);color:#93c5fd;border:1px solid rgba(27,79,155,.3)">Download</a>' : '') +
+          '<button type="button" onclick="deleteAttachment(\''+a.id+'\','+"'"+fileId+"'"+')" class="btn" style="padding:4px 9px;font-size:11px;background:rgba(239,68,68,.08);color:#fca5a5;border:1px solid rgba(239,68,68,.25)">Delete</button>' +
+        '</div>';
+      }).join('');
+    })
+    .catch(function() { if (box) box.innerHTML = '<span style="color:#fca5a5">Failed to load attachments.</span>'; });
+}
+
+function deleteAttachment(attachmentId, fileId) {
+  showConfirm({
+    title: 'Delete Attachment', okText: 'Delete', okColor: '#ef4444',
+    message: 'Remove this attachment? The file will be deleted from storage.',
+    onOk: function() {
+      fetch('/admin/attachments/' + attachmentId, { method: 'DELETE' })
+        .then(function(r){ return r.json(); })
+        .then(function(d) {
+          if (d.ok) loadAttachments(fileId);
+          else alert('Delete failed: ' + (d.error || 'unknown error'));
+        })
+        .catch(function(){ alert('Network error.'); });
+    }
+  });
+}
+
+function di(label, val) {
+  return '<div><div class="det-lbl">'+label+'</div><div class="det-val">'+esc(String(val))+'</div></div>';
+}
+
+function editMeta(fileId) {
+  var f = _allFiles[fileId]; if (!f) return;
+  document.getElementById('meta-fid').value = fileId;
+  selVal('meta-scope', f.scope);
+  selVal('meta-platform', f.platform);
+  document.getElementById('meta-category').value = f.category || '';
+  document.getElementById('meta-tags').value = f.tags || '';
+  document.getElementById('meta-desc').value = f.description || '';
+  openModal('meta-modal');
+}
+
+function selVal(id, val) {
+  var s = document.getElementById(id);
+  for (var i=0;i<s.options.length;i++) if (s.options[i].value===val){s.selectedIndex=i;break;}
+}
+
+function saveMeta() {
+  var fid = document.getElementById('meta-fid').value;
+  var payload = {
+    scope: document.getElementById('meta-scope').value,
+    platform: document.getElementById('meta-platform').value,
+    category: document.getElementById('meta-category').value,
+    tags: document.getElementById('meta-tags').value,
+    description: document.getElementById('meta-desc').value,
+  };
+  fetch('/admin/files/'+fid+'/metadata', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(){ closeModal('meta-modal'); window.location.reload(); });
+}
+
+function viewChunks(fileId, filename) {
+  document.getElementById('chunks-title').textContent = 'Chunks — ' + filename;
+  document.getElementById('chunks-search').value = '';
+  document.getElementById('chunks-content').innerHTML = '<div style="text-align:center;padding:20px;color:rgba(232,237,245,.4)">Loading...</div>';
+  openModal('chunks-modal');
+  fetch('/admin/files/'+fileId+'/chunks').then(function(r){return r.json();}).then(function(d){
+    _allChunks = d.chunks || [];
+    renderChunks(_allChunks);
+  });
+}
+
+function viewExcelPreview(fileId, filename) {
+  document.getElementById('excel-preview-title').textContent = 'Excel Preview — ' + filename;
+  document.getElementById('excel-preview-content').innerHTML = '<div style="text-align:center;padding:20px;color:rgba(232,237,245,.4)">Loading…</div>';
+  openModal('excel-preview-modal');
+  fetch('/admin/files/' + fileId + '/excel-preview')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      var box = document.getElementById('excel-preview-content');
+      if (!d.ok) { box.innerHTML = '<div style="color:#fca5a5;padding:12px">'+esc(d.error||'Failed to load preview.')+'</div>'; return; }
+      var wb = d.workbook;
+      var html = '<div style="margin-bottom:14px;font-size:12px;color:rgba(232,237,245,.5)">' +
+        'Workbook: <strong style="color:#e8edf5">'+esc(wb.filename)+'</strong> · '+wb.sheet_count+' sheet(s)</div>';
+
+      (d.sheets || []).forEach(function(sheet) {
+        html += '<div style="border:1px solid rgba(27,79,155,.2);border-radius:10px;padding:14px;margin-bottom:14px">';
+        html += '<div style="font-size:13px;font-weight:600;color:#e8edf5;margin-bottom:6px">' +
+          esc(sheet.sheet_name) + (sheet.is_hidden ? ' <span style="color:rgba(232,237,245,.35);font-size:11px">(hidden)</span>' : '') + '</div>';
+        html += '<div style="font-size:11px;color:rgba(232,237,245,.45);margin-bottom:10px">' +
+          sheet.row_count + ' rows · ' + sheet.column_count + ' columns' +
+          (sheet.numeric_columns && sheet.numeric_columns.length ? ' · numeric: ' + sheet.numeric_columns.map(esc).join(', ') : '') +
+          (sheet.date_columns && sheet.date_columns.length ? ' · date: ' + sheet.date_columns.map(esc).join(', ') : '') +
+          (sheet.currency_columns && sheet.currency_columns.length ? ' · currency: ' + sheet.currency_columns.map(esc).join(', ') : '') +
+          (sheet.percentage_columns && sheet.percentage_columns.length ? ' · %: ' + sheet.percentage_columns.map(esc).join(', ') : '') +
+          '</div>';
+
+        var statCols = Object.keys(sheet.stats || {});
+        if (statCols.length) {
+          html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px">';
+          statCols.forEach(function(col) {
+            var s = sheet.stats[col];
+            html += '<div style="background:rgba(255,255,255,.03);border-radius:8px;padding:8px 10px">' +
+              '<div style="font-size:10.5px;color:rgba(232,237,245,.4);margin-bottom:4px">'+esc(col)+'</div>' +
+              '<div style="font-size:11px;color:#e8edf5">sum '+fmtNum(s.sum)+' · avg '+fmtNum(s.avg)+'</div>' +
+              '<div style="font-size:11px;color:rgba(232,237,245,.55)">min '+fmtNum(s.min)+' · max '+fmtNum(s.max)+'</div>' +
+              '</div>';
+          });
+          html += '</div>';
+        }
+
+        var rows = sheet.preview_rows || [];
+        if (rows.length && sheet.headers && sheet.headers.length) {
+          html += '<div style="font-size:10.5px;color:rgba(232,237,245,.35);margin-bottom:4px">First '+rows.length+' rows:</div>';
+          html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+          html += '<tr>' + sheet.headers.map(function(h){ return '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid rgba(255,255,255,.1);color:rgba(232,237,245,.5);white-space:nowrap">'+esc(h)+'</th>'; }).join('') + '</tr>';
+          rows.forEach(function(r) {
+            html += '<tr>' + sheet.headers.map(function(h) {
+              var v = (r.row_data || {})[h];
+              return '<td style="padding:4px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:#e8edf5;white-space:nowrap">'+esc(v === null || v === undefined ? '' : String(v))+'</td>';
+            }).join('') + '</tr>';
+          });
+          html += '</table></div>';
+        }
+        html += '</div>';
+      });
+
+      box.innerHTML = html;
+    })
+    .catch(function() {
+      document.getElementById('excel-preview-content').innerHTML = '<div style="color:#fca5a5;padding:12px">Network error loading preview.</div>';
+    });
+}
+
+function fmtNum(v) {
+  if (typeof v !== 'number') return String(v);
+  return v.toLocaleString(undefined, {maximumFractionDigits: 2});
+}
+
+function renderChunks(chunks) {
+  if (!chunks.length) {
+    document.getElementById('chunks-content').innerHTML = '<div style="text-align:center;padding:20px;color:rgba(232,237,245,.4)">No active chunks.</div>';
+    return;
+  }
+  var html = chunks.map(function(c, i) {
+    return '<div style="border:1px solid rgba(27,79,155,.2);border-radius:10px;padding:12px 14px;margin-bottom:8px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+        '<span style="font-size:11px;color:rgba(232,237,245,.35)">Chunk #'+(i+1)+'</span>' +
+        (c.intent?'<span style="font-size:11px;color:#a78bfa;background:rgba(167,139,250,.1);padding:1px 8px;border-radius:10px">'+esc(c.intent)+'</span>':'') +
+      '</div>' +
+      '<div style="font-size:12.5px;color:rgba(232,237,245,.75);line-height:1.6;word-break:break-word">'+esc(c.content.slice(0,300))+(c.content.length>300?'<span style="color:rgba(232,237,245,.35)"> …</span>':'')+'</div>' +
+      (c.created_at?'<div style="font-size:10.5px;color:rgba(232,237,245,.3);margin-top:6px">'+fmtBKK(c.created_at)+'</div>':'') +
+      '</div>';
+  }).join('');
+  document.getElementById('chunks-content').innerHTML = html;
+}
+
+function filterChunks() {
+  var q = document.getElementById('chunks-search').value.toLowerCase();
+  renderChunks(q ? _allChunks.filter(function(c){return c.content.toLowerCase().includes(q);}) : _allChunks);
+}
+
+// ── Delete / Restore ──
+function confirmDelete(fileId, filename) {
+  showConfirm({
+    icon: '',
+    title: 'Delete File',
+    message: '<p style="margin:0 0 10px">You are about to permanently delete <strong style="color:#e8edf5">' + esc(filename) + '</strong>. This operation will also remove all associated chunks, embeddings, metadata, and RAG search data.</p>' +
+      '<p style="margin:0;color:#fca5a5;font-size:12px;font-weight:600">This action cannot be undone.</p>',
+    isHtml: true, okText: 'Delete 1 File', okColor: '#ef4444',
+    onOk: function() { deleteWithProgress([filename]); }
+  });
+}
+
+function confirmPermanentDelete(fileId, filename) {
+  showConfirm({
+    icon: '',
+    title: 'Permanently Delete File',
+    message: '<p style="margin:0 0 10px">You are about to permanently delete <strong style="color:#e8edf5">' + esc(filename) + '</strong>. This operation will also remove all associated chunks, embeddings, metadata, RAG search data, and the source file from disk.</p>' +
+      '<p style="margin:0;color:#fca5a5;font-size:12px;font-weight:600">This action cannot be undone.</p>',
+    isHtml: true, okText: 'Permanently Delete', okColor: '#ef4444',
+    onOk: function() { deleteWithProgress([filename]); }
+  });
+}
+
+function restoreFile(fileId, filename) {
+  showConfirm({
+    icon: '', title: 'Restore File',
+    message: '<p style="margin:0 0 10px">Restore <strong style="color:#e8edf5">' + esc(filename) + '</strong> to the knowledge base?</p>' +
+      '<p style="margin:0;color:rgba(232,237,245,.5);font-size:12px">You will need to re-sync it to make it active in RAG search.</p>',
+    isHtml: true, okText: 'Restore File', okColor: '#34d399',
+    onOk: function() {
+      fetch('/admin/files/'+fileId+'/restore', {method:'POST'})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if (d.ok) { showToast('File restored.'); setTimeout(function(){ window.location.reload(); }, 800); }
+          else showToast(d.msg || 'Restore failed.', true);
+        });
+    }
+  });
+}
+
+// ── Toast (injected into body to avoid stacking-context issues) ──
+(function() {
+  var t = document.createElement('div');
+  t.id = 'fl-toast';
+  t.style.cssText = 'display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' +
+    'z-index:9999;padding:11px 22px;border-radius:10px;font-size:13px;font-weight:600;' +
+    'color:#fff;box-shadow:0 8px 30px rgba(0,0,0,.5);transition:opacity .4s;white-space:nowrap';
+  document.body.appendChild(t);
+})();
+
+// ── Delete progress modal (injected into body — root stacking context) ──
+(function() {
+  var m = document.createElement('div');
+  m.id = 'del-prog-modal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;z-index:3000;' +
+    'background:rgba(6,14,30,.92);backdrop-filter:blur(10px);' +
+    'align-items:center;justify-content:center';
+  m.innerHTML =
+    '<div style="background:rgba(13,25,50,.98);border:1px solid rgba(27,79,155,.4);' +
+    'border-radius:20px;padding:30px 34px;width:500px;max-width:92vw;' +
+    'max-height:85vh;overflow-y:auto;animation:fadeIn .18s ease">' +
+    '<div id="del-prog-title" style="font-size:16px;font-weight:700;color:#e8edf5;margin-bottom:16px">Deleting...</div>' +
+    '<div style="background:rgba(27,79,155,.12);border-radius:8px;height:6px;margin-bottom:20px;overflow:hidden">' +
+    '<div id="del-prog-bar" style="height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:8px;transition:width .35s ease;width:0%"></div>' +
+    '</div>' +
+    '<div id="del-prog-body"></div>' +
+    '</div>';
+  document.body.appendChild(m);
+})();
+
+// ── Delete progress engine ──
+var _delState = {};
+var _delES = null;
+
+function _delStepLabel(step, count) {
+  if (step === 'chunks')          return 'Deleting chunks' + (count > 0 ? ' (' + count + ')' : '');
+  if (step === 'embeddings')      return 'Deleting embeddings' + (count > 0 ? ' (' + count + ')' : '');
+  if (step === 'knowledge_items') return 'Deleting knowledge items';
+  if (step === 'attachments')     return 'Deleting attachments';
+  if (step === 'excel_rows')      return 'Deleting Excel rows' + (count > 0 ? ' (' + count + ')' : '');
+  if (step === 'excel_sheets')    return 'Deleting Excel sheets' + (count > 0 ? ' (' + count + ')' : '');
+  if (step === 'excel_workbook')  return 'Deleting Excel workbook';
+  if (step === 'graph_nodes')     return 'Deleting graph nodes' + (count > 0 ? ' (' + count + ')' : '');
+  if (step === 'graph_edges')     return 'Deleting graph edges' + (count > 0 ? ' (' + count + ')' : '');
+  if (step === 'sync_jobs')       return 'Cleaning sync job references';
+  if (step === 'disk')            return 'Deleting storage object';
+  if (step === 'file_record')     return 'Marking file deleted';
+  return step;
+}
+
+function _renderDelBody() {
+  var html = '';
+  (_delState.filenames || []).forEach(function(name) {
+    var fp = _delState.fp[name] || {};
+    var titleColor = fp.done ? '#34d399' : fp.error ? '#fca5a5' : '#e8edf5';
+    var prefix = fp.done ? '✓ ' : fp.error ? '✗ ' : '';
+    html +=
+      '<div style="margin-bottom:10px;background:rgba(27,79,155,.06);border:1px solid rgba(27,79,155,.15);' +
+      'border-radius:10px;padding:10px 14px">' +
+      '<div style="font-size:12.5px;font-weight:600;color:' + titleColor + ';margin-bottom:' + ((fp.steps||[]).length?'6':'0') + 'px">' +
+      prefix + esc(name) + '</div>';
+    (fp.steps || []).forEach(function(s) {
+      var ic = s.status === 'done' ? '✓' : s.status === 'error' ? '✗' : '›';
+      var c  = s.status === 'done' ? '#34d399' : s.status === 'error' ? '#fca5a5' : '#93c5fd';
+      html +=
+        '<div style="display:flex;align-items:center;gap:8px;padding:2px 0 2px 8px;font-size:12px;color:' + c + '">' +
+        '<span style="min-width:12px;font-size:10px">' + ic + '</span>' +
+        '<span>' + _delStepLabel(s.step, s.count || 0) + '</span>' +
+        (s.status === 'done' && s.count != null ?
+          '<span style="margin-left:auto;color:rgba(232,237,245,.35);font-size:11px">' + s.count + '</span>' : '') +
+        '</div>';
+    });
+    if (fp.orphanReasons && fp.orphanReasons.length) {
+      // Each reason is the EXACT underlying cause from admin/routes.py's
+      // _verify_no_orphans() — never the generic "Data remains" — either
+      // the real exception message from the step that failed, or (if the
+      // step reported success yet the row is still there) a specific
+      // note pointing at that as a bug to investigate.
+      html += '<div style="margin-top:6px;padding:6px 10px;background:rgba(239,68,68,.08);' +
+        'border:1px solid rgba(239,68,68,.25);border-radius:7px;font-size:11.5px;color:#fca5a5">';
+      fp.orphanReasons.forEach(function(r) {
+        html += '<div style="padding:2px 0">&#9888; <strong>' + esc(r.table) + '</strong> (' + r.count + '): ' + esc(r.reason) + '</div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+  document.getElementById('del-prog-body').innerHTML = html || '<div style="text-align:center;padding:12px;color:rgba(232,237,245,.4);font-size:13px">Preparing deletion...</div>';
+}
+
+function _renderDelComplete(evt) {
+  document.getElementById('del-prog-title').textContent = evt.errors && evt.errors.length ? 'Deletion Completed with Errors' : 'Deletion Complete';
+  var bar = document.getElementById('del-prog-bar');
+  bar.style.width = '100%';
+  bar.style.background = evt.errors && evt.errors.length
+    ? 'linear-gradient(90deg,#f59e0b,#d97706)'
+    : 'linear-gradient(90deg,#34d399,#059669)';
+
+  // Full required checklist — every line backed by a real count from the
+  // shared per-file delete routine (admin/routes.py's _delete_file_id),
+  // not a hardcoded/assumed "and embeddings removed" afterthought.
+  var checklistLines = [
+    evt.files_deleted + ' file' + (evt.files_deleted!==1?'s':'') + ' deleted',
+    evt.chunks_deleted + ' chunk' + (evt.chunks_deleted!==1?'s':'') + ' deleted',
+    (evt.embeddings_deleted||0) + ' embedding' + (evt.embeddings_deleted!==1?'s':'') + ' deleted',
+    (evt.knowledge_items_deleted||0) + ' knowledge item' + (evt.knowledge_items_deleted!==1?'s':'') + ' deleted',
+    (evt.attachments_deleted||0) + ' attachment' + (evt.attachments_deleted!==1?'s':'') + ' deleted',
+    (evt.graph_nodes_deleted||0) + ' graph node' + (evt.graph_nodes_deleted!==1?'s':'') + ' deleted',
+    (evt.graph_edges_deleted||0) + ' graph edge' + (evt.graph_edges_deleted!==1?'s':'') + ' deleted',
+    (evt.storage_deleted||0) + ' storage object' + (evt.storage_deleted!==1?'s':'') + ' deleted',
+    (evt.sync_jobs_cleaned||0) + ' sync job reference' + (evt.sync_jobs_cleaned!==1?'s':'') + ' cleaned',
+  ];
+  var html =
+    '<div style="background:rgba(52,211,153,.06);border:1px solid rgba(52,211,153,.18);' +
+    'border-radius:10px;padding:14px 16px;margin-bottom:' + (evt.errors&&evt.errors.length?'12':'14') + 'px">' +
+    checklistLines.map(function(line) {
+      return '<div style="font-size:12.5px;color:#34d399;margin-bottom:3px">✓ ' + line + '</div>';
+    }).join('') +
+    '</div>';
+
+  if (evt.errors && evt.errors.length) {
+    html += '<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:12px 14px;margin-bottom:14px">' +
+      '<div style="font-size:12px;color:#fca5a5;font-weight:600;margin-bottom:6px">⚠ ' + evt.errors.length + ' error(s):</div>';
+    evt.errors.forEach(function(e) {
+      html += '<div style="font-size:11.5px;color:rgba(252,165,165,.8);padding:2px 0">• ' + esc(e.file||'') + ': ' + esc(e.msg||'') + '</div>';
+    });
+    html += '</div>';
+  }
+
+  html += '<div id="del-close-cd" style="font-size:12px;color:rgba(232,237,245,.35);text-align:center">Closing in 2s...</div>';
+  document.getElementById('del-prog-body').innerHTML = html;
+
+  var cd = 2;
+  var timer = setInterval(function() {
+    cd--;
+    var el = document.getElementById('del-close-cd');
+    if (el) el.textContent = 'Closing in ' + cd + 's...';
+    if (cd <= 0) {
+      clearInterval(timer);
+      document.getElementById('del-prog-modal').style.display = 'none';
+      window.location.reload();
+    }
+  }, 1000);
+}
+
+function _renderDelError(msg) {
+  document.getElementById('del-prog-title').textContent = 'Deletion Failed';
+  var bar = document.getElementById('del-prog-bar');
+  bar.style.width = '100%';
+  bar.style.background = 'linear-gradient(90deg,#ef4444,#dc2626)';
+  document.getElementById('del-prog-body').innerHTML =
+    '<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:16px">' +
+    '<div style="font-size:13px;color:#fca5a5;margin-bottom:14px">✗ ' + esc(msg) + '</div>' +
+    '<button type="button" onclick="document.getElementById(\'del-prog-modal\').style.display=\'none\'" ' +
+    'class="btn" style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.3)">Close</button>' +
+    '</div>';
+}
+
+function deleteWithProgress(filenames) {
+  if (_delES) { try { _delES.close(); } catch(e) {} _delES = null; }
+
+  _delState = { filenames: filenames, fp: {}, totalSteps: filenames.length * 4, stepsDone: 0 };
+  filenames.forEach(function(n) { _delState.fp[n] = { steps: [] }; });
+
+  var modal = document.getElementById('del-prog-modal');
+  document.getElementById('del-prog-title').textContent =
+    'Deleting ' + filenames.length + ' file' + (filenames.length !== 1 ? 's' : '') + '...';
+  document.getElementById('del-prog-bar').style.cssText =
+    'height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:8px;transition:width .35s ease;width:0%';
+  document.getElementById('del-prog-body').innerHTML =
+    '<div style="text-align:center;padding:12px;color:rgba(232,237,245,.4);font-size:13px">Preparing deletion...</div>';
+  modal.style.display = 'flex';
+
+  var fd = new FormData();
+  filenames.forEach(function(n) { fd.append('filenames', n); });
+
+  fetch('/admin/delete-start', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.ok || !d.job_id) { _renderDelError(d.msg || 'Failed to start delete job'); return; }
+      _renderDelBody();
+
+      var es = new EventSource('/admin/delete-stream/' + d.job_id);
+      _delES = es;
+
+      es.onmessage = function(e) {
+        var evt; try { evt = JSON.parse(e.data); } catch(err) { return; }
+
+        if (evt.type === 'start') {
+          // total_steps comes from the backend's actual STEP_NAMES count
+          // (admin/routes.py's _delete_stream_gen) — hardcoding it here
+          // silently drifts out of sync every time a step is added/removed
+          // (it did: this used to assume 4 steps/file, then 9, now 12).
+          if (evt.total_steps) _delState.totalSteps = evt.total_steps;
+          _renderDelBody();
+        }
+        else if (evt.type === 'step') {
+          var fp = _delState.fp[evt.file];
+          if (fp) {
+            var existing = null;
+            fp.steps.forEach(function(s) { if (s.step === evt.step) existing = s; });
+            if (existing) {
+              existing.status = evt.status;
+              if (evt.count != null) existing.count = evt.count;
+            } else {
+              fp.steps.push({ step: evt.step, status: evt.status, count: evt.count != null ? evt.count : null });
+            }
+          }
+          if (evt.status === 'done') {
+            _delState.stepsDone++;
+            var pct = Math.round(_delState.stepsDone / _delState.totalSteps * 100);
+            document.getElementById('del-prog-bar').style.width = pct + '%';
+          }
+          _renderDelBody();
+        }
+        else if (evt.type === 'file_done') {
+          var fp = _delState.fp[evt.file]; if (fp) fp.done = true;
+          _renderDelBody();
+        }
+        else if (evt.type === 'file_error') {
+          var fp = _delState.fp[evt.file]; if (fp) fp.error = true;
+          _renderDelBody();
+        }
+        else if (evt.type === 'orphans_detected') {
+          // Verified after every delete — if any child table still has an
+          // active row for this file_id, surface the EXACT reason (see
+          // admin/routes.py's _verify_no_orphans) instead of reporting a
+          // false "deleted successfully" or a generic "Data remains".
+          var fp = _delState.fp[evt.file];
+          if (fp) {
+            fp.orphanReasons = [];
+            Object.keys(evt.orphans || {}).forEach(function(fid) {
+              var tableInfo = evt.orphans[fid];
+              Object.keys(tableInfo).forEach(function(table) {
+                fp.orphanReasons.push({
+                  table: table,
+                  count: tableInfo[table].count,
+                  reason: tableInfo[table].reason,
+                });
+              });
+            });
+          }
+          _renderDelBody();
+        }
+        else if (evt.type === 'complete') {
+          es.close(); _delES = null;
+          clearSelection();
+          _renderDelComplete(evt);
+        }
+        else if (evt.type === 'error') {
+          es.close(); _delES = null;
+          _renderDelError(evt.msg || 'Unknown error');
+        }
+      };
+
+      es.onerror = function() {
+        es.close(); _delES = null;
+        _renderDelError('Connection lost during deletion. Please reload the page to check the current state.');
+      };
+    })
+    .catch(function(e) { _renderDelError('Network error: ' + (e.message || e)); });
+}
+
+function showToast(msg, isError) {
+  var t = document.getElementById('fl-toast');
+  t.textContent = msg;
+  t.style.background = isError
+    ? 'linear-gradient(135deg,#ef4444,#dc2626)'
+    : 'linear-gradient(135deg,#34d399,#059669)';
+  t.style.display = 'block';
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function() {
+    t.style.opacity = '0';
+    setTimeout(function(){ t.style.display = 'none'; }, 400);
+  }, 3000);
+}
+
+// ── Utils ──
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function fmtBKK(s) {
+  if (!s) return '—';
+  try {
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return '—';
+    var parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(d);
+    var map = {};
+    parts.forEach(function(p) { map[p.type] = p.value; });
+    var hh = map.hour === '24' ? '00' : map.hour;
+    return map.year + '-' + map.month + '-' + map.day + ' ' + hh + ':' + map.minute;
+  } catch(e) { return s.slice(0,16).replace('T',' '); }
+}
+
+document.querySelectorAll('.ts-bkk').forEach(function(el) {
+  el.textContent = fmtBKK(el.textContent.trim());
+});
+</script>
+{% endblock %}

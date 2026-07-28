@@ -1,0 +1,586 @@
+{% extends "base.html" %}
+{% set active = "ai-policies" %}
+{% block title %}AI Policies — Shipify Admin{% endblock %}
+{% block topbar_title %}AI Policies{% endblock %}
+
+{% block extra_head %}
+<style>
+.pl-layout{display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start}
+@media (max-width:1000px){.pl-layout{grid-template-columns:1fr}}
+
+.pl-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;display:flex;flex-direction:column}
+.pl-panel-header{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.06)}
+.pl-new-btn{width:100%;background:rgba(245,166,35,.15);color:#F5A623;border:1px solid rgba(245,166,35,.35);border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:8px}
+.pl-new-btn:hover{background:rgba(245,166,35,.25)}
+.pl-search{width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e8edf5;padding:6px 9px;font-size:12px}
+
+.pl-list{max-height:calc(100vh - 320px);min-height:280px;overflow-y:auto;padding:6px}
+.pl-item{padding:10px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid transparent}
+.pl-item:hover{background:rgba(255,255,255,.04)}
+.pl-item.active{background:rgba(245,166,35,.1);border-color:rgba(245,166,35,.3)}
+.pl-item-name{font-size:12.5px;font-weight:700;color:#e8edf5;display:flex;align-items:center;gap:5px}
+.pl-star{color:#fbbf24;font-size:12px}
+.pl-item-desc{font-size:10.5px;color:rgba(232,237,245,.4);margin-top:3px}
+.pl-current-active{display:flex;align-items:center;gap:8px;background:rgba(251,191,36,.08);
+  border:1px solid rgba(251,191,36,.25);border-radius:10px;padding:9px 14px;margin-bottom:14px;font-size:12.5px}
+.pl-current-active-label{color:rgba(232,237,245,.45);text-transform:uppercase;font-size:10px;letter-spacing:.05em;font-weight:700}
+.pl-current-active-name{color:#e8edf5;font-weight:700}
+
+/* Rule cards */
+.pl-section-title{font-size:13px;font-weight:700;color:#e8edf5;margin:18px 0 4px}
+.pl-section-title:first-child{margin-top:0}
+.pl-section-sub{font-size:11px;color:rgba(232,237,245,.4);margin-bottom:10px}
+.pl-card{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:6px 14px;margin-bottom:10px}
+.pl-rule{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.pl-rule:last-child{border-bottom:none}
+.pl-rule-text{flex:1;min-width:0}
+.pl-rule-label{font-size:12.5px;font-weight:600;color:#e8edf5}
+.pl-rule-hint{font-size:11px;color:rgba(232,237,245,.4);margin-top:2px;line-height:1.4}
+.pl-rule-control{flex-shrink:0;display:flex;align-items:center;padding-top:1px}
+
+/* Toggle switch */
+.pl-toggle{position:relative;display:inline-block;width:38px;height:21px;flex-shrink:0}
+.pl-toggle input{opacity:0;width:0;height:0}
+.pl-toggle-track{position:absolute;inset:0;background:rgba(255,255,255,.12);border-radius:11px;cursor:pointer;transition:background .15s}
+.pl-toggle-track::before{content:"";position:absolute;width:15px;height:15px;left:3px;top:3px;background:#e8edf5;border-radius:50%;transition:transform .15s}
+.pl-toggle input:checked + .pl-toggle-track{background:#F5A623}
+.pl-toggle input:checked + .pl-toggle-track::before{transform:translateX(17px)}
+
+.pl-select,.pl-text-input{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;
+  border-radius:7px;padding:6px 10px;font-size:12.5px;outline:none;min-width:130px}
+.pl-select:focus,.pl-text-input:focus{border-color:rgba(245,166,35,.5)}
+/* Native <select> renders its closed control with browser chrome by
+   default (white background, OS-styled arrow) even though the rest of
+   this form is dark-themed — appearance:none + a custom arrow fixes the
+   closed state; `color-scheme:dark` plus explicit <option> colors below
+   fix the open dropdown list too (Chrome/Edge/Firefox all honor both). */
+.pl-select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  color-scheme:dark;
+  background-color:#13233f;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23F5A623' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat;
+  background-position:right 10px center;
+  padding-right:28px;
+  cursor:pointer;
+}
+.pl-select:hover{border-color:rgba(245,166,35,.35)}
+.pl-select option{background-color:#13233f;color:#e8edf5}
+.pl-text-input.wide{width:100%;min-width:0}
+.pl-threshold-row{display:flex;align-items:center;gap:10px;width:220px}
+.pl-threshold-row input[type=range]{flex:1;accent-color:#F5A623}
+.pl-threshold-value{font-size:12px;color:#F5A623;font-weight:700;width:34px;text-align:right}
+
+.pl-actions-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)}
+.pl-btn{font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:rgba(232,237,245,.8)}
+.pl-btn:hover{background:rgba(255,255,255,.1)}
+.pl-btn-primary{background:rgba(245,166,35,.18);color:#F5A623;border-color:rgba(245,166,35,.4)}
+.pl-btn-primary:hover{background:rgba(245,166,35,.28)}
+.pl-btn-star{background:rgba(251,191,36,.12);color:#fbbf24;border-color:rgba(251,191,36,.35)}
+.pl-btn-star:hover{background:rgba(251,191,36,.22)}
+.pl-btn-star.is-default{opacity:.55;cursor:default}
+.pl-btn-danger{color:#fca5a5;border-color:rgba(239,68,68,.3)}
+.pl-btn-danger:hover{background:rgba(239,68,68,.1)}
+
+.pl-form-grp{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.pl-lbl{font-size:11px;color:rgba(232,237,245,.5)}
+.pl-input{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;border-radius:8px;
+  padding:8px 12px;font-size:13px;outline:none;width:100%;box-sizing:border-box}
+.pl-input:focus{border-color:rgba(245,166,35,.5)}
+
+/* Toast + themed confirm — same pattern as Prompt Studio */
+.pl-toast-stack{position:fixed;bottom:24px;right:24px;z-index:3000;display:flex;flex-direction:column;
+  gap:8px;pointer-events:none;align-items:flex-end}
+.pl-toast{background:#0f2038;border:1px solid rgba(52,211,153,.4);color:#e8edf5;padding:12px 18px;
+  border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;align-items:center;
+  gap:8px;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;max-width:340px}
+.pl-toast.show{opacity:1;transform:translateY(0)}
+.pl-toast.pl-toast-error{border-color:rgba(239,68,68,.45)}
+.pl-toast-icon{flex-shrink:0;font-size:14px}
+
+.pl-confirm-ov{display:none;position:fixed;inset:0;z-index:4000;background:rgba(6,14,30,.85);
+  backdrop-filter:blur(6px);align-items:center;justify-content:center}
+.pl-confirm-ov.open{display:flex}
+.pl-confirm-box{background:#0f1e38;border:1px solid rgba(245,166,35,.3);border-radius:16px;
+  padding:22px 26px;width:400px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.pl-confirm-title{font-size:14px;font-weight:700;color:#e8edf5;margin-bottom:10px}
+.pl-confirm-msg{font-size:13px;color:rgba(232,237,245,.65);line-height:1.65;white-space:pre-line;margin-bottom:22px}
+.pl-confirm-actions{display:flex;justify-content:flex-end;gap:10px}
+.pl-confirm-btn{font-size:13px;padding:8px 22px;border-radius:20px;cursor:pointer;font-weight:600;border:1px solid transparent}
+.pl-confirm-btn-ok{background:#F5A623;color:#1a1200;border-color:#F5A623}
+.pl-confirm-btn-ok:hover{background:#ffb84d}
+.pl-confirm-btn-cancel{background:transparent;color:rgba(232,237,245,.75);border-color:rgba(255,255,255,.2)}
+.pl-confirm-btn-cancel:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.35)}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+  <div>
+    <div class="page-title">AI Policies</div>
+    <div class="page-sub">Simple business rules for how the AI answers, escalates, sends attachments, and sounds on each channel — no code or JSON required.</div>
+  </div>
+</div>
+
+<div class="pl-current-active" id="pl-current-active" style="display:none"></div>
+
+<div class="pl-layout">
+  <!-- LEFT: Policy set list -->
+  <div class="pl-panel">
+    <div class="pl-panel-header">
+      <button class="pl-new-btn" onclick="createNewPolicy()">+ New Policy Set</button>
+      <input class="pl-search" id="pl-search" placeholder="Search policy sets…" oninput="debouncedLoadPolicies()">
+    </div>
+    <div class="pl-list" id="pl-list"><div style="padding:16px;color:rgba(232,237,245,.3);font-size:12px">Loading…</div></div>
+  </div>
+
+  <!-- RIGHT: Editor -->
+  <div class="pl-panel" style="padding:18px 20px">
+    <div id="pl-editor">
+      <div style="text-align:center;padding:60px 10px;color:rgba(232,237,245,.3);font-size:13px">
+        Loading…
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pl-toast-stack" id="pl-toast-stack"></div>
+
+<div class="pl-confirm-ov" id="pl-confirm-ov">
+  <div class="pl-confirm-box">
+    <div class="pl-confirm-title" id="pl-confirm-title"></div>
+    <div class="pl-confirm-msg" id="pl-confirm-msg"></div>
+    <div class="pl-confirm-actions">
+      <button class="pl-confirm-btn pl-confirm-btn-cancel" id="pl-confirm-cancel">Cancel</button>
+      <button class="pl-confirm-btn pl-confirm-btn-ok" id="pl-confirm-ok">OK</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var _policyId = null;
+var _policies = [];
+var _searchDebounce = null;
+var _currentPolicy = null;
+var _isCreatingNew = false;  // true only while the blank "New Policy Set" form is intentionally open
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+}); }
+
+// ────────────────────────────────────────────
+// Toast + themed confirm — identical pattern to Prompt Studio
+// ────────────────────────────────────────────
+var _activeToastMessages = {};
+
+function showToast(message, type){
+  type = type || 'success';
+  var key = type + ':' + message;
+  if (_activeToastMessages[key]) return;
+  _activeToastMessages[key] = true;
+
+  var stack = document.getElementById('pl-toast-stack');
+  var el = document.createElement('div');
+  el.className = 'pl-toast' + (type === 'error' ? ' pl-toast-error' : '');
+  el.innerHTML = '<span class="pl-toast-icon">' + (type === 'error' ? '⚠️' : '✅') + '</span><span></span>';
+  el.querySelector('span:last-child').textContent = message;
+  stack.appendChild(el);
+  requestAnimationFrame(function(){ el.classList.add('show'); });
+
+  setTimeout(function(){
+    el.classList.remove('show');
+    delete _activeToastMessages[key];
+    setTimeout(function(){ el.remove(); }, 250);
+  }, 2600);
+}
+function showErrorToast(message){ showToast(message || 'Something went wrong.', 'error'); }
+
+function plConfirm(message, title){
+  return new Promise(function(resolve){
+    var ov = document.getElementById('pl-confirm-ov');
+    document.getElementById('pl-confirm-title').textContent = title || 'Please confirm';
+    document.getElementById('pl-confirm-msg').textContent = message;
+    ov.classList.add('open');
+    var okBtn = document.getElementById('pl-confirm-ok');
+    var cancelBtn = document.getElementById('pl-confirm-cancel');
+    function cleanup(result){
+      ov.classList.remove('open');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      ov.removeEventListener('click', onOverlay);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    }
+    function onOk(){ cleanup(true); }
+    function onCancel(){ cleanup(false); }
+    function onOverlay(e){ if (e.target === ov) cleanup(false); }
+    function onKey(e){ if (e.key === 'Escape') cleanup(false); else if (e.key === 'Enter') cleanup(true); }
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    ov.addEventListener('click', onOverlay);
+    document.addEventListener('keydown', onKey);
+    cancelBtn.focus();
+  });
+}
+
+// ────────────────────────────────────────────
+// List
+// ────────────────────────────────────────────
+function debouncedLoadPolicies(){ clearTimeout(_searchDebounce); _searchDebounce = setTimeout(loadPolicies, 250); }
+
+var _initialLoadDone = false;
+
+// Always the Default policy set first, then everything else by
+// updated_at DESC — applied client-side so list order/auto-select/"first
+// item" fallback are always consistent regardless of API return order.
+function _sortPolicies(policies){
+  return policies.slice().sort(function(a, b){
+    if (!!a.is_default !== !!b.is_default) return a.is_default ? -1 : 1;
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  });
+}
+
+function loadPolicies(){
+  var params = new URLSearchParams();
+  var search = document.getElementById('pl-search').value.trim();
+  if (search) params.set('search', search);
+  fetch('/admin/api/ai/policies?' + params.toString())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      _policies = _sortPolicies(d.policies || []);
+      renderPolicyList();
+      renderCurrentActive();
+
+      if (!_isCreatingNew && !_policyId) {
+        if (_policies.length) {
+          // First load with nothing selected yet -> Default policy set
+          // (or the first item, since _policies is already sorted that way).
+          selectPolicy(_policies[0].id);
+        } else if (!search) {
+          // Zero policy sets overall (not just an empty search result).
+          showEmptyState();
+        }
+      }
+      _initialLoadDone = true;
+    });
+}
+
+function showEmptyState(){
+  document.getElementById('pl-editor').innerHTML =
+    '<div style="text-align:center;padding:60px 10px;color:rgba(232,237,245,.3);font-size:13px">' +
+    'Create your first Policy</div>';
+}
+
+function renderCurrentActive(){
+  var el = document.getElementById('pl-current-active');
+  var def = _policies.find(function(p){ return p.is_default; });
+  if (!def) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML = '<span class="pl-current-active-label">Current Active — Policy</span>' +
+    '<span class="pl-current-active-name"><span class="pl-star">⭐</span> ' + esc(def.name) + '</span>';
+}
+
+function renderPolicyList(){
+  var holder = document.getElementById('pl-list');
+  if (!_policies.length){
+    holder.innerHTML = '<div style="padding:16px;color:rgba(232,237,245,.3);font-size:12px">No policy sets found.</div>';
+    return;
+  }
+  holder.innerHTML = _policies.map(function(p){
+    return '<div class="pl-item' + (p.id === _policyId ? ' active' : '') + '" onclick="selectPolicy(\'' + p.id + '\')">' +
+      '<div class="pl-item-name">' + (p.is_default ? '<span class="pl-star" title="Default">⭐</span>' : '') + esc(p.name) + '</div>' +
+      (p.description ? '<div class="pl-item-desc">' + esc(p.description) + '</div>' : '') +
+    '</div>';
+  }).join('');
+}
+
+// ────────────────────────────────────────────
+// Create / Select
+// ────────────────────────────────────────────
+function createNewPolicy(){
+  _isCreatingNew = true;
+  _policyId = null;
+  renderPolicyList();
+  renderEditor({name:'', description:'', is_default:false, id:null, config:{}});
+}
+
+function selectPolicy(id){
+  fetch('/admin/api/ai/policies/' + id)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      _isCreatingNew = false;
+      _policyId = id;
+      renderPolicyList();
+      renderEditor(d.policy);
+    });
+}
+
+// ────────────────────────────────────────────
+// Rule field metadata — short plain-language label + one-line explanation
+// per rule. Purely descriptive; no rule syntax/expressions anywhere.
+// ────────────────────────────────────────────
+var BUSINESS_RULES = [
+  {key:'no_guess_prices', label:'Do not guess prices', hint:'Only state a price if it is found in approved knowledge.'},
+  {key:'no_guess_delivery_status', label:'Do not guess delivery status', hint:'Only state a delivery status if it is confirmed.'},
+  {key:'no_answer_unavailable_info', label:'Do not answer unavailable information', hint:'If the answer isn’t known, say so instead of guessing.'},
+  {key:'require_approved_knowledge', label:'Require approved knowledge before answering', hint:'Only use approved sources — never outside/general knowledge.'},
+];
+var KNOWLEDGE_RULES = [
+  {key:'use_rag_first', label:'Use Knowledge Base first', hint:'Prefer information retrieved from approved documents.'},
+  {key:'cite_source', label:'Cite the source when possible', hint:'Mention which document an answer came from.'},
+  {key:'say_if_no_info', label:'Say so if no reliable information exists', hint:'Never fill a gap with a guess.'},
+  {key:'prefer_latest_document', label:'Prefer the latest approved document', hint:'When documents disagree, use the most recent one.'},
+];
+var ATTACHMENT_RULES = [
+  {key:'send_image_if_available', label:'Send linked image when available', hint:'Attach a relevant image if the knowledge base has one.'},
+  {key:'send_file_link_if_available', label:'Send file link when available', hint:'Attach a download link for relevant documents.'},
+  {key:'skip_broken_attachments', label:'Do not send missing or broken attachments', hint:'Never send a link that doesn’t work.'},
+  {key:'text_first', label:'Text first, attachment second', hint:'Always send the written answer before any attachment.'},
+];
+
+function renderEditor(p){
+  var isNew = !p.id;
+  _currentPolicy = p;
+  var cfg = p.config || {};
+  var biz = cfg.business_rules || {};
+  var know = cfg.knowledge_rules || {};
+  var esc_ = cfg.escalation_rules || {};
+  var att = cfg.attachment_rules || {};
+  var chan = cfg.channel_rules || {};
+  var msg = cfg.messaging_rules || {};
+
+  function toggleRow(key, label, hint, checked){
+    return '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">' + esc(label) + '</div>' +
+      '<div class="pl-rule-hint">' + esc(hint) + '</div></div>' +
+      '<div class="pl-rule-control"><label class="pl-toggle"><input type="checkbox" data-rule="' + key + '"' + (checked ? ' checked' : '') + '>' +
+      '<span class="pl-toggle-track"></span></label></div></div>';
+  }
+
+  var businessHtml = BUSINESS_RULES.map(function(r){ return toggleRow(r.key, r.label, r.hint, biz[r.key]); }).join('');
+  var knowledgeHtml = KNOWLEDGE_RULES.map(function(r){ return toggleRow(r.key, r.label, r.hint, know[r.key]); }).join('');
+  var attachmentHtml = ATTACHMENT_RULES.map(function(r){ return toggleRow(r.key, r.label, r.hint, att[r.key]); }).join('');
+
+  var threshold = esc_.confidence_threshold != null ? esc_.confidence_threshold : 0.5;
+
+  document.getElementById('pl-editor').innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">' +
+      '<div style="font-size:15px;font-weight:700;color:#e8edf5;display:flex;align-items:center;gap:7px">' +
+        (isNew ? 'New Policy Set' : (p.is_default ? '<span class="pl-star">⭐</span>' : '') + esc(p.name)) +
+      '</div>' +
+    '</div>' +
+    '<div class="pl-form-grp"><label class="pl-lbl">Name</label>' +
+      '<input class="pl-input" id="pl-f-name" value="' + esc(p.name) + '" placeholder="e.g. Standard Policy"></div>' +
+    '<div class="pl-form-grp"><label class="pl-lbl">Description</label>' +
+      '<input class="pl-input" id="pl-f-desc" value="' + esc(p.description||'') + '" placeholder="What is this policy set for?"></div>' +
+
+    '<div class="pl-section-title">1. Business Rules</div>' +
+    '<div class="pl-section-sub">What the AI is and isn’t allowed to claim.</div>' +
+    '<div class="pl-card">' + businessHtml + '</div>' +
+
+    '<div class="pl-section-title">2. Knowledge Rules</div>' +
+    '<div class="pl-section-sub">How the AI uses your Knowledge Base.</div>' +
+    '<div class="pl-card">' + knowledgeHtml + '</div>' +
+
+    '<div class="pl-section-title">3. Escalation Rules</div>' +
+    '<div class="pl-section-sub">When to hand a conversation to a human.</div>' +
+    '<div class="pl-card">' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Enable escalation</div>' +
+        '<div class="pl-rule-hint">Allow the AI to hand off to a human at all.</div></div>' +
+        '<div class="pl-rule-control"><label class="pl-toggle"><input type="checkbox" id="pl-esc-enabled"' + (esc_.enabled ? ' checked' : '') + '>' +
+        '<span class="pl-toggle-track"></span></label></div></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Confidence threshold</div>' +
+        '<div class="pl-rule-hint">Escalate when the AI is less sure than this.</div></div>' +
+        '<div class="pl-rule-control pl-threshold-row">' +
+          '<input type="range" id="pl-esc-threshold" min="0" max="1" step="0.05" value="' + threshold + '" oninput="document.getElementById(\'pl-esc-threshold-val\').textContent = this.value">' +
+          '<span class="pl-threshold-value" id="pl-esc-threshold-val">' + threshold + '</span>' +
+        '</div></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Escalation message</div>' +
+        '<div class="pl-rule-hint">What the customer sees when handed off to a human.</div></div></div>' +
+      '<div style="padding-bottom:10px"><input class="pl-text-input wide" id="pl-esc-message" value="' + esc(esc_.message||'') + '" placeholder="e.g. ขออภัยค่ะ ทีมงานจะติดต่อกลับนะคะ"></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Send to human when no answer is found</div>' +
+        '<div class="pl-rule-hint">Escalate automatically when confidence is below the threshold.</div></div>' +
+        '<div class="pl-rule-control"><label class="pl-toggle"><input type="checkbox" id="pl-esc-no-answer"' + (esc_.escalate_on_no_answer ? ' checked' : '') + '>' +
+        '<span class="pl-toggle-track"></span></label></div></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Send to human when the customer is dissatisfied</div>' +
+        '<div class="pl-rule-hint">Escalate automatically on complaint/dissatisfaction language.</div></div>' +
+        '<div class="pl-rule-control"><label class="pl-toggle"><input type="checkbox" id="pl-esc-dissatisfaction"' + (esc_.escalate_on_dissatisfaction ? ' checked' : '') + '>' +
+        '<span class="pl-toggle-track"></span></label></div></div>' +
+    '</div>' +
+
+    '<div class="pl-section-title">4. Attachment Rules</div>' +
+    '<div class="pl-section-sub">How images and files are sent alongside answers.</div>' +
+    '<div class="pl-card">' + attachmentHtml + '</div>' +
+
+    '<div class="pl-section-title">5. Channel Rules</div>' +
+    '<div class="pl-section-sub">How the AI sounds on LINE OA.</div>' +
+    '<div class="pl-card">' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">LINE OA response length</div>' +
+        '<div class="pl-rule-hint">How long replies should be.</div></div>' +
+        '<div class="pl-rule-control"><select class="pl-select" id="pl-chan-length">' +
+          ['short','standard','detailed'].map(function(v){ return '<option value="'+v+'"' + (chan.line_response_length===v?' selected':'') + '>' + (v.charAt(0).toUpperCase()+v.slice(1)) + '</option>'; }).join('') +
+        '</select></div></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Use emoji</div>' +
+        '<div class="pl-rule-hint">How freely the AI can use emoji.</div></div>' +
+        '<div class="pl-rule-control"><select class="pl-select" id="pl-chan-emoji">' +
+          [['never','Never'],['sometimes','Sometimes'],['allowed','Allowed']].map(function(v){ return '<option value="'+v[0]+'"' + (chan.emoji_usage===v[0]?' selected':'') + '>' + v[1] + '</option>'; }).join('') +
+        '</select></div></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Formality</div>' +
+        '<div class="pl-rule-hint">Overall tone of voice.</div></div>' +
+        '<div class="pl-rule-control"><select class="pl-select" id="pl-chan-formality">' +
+          ['formal','friendly','neutral'].map(function(v){ return '<option value="'+v+'"' + (chan.formality===v?' selected':'') + '>' + (v.charAt(0).toUpperCase()+v.slice(1)) + '</option>'; }).join('') +
+        '</select></div></div>' +
+    '</div>' +
+
+    '<div class="pl-section-title">6. Message Segmenter</div>' +
+    '<div class="pl-section-sub">Split long replies into a few short, natural chat messages instead of one big block.</div>' +
+    '<div class="pl-card">' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Reply Mode</div>' +
+        '<div class="pl-rule-hint">Single Message always replies in one bubble. Natural Multi-Message splits longer replies when useful. Auto decides based on the answer.</div></div>' +
+        '<div class="pl-rule-control"><select class="pl-select" id="pl-msg-reply-mode">' +
+          [['single','Single Message'],['multi','Natural Multi-Message'],['auto','Auto']].map(function(v){
+            return '<option value="'+v[0]+'"' + (msg.reply_mode===v[0]?' selected':'') + '>' + v[1] + '</option>';
+          }).join('') +
+        '</select></div></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Maximum Messages</div>' +
+        '<div class="pl-rule-hint">The most chat bubbles one answer can be split into.</div></div>' +
+        '<div class="pl-rule-control"><select class="pl-select" id="pl-msg-max-messages">' +
+          [1,2,3].map(function(v){ return '<option value="'+v+'"' + (Number(msg.max_messages)===v?' selected':'') + '>' + v + '</option>'; }).join('') +
+        '</select></div></div>' +
+      '<div class="pl-rule"><div class="pl-rule-text"><div class="pl-rule-label">Message Delay</div>' +
+        '<div class="pl-rule-hint">Pause between chat bubbles, so replies feel like natural typing instead of arriving all at once.</div></div>' +
+        '<div class="pl-rule-control"><select class="pl-select" id="pl-msg-delay">' +
+          [['none','None'],['short','Short'],['natural','Natural']].map(function(v){
+            return '<option value="'+v[0]+'"' + (msg.message_delay===v[0]?' selected':'') + '>' + v[1] + '</option>';
+          }).join('') +
+        '</select></div></div>' +
+    '</div>' +
+
+    '<div class="pl-actions-row">' +
+      (isNew
+        ? '<button class="pl-btn pl-btn-primary" onclick="savePolicy()">Save</button>'
+        : '<button class="pl-btn pl-btn-primary" onclick="savePolicy(\'' + p.id + '\')">Save</button>' +
+          '<button class="pl-btn" onclick="duplicatePolicy(\'' + p.id + '\')">Duplicate</button>' +
+          '<button class="pl-btn pl-btn-star' + (p.is_default ? ' is-default' : '') + '" onclick="setDefaultPolicy(\'' + p.id + '\')"' +
+            (p.is_default ? ' disabled title="Already the Default"' : '') + '>' +
+            (p.is_default ? '⭐ Default' : '☆ Set as Default') + '</button>' +
+          '<button class="pl-btn pl-btn-danger" onclick="deletePolicy(\'' + p.id + '\')">Delete</button>') +
+    '</div>';
+}
+
+function collectFormData(){
+  function toggleVal(key){ var el = document.querySelector('[data-rule="'+key+'"]'); return el ? el.checked : false; }
+  var business_rules = {}, knowledge_rules = {}, attachment_rules = {};
+  BUSINESS_RULES.forEach(function(r){ business_rules[r.key] = toggleVal(r.key); });
+  KNOWLEDGE_RULES.forEach(function(r){ knowledge_rules[r.key] = toggleVal(r.key); });
+  ATTACHMENT_RULES.forEach(function(r){ attachment_rules[r.key] = toggleVal(r.key); });
+
+  return {
+    name: document.getElementById('pl-f-name').value.trim(),
+    description: document.getElementById('pl-f-desc').value.trim(),
+    config: {
+      business_rules: business_rules,
+      knowledge_rules: knowledge_rules,
+      attachment_rules: attachment_rules,
+      escalation_rules: {
+        enabled: document.getElementById('pl-esc-enabled').checked,
+        confidence_threshold: parseFloat(document.getElementById('pl-esc-threshold').value),
+        message: document.getElementById('pl-esc-message').value.trim(),
+        escalate_on_no_answer: document.getElementById('pl-esc-no-answer').checked,
+        escalate_on_dissatisfaction: document.getElementById('pl-esc-dissatisfaction').checked,
+      },
+      channel_rules: {
+        line_response_length: document.getElementById('pl-chan-length').value,
+        emoji_usage: document.getElementById('pl-chan-emoji').value,
+        formality: document.getElementById('pl-chan-formality').value,
+      },
+      messaging_rules: {
+        reply_mode: document.getElementById('pl-msg-reply-mode').value,
+        max_messages: parseInt(document.getElementById('pl-msg-max-messages').value, 10),
+        message_delay: document.getElementById('pl-msg-delay').value,
+      },
+    },
+  };
+}
+
+// ────────────────────────────────────────────
+// Actions
+// ────────────────────────────────────────────
+function savePolicy(id){
+  var data = collectFormData();
+  if (!data.name){ showErrorToast('Please enter a name.'); return; }
+  var isNew = !id;
+  var url = isNew ? '/admin/api/ai/policies' : '/admin/api/ai/policies/' + id;
+  var method = isNew ? 'POST' : 'PUT';
+  fetch(url, {method: method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { showErrorToast(d.error || 'Could not save'); return; }
+      loadPolicies();
+      selectPolicy(d.policy.id);
+      showToast(isNew ? 'Policy set created successfully' : 'Policy set updated successfully');
+    })
+    .catch(function(){ showErrorToast('Could not save'); });
+}
+
+function duplicatePolicy(id){
+  fetch('/admin/api/ai/policies/' + id + '/duplicate', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { showErrorToast(d.error || 'Could not duplicate'); return; }
+      loadPolicies();
+      selectPolicy(d.policy.id);
+      showToast('Policy set duplicated successfully');
+    })
+    .catch(function(){ showErrorToast('Could not duplicate'); });
+}
+
+function setDefaultPolicy(id){
+  plConfirm('Set this as the Default policy set?\n\nAI Playground and LINE OA will use it automatically.', 'Set as Default?')
+    .then(function(ok){
+      if (!ok) return;
+      fetch('/admin/api/ai/policies/' + id + '/set-default', {method:'POST'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (d.ok) { loadPolicies(); selectPolicy(id); showToast('Default policy updated successfully'); }
+          else { showErrorToast(d.error || 'Could not set default'); }
+        })
+        .catch(function(){ showErrorToast('Could not set default'); });
+    });
+}
+
+function deletePolicy(id){
+  plConfirm('Delete this policy set? This cannot be undone from here.', 'Delete Policy Set?').then(function(ok){
+    if (!ok) return;
+    fetch('/admin/api/ai/policies/' + id, {method:'DELETE'})
+      .then(function(r){ return r.json().then(function(d){ return {status:r.status, body:d}; }); })
+      .then(function(res){
+        if (res.body.ok) {
+          // loadPolicies() auto-selects the next available policy set
+          // (Default, or the first remaining one) — or shows "Create your
+          // first Policy" if none are left. Never leaves a stale editor.
+          _policyId = null; loadPolicies();
+          showToast('Policy set deleted successfully');
+          return;
+        }
+        if (res.body.warning){
+          plConfirm(res.body.error, 'Delete Anyway?').then(function(forceOk){
+            if (!forceOk) return;
+            fetch('/admin/api/ai/policies/' + id + '?force=true', {method:'DELETE'})
+              .then(function(r2){ return r2.json(); })
+              .then(function(d2){ if (d2.ok){ _policyId = null; loadPolicies(); showToast('Policy set deleted successfully'); } else showErrorToast(d2.error || 'Could not delete'); });
+          });
+          return;
+        }
+        showErrorToast(res.body.error || 'Could not delete');
+      })
+      .catch(function(){ showErrorToast('Could not delete'); });
+  });
+}
+
+loadPolicies();
+</script>
+{% endblock %}

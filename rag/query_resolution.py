@@ -461,6 +461,26 @@ def resolve_conversation(question: str, history: Optional[List[Dict]] = None) ->
     normalized = re.sub(r"\s+", " ", original.strip())
     normalized = re.sub(r"[?!.]+$", "", normalized)
 
+    # Clarification State Engine (P0, 2026-07-22, rag/clarification_state.py)
+    # — checked BEFORE the generic follow-up marker detection below, since
+    # a reply to the assistant's OWN immediately previous clarification
+    # question must never be resolved via the generic entity-carrying
+    # machinery, which accumulates entities across the ENTIRE history
+    # with no flow-scoping and could pull in a stale entity from an
+    # earlier, unrelated, already-completed flow. This step only ever
+    # uses the ORIGINAL user question that triggered the clarification —
+    # never `prev_entities`/the rest of `history` — so the user's
+    # original intent (e.g. contact_information) can never be replaced
+    # by a different, unrelated intent (e.g. shipping_duration).
+    from rag.clarification_state import resolve_clarification_answer
+    clarification = resolve_clarification_answer(normalized, history)
+    if clarification:
+        return {
+            "resolved_question": clarification["resolved_question"], "followup_type": "clarification-answer",
+            "entities_carried": {}, "confidence": clarification["confidence"], "prev_topic": prev_topic,
+            "excluded_entities": {"location": [], "transport": []}, "replaced_entities": {},
+        }
+
     marker = _detect_marker(normalized)
     if marker is None:
         # A complete, standalone question on its own — never touched,

@@ -1,0 +1,376 @@
+"""Regression tests for the Information Collection Engine / Slot Filling
+Engine (services/slot_filling_engine.py). Pure Python, no DB, no LLM.
+"""
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from services.slot_filling_engine import (
+    detect_erp_intent, extract_slots_from_text, build_collection_state, INTENT_SCHEMAS,
+    resolve_active_erp_intent, extract_candidates, bind_candidate_to_slot,
+)
+
+
+def _hist(*turns):
+    """turns: alternating (role, content) pairs."""
+    return [{"role": r, "content": c} for r, c in turns]
+
+
+class TestIntentDetection(unittest.TestCase):
+    def test_tracking_intent_detected(self):
+        self.assertEqual(detect_erp_intent("ของถึงไหนแล้ว"), "tracking")
+
+    def test_warranty_intent_detected(self):
+        self.assertEqual(detect_erp_intent("อยากเคลมสินค้า"), "warranty")
+
+    def test_invoice_intent_detected(self):
+        self.assertEqual(detect_erp_intent("ขอใบกำกับภาษีหน่อย"), "invoice")
+
+    def test_payment_intent_detected(self):
+        self.assertEqual(detect_erp_intent("ยอดค้างชำระเท่าไหร่"), "payment")
+
+    def test_customer_intent_detected(self):
+        self.assertEqual(detect_erp_intent("ขอประวัติการสั่งซื้อ"), "customer")
+
+    def test_no_erp_intent_returns_none(self):
+        self.assertIsNone(detect_erp_intent("สวัสดีค่ะ วันนี้อากาศดีมาก"))
+
+
+class TestSlotExtraction(unittest.TestCase):
+    def test_extracts_tracking_number(self):
+        slots = extract_slots_from_text("เลขพัสดุคือ TH123456789 ค่ะ")
+        self.assertEqual(slots.get("tracking_number"), "TH123456789")
+
+    def test_extracts_order_number(self):
+        slots = extract_slots_from_text("ORD-20250001")
+        self.assertEqual(slots.get("order_number"), "ORD-20250001")
+
+    def test_extracts_serial_number(self):
+        slots = extract_slots_from_text("SN:ABCD1234")
+        self.assertIn("serial_number", slots)
+
+    def test_extracts_customer_code(self):
+        slots = extract_slots_from_text("รหัสลูกค้า CUS-000123")
+        self.assertEqual(slots.get("customer_code"), "CUS-000123")
+
+    def test_extracts_phone_number(self):
+        slots = extract_slots_from_text("0812345678")
+        self.assertEqual(slots.get("phone_number"), "0812345678")
+
+
+class TestTrackingScenario(unittest.TestCase):
+    def test_missing_parameters_generates_follow_up(self):
+        state = build_collection_state("tracking", history=None, current_message="ของถึงไหนแล้ว")
+        self.assertFalse(state["is_complete"])
+        self.assertEqual(state["follow_up_question"], INTENT_SCHEMAS["tracking"]["follow_up_question"])
+        self.assertEqual(state["next_expected_slot"], "tracking_number")
+
+    def test_multi_turn_collection_completes(self):
+        history = _hist(("user", "ของถึงไหนแล้ว"), ("assistant", INTENT_SCHEMAS["tracking"]["follow_up_question"]))
+        state = build_collection_state("tracking", history=history, current_message="TH123456789")
+        self.assertTrue(state["is_complete"])
+        self.assertEqual(state["collected_slots"]["tracking_number"], "TH123456789")
+        self.assertIsNone(state["follow_up_question"])
+
+
+class TestPaymentScenario(unittest.TestCase):
+    def test_missing_customer_code(self):
+        state = build_collection_state("payment", history=None, current_message="ยอดค้างชำระเท่าไหร่")
+        self.assertFalse(state["is_complete"])
+        self.assertEqual(state["next_expected_slot"], "customer_code")
+
+    def test_complete_when_customer_code_given(self):
+        state = build_collection_state("payment", history=None, current_message="CUS-000999")
+        self.assertTrue(state["is_complete"])
+
+
+class TestWarrantyScenario(unittest.TestCase):
+    def test_requires_serial_number(self):
+        state = build_collection_state("warranty", history=None, current_message="อยากเคลมสินค้า")
+        self.assertFalse(state["is_complete"])
+        self.assertEqual(state["next_expected_slot"], "serial_number")
+
+    def test_complete_with_serial_number(self):
+        state = build_collection_state("warranty", history=None, current_message="SN-XY9988")
+        self.assertTrue(state["is_complete"])
+
+
+class TestInvoiceScenario(unittest.TestCase):
+    def test_either_invoice_or_order_number_satisfies(self):
+        state_invoice = build_collection_state("invoice", history=None, current_message="INV-0099")
+        self.assertTrue(state_invoice["is_complete"])
+        state_order = build_collection_state("invoice", history=None, current_message="ORD-0099")
+        self.assertTrue(state_order["is_complete"])
+
+    def test_missing_both_generates_follow_up(self):
+        state = build_collection_state("invoice", history=None, current_message="ขอใบกำกับภาษีหน่อย")
+        self.assertFalse(state["is_complete"])
+
+
+class TestCustomerLookupScenario(unittest.TestCase):
+    def test_customer_code_or_phone_satisfies(self):
+        by_code = build_collection_state("customer", history=None, current_message="CUS-123")
+        self.assertTrue(by_code["is_complete"])
+        by_phone = build_collection_state("customer", history=None, current_message="0891234567")
+        self.assertTrue(by_phone["is_complete"])
+
+
+class TestNumericTrackingNumberBugFix(unittest.TestCase):
+    """Production bug fix: a pure-numeric tracking number (no letter
+    prefix) was previously never recognized, causing the engine to
+    escalate a customer who correctly provided their tracking number."""
+
+    def _follow_up_history(self):
+        return _hist(("user", "ของถึงไหนแล้ว"), ("assistant", INTENT_SCHEMAS["tracking"]["follow_up_question"]))
+
+    def test_numeric_tracking_number(self):
+        state = build_collection_state("tracking", history=self._follow_up_history(), current_message="1005505051005")
+        self.assertEqual(state["collected_slots"]["tracking_number"], "1005505051005")
+        self.assertTrue(state["is_complete"])
+        self.assertFalse(state["escalation_required"])
+
+    def test_tracking_number_with_thai_text(self):
+        state = build_collection_state("tracking", history=self._follow_up_history(),
+                                        current_message="1005505051005 เลขนี้ไง")
+        self.assertEqual(state["collected_slots"]["tracking_number"], "1005505051005")
+        self.assertTrue(state["is_complete"])
+
+    def test_tracking_number_only_shorter_numeric(self):
+        state = build_collection_state("tracking", history=self._follow_up_history(), current_message="123456789")
+        self.assertEqual(state["collected_slots"]["tracking_number"], "123456789")
+        self.assertTrue(state["is_complete"])
+
+    def test_tracking_number_after_follow_up_completes_and_no_escalation(self):
+        state = build_collection_state("tracking", history=self._follow_up_history(), current_message="1005505051005")
+        self.assertTrue(state["is_complete"])
+        self.assertIsNone(state["missing_slots"] or None)
+        self.assertFalse(state["escalation_required"])
+        self.assertIsNone(state["escalation_reason"])
+
+    def test_retry_count_resets_after_success_even_with_prior_asks(self):
+        q = INTENT_SCHEMAS["tracking"]["follow_up_question"]
+        history = _hist(("user", "ของถึงไหนแล้ว"), ("assistant", q),
+                         ("user", "เอ่อ"), ("assistant", q))
+        state = build_collection_state("tracking", history=history, current_message="1005505051005")
+        self.assertTrue(state["is_complete"])
+        self.assertEqual(state["retry_count"], 0)
+
+    def test_alphanumeric_formats_still_work_unchanged(self):
+        for value in ("AB123456", "TH123456789", "CN987654321"):
+            state = build_collection_state("tracking", history=self._follow_up_history(), current_message=value)
+            self.assertEqual(state["collected_slots"]["tracking_number"], value)
+            self.assertTrue(state["is_complete"])
+
+
+def _asked(intent):
+    """History: user asked something, assistant already asked this
+    intent's follow-up question — i.e. an active workflow is waiting on
+    that intent's next_expected_slot."""
+    return _hist(("user", "x"), ("assistant", INTENT_SCHEMAS[intent]["follow_up_question"]))
+
+
+class TestContextualSlotBinding(unittest.TestCase):
+    """Regression coverage for the Candidate Extraction -> Slot
+    Validation -> Contextual Binding pipeline (P1 behavior completion)."""
+
+    # 1. tracking_number from a bare numeric reply
+    def test_tracking_number_from_bare_numeric_reply(self):
+        state = build_collection_state("tracking", _asked("tracking"), "1005505051005")
+        self.assertEqual(state["collected_slots"], {"tracking_number": "1005505051005"})
+        self.assertTrue(state["is_complete"])
+
+    # 2. order_number from the same numeric format
+    def test_order_number_from_same_numeric_format(self):
+        state = build_collection_state("order", _asked("order"), "1005505051005")
+        self.assertEqual(state["collected_slots"], {"order_number": "1005505051005"})
+        self.assertTrue(state["is_complete"])
+
+    # 3. invoice_number from text-surrounded reply
+    def test_invoice_number_from_text_surrounded_reply(self):
+        state = build_collection_state("invoice", _asked("invoice"), "INV-2026-00125 เลขนี้ค่ะ")
+        self.assertEqual(state["collected_slots"], {"invoice_number": "INV-2026-00125"})
+        self.assertTrue(state["is_complete"])
+
+    # 4. serial_number from bare reply
+    def test_serial_number_from_bare_reply(self):
+        state = build_collection_state("warranty", _asked("warranty"), "SN-A99882")
+        self.assertEqual(state["collected_slots"], {"serial_number": "SN-A99882"})
+        self.assertTrue(state["is_complete"])
+
+    # 5. customer_code from bare reply
+    def test_customer_code_from_bare_reply(self):
+        state = build_collection_state("customer", _asked("customer"), "CUS-000123")
+        self.assertEqual(state["collected_slots"], {"customer_code": "CUS-000123"})
+        self.assertTrue(state["is_complete"])
+
+    # 6. phone_number from bare reply (validated directly — this task's
+    # own Example 5 has phone_number as the sole expected slot, a shape
+    # this platform's INTENT_SCHEMAS doesn't currently model standalone,
+    # so the binder itself is exercised directly here).
+    def test_phone_number_from_bare_reply(self):
+        binding = bind_candidate_to_slot(extract_candidates("0812345678"), "phone_number")
+        self.assertEqual(binding["status"], "bound")
+        self.assertEqual(binding["value"], "0812345678")
+
+    # 7. correct binding based on next_expected_slot
+    def test_binding_uses_next_expected_slot_not_first_matching_pattern(self):
+        order_state = build_collection_state("order", _asked("order"), "1005505051005")
+        tracking_state = build_collection_state("tracking", _asked("tracking"), "1005505051005")
+        self.assertIn("order_number", order_state["collected_slots"])
+        self.assertIn("tracking_number", tracking_state["collected_slots"])
+
+    # 8. numeric order number must not become tracking_number
+    def test_numeric_order_number_never_becomes_tracking_number(self):
+        state = build_collection_state("order", _asked("order"), "1005505051005")
+        self.assertNotIn("tracking_number", state["collected_slots"])
+
+    # 9. multiple valid candidates require clarification
+    def test_multiple_valid_candidates_require_clarification(self):
+        state = build_collection_state("tracking", _asked("tracking"), "1005505051005 กับ 1005505052006")
+        self.assertFalse(state["is_complete"])
+        self.assertEqual(state["collected_slots"], {})
+        self.assertEqual(len(state["ambiguous_candidates"]), 2)
+        self.assertIn("รบกวนระบุ", state["follow_up_question"])
+        self.assertFalse(state["escalation_required"])
+
+    # 10. invalid candidate asks again
+    def test_invalid_candidate_asks_again(self):
+        state = build_collection_state("customer", _asked("customer"), "ab")  # too short, no valid candidate
+        self.assertFalse(state["is_complete"])
+        self.assertEqual(state["collected_slots"], {})
+        self.assertEqual(state["follow_up_question"], INTENT_SCHEMAS["customer"]["follow_up_question"])
+
+    # 11. retry resets after successful binding
+    def test_retry_resets_after_successful_binding(self):
+        q = INTENT_SCHEMAS["order"]["follow_up_question"]
+        history = _hist(("user", "สถานะออเดอร์ถึงไหน"), ("assistant", q), ("user", "เอ่อ"), ("assistant", q))
+        state = build_collection_state("order", history, "1005505051005")
+        self.assertTrue(state["is_complete"])
+        self.assertEqual(state["retry_count"], 0)
+
+    # 12. escalation is cancelled after successful binding
+    def test_escalation_cancelled_after_successful_binding(self):
+        state = build_collection_state("order", _asked("order"), "1005505051005")
+        self.assertFalse(state["escalation_required"])
+        self.assertIsNone(state["escalation_reason"])
+
+    # 13. no regression to existing tracking behavior (mixed formats)
+    def test_no_regression_to_existing_tracking_behavior(self):
+        for value in ("1005505051005", "TH123456789", "CN987654321", "AB123456"):
+            state = build_collection_state("tracking", _asked("tracking"), value)
+            self.assertEqual(state["collected_slots"]["tracking_number"], value)
+            self.assertTrue(state["is_complete"])
+
+    def test_no_active_workflow_falls_back_to_legacy_extraction(self):
+        """No missing slot at all (schema unknown / already satisfied) —
+        legacy extract_slots_from_text() behavior must be unchanged."""
+        state = build_collection_state("tracking", history=None, current_message="ของถึงไหนแล้ว TH123456789")
+        self.assertEqual(state["collected_slots"].get("tracking_number"), "TH123456789")
+
+
+class TestExtractCandidates(unittest.TestCase):
+    def test_extracts_bare_numeric(self):
+        self.assertEqual(extract_candidates("1005505051005"), ["1005505051005"])
+
+    def test_extracts_from_surrounding_text(self):
+        self.assertEqual(extract_candidates("เลขนี้ค่ะ INV-2026-00125"), ["INV-2026-00125"])
+
+    def test_extracts_phone_like_token(self):
+        self.assertEqual(extract_candidates("เบอร์ 0812345678 ค่ะ"), ["0812345678"])
+
+    def test_extracts_multiple_candidates_in_order(self):
+        result = extract_candidates("1005505051005 กับ 1005505052006")
+        self.assertEqual(result, ["1005505051005", "1005505052006"])
+
+    def test_never_assigns_a_slot_name(self):
+        # extract_candidates returns plain strings, never a dict/slot mapping.
+        result = extract_candidates("1005505051005")
+        self.assertIsInstance(result, list)
+        self.assertIsInstance(result[0], str)
+
+
+class TestResolveActiveErpIntent(unittest.TestCase):
+    def test_bare_reply_with_no_keyword_still_resolves_active_intent(self):
+        """Regression: a bare follow-up reply like 'TH123456789' has no
+        ERP keyword of its own — must still resolve to the intent whose
+        follow-up question was just asked, or the flow breaks on turn 2."""
+        history = _hist(("user", "ของถึงไหนแล้ว"), ("assistant", INTENT_SCHEMAS["tracking"]["follow_up_question"]))
+        self.assertEqual(resolve_active_erp_intent(history, "TH123456789"), "tracking")
+
+    def test_current_message_keyword_always_wins_over_history(self):
+        history = _hist(("user", "ของถึงไหนแล้ว"), ("assistant", INTENT_SCHEMAS["tracking"]["follow_up_question"]))
+        self.assertEqual(resolve_active_erp_intent(history, "อยากเคลมสินค้า"), "warranty")
+
+    def test_no_history_and_no_keyword_returns_none(self):
+        self.assertIsNone(resolve_active_erp_intent(None, "TH123456789"))
+
+    def test_unrelated_assistant_reply_does_not_falsely_continue_a_flow(self):
+        history = _hist(("user", "สวัสดีค่ะ"), ("assistant", "สวัสดีค่ะ ยินดีให้บริการค่ะ"))
+        self.assertIsNone(resolve_active_erp_intent(history, "TH123456789"))
+
+
+class TestConversationResume(unittest.TestCase):
+    def test_state_recomputes_correctly_mid_conversation(self):
+        """Simulates a resumed session — the engine has no separate
+        persistence table, it recomputes purely from `history`."""
+        history = _hist(
+            ("user", "ของถึงไหนแล้ว"),
+            ("assistant", INTENT_SCHEMAS["tracking"]["follow_up_question"]),
+        )
+        state = build_collection_state("tracking", history=history, current_message="ยังไม่ถึงเลยเหรอ")
+        self.assertFalse(state["is_complete"])  # still missing — current message has no tracking number
+        self.assertEqual(state["collected_slots"], {})
+
+
+class TestAlreadyCollectedParameters(unittest.TestCase):
+    def test_ai_does_not_ask_again_once_collected(self):
+        history = _hist(("user", "ของถึงไหนแล้ว"), ("assistant", INTENT_SCHEMAS["tracking"]["follow_up_question"]),
+                         ("user", "TH999999999"), ("assistant", "ขอบคุณค่ะ"))
+        state = build_collection_state("tracking", history=history, current_message="แล้วค่าส่งเท่าไหร่")
+        self.assertTrue(state["is_complete"])
+        self.assertEqual(state["collected_slots"]["tracking_number"], "TH999999999")
+        self.assertIsNone(state["follow_up_question"])
+
+
+class TestRepeatedUserReply(unittest.TestCase):
+    def test_correction_overwrites_previous_value(self):
+        history = _hist(("user", "TH111111111"), ("assistant", "ขอบคุณค่ะ"))
+        state = build_collection_state("tracking", history=history, current_message="TH222222222")
+        self.assertEqual(state["collected_slots"]["tracking_number"], "TH222222222")
+
+
+class TestEscalation(unittest.TestCase):
+    def test_explicit_human_request_escalates(self):
+        state = build_collection_state("tracking", history=None, current_message="ขอคุยกับเจ้าหน้าที่")
+        self.assertTrue(state["escalation_required"])
+        self.assertEqual(state["escalation_reason"], "user_requested_human")
+
+    def test_user_refusal_escalates(self):
+        state = build_collection_state("tracking", history=None, current_message="ไม่มีเลขพัสดุอ่ะ")
+        self.assertTrue(state["escalation_required"])
+        self.assertEqual(state["escalation_reason"], "user_refused_to_provide_information")
+
+    def test_max_retry_exceeded_escalates(self):
+        q = INTENT_SCHEMAS["tracking"]["follow_up_question"]
+        history = _hist(("user", "ของถึงไหน"), ("assistant", q),
+                         ("user", "เอ่อ"), ("assistant", q))
+        state = build_collection_state("tracking", history=history, current_message="ไม่รู้ค่ะ")
+        self.assertTrue(state["escalation_required"])
+        self.assertEqual(state["escalation_reason"], "max_retry_exceeded")
+
+    def test_no_escalation_when_information_provided_normally(self):
+        state = build_collection_state("tracking", history=None, current_message="TH123456789")
+        self.assertFalse(state["escalation_required"])
+
+    def test_never_escalates_merely_for_missing_info_on_first_ask(self):
+        """Per the task's own rule: 'Do NOT escalate simply because ERP
+        is unavailable' / missing info alone (without refusal or retry
+        exhaustion) must never trigger escalation on the very first ask."""
+        state = build_collection_state("tracking", history=None, current_message="ของถึงไหนแล้ว")
+        self.assertFalse(state["escalation_required"])
+
+
+if __name__ == "__main__":
+    unittest.main()

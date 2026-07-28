@@ -1,0 +1,723 @@
+{% extends "base.html" %}
+{% set active = "prompt-studio" %}
+{% block title %}Prompt Studio — Shipify Admin{% endblock %}
+{% block topbar_title %}Prompt Studio{% endblock %}
+
+{% block extra_head %}
+<style>
+.ps-layout{display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
+@media (max-width:1000px){.ps-layout{grid-template-columns:1fr}}
+
+.ps-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;display:flex;flex-direction:column}
+.ps-panel-header{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.06)}
+.ps-new-btn{width:100%;background:rgba(245,166,35,.15);color:#F5A623;border:1px solid rgba(245,166,35,.35);border-radius:8px;padding:8px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:8px}
+.ps-new-btn:hover{background:rgba(245,166,35,.25)}
+.ps-search{width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e8edf5;padding:6px 9px;font-size:12px}
+
+.ps-list{max-height:calc(100vh - 340px);min-height:280px;overflow-y:auto;padding:6px}
+.ps-item{padding:10px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid transparent}
+.ps-item:hover{background:rgba(255,255,255,.04)}
+.ps-item.active{background:rgba(245,166,35,.1);border-color:rgba(245,166,35,.3)}
+.ps-item-name{font-size:12.5px;font-weight:700;color:#e8edf5;display:flex;align-items:center;gap:5px}
+.ps-star{color:#fbbf24;font-size:12px}
+.ps-current-active{display:flex;align-items:center;gap:8px;background:rgba(251,191,36,.08);
+  border:1px solid rgba(251,191,36,.25);border-radius:10px;padding:9px 14px;margin-bottom:14px;font-size:12.5px}
+.ps-current-active-label{color:rgba(232,237,245,.45);text-transform:uppercase;font-size:10px;letter-spacing:.05em;font-weight:700}
+.ps-current-active-name{color:#e8edf5;font-weight:700}
+.ps-item-meta{font-size:10px;color:rgba(232,237,245,.4);margin-top:4px;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.ps-badge{font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;white-space:nowrap}
+.ps-badge-active{background:rgba(52,211,153,.15);color:#34d399}
+.ps-badge-default{background:rgba(251,191,36,.15);color:#fbbf24}
+.ps-badge-inactive{background:rgba(255,255,255,.06);color:rgba(232,237,245,.4)}
+.ps-tone-tag{font-size:9px;padding:1px 7px;border-radius:10px;background:rgba(167,139,250,.12);color:#c4b5fd}
+.ps-base-rules{margin-bottom:16px;padding:10px 12px;border:1px solid rgba(34,197,94,.25);border-radius:10px;background:rgba(34,197,94,.05)}
+
+.ps-form-grp{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.ps-lbl{font-size:11px;color:rgba(232,237,245,.5)}
+.ps-input,.ps-ta{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;width:100%;box-sizing:border-box;font-family:inherit}
+.ps-input:focus,.ps-ta:focus{border-color:rgba(245,166,35,.5)}
+.ps-ta{resize:vertical;font-family:'SF Mono','Fira Code',monospace;font-size:12.5px;line-height:1.6}
+.ps-actions-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)}
+.ps-btn{font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:rgba(232,237,245,.8);transition:background .15s}
+.ps-btn:hover{background:rgba(255,255,255,.1)}
+.ps-btn-primary{background:rgba(245,166,35,.18);color:#F5A623;border-color:rgba(245,166,35,.4)}
+.ps-btn-primary:hover{background:rgba(245,166,35,.28)}
+.ps-btn-star{background:rgba(251,191,36,.12);color:#fbbf24;border-color:rgba(251,191,36,.35)}
+.ps-btn-star:hover{background:rgba(251,191,36,.22)}
+.ps-btn-star.is-default{opacity:.55;cursor:default}
+.ps-btn-danger{color:#fca5a5;border-color:rgba(239,68,68,.3)}
+.ps-btn-danger:hover{background:rgba(239,68,68,.1)}
+
+/* Tone multi-select chips */
+.ps-tone-grid{display:flex;flex-wrap:wrap;gap:7px}
+.ps-tone-chip{font-size:12px;padding:6px 12px;border-radius:16px;border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.04);color:rgba(232,237,245,.65);cursor:pointer;user-select:none;transition:all .15s}
+.ps-tone-chip:hover{border-color:rgba(245,166,35,.4);color:#e8edf5}
+.ps-tone-chip.selected{background:rgba(245,166,35,.18);border-color:#F5A623;color:#F5A623;font-weight:600}
+
+/* Conversation Preview */
+.ps-preview-panel{background:rgba(27,79,155,.06);border:1px solid rgba(27,79,155,.25);border-radius:12px;
+  padding:14px 16px;margin-bottom:18px}
+.ps-preview-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#93c5fd;font-weight:700;
+  display:flex;align-items:center;gap:6px;margin-bottom:2px}
+.ps-preview-note{font-size:10.5px;color:rgba(232,237,245,.35);margin-bottom:10px}
+.ps-preview-msgs{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto}
+.ps-preview-msg{display:flex;gap:8px;font-size:12.5px;line-height:1.5}
+.ps-preview-role{flex-shrink:0;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;
+  padding-top:2px;width:64px}
+.ps-preview-role.customer{color:rgba(232,237,245,.45)}
+.ps-preview-role.ai{color:#F5A623}
+.ps-preview-text{color:#e8edf5;background:rgba(255,255,255,.03);border-radius:8px;padding:7px 10px;flex:1}
+
+/* Modal (Version History) — scoped to this page */
+.ps-modal-ov{display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);backdrop-filter:blur(8px);align-items:center;justify-content:center}
+.ps-modal-ov.open{display:flex}
+.ps-modal-box{background:rgba(13,25,50,.98);border:1px solid rgba(27,79,155,.4);border-radius:20px;padding:26px 30px;width:480px;max-width:94vw;max-height:80vh;overflow-y:auto;position:relative}
+.ps-modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:rgba(232,237,245,.4);cursor:pointer;font-size:18px;line-height:1;padding:4px}
+.ps-modal-title{font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:16px}
+.ps-version-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:8px;
+  background:rgba(255,255,255,.03);margin-bottom:6px}
+.ps-version-row.current{border:1px solid rgba(245,166,35,.35)}
+.ps-version-meta{font-size:12px;color:#e8edf5}
+.ps-version-date{font-size:10.5px;color:rgba(232,237,245,.4)}
+
+/* Themed confirm dialog — replaces window.confirm() everywhere on this page */
+.ps-confirm-ov{display:none;position:fixed;inset:0;z-index:4000;background:rgba(6,14,30,.85);
+  backdrop-filter:blur(6px);align-items:center;justify-content:center}
+.ps-confirm-ov.open{display:flex}
+.ps-confirm-box{background:#0f1e38;border:1px solid rgba(245,166,35,.3);border-radius:16px;
+  padding:22px 26px;width:400px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,.5);animation:psConfirmIn .15s ease}
+@keyframes psConfirmIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.ps-confirm-title{font-size:14px;font-weight:700;color:#e8edf5;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.ps-confirm-msg{font-size:13px;color:rgba(232,237,245,.65);line-height:1.65;white-space:pre-line;margin-bottom:22px}
+.ps-confirm-actions{display:flex;justify-content:flex-end;gap:10px}
+.ps-confirm-btn{font-size:13px;padding:8px 22px;border-radius:20px;cursor:pointer;font-weight:600;
+  border:1px solid transparent;transition:background .15s,border-color .15s}
+.ps-confirm-btn-ok{background:#F5A623;color:#1a1200;border-color:#F5A623}
+.ps-confirm-btn-ok:hover{background:#ffb84d}
+.ps-confirm-btn-cancel{background:transparent;color:rgba(232,237,245,.75);border-color:rgba(255,255,255,.2)}
+.ps-confirm-btn-cancel:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.35)}
+
+/* Toast stack — non-blocking, auto-dismissing, success/error variants */
+.ps-toast-stack{position:fixed;bottom:24px;right:24px;z-index:3000;display:flex;flex-direction:column;
+  gap:8px;pointer-events:none;align-items:flex-end}
+.ps-toast{background:#0f2038;border:1px solid rgba(52,211,153,.4);color:#e8edf5;padding:12px 18px;
+  border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;align-items:center;
+  gap:8px;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;max-width:340px}
+.ps-toast.show{opacity:1;transform:translateY(0)}
+.ps-toast.ps-toast-error{border-color:rgba(239,68,68,.45)}
+.ps-toast-icon{flex-shrink:0;font-size:14px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+  <div>
+    <div class="page-title">Prompt Studio</div>
+    <div class="page-sub">Create and manage the AI's tone and personality — one prompt is used as the Customer Default across AI Playground and LINE OA.</div>
+  </div>
+</div>
+
+<div class="ps-current-active" id="ps-current-active" style="display:none"></div>
+
+<div class="ps-layout">
+  <!-- LEFT: Prompt list -->
+  <div class="ps-panel">
+    <div class="ps-panel-header">
+      <button class="ps-new-btn" onclick="createNewPrompt()">+ New Prompt</button>
+      <input class="ps-search" id="ps-search" placeholder="Search prompts…" oninput="debouncedLoadPrompts()">
+    </div>
+    <div class="ps-list" id="ps-list"><div style="padding:16px;color:rgba(232,237,245,.3);font-size:12px">Loading…</div></div>
+  </div>
+
+  <!-- RIGHT: Editor -->
+  <div class="ps-panel" style="padding:18px 20px">
+    <div id="ps-editor">
+      <div style="text-align:center;padding:60px 10px;color:rgba(232,237,245,.3);font-size:13px">
+        Loading…
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Version History Modal -->
+<div class="ps-modal-ov" id="ps-version-modal" onclick="if(event.target===this)closeVersionModal()">
+  <div class="ps-modal-box">
+    <button class="ps-modal-close" onclick="closeVersionModal()">✕</button>
+    <div class="ps-modal-title">Version History</div>
+    <div id="ps-version-list"></div>
+  </div>
+</div>
+
+<div class="ps-toast-stack" id="ps-toast-stack"></div>
+
+<!-- Themed confirm dialog — replaces window.confirm() -->
+<div class="ps-confirm-ov" id="ps-confirm-ov">
+  <div class="ps-confirm-box">
+    <div class="ps-confirm-title" id="ps-confirm-title"></div>
+    <div class="ps-confirm-msg" id="ps-confirm-msg"></div>
+    <div class="ps-confirm-actions">
+      <button class="ps-confirm-btn ps-confirm-btn-cancel" id="ps-confirm-cancel">Cancel</button>
+      <button class="ps-confirm-btn ps-confirm-btn-ok" id="ps-confirm-ok">OK</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var _promptId = null;
+var _prompts = [];
+var _searchDebounce = null;
+var _currentPrompt = null;   // the prompt object currently loaded in the editor
+var _currentVersions = [];
+var _selectedTones = [];     // chip selection state for the open editor
+var _isCreatingNew = false;  // true only while the blank "New Prompt" form is intentionally open
+
+// Platform-standard "Base Conversation Rules" — fixed, read-only, the
+// SAME text services/prompt_builder.py actually injects into every built
+// prompt (this is display-only; the source of truth lives there, not
+// here). Automatically shown for every prompt, new or existing, without
+// ever being stored per-prompt or editable from this screen.
+var BASE_CONVERSATION_RULES = {{ base_conversation_rules|tojson }};
+
+// Fixed tone vocabulary (Requirement 3) — order shown in the UI.
+var TONES = ['Professional', 'Friendly', 'Warm', 'Concise', 'Detailed', 'Helpful',
+             'Empathetic', 'Expert', 'Sales', 'Customer Service', 'Premium', 'Casual'];
+
+// Short, deterministic guidance line per tone — used to build/update the
+// auto-generated "Tone Guidance" section inside System Prompt. No LLM call.
+var TONE_GUIDANCE = {
+  'Professional':     'Maintain a professional, business-appropriate tone.',
+  'Friendly':          'Be friendly and approachable.',
+  'Warm':              'Use warm, welcoming language.',
+  'Concise':           'Keep responses concise and to the point.',
+  'Detailed':          'Provide detailed, thorough explanations.',
+  'Helpful':           'Prioritize being genuinely helpful and solution-oriented.',
+  'Empathetic':        'Show empathy and understanding for the customer’s situation.',
+  'Expert':            'Communicate with confident, expert authority.',
+  'Sales':             'Highlight value and gently encourage next steps.',
+  'Customer Service':  'Focus on customer satisfaction and clear, supportive answers.',
+  'Premium':           'Convey a premium, high-touch service experience.',
+  'Casual':            'Keep the language casual and relaxed.'
+};
+
+var TONE_BLOCK_START = '[TONE GUIDANCE — auto-generated from selected tones, edit freely]';
+var TONE_BLOCK_END   = '[END TONE GUIDANCE]';
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+}); }
+
+// ────────────────────────────────────────────
+// Toast — themed, non-blocking, auto-dismissing success/error feedback.
+// Never uses window.alert(). Stacks multiple toasts vertically, but
+// de-dupes an identical message that's already showing so repeated
+// clicks/rapid actions don't pile up the same toast over and over.
+// ────────────────────────────────────────────
+var _activeToastMessages = {};
+
+function showToast(message, type){
+  type = type || 'success';
+  var key = type + ':' + message;
+  if (_activeToastMessages[key]) return; // already showing this exact toast — don't stack a duplicate
+  _activeToastMessages[key] = true;
+
+  var stack = document.getElementById('ps-toast-stack');
+  var el = document.createElement('div');
+  el.className = 'ps-toast' + (type === 'error' ? ' ps-toast-error' : '');
+  el.innerHTML = '<span class="ps-toast-icon">' + (type === 'error' ? '⚠️' : '✅') + '</span><span></span>';
+  el.querySelector('span:last-child').textContent = message;
+  stack.appendChild(el);
+  // Force layout before adding .show so the CSS transition actually runs.
+  requestAnimationFrame(function(){ el.classList.add('show'); });
+
+  setTimeout(function(){
+    el.classList.remove('show');
+    delete _activeToastMessages[key];
+    setTimeout(function(){ el.remove(); }, 250); // let the fade-out transition finish
+  }, 2600);
+}
+
+function showErrorToast(message){ showToast(message || 'Something went wrong.', 'error'); }
+
+// ────────────────────────────────────────────
+// Themed confirm dialog — replaces window.confirm() everywhere on this
+// page so confirmation prompts match the Shipify dark theme instead of
+// the browser's native (unstyled) dialog. Returns a Promise<boolean>;
+// call sites use .then(function(ok){ if (!ok) return; ... }).
+// ────────────────────────────────────────────
+function psConfirm(message, title){
+  return new Promise(function(resolve){
+    var ov = document.getElementById('ps-confirm-ov');
+    document.getElementById('ps-confirm-title').textContent = title || 'Please confirm';
+    document.getElementById('ps-confirm-msg').textContent = message;
+    ov.classList.add('open');
+
+    var okBtn = document.getElementById('ps-confirm-ok');
+    var cancelBtn = document.getElementById('ps-confirm-cancel');
+
+    function cleanup(result){
+      ov.classList.remove('open');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      ov.removeEventListener('click', onOverlay);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    }
+    function onOk(){ cleanup(true); }
+    function onCancel(){ cleanup(false); }
+    function onOverlay(e){ if (e.target === ov) cleanup(false); }
+    function onKey(e){ if (e.key === 'Escape') cleanup(false); else if (e.key === 'Enter') cleanup(true); }
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    ov.addEventListener('click', onOverlay);
+    document.addEventListener('keydown', onKey);
+    cancelBtn.focus();
+  });
+}
+
+// ────────────────────────────────────────────
+// List
+// ────────────────────────────────────────────
+function debouncedLoadPrompts(){ clearTimeout(_searchDebounce); _searchDebounce = setTimeout(loadPrompts, 250); }
+
+var _initialLoadDone = false;
+
+// Always Customer Default first, then everything else by updated_at DESC —
+// applied client-side so list order/auto-select/"first item" fallback are
+// always consistent regardless of what order the API happens to return.
+function _sortPrompts(prompts){
+  return prompts.slice().sort(function(a, b){
+    if (!!a.is_default !== !!b.is_default) return a.is_default ? -1 : 1;
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  });
+}
+
+function loadPrompts(){
+  var params = new URLSearchParams();
+  var search = document.getElementById('ps-search').value.trim();
+  if (search) params.set('search', search);
+  fetch('/admin/api/ai/prompts?' + params.toString())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      _prompts = _sortPrompts(d.prompts || []);
+      renderPromptList();
+      renderCurrentActive();
+
+      if (!_isCreatingNew && !_promptId) {
+        if (_prompts.length) {
+          // First load with nothing selected yet -> Customer Default (or
+          // the first item, since _prompts is already sorted that way).
+          selectPrompt(_prompts[0].id);
+        } else if (!search) {
+          // Zero prompts overall (not just an empty search result) —
+          // only then is "Create your first Prompt" the correct message.
+          showEmptyState();
+        }
+      }
+      _initialLoadDone = true;
+    });
+}
+
+function showEmptyState(){
+  document.getElementById('ps-editor').innerHTML =
+    '<div style="text-align:center;padding:60px 10px;color:rgba(232,237,245,.3);font-size:13px">' +
+    'Create your first Prompt</div>';
+}
+
+function renderCurrentActive(){
+  var el = document.getElementById('ps-current-active');
+  var def = _prompts.find(function(p){ return p.is_default; });
+  if (!def) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML = '<span class="ps-current-active-label">Current Active — Prompt</span>' +
+    '<span class="ps-current-active-name"><span class="ps-star">⭐</span> ' + esc(def.name) + '</span>';
+}
+
+function _toneTags(toneStr){
+  if (!toneStr) return '';
+  return toneStr.split(',').map(function(t){ return t.trim(); }).filter(Boolean)
+    .map(function(t){ return '<span class="ps-tone-tag">' + esc(t) + '</span>'; }).join('');
+}
+
+function renderPromptList(){
+  var holder = document.getElementById('ps-list');
+  if (!_prompts.length){
+    holder.innerHTML = '<div style="padding:16px;color:rgba(232,237,245,.3);font-size:12px">No prompts found.</div>';
+    return;
+  }
+  holder.innerHTML = _prompts.map(function(p){
+    var badges = '';
+    if (!p.is_active) badges += '<span class="ps-badge ps-badge-inactive">Inactive</span>';
+    return '<div class="ps-item' + (p.id === _promptId ? ' active' : '') + '" onclick="selectPrompt(\'' + p.id + '\')">' +
+      '<div class="ps-item-name">' + (p.is_default ? '<span class="ps-star" title="Customer Default">⭐</span>' : '') +
+        esc(p.name) + ' <span style="color:rgba(232,237,245,.35);font-weight:400">v' + p.version + '</span></div>' +
+      '<div class="ps-item-meta">' + badges + _toneTags(p.tone) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ────────────────────────────────────────────
+// Create / Select
+// ────────────────────────────────────────────
+function createNewPrompt(){
+  _isCreatingNew = true;
+  _promptId = null;
+  renderPromptList();
+  renderEditor({name:'', description:'', channel:null, language:'th', tone:'', system_prompt:'',
+    is_active:true, is_default:false, version:1, id:null}, []);
+}
+
+function selectPrompt(id){
+  fetch('/admin/api/ai/prompts/' + id)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      _isCreatingNew = false;
+      _promptId = id;
+      renderPromptList();
+      renderEditor(d.prompt, d.versions || []);
+    });
+}
+
+// ────────────────────────────────────────────
+// Editor
+// ────────────────────────────────────────────
+function renderEditor(p, versions){
+  var isNew = !p.id;
+  _currentPrompt = p;
+  _currentVersions = versions;
+  _selectedTones = (p.tone || '').split(',').map(function(t){ return t.trim(); }).filter(function(t){ return TONES.indexOf(t) !== -1; });
+
+  document.getElementById('ps-editor').innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">' +
+      '<div style="font-size:15px;font-weight:700;color:#e8edf5;display:flex;align-items:center;gap:7px">' +
+        (isNew ? 'New Prompt' : (p.is_default ? '<span class="ps-star">⭐</span>' : '') + esc(p.name)) +
+      '</div>' +
+      (!isNew && versions.length > 1
+        ? '<button class="ps-btn" onclick="openVersionModal()">Version History (' + versions.length + ')</button>' : '') +
+    '</div>' +
+    '<div id="ps-preview-container"></div>' +
+    '<details class="ps-base-rules" open>' +
+      '<summary style="cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:600;color:#e8edf5">' +
+        '<span style="color:#22c55e">&#9989;</span> Base Conversation Rules' +
+        '<span style="font-weight:400;font-size:11px;color:rgba(232,237,245,.5)">Platform Standard (Automatically Included)</span>' +
+      '</summary>' +
+      '<div style="font-size:11px;color:rgba(232,237,245,.4);margin:6px 0 8px">' +
+        'Read-only &mdash; applied automatically to every Prompt, before Tone Guidance and your System Prompt. Cannot be edited here.' +
+      '</div>' +
+      '<pre style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;line-height:1.6;color:rgba(232,237,245,.75);' +
+        'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px;margin:0">' +
+        esc(BASE_CONVERSATION_RULES) +
+      '</pre>' +
+    '</details>' +
+    '<div class="ps-form-grp"><label class="ps-lbl">Name</label>' +
+      '<input class="ps-input" id="ps-f-name" value="' + esc(p.name) + '" placeholder="e.g. Warm &amp; Helpful Support"></div>' +
+    '<div class="ps-form-grp"><label class="ps-lbl">Description</label>' +
+      '<input class="ps-input" id="ps-f-desc" value="' + esc(p.description||'') + '" placeholder="What is this prompt for?"></div>' +
+    '<div class="ps-form-grp"><label class="ps-lbl">Tone (select any that apply)</label>' +
+      '<div class="ps-tone-grid" id="ps-tone-grid"></div></div>' +
+    '<div class="ps-form-grp"><label class="ps-lbl">System Prompt</label>' +
+      '<textarea class="ps-ta" id="ps-f-system" rows="10" oninput="onSystemPromptEdited()">' + esc(p.system_prompt||'') + '</textarea></div>' +
+    (!isNew ? '<div style="font-size:11px;color:rgba(232,237,245,.35)">Version ' + p.version +
+        (p.is_default ? ' · Customer Default' : '') + (p.is_active ? ' · Active' : ' · Inactive') + '</div>' : '') +
+    '<div class="ps-actions-row">' +
+      (isNew
+        ? '<button class="ps-btn ps-btn-primary" onclick="saveNewPrompt()">Save</button>'
+        : '<button class="ps-btn ps-btn-primary" onclick="savePrompt(\'' + p.id + '\')">Save</button>' +
+          '<button class="ps-btn" onclick="duplicatePrompt(\'' + p.id + '\')">Duplicate</button>' +
+          '<button class="ps-btn ps-btn-star' + (p.is_default ? ' is-default' : '') + '" onclick="setDefaultPrompt(\'' + p.id + '\')"' +
+            (p.is_default ? ' disabled title="Already the Customer Default"' : '') + '>' +
+            (p.is_default ? '⭐ Customer Default' : '☆ Set as Customer Default') + '</button>' +
+          '<button class="ps-btn ps-btn-danger" onclick="deletePrompt(\'' + p.id + '\')">Delete</button>') +
+    '</div>';
+
+  renderToneChips();
+  renderConversationPreview();
+}
+
+function renderToneChips(){
+  var grid = document.getElementById('ps-tone-grid');
+  if (!grid) return;
+  grid.innerHTML = TONES.map(function(t){
+    var selected = _selectedTones.indexOf(t) !== -1;
+    return '<span class="ps-tone-chip' + (selected ? ' selected' : '') + '" onclick="toggleTone(\'' + esc(t) + '\')">' + esc(t) + '</span>';
+  }).join('');
+}
+
+function toggleTone(tone){
+  var idx = _selectedTones.indexOf(tone);
+  if (idx === -1) _selectedTones.push(tone); else _selectedTones.splice(idx, 1);
+  renderToneChips();
+  applyToneGuidanceToSystemPrompt();
+  renderConversationPreview();
+}
+
+// ────────────────────────────────────────────
+// Tone -> suggested System Prompt section (Requirement 3)
+// Deterministic, no LLM. Only ever touches the marked block; everything
+// else the user typed is left completely untouched.
+// ────────────────────────────────────────────
+function buildToneGuidanceBlock(tones){
+  if (!tones.length) return '';
+  var lines = tones.map(function(t){ return '- ' + (TONE_GUIDANCE[t] || t); });
+  return TONE_BLOCK_START + '\n' + lines.join('\n') + '\n' + TONE_BLOCK_END;
+}
+
+function _findToneBlockRange(text){
+  var start = text.indexOf(TONE_BLOCK_START);
+  if (start === -1) return null;
+  var endMarker = text.indexOf(TONE_BLOCK_END, start);
+  if (endMarker === -1) return null;
+  var end = endMarker + TONE_BLOCK_END.length;
+  return {start: start, end: end};
+}
+
+function applyToneGuidanceToSystemPrompt(){
+  var ta = document.getElementById('ps-f-system');
+  if (!ta) return;
+  var text = ta.value;
+  var newBlock = buildToneGuidanceBlock(_selectedTones);
+  var range = _findToneBlockRange(text);
+
+  if (!range){
+    // No existing block — just append (never overwrites manual content).
+    if (newBlock) ta.value = (text.trim() ? text.trim() + '\n\n' : '') + newBlock;
+    renderConversationPreview();
+    return;
+  }
+
+  var existingBlock = text.slice(range.start, range.end);
+  if (existingBlock === newBlock) return; // nothing changed
+
+  if (!newBlock){
+    // All tones deselected — ask before removing the block entirely.
+    psConfirm('Remove the auto-generated Tone Guidance section from System Prompt?', 'Remove Tone Guidance?')
+      .then(function(ok){
+        if (!ok) return;
+        ta.value = (text.slice(0, range.start) + text.slice(range.end)).replace(/\n{3,}/g, '\n\n').trim();
+        renderConversationPreview();
+      });
+    return;
+  }
+
+  psConfirm('Update the auto-generated Tone Guidance section to match your new tone selection?\n\n' +
+            'Only that section will change — the rest of your System Prompt is preserved.',
+            'Update Tone Guidance?')
+    .then(function(ok){
+      if (!ok) return; // user declined — selected chips stay visually selected, text is untouched
+      ta.value = text.slice(0, range.start) + newBlock + text.slice(range.end);
+      renderConversationPreview();
+    });
+}
+
+function onSystemPromptEdited(){
+  renderConversationPreview();
+}
+
+function collectFormData(){
+  return {
+    name: document.getElementById('ps-f-name').value.trim(),
+    description: document.getElementById('ps-f-desc').value.trim(),
+    tone: _selectedTones.join(', '),
+    system_prompt: document.getElementById('ps-f-system').value,
+  };
+}
+
+// ────────────────────────────────────────────
+// Conversation Preview (Requirement 9) — deterministic, no LLM call.
+// ────────────────────────────────────────────
+function _classifyToneAxes(tones){
+  var t = tones || [];
+  var has = function(x){ return t.indexOf(x) !== -1; };
+  var length = has('Detailed') ? 'long' : (has('Concise') ? 'short' : 'medium');
+  var formal = has('Casual') ? 'casual' : ((has('Professional') || has('Expert') || has('Premium')) ? 'formal' : 'neutral');
+  var warm = (has('Warm') || has('Friendly') || has('Empathetic') || has('Customer Service')) ? 'warm' : 'neutral';
+  return {length: length, formal: formal, warm: warm};
+}
+
+function buildConversationPreview(tones){
+  // Thai sample messages only (Conversation Preview content) — every
+  // other label/button/tone name/System Prompt stays in its existing
+  // language. Still fully deterministic (no LLM call); the SAME
+  // tone-axis logic as before just picks between Thai phrasings now.
+  var axes = _classifyToneAxes(tones);
+
+  var orderQuestion = 'สวัสดีค่ะ ขอสอบถามสถานะคำสั่งซื้อได้ไหม';
+  var orderAnswerShort = axes.formal === 'casual' ? 'ได้เลย! ส่งไปเมื่อวานแล้ว กำลังมาส่งอยู่นะ' : 'ได้เลยค่ะ กรุณาแจ้งเลขที่คำสั่งซื้อให้ตรวจสอบได้เลยนะคะ';
+  var orderAnswerLong = axes.formal === 'casual'
+    ? 'ได้เลย! คำสั่งซื้อส่งออกจากคลังไปเมื่อวานนี้ ตามระบบติดตามคาดว่าจะถึงภายใน 2-3 วันทำการนะ เดี๋ยวช่วยดูให้'
+    : 'ได้ค่ะ คำสั่งซื้อของคุณลูกค้าถูกจัดส่งออกจากคลังสินค้าเมื่อวานนี้ และคาดว่าจะถึงภายใน 2-3 วันทำการค่ะ หากต้องการข้อมูลเพิ่มเติมแจ้งได้เลยนะคะ';
+  var orderAnswer = axes.length === 'long' ? orderAnswerLong : (axes.length === 'short' ? orderAnswerShort : orderAnswerShort + ' หากต้องการเลขติดตามพัสดุแจ้งได้เลยนะคะ');
+
+  var issueQuestion = 'พัสดุมาถึงแล้วแต่กล่องเสียหายค่ะ';
+  var issueAnswer = axes.warm === 'warm'
+    ? 'ต้องขออภัยด้วยนะคะ เข้าใจว่าคงรู้สึกไม่ดีเลย เดี๋ยวช่วยตรวจสอบและแนะนำขั้นตอนเปลี่ยน/คืนสินค้าให้ทันทีค่ะ'
+    : 'ขออภัยด้วยค่ะ ทางเราจะดำเนินการเปลี่ยนสินค้าหรือคืนเงินให้ทันทีค่ะ';
+
+  var priceQuestion = 'แพ็กเกจพรีเมียมราคาเท่าไหร่คะ';
+  var priceAnswer = axes.formal === 'formal'
+    ? 'แพ็กเกจพรีเมียมราคา 1,990 บาทต่อเดือน รวมสิทธิ์การดูแลลูกค้าแบบเร่งด่วนค่ะ'
+    : (axes.formal === 'casual' ? 'พรีเมียม 1,990 บาท/เดือนเอง มีบริการเร่งด่วนด้วยนะ' : 'แพ็กเกจพรีเมียมราคา 1,990 บาทต่อเดือน รวมบริการช่วยเหลือแบบเร่งด่วนค่ะ');
+
+  var closingQuestion = 'ขอบคุณค่ะ';
+  var closingAnswer = axes.warm === 'warm' ? 'ยินดีมากค่ะ หากต้องการความช่วยเหลือเพิ่มเติมแจ้งได้เสมอนะคะ 😊' : 'ยินดีค่ะ';
+
+  return [
+    {role: 'customer', text: orderQuestion},
+    {role: 'ai', text: orderAnswer},
+    {role: 'customer', text: axes.warm === 'warm' ? issueQuestion : priceQuestion},
+    {role: 'ai', text: axes.warm === 'warm' ? issueAnswer : priceAnswer},
+    {role: 'customer', text: closingQuestion},
+    {role: 'ai', text: closingAnswer},
+  ];
+}
+
+function renderConversationPreview(){
+  var container = document.getElementById('ps-preview-container');
+  if (!container) return;
+  var messages = buildConversationPreview(_selectedTones);
+  container.innerHTML =
+    '<div class="ps-preview-panel">' +
+      '<div class="ps-preview-label">💬 Conversation Preview</div>' +
+      '<div class="ps-preview-note">Illustrative example only — not a real AI answer. Updates as you change tones.</div>' +
+      '<div class="ps-preview-msgs">' +
+        messages.map(function(m){
+          return '<div class="ps-preview-msg">' +
+            '<span class="ps-preview-role ' + m.role + '">' + (m.role === 'ai' ? 'AI' : 'ลูกค้า') + '</span>' +
+            '<span class="ps-preview-text">' + esc(m.text) + '</span>' +
+          '</div>';
+        }).join('') +
+      '</div>' +
+    '</div>';
+}
+
+// ────────────────────────────────────────────
+// Actions
+// ────────────────────────────────────────────
+function saveNewPrompt(){
+  var data = collectFormData();
+  if (!data.name){ showErrorToast('Please enter a name.'); return; }
+  fetch('/admin/api/ai/prompts', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { showErrorToast(d.error || 'Could not create prompt'); return; }
+      loadPrompts();
+      selectPrompt(d.prompt.id);
+      showToast('Prompt created successfully');
+    })
+    .catch(function(){ showErrorToast('Could not create prompt'); });
+}
+
+function savePrompt(id){
+  var data = collectFormData();
+  if (!data.name){ showErrorToast('Please enter a name.'); return; }
+  fetch('/admin/api/ai/prompts/' + id, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { showErrorToast(d.error || 'Could not save'); return; }
+      loadPrompts();
+      selectPrompt(id);
+      showToast('Prompt updated successfully');
+    })
+    .catch(function(){ showErrorToast('Could not save'); });
+}
+
+function duplicatePrompt(id){
+  fetch('/admin/api/ai/prompts/' + id + '/duplicate', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { showErrorToast(d.error || 'Could not duplicate'); return; }
+      loadPrompts();
+      selectPrompt(d.prompt.id);
+      showToast('Prompt duplicated successfully');
+    })
+    .catch(function(){ showErrorToast('Could not duplicate'); });
+}
+
+function setDefaultPrompt(id){
+  psConfirm('Set this as the Customer Default prompt?\n\nAI Playground and LINE OA will use this prompt whenever nothing more specific is selected/assigned.',
+            'Set as Customer Default?')
+    .then(function(ok){
+      if (!ok) return;
+      fetch('/admin/api/ai/prompts/' + id + '/set-default', {method:'POST'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (d.ok) { loadPrompts(); selectPrompt(id); showToast('Customer Default updated successfully'); }
+          else { showErrorToast(d.error || 'Could not set Customer Default'); }
+        })
+        .catch(function(){ showErrorToast('Could not set Customer Default'); });
+    });
+}
+
+function deletePrompt(id){
+  psConfirm('Delete this prompt? This cannot be undone from here.', 'Delete Prompt?').then(function(ok){
+    if (!ok) return;
+    fetch('/admin/api/ai/prompts/' + id, {method:'DELETE'})
+      .then(function(r){ return r.json().then(function(d){ return {status:r.status, body:d}; }); })
+      .then(function(res){
+        if (res.body.ok) {
+          // loadPrompts() auto-selects the next available prompt (Customer
+          // Default, or the first remaining one) — or shows "Create your
+          // first Prompt" if none are left. Never leaves a stale editor.
+          _promptId = null; loadPrompts();
+          showToast('Prompt deleted successfully');
+          return;
+        }
+        if (res.body.warning){
+          psConfirm(res.body.error + '\n\nDelete anyway?', 'Delete Anyway?').then(function(forceOk){
+            if (!forceOk) return;
+            fetch('/admin/api/ai/prompts/' + id + '?force=true', {method:'DELETE'})
+              .then(function(r2){ return r2.json(); })
+              .then(function(d2){ if (d2.ok){ _promptId = null; loadPrompts(); showToast('Prompt deleted successfully'); } else showErrorToast(d2.error || 'Could not delete'); });
+          });
+          return;
+        }
+        showErrorToast(res.body.error || 'Could not delete');
+      })
+      .catch(function(){ showErrorToast('Could not delete'); });
+  });
+}
+
+// ────────────────────────────────────────────
+// Version History modal (Requirement 7)
+// ────────────────────────────────────────────
+function openVersionModal(){
+  var list = document.getElementById('ps-version-list');
+  list.innerHTML = _currentVersions.slice().reverse().map(function(v){
+    var isCurrent = v.id === _currentPrompt.id;
+    var when = v.updated_at ? new Date(v.updated_at).toLocaleString() : '';
+    return '<div class="ps-version-row' + (isCurrent ? ' current' : '') + '">' +
+      '<div><div class="ps-version-meta">v' + v.version + (isCurrent ? ' — current' : '') + '</div>' +
+        '<div class="ps-version-date">' + esc(when) + '</div></div>' +
+      (isCurrent ? '' : '<button class="ps-btn" onclick="restoreVersion(\'' + _currentPrompt.id + '\',\'' + v.id + '\')">Restore</button>') +
+    '</div>';
+  }).join('');
+  document.getElementById('ps-version-modal').classList.add('open');
+}
+
+function closeVersionModal(){ document.getElementById('ps-version-modal').classList.remove('open'); }
+
+function restoreVersion(currentId, targetVersionId){
+  psConfirm('Restore this version? A new version will be created matching it — no history is deleted.', 'Restore Version?')
+    .then(function(ok){
+      if (!ok) return;
+      fetch('/admin/api/ai/prompts/' + currentId + '/rollback', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target_version_id: targetVersionId})})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (!d.ok) { showErrorToast(d.error || 'Restore failed'); return; }
+          closeVersionModal();
+          loadPrompts();
+          selectPrompt(d.prompt.id);
+          showToast('Prompt version restored successfully');
+        })
+        .catch(function(){ showErrorToast('Restore failed'); });
+    });
+}
+
+loadPrompts();
+</script>
+{% endblock %}

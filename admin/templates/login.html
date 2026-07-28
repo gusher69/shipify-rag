@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shipify Admin — เข้าสู่ระบบ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Sarabun', 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+      background: #060e1e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* ── Aurora background ── */
+    .aurora {
+      position: fixed; inset: 0; z-index: 0;
+      background: #060e1e;
+      overflow: hidden;
+    }
+    .aurora-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      animation: drift linear infinite;
+      opacity: 0;
+    }
+    .aurora-orb:nth-child(1) {
+      width: 600px; height: 400px;
+      background: radial-gradient(ellipse, rgba(27,79,155,0.55) 0%, transparent 70%);
+      top: -100px; left: -150px;
+      animation-duration: 18s; animation-delay: 0s;
+    }
+    .aurora-orb:nth-child(2) {
+      width: 500px; height: 500px;
+      background: radial-gradient(ellipse, rgba(13,31,60,0.7) 0%, transparent 70%);
+      top: 30%; right: -100px;
+      animation-duration: 22s; animation-delay: -6s;
+    }
+    .aurora-orb:nth-child(3) {
+      width: 400px; height: 300px;
+      background: radial-gradient(ellipse, rgba(245,166,35,0.12) 0%, transparent 70%);
+      bottom: -80px; left: 20%;
+      animation-duration: 16s; animation-delay: -10s;
+    }
+    .aurora-orb:nth-child(4) {
+      width: 350px; height: 350px;
+      background: radial-gradient(ellipse, rgba(27,79,155,0.35) 0%, transparent 70%);
+      top: 60%; left: 60%;
+      animation-duration: 20s; animation-delay: -3s;
+    }
+
+    @keyframes drift {
+      0%   { transform: translate(0, 0) scale(1);    opacity: 0; }
+      10%  { opacity: 1; }
+      50%  { transform: translate(60px, 40px) scale(1.1); }
+      90%  { opacity: 1; }
+      100% { transform: translate(0, 0) scale(1);    opacity: 0; }
+    }
+
+    /* ── Grid overlay ── */
+    .grid-overlay {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(27,79,155,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(27,79,155,0.06) 1px, transparent 1px);
+      background-size: 44px 44px;
+    }
+
+    /* ── Shooting light beams ── */
+    .beam {
+      position: fixed; z-index: 1; pointer-events: none;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(245,166,35,0.6), rgba(27,79,155,0.4), transparent);
+      animation: beam-move linear infinite;
+      opacity: 0;
+    }
+    .beam:nth-child(1) { width: 300px; top: 22%; animation-duration: 6s; animation-delay: 0s; }
+    .beam:nth-child(2) { width: 200px; top: 55%; animation-duration: 9s; animation-delay: -3s; }
+    .beam:nth-child(3) { width: 400px; top: 78%; animation-duration: 7s; animation-delay: -5s; }
+
+    @keyframes beam-move {
+      0%   { left: -400px; opacity: 0; }
+      5%   { opacity: 1; }
+      95%  { opacity: 1; }
+      100% { left: 110%; opacity: 0; }
+    }
+
+    /* ── Particles ── */
+    .particles { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(245,166,35,0.7);
+      animation: float-up linear infinite;
+    }
+    @keyframes float-up {
+      0%   { transform: translateY(0) scale(1);   opacity: 0; }
+      10%  { opacity: 1; }
+      90%  { opacity: 0.6; }
+      100% { transform: translateY(-100vh) scale(0.5); opacity: 0; }
+    }
+
+    /* ── Card ── */
+    .wrap {
+      position: relative; z-index: 10;
+      width: 100%; max-width: 400px;
+      padding: 0 20px;
+    }
+
+    .brand {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .brand-logo {
+      display: flex; align-items: center;
+      justify-content: center; gap: 12px;
+      margin-bottom: 8px;
+    }
+    .brand-name {
+      font-family: 'Inter', sans-serif;
+      font-size: 30px; font-weight: 700;
+      letter-spacing: -0.8px; color: #fff;
+    }
+    .brand-name em { color: #F5A623; font-style: normal; }
+    .brand-tagline {
+      font-size: 13px; font-weight: 400;
+      color: rgba(232,237,245,0.45);
+      letter-spacing: 0.3px;
+    }
+
+    .card {
+      position: relative;
+      background: rgba(255,255,255,0.055);
+      backdrop-filter: blur(32px) saturate(1.6);
+      -webkit-backdrop-filter: blur(32px) saturate(1.6);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 20px;
+      padding: 34px 30px;
+      overflow: hidden;
+    }
+
+    /* Card shimmer sweep */
+    .card::before {
+      content: '';
+      position: absolute;
+      top: -50%; left: -75%;
+      width: 50%; height: 200%;
+      background: linear-gradient(
+        105deg,
+        transparent 30%,
+        rgba(255,255,255,0.06) 50%,
+        transparent 70%
+      );
+      animation: card-shimmer 4s ease-in-out infinite;
+    }
+    @keyframes card-shimmer {
+      0%   { left: -75%; }
+      100% { left: 125%; }
+    }
+
+    /* Glowing border */
+    .card::after {
+      content: '';
+      position: absolute; inset: 0;
+      border-radius: 20px;
+      background: linear-gradient(135deg,
+        rgba(27,79,155,0.4), transparent 40%,
+        transparent 60%, rgba(245,166,35,0.15));
+      pointer-events: none;
+      animation: border-glow 4s ease-in-out infinite alternate;
+    }
+    @keyframes border-glow {
+      0%   { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+
+    .card-heading {
+      font-size: 16px; font-weight: 600;
+      color: #fff; margin-bottom: 22px;
+      text-align: center;
+      position: relative; z-index: 1;
+    }
+
+    .form-group { margin-bottom: 16px; position: relative; z-index: 1; }
+    .form-label {
+      display: block; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.9px; text-transform: uppercase;
+      color: rgba(232,237,245,0.45); margin-bottom: 7px;
+    }
+    .form-input {
+      width: 100%; padding: 11px 14px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 11px; color: #e8edf5;
+      font-size: 14.5px; font-family: 'Sarabun','Inter',sans-serif;
+      outline: none;
+      transition: border-color .2s, background .2s, box-shadow .2s;
+    }
+    .form-input::placeholder { color: rgba(232,237,245,0.28); }
+    .form-input:focus {
+      border-color: rgba(27,79,155,0.75);
+      background: rgba(27,79,155,0.10);
+      box-shadow: 0 0 0 3px rgba(27,79,155,0.18), 0 0 20px rgba(27,79,155,0.12);
+    }
+
+    .btn-login {
+      width: 100%; padding: 12px; margin-top: 8px;
+      background: linear-gradient(135deg, #1B4F9B 0%, #2261b8 50%, #1B4F9B 100%);
+      background-size: 200% 100%;
+      color: #fff; border: none; border-radius: 11px;
+      font-size: 15px; font-weight: 600;
+      font-family: 'Sarabun','Inter',sans-serif;
+      cursor: pointer; letter-spacing: 0.3px;
+      box-shadow: 0 6px 22px rgba(27,79,155,0.45);
+      transition: transform .18s, box-shadow .18s, background-position .4s;
+      animation: btn-pulse 3s ease-in-out infinite;
+      position: relative; z-index: 1; overflow: hidden;
+    }
+    .btn-login::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.15) 50%, transparent 60%);
+      transform: translateX(-100%);
+      transition: transform 0s;
+    }
+    .btn-login:hover::after { transform: translateX(200%); transition: transform .5s ease; }
+    .btn-login:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(27,79,155,0.6);
+      background-position: 100% 0;
+    }
+    .btn-login:active { transform: translateY(0); }
+
+    @keyframes btn-pulse {
+      0%,100% { box-shadow: 0 6px 22px rgba(27,79,155,0.45); }
+      50%      { box-shadow: 0 6px 32px rgba(27,79,155,0.70); }
+    }
+
+    .alert-error {
+      background: rgba(248,113,113,0.12);
+      border: 1px solid rgba(248,113,113,0.28);
+      color: #fca5a5; padding: 10px 14px;
+      border-radius: 10px; font-size: 13.5px;
+      margin-bottom: 16px; position: relative; z-index: 1;
+    }
+
+    .footer-note {
+      text-align: center; margin-top: 22px;
+      font-size: 12px; color: rgba(232,237,245,0.28);
+      font-family: 'Inter', sans-serif;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Aurora background -->
+<div class="aurora">
+  <div class="aurora-orb"></div>
+  <div class="aurora-orb"></div>
+  <div class="aurora-orb"></div>
+  <div class="aurora-orb"></div>
+</div>
+
+<!-- Grid -->
+<div class="grid-overlay"></div>
+
+<!-- Light beams -->
+<div class="beam"></div>
+<div class="beam"></div>
+<div class="beam"></div>
+
+<!-- Particles -->
+<div class="particles" id="particles"></div>
+
+<!-- Content -->
+<div class="wrap">
+  <div class="brand">
+    <div class="brand-logo">
+      <img src="/static/img/logo.png" alt="Shipify"
+           style="height:52px;width:auto;object-fit:contain;
+                  filter: drop-shadow(0 0 1px rgba(255,255,255,0.9))">
+    </div>
+    <div class="brand-tagline">AI Customer Service · Admin Portal</div>
+  </div>
+
+  <div class="card">
+    <div class="card-heading">Sign In</div>
+
+    {% if request.query_params.get('error') %}
+    <div class="alert-error">Invalid username or password. Please try again.</div>
+    {% endif %}
+
+    <form method="post" action="/admin/login">
+      <div class="form-group">
+        <label class="form-label" for="username">Username</label>
+        <input class="form-input" type="text" id="username" name="username"
+               placeholder="Enter username" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-input" type="password" id="password" name="password"
+               placeholder="Enter password" autocomplete="current-password" required>
+      </div>
+      <button class="btn-login" type="submit">Sign In</button>
+    </form>
+  </div>
+
+</div>
+
+<script>
+  // Glowing particles
+  const container = document.getElementById('particles');
+  const glowConfigs = [
+    { bg: 'rgba(245,166,35,1)',   shadow: '0 0 6px 2px rgba(245,166,35,0.9),  0 0 18px 4px rgba(245,166,35,0.5),  0 0 40px 8px rgba(245,166,35,0.2)'  },
+    { bg: 'rgba(27,79,155,1)',    shadow: '0 0 6px 2px rgba(27,79,155,0.9),   0 0 18px 4px rgba(27,79,155,0.55),  0 0 40px 8px rgba(27,79,155,0.25)' },
+    { bg: 'rgba(255,255,255,1)',  shadow: '0 0 5px 2px rgba(255,255,255,0.8), 0 0 14px 4px rgba(200,220,255,0.45),0 0 30px 6px rgba(27,79,155,0.2)'  },
+    { bg: 'rgba(100,180,255,1)',  shadow: '0 0 6px 2px rgba(100,180,255,0.9), 0 0 18px 4px rgba(100,180,255,0.5), 0 0 36px 8px rgba(27,79,155,0.25)' },
+    { bg: 'rgba(245,166,35,1)',   shadow: '0 0 4px 1px rgba(245,166,35,1),    0 0 12px 3px rgba(245,166,35,0.6),  0 0 24px 6px rgba(245,166,35,0.2)'  },
+  ];
+  for (let i = 0; i < 34; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    const cfg  = glowConfigs[Math.floor(Math.random() * glowConfigs.length)];
+    const size = Math.random() * 3.5 + 1.2;
+    p.style.cssText = `
+      width:${size}px; height:${size}px;
+      left:${Math.random()*100}%;
+      bottom:${Math.random()*20-10}%;
+      background:${cfg.bg};
+      box-shadow:${cfg.shadow};
+      filter:blur(${Math.random() < 0.4 ? '0.5' : '0'}px);
+      animation-duration:${9+Math.random()*14}s;
+      animation-delay:-${Math.random()*22}s;
+    `;
+    container.appendChild(p);
+  }
+
+  // Cursor glow
+  const cursor = document.createElement('div');
+  cursor.style.cssText = `
+    position:fixed; pointer-events:none; z-index:9999;
+    width:300px; height:300px; border-radius:50%;
+    background:radial-gradient(circle, rgba(27,79,155,0.12) 0%, transparent 70%);
+    transform:translate(-50%,-50%);
+    transition:left .12s ease, top .12s ease;
+    left:-9999px; top:-9999px;
+  `;
+  document.body.appendChild(cursor);
+  document.addEventListener('mousemove', e => {
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top  = e.clientY + 'px';
+  });
+</script>
+</body>
+</html>

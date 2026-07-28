@@ -1,0 +1,437 @@
+{% extends "base.html" %}
+{% block title %}Settings — Shipify Admin{% endblock %}
+{% block topbar_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">Settings</div>
+  <div class="page-sub">Manage API keys and system configuration</div>
+</div>
+
+{% if msg %}
+<div class="alert alert-{{ msg_type or 'success' }}" id="settings-msg">{{ msg }}</div>
+{% endif %}
+
+<!-- ── OpenAI ── -->
+<div class="card">
+  <div class="card-title">🤖 OpenAI</div>
+  <form method="POST" action="/admin/settings">
+    <input type="hidden" name="section" value="ai">
+    <div class="form-group">
+      <label class="form-label">OpenAI API Key</label>
+      <div style="position:relative">
+        <input type="password" name="OPENAI_API_KEY" class="form-input"
+               id="key-openai"
+               value="{{ env.OPENAI_API_KEY or '' }}"
+               placeholder="sk-proj-..."
+               style="padding-right:44px; font-family:'SF Mono','Fira Code',monospace; font-size:13px">
+        <button type="button" onclick="toggleShow('key-openai')"
+                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                       background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px">👁</button>
+      </div>
+      <div class="form-hint">ใช้สำหรับ Embedding (text-embedding-3-small) และ Chat completion (gpt-4o)</div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Chat Model</label>
+        <input type="text" name="OPENAI_CHAT_MODEL" class="form-input"
+               value="{{ env.OPENAI_CHAT_MODEL or 'gpt-4o' }}"
+               placeholder="gpt-4o">
+        <div class="form-hint">e.g. gpt-4o, gpt-4o-mini</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Embedding Model</label>
+        <input type="text" name="OPENAI_EMBED_MODEL" class="form-input"
+               value="{{ env.OPENAI_EMBED_MODEL or 'text-embedding-3-small' }}"
+               placeholder="text-embedding-3-small">
+        <div class="form-hint">e.g. text-embedding-3-small, text-embedding-3-large</div>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save OpenAI Config</button>
+  </form>
+</div>
+
+<!-- ── Supabase ── -->
+<div class="card">
+  <div class="card-title">🗄️ Supabase / Database</div>
+  <form method="POST" action="/admin/settings">
+    <input type="hidden" name="section" value="supabase">
+    <div class="form-group">
+      <label class="form-label">Supabase URL</label>
+      <input type="text" name="SUPABASE_URL" class="form-input"
+             value="{{ env.SUPABASE_URL or '' }}"
+             placeholder="https://xxxx.supabase.co">
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Anon Key</label>
+        <div style="position:relative">
+          <input type="password" name="SUPABASE_ANON_KEY" class="form-input"
+                 id="key-anon"
+                 value="{{ env.SUPABASE_ANON_KEY or '' }}"
+                 style="padding-right:44px; font-family:'SF Mono','Fira Code',monospace; font-size:13px">
+          <button type="button" onclick="toggleShow('key-anon')"
+                  style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                         background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px">👁</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Service Key</label>
+        <div style="position:relative">
+          <input type="password" name="SUPABASE_SERVICE_KEY" class="form-input"
+                 id="key-service"
+                 value="{{ env.SUPABASE_SERVICE_KEY or '' }}"
+                 style="padding-right:44px; font-family:'SF Mono','Fira Code',monospace; font-size:13px">
+          <button type="button" onclick="toggleShow('key-service')"
+                  style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                         background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px">👁</button>
+        </div>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Supabase Config</button>
+  </form>
+</div>
+
+<!-- ── LINE OA ── -->
+<div class="card">
+  <div class="card-title">💬 LINE OA (Phase 2)</div>
+  <form method="POST" action="/admin/settings">
+    <input type="hidden" name="section" value="line">
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Channel Secret</label>
+        <div style="position:relative">
+          <input type="password" name="LINE_CHANNEL_SECRET" class="form-input"
+                 id="key-line-secret"
+                 value="{{ env.LINE_CHANNEL_SECRET or '' }}"
+                 placeholder="รอลูกค้าให้"
+                 style="padding-right:44px; font-family:'SF Mono','Fira Code',monospace; font-size:13px">
+          <button type="button" onclick="toggleShow('key-line-secret')"
+                  style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                         background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px">👁</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Channel Access Token</label>
+        <div style="position:relative">
+          <input type="password" name="LINE_CHANNEL_ACCESS_TOKEN" class="form-input"
+                 id="key-line-token"
+                 value="{{ env.LINE_CHANNEL_ACCESS_TOKEN or '' }}"
+                 placeholder="รอลูกค้าให้"
+                 style="padding-right:44px; font-family:'SF Mono','Fira Code',monospace; font-size:13px">
+          <button type="button" onclick="toggleShow('key-line-token')"
+                  style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                         background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px">👁</button>
+        </div>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-secondary">Save LINE Config</button>
+  </form>
+</div>
+
+<!-- ── Retrieval Settings ──
+     Deliberately separate from Prompt Studio: these are Search/Retrieval
+     Engine settings (thresholds, weights, top-k, reranker) — never LLM
+     prompt settings. Backed by services/retrieval_settings.py /
+     rag_retrieval_settings (DB, falls back to config defaults). -->
+<div class="card">
+  <div class="card-title">🔍 Retrieval Settings</div>
+  <div class="form-hint" style="margin-bottom:12px">
+    Controls how the Search/Retrieval Engine finds and ranks knowledge chunks — separate from Prompt Studio,
+    which only controls the LLM's system prompt/persona/tone.
+  </div>
+  <div id="rs-status" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px">Loading retrieval settings…</div>
+  <div id="rs-form" style="display:none">
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Preset</label>
+        <select class="form-input" id="rs-preset" onchange="rsApplyPreset(this.value)">
+          <option value="balanced">Balanced (Default)</option>
+          <option value="strict">Strict</option>
+          <option value="high_recall">High Recall</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div class="form-hint">Balanced fits most cases. Strict reduces false positives; High Recall reduces missed answers.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Search Strategy</label>
+        <select class="form-input" id="rs-search-strategy">
+          <option value="vector_only">Vector Only</option>
+          <option value="hybrid">Hybrid</option>
+          <option value="hybrid_graph">Hybrid + Graph</option>
+          <option value="graph_only">Graph Only</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Candidate Top K</label>
+        <input type="number" class="form-input" id="rs-candidate-top-k" min="1" max="50">
+        <div class="form-hint">How many candidates are fetched before ranking. Default 12.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Final Context Top K</label>
+        <input type="number" class="form-input" id="rs-final-context-top-k" min="1" max="20">
+        <div class="form-hint">How many chunks are actually sent to the LLM. Default 5.</div>
+      </div>
+    </div>
+    <button type="button" class="btn btn-secondary" style="margin-bottom:10px" onclick="rsToggleAdvanced()">
+      <span id="rs-advanced-toggle-label">Show Advanced Settings</span>
+    </button>
+    <div id="rs-advanced" style="display:none">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Absolute Minimum Score</label>
+          <input type="number" step="0.01" class="form-input" id="rs-absolute-minimum-score">
+          <div class="form-hint">A candidate below this hybrid score is never kept, regardless of ranking. Default 0.15.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Relative to Best Ratio</label>
+          <input type="number" step="0.01" class="form-input" id="rs-relative-to-best-ratio">
+          <div class="form-hint">A candidate must score at least this fraction of the pool's best score. Default 0.55.</div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Minimum Candidates</label>
+          <input type="number" class="form-input" id="rs-minimum-candidates">
+          <div class="form-hint">Always keep at least this many candidates when results exist. Default 3.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Maximum Candidates</label>
+          <input type="number" class="form-input" id="rs-maximum-candidates">
+        </div>
+      </div>
+      <div class="form-hint" style="margin-top:4px;margin-bottom:4px">Weights (must sum to 1.0 — auto-adjusted if Graph Search is off)</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Semantic Weight</label>
+          <input type="number" step="0.01" class="form-input" id="rs-semantic-weight">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Keyword Weight</label>
+          <input type="number" step="0.01" class="form-input" id="rs-keyword-weight">
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Heading Weight</label>
+          <input type="number" step="0.01" class="form-input" id="rs-heading-weight">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Graph Weight</label>
+          <input type="number" step="0.01" class="form-input" id="rs-graph-weight">
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label"><input type="checkbox" id="rs-query-expansion-enabled"> Query Expansion</label>
+          <div class="form-hint">Thai-English synonym expansion before retrieval. Default ON.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><input type="checkbox" id="rs-heading-boost-enabled"> Heading Boost</label>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label"><input type="checkbox" id="rs-graph-search-enabled"> Graph Search</label>
+          <div class="form-hint">No retrieval-time graph signal is wired in yet — see report. Leave off.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reranker</label>
+          <select class="form-input" id="rs-reranker-provider">
+            <option value="none">None</option>
+            <option value="heuristic">Heuristic (Default)</option>
+            <option value="llm">LLM (not implemented)</option>
+            <option value="cross_encoder">Cross-Encoder (not implemented)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="rs-errors" class="alert alert-error" style="display:none;margin-top:10px"></div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button type="button" class="btn btn-primary" onclick="rsSave()">Save Settings</button>
+      <button type="button" class="btn" onclick="rsReset()">Reset to Recommended Defaults</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Admin Credentials ── -->
+<div class="card">
+  <div class="card-title">🔐 Admin Login</div>
+  <form method="POST" action="/admin/settings">
+    <input type="hidden" name="section" value="admin">
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" name="ADMIN_USERNAME" class="form-input"
+               value="{{ env.ADMIN_USERNAME or '' }}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <div style="position:relative">
+          <input type="password" name="ADMIN_PASSWORD" class="form-input"
+                 id="key-admin-pass"
+                 value="{{ env.ADMIN_PASSWORD or '' }}"
+                 style="padding-right:44px">
+          <button type="button" onclick="toggleShow('key-admin-pass')"
+                  style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                         background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px">👁</button>
+        </div>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-secondary">Save Admin Credentials</button>
+  </form>
+</div>
+
+<!-- ── Developer Settings (Developer Mode milestone) ── -->
+<div class="card">
+  <div class="card-title">🛠️ Developer Settings</div>
+  {% if request.query_params.get('dev_feature_blocked') %}
+  <div class="alert alert-warn" style="margin-bottom:14px">
+    That page requires Developer Mode to be turned on. Enable it below to access it, or ask an administrator.
+  </div>
+  {% endif %}
+  <form method="POST" action="/admin/settings" onsubmit="return confirmDevModeToggle(this)">
+    <input type="hidden" name="section" value="developer">
+    <div class="form-group">
+      <label class="form-label">Developer Mode</label>
+      <div class="form-hint" style="margin-bottom:8px">
+        Show advanced development, testing, validation, and integration tools. Intended for administrators and developers only.
+      </div>
+      <select name="DEVELOPER_MODE" class="form-input" id="developer-mode-select" style="max-width:220px">
+        <option value="false" {% if not developer_mode %}selected{% endif %}>OFF</option>
+        <option value="true" {% if developer_mode %}selected{% endif %}>ON</option>
+      </select>
+      <div class="form-hint" style="margin-top:10px">
+        Status: <strong>{{ "Enabled" if developer_mode else "Disabled" }}</strong>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-secondary">Save Developer Mode</button>
+  </form>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function toggleShow(id) {
+  var el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+function confirmDevModeToggle(form) {
+  var select = form.querySelector('#developer-mode-select');
+  var turningOn = select.value === 'true';
+  var wasOn = {{ 'true' if developer_mode else 'false' }};
+  if (turningOn && !wasOn) {
+    return confirm('Developer Mode exposes advanced tools that may affect testing, integrations, and system configuration. Use only if you understand these features.\n\nContinue?');
+  }
+  return true;
+}
+var msgEl = document.getElementById('settings-msg');
+if (msgEl) setTimeout(function() {
+  msgEl.style.transition = 'opacity .5s';
+  msgEl.style.opacity = '0';
+  setTimeout(function(){ msgEl.remove(); }, 500);
+}, 4000);
+
+/* ── Retrieval Settings ── */
+var _rsPresets = {};
+
+function rsFieldIds() {
+  return ['search-strategy', 'candidate-top-k', 'final-context-top-k', 'absolute-minimum-score',
+          'relative-to-best-ratio', 'minimum-candidates', 'maximum-candidates', 'semantic-weight',
+          'keyword-weight', 'heading-weight', 'graph-weight', 'reranker-provider'];
+}
+
+function rsPopulate(s) {
+  document.getElementById('rs-preset').value = s.preset || 'custom';
+  document.getElementById('rs-search-strategy').value = s.search_strategy;
+  document.getElementById('rs-candidate-top-k').value = s.candidate_top_k;
+  document.getElementById('rs-final-context-top-k').value = s.final_context_top_k;
+  document.getElementById('rs-absolute-minimum-score').value = s.absolute_minimum_score;
+  document.getElementById('rs-relative-to-best-ratio').value = s.relative_to_best_ratio;
+  document.getElementById('rs-minimum-candidates').value = s.minimum_candidates;
+  document.getElementById('rs-maximum-candidates').value = s.maximum_candidates;
+  document.getElementById('rs-semantic-weight').value = s.semantic_weight;
+  document.getElementById('rs-keyword-weight').value = s.keyword_weight;
+  document.getElementById('rs-heading-weight').value = s.heading_weight;
+  document.getElementById('rs-graph-weight').value = s.graph_weight;
+  document.getElementById('rs-query-expansion-enabled').checked = !!s.query_expansion_enabled;
+  document.getElementById('rs-heading-boost-enabled').checked = !!s.heading_boost_enabled;
+  document.getElementById('rs-graph-search-enabled').checked = !!s.graph_search_enabled;
+  document.getElementById('rs-reranker-provider').value = s.reranker_provider;
+}
+
+function rsCollect() {
+  return {
+    preset: document.getElementById('rs-preset').value,
+    search_strategy: document.getElementById('rs-search-strategy').value,
+    candidate_top_k: parseInt(document.getElementById('rs-candidate-top-k').value, 10),
+    final_context_top_k: parseInt(document.getElementById('rs-final-context-top-k').value, 10),
+    absolute_minimum_score: parseFloat(document.getElementById('rs-absolute-minimum-score').value),
+    relative_to_best_ratio: parseFloat(document.getElementById('rs-relative-to-best-ratio').value),
+    minimum_candidates: parseInt(document.getElementById('rs-minimum-candidates').value, 10),
+    maximum_candidates: parseInt(document.getElementById('rs-maximum-candidates').value, 10),
+    semantic_weight: parseFloat(document.getElementById('rs-semantic-weight').value),
+    keyword_weight: parseFloat(document.getElementById('rs-keyword-weight').value),
+    heading_weight: parseFloat(document.getElementById('rs-heading-weight').value),
+    graph_weight: parseFloat(document.getElementById('rs-graph-weight').value),
+    query_expansion_enabled: document.getElementById('rs-query-expansion-enabled').checked,
+    heading_boost_enabled: document.getElementById('rs-heading-boost-enabled').checked,
+    graph_search_enabled: document.getElementById('rs-graph-search-enabled').checked,
+    reranker_provider: document.getElementById('rs-reranker-provider').value,
+  };
+}
+
+function rsApplyPreset(name) {
+  if (name === 'custom' || !_rsPresets[name]) return;
+  rsPopulate(_rsPresets[name]);
+}
+
+function rsToggleAdvanced() {
+  var el = document.getElementById('rs-advanced');
+  var open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  document.getElementById('rs-advanced-toggle-label').textContent = open ? 'Show Advanced Settings' : 'Hide Advanced Settings';
+}
+
+function rsLoad() {
+  fetch('/admin/api/retrieval-settings').then(function(r){ return r.json(); }).then(function(d) {
+    if (!d.ok) { document.getElementById('rs-status').textContent = 'Unable to load retrieval settings.'; return; }
+    _rsPresets = d.presets;
+    rsPopulate(d.settings);
+    document.getElementById('rs-status').style.display = 'none';
+    document.getElementById('rs-form').style.display = 'block';
+  }).catch(function() {
+    document.getElementById('rs-status').textContent = 'Unable to load retrieval settings.';
+  });
+}
+
+function rsSave() {
+  var errBox = document.getElementById('rs-errors');
+  errBox.style.display = 'none';
+  fetch('/admin/api/retrieval-settings', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(rsCollect()),
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    if (!d.ok) {
+      errBox.textContent = (d.errors || [d.error || 'Save failed']).join('; ');
+      errBox.style.display = 'block';
+      return;
+    }
+    rsPopulate(d.settings);
+  });
+}
+
+function rsReset() {
+  uiConfirm('Reset Retrieval Settings to the recommended (Balanced) defaults?', 'Reset Settings').then(function(ok) {
+    if (!ok) return;
+    fetch('/admin/api/retrieval-settings/reset', {method: 'POST'}).then(function(r){ return r.json(); }).then(function(d) {
+      if (d.ok) rsPopulate(d.settings);
+    });
+  });
+}
+
+rsLoad();
+</script>
+{% endblock %}

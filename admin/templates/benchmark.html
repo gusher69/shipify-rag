@@ -1,0 +1,679 @@
+{% extends "base.html" %}
+{% set active = "rag_benchmark" %}
+{% block title %}RAG Benchmark — Shipify Admin{% endblock %}
+{% block topbar_title %}RAG Benchmark{% endblock %}
+
+{% block extra_head %}
+<style>
+.bm-tabs{display:flex;gap:4px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:16px}
+.bm-tab{padding:9px 16px;font-size:13px;color:rgba(232,237,245,.55);cursor:pointer;border-bottom:2px solid transparent}
+.bm-tab.active{color:#e8edf5;border-bottom-color:#5b9dff}
+.bm-panel{display:none}
+.bm-panel.active{display:block}
+.bm-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.bm-summary-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px}
+@media(max-width:1100px){.bm-summary-grid{grid-template-columns:repeat(3,1fr)}}
+.bm-summary-cell{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px}
+.bm-summary-cell .label{font-size:10.5px;color:rgba(232,237,245,.45);text-transform:uppercase;letter-spacing:.04em}
+.bm-summary-cell .value{font-size:18px;font-weight:600;color:#e8edf5;margin-top:2px}
+.bm-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.bm-table th{text-align:left;padding:8px 10px;color:rgba(232,237,245,.5);border-bottom:1px solid rgba(255,255,255,.08);white-space:nowrap}
+.bm-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}
+.bm-table tr:hover td{background:rgba(255,255,255,.02);cursor:pointer}
+.bm-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:600}
+.bm-badge.pass{background:rgba(52,211,153,.12);color:#34d399}
+.bm-badge.fail{background:rgba(248,113,113,.12);color:#f87171}
+.bm-badge.error{background:rgba(252,165,165,.12);color:#fca5a5}
+.bm-filter-bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.bm-filter-chip{padding:4px 10px;border-radius:20px;font-size:11.5px;border:1px solid rgba(255,255,255,.1);color:rgba(232,237,245,.6);cursor:pointer}
+.bm-filter-chip.active{border-color:#5b9dff;color:#5b9dff;background:rgba(91,157,255,.08)}
+.bm-guidance{background:rgba(91,157,255,.06);border:1px solid rgba(91,157,255,.2);border-radius:10px;padding:12px 14px;font-size:12.5px;color:rgba(232,237,245,.7);margin-bottom:16px}
+.bm-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center}
+.bm-modal-overlay.open{display:flex}
+.bm-modal{background:#0f1a30;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:20px;max-width:700px;width:92%;max-height:85vh;overflow-y:auto}
+textarea.bm-input, input.bm-input, select.bm-input{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:#e8edf5;padding:7px 9px;font-size:12.5px;margin-bottom:8px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:16px">
+  <div class="page-title">RAG Benchmark</div>
+  <div class="page-sub">Create test cases, run retrieval-only or full-RAG evaluations, and compare results before/after RAG changes.</div>
+</div>
+
+<div class="bm-guidance">
+  <b>Recommended workflow:</b> 1) Create 30–50 real test cases &middot; 2) Run <b>Retrieval Only</b> (free, fast) &middot;
+  3) Fix retrieval failures &middot; 4) Run <b>Full RAG</b> on 10–20 critical cases &middot; 5) Save as Baseline &middot;
+  6) After future RAG changes, run again and Compare against Baseline.
+</div>
+
+<div class="bm-tabs">
+  <div class="bm-tab active" data-tab="dataset" onclick="bmSwitchTab('dataset')">Dataset</div>
+  <div class="bm-tab" data-tab="run" onclick="bmSwitchTab('run')">Run Benchmark</div>
+  <div class="bm-tab" data-tab="results" onclick="bmSwitchTab('results')">Results</div>
+  <div class="bm-tab" data-tab="compare" onclick="bmSwitchTab('compare')">Compare Runs</div>
+</div>
+
+<!-- ── Dataset tab ── -->
+<div class="bm-panel active" id="bm-panel-dataset">
+  <div class="bm-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div>
+        <label style="font-size:11.5px;color:rgba(232,237,245,.5)">Dataset:</label>
+        <select class="bm-input" id="bm-dataset-select" style="display:inline-block;width:auto;min-width:220px" onchange="bmLoadCases()"></select>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn" onclick="bmNewDataset()">+ New Dataset</button>
+        <button class="btn" onclick="bmNewCase()">+ New Case</button>
+        <button class="btn" onclick="document.getElementById('bm-import-file').click()">Import JSON</button>
+        <input type="file" id="bm-import-file" accept="application/json" style="display:none" onchange="bmImportFile(this)">
+        <button class="btn" onclick="bmExportCases()">Export JSON</button>
+      </div>
+    </div>
+    <table class="bm-table" id="bm-cases-table">
+      <thead><tr><th>Question</th><th>Lang</th><th>Expected File</th><th>Section</th><th>Answerability</th><th>Tags</th><th>Active</th><th></th></tr></thead>
+      <tbody id="bm-cases-tbody"><tr><td colspan="8" style="text-align:center;color:rgba(232,237,245,.4)">No dataset selected.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Run Benchmark tab ── -->
+<div class="bm-panel" id="bm-panel-run">
+  <div class="bm-card">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="font-size:11.5px;color:rgba(232,237,245,.5)">Run Name</label>
+        <input class="bm-input" id="bm-run-name" placeholder="e.g. Baseline v1" style="width:220px">
+      </div>
+      <div>
+        <label style="font-size:11.5px;color:rgba(232,237,245,.5)">Mode</label>
+        <select class="bm-input" id="bm-run-mode" style="width:220px">
+          <option value="RETRIEVAL_ONLY" selected>Retrieval Only (recommended)</option>
+          <option value="FULL_RAG">Full RAG (costs money)</option>
+          <option value="QUERY_UNDERSTANDING">Query Understanding Only (free, no LLM)</option>
+          <option value="CONVERSATION_SCENARIO">Conversation Scenario (costs money)</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11.5px;color:rgba(232,237,245,.5)">Top K</label>
+        <input class="bm-input" id="bm-run-topk" type="number" value="3" style="width:80px">
+      </div>
+      <button class="btn btn-primary" onclick="bmStartRun()">▶ Start Run</button>
+    </div>
+    <div id="bm-cost-estimate" style="margin-top:10px;font-size:12px;color:rgba(232,237,245,.6)"></div>
+  </div>
+
+  <div class="bm-card" id="bm-progress-card" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><b id="bm-progress-status">queued</b> — <span id="bm-progress-detail"></span></div>
+      <button class="btn" onclick="bmCancelRun()" style="background:rgba(239,68,68,.12);color:#fca5a5">Cancel Run</button>
+    </div>
+    <div style="margin-top:8px;height:6px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden">
+      <div id="bm-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);transition:width .3s"></div>
+    </div>
+  </div>
+
+  <div class="bm-card">
+    <div class="pg-panel-title" style="margin-bottom:8px">Past Runs</div>
+    <table class="bm-table">
+      <thead><tr><th>Run</th><th>Mode</th><th>Status</th><th>Pass Rate</th><th>Avg Latency</th><th>Cost</th><th>Created</th><th></th></tr></thead>
+      <tbody id="bm-runs-tbody"><tr><td colspan="8" style="text-align:center;color:rgba(232,237,245,.4)">No runs yet.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Results tab ── -->
+<div class="bm-panel" id="bm-panel-results">
+  <div class="bm-card">
+    <label style="font-size:11.5px;color:rgba(232,237,245,.5)">Run:</label>
+    <select class="bm-input" id="bm-results-run-select" style="display:inline-block;width:auto;min-width:260px" onchange="bmLoadResults()"></select>
+  </div>
+  <div class="bm-summary-grid" id="bm-run-summary"></div>
+  <div class="bm-filter-bar" id="bm-result-filters">
+    <div class="bm-filter-chip active" data-f="all" onclick="bmFilterResults('all')">All</div>
+    <div class="bm-filter-chip" data-f="pass" onclick="bmFilterResults('pass')">Pass</div>
+    <div class="bm-filter-chip" data-f="fail" onclick="bmFilterResults('fail')">Fail</div>
+    <div class="bm-filter-chip" data-f="retrieval_miss" onclick="bmFilterResults('retrieval_miss')">Retrieval Miss</div>
+    <div class="bm-filter-chip" data-f="wrong_citation" onclick="bmFilterResults('wrong_citation')">Wrong Citation</div>
+    <div class="bm-filter-chip" data-f="unsupported_claim" onclick="bmFilterResults('unsupported_claim')">Hallucination</div>
+  </div>
+  <table class="bm-table">
+    <thead><tr><th></th><th>Question</th><th>Lang</th><th>Expected</th><th>Actual</th><th>Top Source</th><th>Answerability</th><th>Latency</th><th>Cost</th><th>Failure</th></tr></thead>
+    <tbody id="bm-results-tbody"><tr><td colspan="10" style="text-align:center;color:rgba(232,237,245,.4)">Select a run.</td></tr></tbody>
+  </table>
+</div>
+
+<!-- ── Compare Runs tab ── -->
+<div class="bm-panel" id="bm-panel-compare">
+  <div class="bm-card">
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+      <div><label style="font-size:11.5px;color:rgba(232,237,245,.5)">Baseline</label>
+        <select class="bm-input" id="bm-compare-a" style="width:260px"></select></div>
+      <div><label style="font-size:11.5px;color:rgba(232,237,245,.5)">Candidate</label>
+        <select class="bm-input" id="bm-compare-b" style="width:260px"></select></div>
+      <button class="btn btn-primary" onclick="bmRunCompare()">Compare</button>
+    </div>
+  </div>
+  <div id="bm-compare-summary" class="bm-summary-grid"></div>
+  <div class="bm-card">
+    <div class="pg-panel-title" style="margin-bottom:8px">Changed Cases</div>
+    <table class="bm-table">
+      <thead><tr><th>Question</th><th>Previous Status</th><th>New Status</th><th>Previous Top Chunk</th><th>New Top Chunk</th></tr></thead>
+      <tbody id="bm-compare-tbody"><tr><td colspan="5" style="text-align:center;color:rgba(232,237,245,.4)">Select two runs and compare.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Case editor modal ── -->
+<div class="bm-modal-overlay" id="bm-case-modal">
+  <div class="bm-modal">
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px"><b>Benchmark Case</b>
+      <span style="cursor:pointer" onclick="bmCloseCaseModal()">✕</span></div>
+    <input type="hidden" id="bm-case-id">
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Question</label>
+    <textarea class="bm-input" id="bm-case-question" rows="2"></textarea>
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Language</label>
+    <select class="bm-input" id="bm-case-language">
+      <option>English</option><option>Thai</option><option>Mixed Thai-English</option>
+    </select>
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Answer</label>
+    <textarea class="bm-input" id="bm-case-expected-answer" rows="2"></textarea>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Expected File</label>
+        <input class="bm-input" id="bm-case-expected-file"></div>
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Section</label>
+        <input class="bm-input" id="bm-case-expected-section"></div>
+    </div>
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Answerability</label>
+    <select class="bm-input" id="bm-case-answerability">
+      <option value="">—</option><option value="direct_answer">direct_answer</option>
+      <option value="partial_answer">partial_answer</option><option value="no_information">no_information</option>
+    </select>
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Must Include (comma-separated)</label>
+    <input class="bm-input" id="bm-case-must-include">
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Must Not Include (comma-separated)</label>
+    <input class="bm-input" id="bm-case-must-not-include">
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Prohibited Files (comma-separated)</label>
+    <input class="bm-input" id="bm-case-prohibited-files">
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Tags (comma-separated)</label>
+    <input class="bm-input" id="bm-case-tags">
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Notes</label>
+    <textarea class="bm-input" id="bm-case-notes" rows="2"></textarea>
+
+    <div style="border-top:1px solid rgba(255,255,255,.08);margin:10px 0;padding-top:8px;font-size:11px;color:rgba(232,237,245,.4)">
+      Query Understanding / Conversation Scenario (Phase 2) — optional
+    </div>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Topic</label>
+        <input class="bm-input" id="bm-case-expected-topic"></div>
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Subtopic</label>
+        <input class="bm-input" id="bm-case-expected-subtopic"></div>
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Intent</label>
+        <input class="bm-input" id="bm-case-expected-intent"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Transition</label>
+        <select class="bm-input" id="bm-case-expected-transition">
+          <option value="">—</option><option value="new_topic">new_topic</option>
+          <option value="same_topic">same_topic</option><option value="switch_topic">switch_topic</option>
+        </select></div>
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Scenario Key</label>
+        <input class="bm-input" id="bm-case-scenario-key" placeholder="e.g. warehouse-continuity-1"></div>
+      <div style="flex:1"><label style="font-size:11px;color:rgba(232,237,245,.5)">Turn Index</label>
+        <input class="bm-input" id="bm-case-turn-index" type="number"></div>
+    </div>
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Entities (JSON, e.g. {"location":"จีน"})</label>
+    <input class="bm-input" id="bm-case-expected-entities">
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Expected Excluded Entities (JSON, e.g. {"location":["จีน"]})</label>
+    <input class="bm-input" id="bm-case-expected-excluded-entities">
+    <label style="font-size:11px;color:rgba(232,237,245,.5)">Critical Facts (JSON array, e.g. [{"key":"fee","value":500,"unit":"THB"}])</label>
+    <input class="bm-input" id="bm-case-critical-facts">
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
+      <button class="btn" onclick="bmCloseCaseModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="bmSaveCase()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Result detail modal ── -->
+<div class="bm-modal-overlay" id="bm-result-modal">
+  <div class="bm-modal" style="max-width:900px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px"><b>Result Detail</b>
+      <span style="cursor:pointer" onclick="document.getElementById('bm-result-modal').classList.remove('open')">✕</span></div>
+    <div id="bm-result-detail-body" style="font-size:12.5px;line-height:1.6"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var _bmDatasets = [], _bmCases = [], _bmRuns = [], _bmResults = [], _bmResultFilter = 'all', _bmActiveRunId = null, _bmPollTimer = null;
+
+function bmSwitchTab(tab) {
+  document.querySelectorAll('.bm-tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab === tab); });
+  document.querySelectorAll('.bm-panel').forEach(function(p){ p.classList.toggle('active', p.id === 'bm-panel-' + tab); });
+  if (tab === 'results') bmLoadRunsForSelect('bm-results-run-select');
+  if (tab === 'compare') { bmLoadRunsForSelect('bm-compare-a'); bmLoadRunsForSelect('bm-compare-b'); }
+}
+
+function bmLoadDatasets() {
+  fetch('/admin/api/benchmark/datasets').then(function(r){return r.json();}).then(function(d){
+    if (!d.ok) return;
+    _bmDatasets = d.datasets;
+    var sel = document.getElementById('bm-dataset-select');
+    sel.innerHTML = _bmDatasets.map(function(ds){
+      return '<option value="'+ds.id+'">'+esc(ds.name)+' ('+ds.case_count+' cases)</option>';
+    }).join('') || '<option value="">No datasets — create one</option>';
+    bmLoadCases();
+    bmLoadRuns();
+  });
+}
+
+function bmNewDataset() {
+  uiPrompt('Dataset name', '', 'New Dataset').then(function(name) {
+    if (!name) return;
+    fetch('/admin/api/benchmark/datasets', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name: name})}).then(function(){ bmLoadDatasets(); });
+  });
+}
+
+function bmCurrentDatasetId() {
+  var sel = document.getElementById('bm-dataset-select');
+  return sel ? sel.value : null;
+}
+
+function bmLoadCases() {
+  var id = bmCurrentDatasetId();
+  var tbody = document.getElementById('bm-cases-tbody');
+  if (!id) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:rgba(232,237,245,.4)">No dataset selected.</td></tr>'; return; }
+  fetch('/admin/api/benchmark/datasets/' + id + '/cases').then(function(r){return r.json();}).then(function(d){
+    if (!d.ok) return;
+    _bmCases = d.cases;
+    if (!_bmCases.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:rgba(232,237,245,.4)">No cases yet.</td></tr>'; return; }
+    tbody.innerHTML = _bmCases.map(function(c){
+      return '<tr><td>'+esc(c.question)+'</td><td>'+esc(c.language||'')+'</td><td>'+esc(c.expected_file||'')+'</td>' +
+        '<td>'+esc(c.expected_section||'')+'</td><td>'+esc(c.expected_answerability||'')+'</td>' +
+        '<td>'+esc((c.tags||[]).join(', '))+'</td><td>'+(c.is_active?'✅':'—')+'</td>' +
+        '<td><button class="btn" style="padding:3px 8px;font-size:11px" onclick="bmEditCase(\''+c.id+'\')">Edit</button> ' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="bmDuplicateCase(\''+c.id+'\')">Dup</button> ' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="bmDeleteCase(\''+c.id+'\')">Del</button></td></tr>';
+    }).join('');
+  });
+}
+
+function bmNewCase() {
+  document.getElementById('bm-case-id').value = '';
+  ['question','expected-answer','expected-file','expected-section','must-include','must-not-include','prohibited-files','tags','notes',
+   'expected-topic','expected-subtopic','expected-intent','scenario-key','turn-index','expected-entities','expected-excluded-entities','critical-facts']
+    .forEach(function(f){ document.getElementById('bm-case-'+f).value = ''; });
+  document.getElementById('bm-case-language').value = 'English';
+  document.getElementById('bm-case-answerability').value = '';
+  document.getElementById('bm-case-expected-transition').value = '';
+  document.getElementById('bm-case-modal').classList.add('open');
+}
+
+function bmEditCase(id) {
+  var c = _bmCases.find(function(x){ return x.id === id; });
+  if (!c) return;
+  document.getElementById('bm-case-id').value = c.id;
+  document.getElementById('bm-case-question').value = c.question || '';
+  document.getElementById('bm-case-language').value = c.language || 'English';
+  document.getElementById('bm-case-expected-answer').value = c.expected_answer || '';
+  document.getElementById('bm-case-expected-file').value = c.expected_file || '';
+  document.getElementById('bm-case-expected-section').value = c.expected_section || '';
+  document.getElementById('bm-case-answerability').value = c.expected_answerability || '';
+  document.getElementById('bm-case-must-include').value = (c.must_include||[]).join(', ');
+  document.getElementById('bm-case-must-not-include').value = (c.must_not_include||[]).join(', ');
+  document.getElementById('bm-case-prohibited-files').value = (c.prohibited_files||[]).join(', ');
+  document.getElementById('bm-case-tags').value = (c.tags||[]).join(', ');
+  document.getElementById('bm-case-notes').value = c.notes || '';
+  document.getElementById('bm-case-expected-topic').value = c.expected_topic || '';
+  document.getElementById('bm-case-expected-subtopic').value = c.expected_subtopic || '';
+  document.getElementById('bm-case-expected-intent').value = c.expected_intent || '';
+  document.getElementById('bm-case-expected-transition').value = c.expected_transition || '';
+  document.getElementById('bm-case-scenario-key').value = c.scenario_key || '';
+  document.getElementById('bm-case-turn-index').value = c.turn_index != null ? c.turn_index : '';
+  document.getElementById('bm-case-expected-entities').value = (c.expected_entities && Object.keys(c.expected_entities).length) ? JSON.stringify(c.expected_entities) : '';
+  document.getElementById('bm-case-expected-excluded-entities').value = (c.expected_excluded_entities && Object.keys(c.expected_excluded_entities).length) ? JSON.stringify(c.expected_excluded_entities) : '';
+  document.getElementById('bm-case-critical-facts').value = (c.critical_facts && c.critical_facts.length) ? JSON.stringify(c.critical_facts) : '';
+  document.getElementById('bm-case-modal').classList.add('open');
+}
+
+function _parseJsonField(id, fallback) {
+  var raw = (document.getElementById(id).value || '').trim();
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch (e) { alert(id + ' is not valid JSON — ignoring.'); return fallback; }
+}
+
+function bmCloseCaseModal() { document.getElementById('bm-case-modal').classList.remove('open'); }
+
+function _csvToList(v) { return v.split(',').map(function(s){return s.trim();}).filter(Boolean); }
+
+function bmSaveCase() {
+  var id = document.getElementById('bm-case-id').value;
+  var payload = {
+    question: document.getElementById('bm-case-question').value,
+    language: document.getElementById('bm-case-language').value,
+    expected_answer: document.getElementById('bm-case-expected-answer').value,
+    expected_file: document.getElementById('bm-case-expected-file').value,
+    expected_section: document.getElementById('bm-case-expected-section').value,
+    expected_answerability: document.getElementById('bm-case-answerability').value,
+    must_include: _csvToList(document.getElementById('bm-case-must-include').value),
+    must_not_include: _csvToList(document.getElementById('bm-case-must-not-include').value),
+    prohibited_files: _csvToList(document.getElementById('bm-case-prohibited-files').value),
+    tags: _csvToList(document.getElementById('bm-case-tags').value),
+    notes: document.getElementById('bm-case-notes').value,
+    is_active: true,
+    expected_topic: document.getElementById('bm-case-expected-topic').value || null,
+    expected_subtopic: document.getElementById('bm-case-expected-subtopic').value || null,
+    expected_intent: document.getElementById('bm-case-expected-intent').value || null,
+    expected_transition: document.getElementById('bm-case-expected-transition').value || null,
+    scenario_key: document.getElementById('bm-case-scenario-key').value || null,
+    turn_index: document.getElementById('bm-case-turn-index').value ? parseInt(document.getElementById('bm-case-turn-index').value, 10) : null,
+    expected_entities: _parseJsonField('bm-case-expected-entities', {}),
+    expected_excluded_entities: _parseJsonField('bm-case-expected-excluded-entities', {}),
+    critical_facts: _parseJsonField('bm-case-critical-facts', []),
+  };
+  var url = id ? '/admin/api/benchmark/cases/' + id : '/admin/api/benchmark/datasets/' + bmCurrentDatasetId() + '/cases';
+  fetch(url, {method: id ? 'PATCH' : 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+    .then(function(){ bmCloseCaseModal(); bmLoadCases(); bmLoadDatasets(); });
+}
+
+function bmDuplicateCase(id) {
+  fetch('/admin/api/benchmark/cases/' + id + '/duplicate', {method:'POST'}).then(function(){ bmLoadCases(); });
+}
+
+function bmDeleteCase(id) {
+  uiConfirm('Delete this case? Historical run results referencing it are kept.', 'Delete Case').then(function(ok) {
+    if (!ok) return;
+    fetch('/admin/api/benchmark/cases/' + id, {method:'DELETE'}).then(function(){ bmLoadCases(); bmLoadDatasets(); });
+  });
+}
+
+function bmImportFile(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var data;
+    try { data = JSON.parse(e.target.result); } catch(err) { alert('Invalid JSON'); return; }
+    var cases = Array.isArray(data) ? data : (data.cases || []);
+    fetch('/admin/api/benchmark/datasets/' + bmCurrentDatasetId() + '/import', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cases: cases}),
+    }).then(function(r){return r.json();}).then(function(d){
+      alert('Imported ' + d.inserted + ' case(s)' + (d.errors&&d.errors.length ? ('; ' + d.errors.length + ' error(s)') : ''));
+      bmLoadCases(); bmLoadDatasets();
+    });
+  };
+  reader.readAsText(file);
+}
+
+function bmExportCases() {
+  window.open('/admin/api/benchmark/datasets/' + bmCurrentDatasetId() + '/export', '_blank');
+}
+
+function bmLoadRuns() {
+  var id = bmCurrentDatasetId();
+  fetch('/admin/api/benchmark/runs' + (id ? '?dataset_id=' + id : '')).then(function(r){return r.json();}).then(function(d){
+    if (!d.ok) return;
+    _bmRuns = d.runs;
+    var tbody = document.getElementById('bm-runs-tbody');
+    if (!_bmRuns.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:rgba(232,237,245,.4)">No runs yet.</td></tr>'; return; }
+    tbody.innerHTML = _bmRuns.map(function(r){
+      var passRate = r.total_cases ? Math.round(100*r.passed_cases/r.total_cases) + '%' : '—';
+      return '<tr><td>'+esc(r.run_name)+'</td><td>'+esc(r.mode)+'</td><td>'+esc(r.status)+'</td>' +
+        '<td>'+passRate+'</td><td>'+(r.average_latency_ms?Math.round(r.average_latency_ms)+'ms':'—')+'</td>' +
+        '<td>$'+(r.estimated_cost||0).toFixed(4)+'</td><td>'+new Date(r.created_at).toLocaleString()+'</td>' +
+        '<td><button class="btn" style="padding:3px 8px;font-size:11px" onclick="bmRerunFailed(\''+r.id+'\')">Rerun Failed</button></td></tr>';
+    }).join('');
+  });
+}
+
+function bmLoadRunsForSelect(selectId) {
+  var id = bmCurrentDatasetId();
+  fetch('/admin/api/benchmark/runs' + (id ? '?dataset_id=' + id : '')).then(function(r){return r.json();}).then(function(d){
+    if (!d.ok) return;
+    var sel = document.getElementById(selectId);
+    sel.innerHTML = (d.runs||[]).map(function(r){
+      return '<option value="'+r.id+'">'+esc(r.run_name)+' ('+esc(r.mode)+', '+esc(r.status)+')</option>';
+    }).join('');
+  });
+}
+
+function bmStartRun() {
+  var mode = document.getElementById('bm-run-mode').value;
+  var datasetId = bmCurrentDatasetId();
+  if (!datasetId) { alert('Select a dataset first.'); return; }
+
+  function launch() {
+    fetch('/admin/api/benchmark/runs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      dataset_id: datasetId, run_name: document.getElementById('bm-run-name').value || undefined,
+      mode: mode, top_k: parseInt(document.getElementById('bm-run-topk').value || '3', 10),
+    })}).then(function(r){return r.json();}).then(function(d){
+      if (!d.ok) { alert(d.error || 'Could not start run'); return; }
+      _bmActiveRunId = d.run_id;
+      document.getElementById('bm-progress-card').style.display = '';
+      bmPollRun();
+    });
+  }
+
+  if (mode === 'FULL_RAG' || mode === 'CONVERSATION_SCENARIO') {
+    var caseCount = _bmCases.filter(function(c){return c.is_active;}).length;
+    fetch('/admin/api/benchmark/estimate-cost', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({case_count: caseCount})}).then(function(r){return r.json();}).then(function(d){
+      var est = d.estimate;
+      uiConfirm(mode + ' will make ~' + est.estimated_llm_calls + ' real LLM call(s), estimated max cost $' +
+                   est.estimated_max_cost_usd + '. Continue?', 'Confirm Run').then(function(ok) {
+        if (!ok) return;
+        launch();
+      });
+    });
+  } else {
+    launch();
+  }
+}
+
+function bmPollRun() {
+  if (_bmPollTimer) clearInterval(_bmPollTimer);
+  _bmPollTimer = setInterval(function() {
+    fetch('/admin/api/benchmark/runs/' + _bmActiveRunId).then(function(r){return r.json();}).then(function(d){
+      if (!d.ok) return;
+      var p = d.progress || {};
+      var status = d.run.status;
+      document.getElementById('bm-progress-status').textContent = status;
+      document.getElementById('bm-progress-detail').textContent =
+        (p.completed||0) + '/' + (p.total||0) + ' completed, ' + (p.failed||0) + ' failed' +
+        (p.current_case ? (' — ' + p.current_case) : '');
+      var pct = p.total ? Math.round(100*(p.completed||0)/p.total) : 0;
+      document.getElementById('bm-progress-bar').style.width = pct + '%';
+      if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+        clearInterval(_bmPollTimer);
+        bmLoadRuns();
+      }
+    });
+  }, 1500);
+}
+
+function bmCancelRun() {
+  if (!_bmActiveRunId) return;
+  fetch('/admin/api/benchmark/runs/' + _bmActiveRunId + '/cancel', {method:'POST'});
+}
+
+function bmRerunFailed(runId) {
+  fetch('/admin/api/benchmark/runs/' + runId + '/rerun-failed', {method:'POST'}).then(function(r){return r.json();}).then(function(d){
+    if (d.run_id) { _bmActiveRunId = d.run_id; document.getElementById('bm-progress-card').style.display=''; bmPollRun(); }
+    else alert(d.message || 'Nothing to rerun');
+  });
+}
+
+function bmLoadResults() {
+  var runId = document.getElementById('bm-results-run-select').value;
+  if (!runId) return;
+  fetch('/admin/api/benchmark/runs/' + runId).then(function(r){return r.json();}).then(function(d){
+    var run = d.run;
+    document.getElementById('bm-run-summary').innerHTML = [
+      ['Total Cases', run.total_cases], ['Passed', run.passed_cases], ['Failed', run.failed_cases],
+      ['Pass Rate', run.total_cases ? Math.round(100*run.passed_cases/run.total_cases)+'%' : '—'],
+      ['Avg Latency', run.average_latency_ms ? Math.round(run.average_latency_ms)+'ms' : '—'],
+      ['P95 Latency', run.p95_latency_ms ? Math.round(run.p95_latency_ms)+'ms' : '—'],
+      ['Total Tokens', (run.input_tokens||0)+(run.output_tokens||0)], ['Est. Cost', '$'+(run.estimated_cost||0).toFixed(4)],
+    ].map(function(kv){ return '<div class="bm-summary-cell"><div class="label">'+kv[0]+'</div><div class="value">'+kv[1]+'</div></div>'; }).join('');
+  });
+  fetch('/admin/api/benchmark/runs/' + runId + '/results').then(function(r){return r.json();}).then(function(d){
+    if (!d.ok) return;
+    _bmResults = d.results;
+    bmRenderResults();
+  });
+}
+
+function bmFilterResults(f) {
+  _bmResultFilter = f;
+  document.querySelectorAll('#bm-result-filters .bm-filter-chip').forEach(function(c){ c.classList.toggle('active', c.dataset.f === f); });
+  bmRenderResults();
+}
+
+function bmRenderResults() {
+  var tbody = document.getElementById('bm-results-tbody');
+  var rows = _bmResults;
+  if (_bmResultFilter === 'pass') rows = rows.filter(function(r){return r.status==='pass';});
+  else if (_bmResultFilter === 'fail') rows = rows.filter(function(r){return r.status!=='pass';});
+  else if (_bmResultFilter !== 'all') rows = rows.filter(function(r){return r.failure_type===_bmResultFilter;});
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:rgba(232,237,245,.4)">No results.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(function(r, i){
+    var topSource = (r.retrieved_chunks && r.retrieved_chunks[0]) ? r.retrieved_chunks[0].file_name : '—';
+    return '<tr onclick="bmShowResultDetail(\''+r.id+'\')"><td><span class="bm-badge '+esc(r.status)+'">'+esc(r.status)+'</span></td>' +
+      '<td>'+esc(r.question)+'</td><td>—</td><td>'+esc((r.expected_answer||'').slice(0,60))+'</td>' +
+      '<td>'+esc((r.actual_answer||'').slice(0,60))+'</td><td>'+esc(topSource||'')+'</td>' +
+      '<td>'+esc(r.answerability||'')+'</td><td>'+Math.round(r.latency_ms||0)+'ms</td>' +
+      '<td>$'+(r.estimated_cost||0).toFixed(4)+'</td><td>'+esc(r.failure_type||'')+'</td></tr>';
+  }).join('');
+}
+
+function _fieldRow(label, row) {
+  if (!row) return '';
+  var badge = row.pass ? '<span class="bm-badge pass">pass</span>' : '<span class="bm-badge fail">fail</span>';
+  return '<tr><td>'+esc(label)+'</td><td>'+esc(row.expected==null?'—':row.expected)+'</td>' +
+    '<td>'+esc(row.actual==null?'—':row.actual)+'</td><td>'+badge+'</td></tr>';
+}
+
+function _entityRow(label, row) {
+  if (!row) return '';
+  var badge = row.exact_match ? '<span class="bm-badge pass">pass</span>' : '<span class="bm-badge fail">fail</span>';
+  return '<tr><td>'+esc(label)+'</td><td>'+esc(JSON.stringify(row.expected||{}))+'</td>' +
+    '<td>'+esc(JSON.stringify(row.actual||{}))+'</td><td>'+badge+'</td></tr>';
+}
+
+function bmShowResultDetail(resultId) {
+  fetch('/admin/api/benchmark/results/' + resultId).then(function(r){return r.json();}).then(function(d){
+    if (!d.ok) return;
+    var r = d.result;
+    var body = document.getElementById('bm-result-detail-body');
+    var qu = r.query_understanding_metrics || {};
+    var conv = r.conversation_metrics || {};
+    var crit = r.critical_fact_metrics || {};
+    var ground = r.grounding_metrics || {};
+
+    var quSection = '';
+    if (Object.keys(qu).length) {
+      quSection = '<b>Query Understanding / Conversation State</b>' +
+        '<table class="bm-table" style="margin:6px 0 12px"><thead><tr><th>Field</th><th>Expected</th><th>Actual</th><th></th></tr></thead><tbody>' +
+        _fieldRow('Topic', qu.topic) + _fieldRow('Subtopic', qu.subtopic) + _fieldRow('Intent', qu.intent) +
+        _fieldRow('Canonical Query', qu.canonical_query) + _fieldRow('Resolved Query', qu.resolved_query) +
+        _fieldRow('Transition', qu.transition) + _entityRow('Entities', qu.entities) +
+        _entityRow('Excluded Entities', qu.excluded_entities) + _entityRow('Conversation State', qu.conversation_state) +
+        '</tbody></table>';
+    }
+
+    var convSection = '';
+    if (Object.keys(conv).length) {
+      convSection = '<b>Conversation Scenario</b><br>' +
+        'Turn Pass Rate: ' + Math.round((conv.turn_pass_rate||0)*100) + '% (' + (conv.passed_turns||0) + '/' + (conv.total_turns||0) + ') &middot; ' +
+        'Scenario ' + (conv.scenario_pass ? '<span class="bm-badge pass">PASS</span>' : '<span class="bm-badge fail">FAIL</span>') + '<br>' +
+        'Topic Continuity: ' + Math.round((conv.topic_continuity||0)*100) + '% &middot; ' +
+        'Entity Carry: ' + Math.round((conv.entity_carry_accuracy||0)*100) + '% &middot; ' +
+        'Entity Replacement: ' + Math.round((conv.entity_replacement_accuracy||0)*100) + '% &middot; ' +
+        'State Retention: ' + Math.round((conv.state_retention_accuracy||0)*100) + '%<br><br>';
+    }
+
+    var critSection = '';
+    if (crit.facts && crit.facts.length) {
+      critSection = '<b>Critical Facts</b>' +
+        '<table class="bm-table" style="margin:6px 0 12px"><thead><tr><th>Key</th><th>Expected</th><th>Found</th><th>Status</th></tr></thead><tbody>' +
+        crit.facts.map(function(f){
+          return '<tr><td>'+esc(f.key)+'</td><td>'+esc(f.expected_value)+' '+esc(f.unit||'')+'</td>' +
+            '<td>'+esc((f.found_candidates||[]).join(', ')||'—')+'</td>' +
+            '<td><span class="bm-badge '+(f.pass?'pass':'fail')+'">'+esc(f.status)+'</span></td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+
+    var groundSection = '';
+    if (ground.status) {
+      groundSection = '<b>Grounding</b><br>' +
+        'Status: <span class="bm-badge '+(ground.status==='supported'?'pass':(ground.status==='not_applicable'?'':'fail'))+'">'+esc(ground.status)+'</span> &middot; ' +
+        'Citation Exists: ' + (ground.citation_exists?'Yes':'No') + ' &middot; ' +
+        'Sources Retrieved: ' + (ground.citation_sources_retrieved?'Yes':'No') +
+        (ground.prohibited_citation ? (' &middot; <b style="color:#f87171">Prohibited citation: '+esc(ground.prohibited_citation)+'</b>') : '') +
+        (ground.unsupported_critical_facts && ground.unsupported_critical_facts.length ?
+          ('<br>Unsupported facts: ' + esc(ground.unsupported_critical_facts.join(', '))) : '') + '<br><br>';
+    }
+
+    body.innerHTML =
+      '<b>Question:</b> ' + esc(r.question) + '<br>' +
+      '<b>Expected Answer:</b> ' + esc(r.expected_answer||'—') + '<br>' +
+      '<b>Actual Answer:</b> ' + esc(r.actual_answer||'—') + '<br>' +
+      '<b>Expected Source:</b> ' + esc(r.expected_file||'—') + (r.expected_section ? (' &gt; ' + esc(r.expected_section)) : '') + '<br>' +
+      '<b>Answerability:</b> ' + esc(r.answerability||'—') + '<br>' +
+      '<b>Status:</b> <span class="bm-badge '+esc(r.status)+'">'+esc(r.status)+'</span> ' +
+      (r.failure_type ? ('&mdash; <b>'+esc(r.failure_type)+'</b>: '+esc(r.failure_reason||'')) : '') + '<br><br>' +
+      quSection + convSection + critSection + groundSection +
+      '<b>Latency:</b> ' + Math.round(r.latency_ms||0) + 'ms &middot; ' +
+      '<b>Tokens:</b> ' + (r.input_tokens||0) + ' in / ' + (r.output_tokens||0) + ' out &middot; ' +
+      '<b>Cost:</b> $' + (r.estimated_cost||0).toFixed(4) + '<br><br>' +
+      '<details><summary style="cursor:pointer;color:rgba(232,237,245,.5)">Developer Mode — Raw JSON</summary>' +
+      '<pre style="white-space:pre-wrap;background:rgba(255,255,255,.03);padding:8px;border-radius:6px;margin-top:6px">' +
+        esc(JSON.stringify(r, null, 2)) + '</pre></details>';
+    document.getElementById('bm-result-modal').classList.add('open');
+  });
+}
+
+function bmRunCompare() {
+  var a = document.getElementById('bm-compare-a').value, b = document.getElementById('bm-compare-b').value;
+  if (!a || !b) { alert('Select both runs.'); return; }
+  fetch('/admin/api/benchmark/compare?run_a=' + a + '&run_b=' + b).then(function(r){return r.json();}).then(function(d){
+    if (!d.ok) { alert(d.error||'Compare failed'); return; }
+    var diff = d.diff;
+    var cells = [
+      ['Pass Rate Change', (diff.pass_rate_change>=0?'+':'')+(diff.pass_rate_change*100).toFixed(1)+'%'],
+      ['Latency Change', (diff.latency_change_ms>=0?'+':'')+Math.round(diff.latency_change_ms)+'ms'],
+      ['Cost Change', (diff.cost_change>=0?'+':'')+'$'+diff.cost_change.toFixed(4)],
+      ['Improved', diff.cases_improved.length], ['Regressed', diff.cases_regressed.length],
+      ['Unchanged', diff.cases_unchanged_count],
+    ];
+    var mc = diff.metric_comparison || {};
+    var mcLabels = {query_understanding_accuracy: 'Query Understanding Acc.', conversation_scenario_pass_rate: 'Scenario Pass Rate',
+                    critical_fact_pass_rate: 'Critical Fact Pass Rate', grounded_answer_rate: 'Grounded Answer Rate'};
+    Object.keys(mcLabels).forEach(function(key){
+      var m = mc[key];
+      if (!m || m.direction === 'not_comparable') return;
+      var arrow = m.direction === 'improved' ? '▲' : (m.direction === 'regressed' ? '▼' : '—');
+      cells.push([mcLabels[key], Math.round(m.candidate*100)+'% ' + arrow + ' (' + m.direction + ')']);
+    });
+    document.getElementById('bm-compare-summary').innerHTML = cells
+      .map(function(kv){ return '<div class="bm-summary-cell"><div class="label">'+kv[0]+'</div><div class="value">'+kv[1]+'</div></div>'; }).join('');
+    var tbody = document.getElementById('bm-compare-tbody');
+    tbody.innerHTML = diff.case_diffs.length ? diff.case_diffs.map(function(c){
+      return '<tr><td>'+esc(c.question)+'</td><td>'+esc(c.previous_status)+'</td><td>'+esc(c.new_status)+'</td>' +
+        '<td>'+esc(c.previous_top_chunk||'—')+'</td><td>'+esc(c.new_top_chunk||'—')+'</td></tr>';
+    }).join('') : '<tr><td colspan="5" style="text-align:center;color:rgba(232,237,245,.4)">No changed cases.</td></tr>';
+  });
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+}
+
+document.addEventListener('DOMContentLoaded', bmLoadDatasets);
+</script>
+{% endblock %}

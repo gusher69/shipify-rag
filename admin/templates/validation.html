@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% set active = "ai_validation" %}
+{% block title %}Production Validation — Shipify Admin{% endblock %}
+{% block topbar_title %}Production Validation{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Reuses the exact same visual language as benchmark.html — no new
+   design system, just the same bm-* classes under a pv- prefix. */
+.pv-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.pv-guidance{background:rgba(91,157,255,.06);border:1px solid rgba(91,157,255,.2);border-radius:10px;padding:12px 14px;font-size:12.5px;color:rgba(232,237,245,.7);margin-bottom:16px}
+.pv-steps{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+.pv-step{display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(232,237,245,.6)}
+.pv-step.done{color:#34d399}
+.pv-step.active{color:#5b9dff;font-weight:600}
+.pv-step .dot{width:16px;text-align:center}
+.pv-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+@media(max-width:1000px){.pv-summary-grid{grid-template-columns:repeat(2,1fr)}}
+.pv-score-cell{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:14px}
+.pv-score-cell .label{font-size:10.5px;color:rgba(232,237,245,.45);text-transform:uppercase;letter-spacing:.04em}
+.pv-score-cell .value{font-size:26px;font-weight:700;color:#e8edf5;margin-top:4px}
+.pv-score-cell .value.pass{color:#34d399}
+.pv-score-cell .value.fail{color:#f87171}
+.pv-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700}
+.pv-badge.pass{background:rgba(52,211,153,.14);color:#34d399}
+.pv-badge.fail{background:rgba(248,113,113,.14);color:#f87171}
+.pv-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.pv-table th{text-align:left;padding:8px 10px;color:rgba(232,237,245,.5);border-bottom:1px solid rgba(255,255,255,.08)}
+.pv-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}
+.pv-progress-bar-track{margin-top:8px;height:6px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden}
+.pv-progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);transition:width .3s}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:16px">
+  <div class="page-title">Production Validation</div>
+  <div class="page-sub">One click runs Query Understanding, Retrieval, Conversation Scenario, and Full RAG against the current Knowledge Base, compares every mode against Production Baseline v1.0, and generates a report.</div>
+</div>
+
+<div class="pv-guidance">
+  Reuses the exact same AI Evaluation framework as the Benchmark page (<a href="/admin/ai/benchmark" style="color:#5b9dff">AI Evaluation</a>) —
+  this page only orchestrates the 4 existing modes in sequence and compares against the frozen Production Baseline. Automation: <code>POST /admin/api/validation/run</code>.
+</div>
+
+<div class="pv-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <button class="btn btn-primary" id="pv-run-btn" onclick="pvRunValidation()">▶ Run Production Validation</button>
+    <button class="btn" id="pv-cancel-btn" onclick="pvCancelValidation()" style="display:none;background:rgba(239,68,68,.12);color:#fca5a5">Cancel</button>
+  </div>
+
+  <div id="pv-status-card" style="display:none;margin-top:14px">
+    <div style="display:flex;justify-content:space-between;font-size:12.5px;color:rgba(232,237,245,.6)">
+      <span>Elapsed: <b id="pv-elapsed">0s</b> &middot; Dataset: <span id="pv-dataset">—</span> &middot; Mode: <span id="pv-mode">—</span></span>
+      <span id="pv-progress-pct">0%</span>
+    </div>
+    <div class="pv-progress-bar-track"><div class="pv-progress-bar" id="pv-progress-bar"></div></div>
+    <div class="pv-steps" id="pv-steps">
+      <div class="pv-step" data-step="query_understanding"><span class="dot">○</span> Query Understanding</div>
+      <div class="pv-step" data-step="retrieval_only"><span class="dot">○</span> Retrieval Only</div>
+      <div class="pv-step" data-step="conversation_scenario"><span class="dot">○</span> Conversation Scenario</div>
+      <div class="pv-step" data-step="full_rag"><span class="dot">○</span> Full RAG</div>
+      <div class="pv-step" data-step="compare"><span class="dot">○</span> Compare with Production Baseline</div>
+      <div class="pv-step" data-step="report"><span class="dot">○</span> Generate Report</div>
+    </div>
+  </div>
+</div>
+
+<div id="pv-results" style="display:none">
+  <div class="pv-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="pg-panel-title">AI Engine Production Validation</div>
+      <span class="pv-badge" id="pv-overall-badge">—</span>
+    </div>
+    <div class="pv-summary-grid" id="pv-scorecard"></div>
+    <div style="font-size:12.5px;color:rgba(232,237,245,.6)">
+      Regression: <b id="pv-regression-overall">—</b> &middot; Production Ready: <b id="pv-production-ready">—</b>
+    </div>
+  </div>
+
+  <div class="pv-card">
+    <div class="pg-panel-title" style="margin-bottom:8px">Regression vs Production Baseline</div>
+    <table class="pv-table">
+      <thead><tr><th>Mode</th><th>Pass Rate Change</th><th>Improved</th><th>Regressed</th><th>Unchanged</th><th>Latency Change</th><th>Cost Change</th></tr></thead>
+      <tbody id="pv-regression-tbody"><tr><td colspan="7" style="text-align:center;color:rgba(232,237,245,.4)">Run validation to see results.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="pv-card">
+    <div class="pg-panel-title" style="margin-bottom:8px">Failure Summary</div>
+    <table class="pv-table">
+      <thead><tr><th>Mode</th><th>Question</th><th>Conversation State</th><th>Retrieved Chunks</th><th>Grounding</th><th>Failure Reason</th></tr></thead>
+      <tbody id="pv-failures-tbody"><tr><td colspan="6" style="text-align:center;color:rgba(232,237,245,.4)">No failures.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="pv-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div class="pg-panel-title">Validation Report</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn" onclick="pvExport('markdown')">Export Markdown</button>
+        <button class="btn" onclick="pvExport('json')">Export JSON</button>
+        <button class="btn" onclick="pvExport('html')">Export HTML</button>
+      </div>
+    </div>
+    <pre id="pv-report-markdown" style="white-space:pre-wrap;background:rgba(255,255,255,.03);padding:10px;border-radius:6px;font-size:12px;max-height:400px;overflow-y:auto"></pre>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var _pvValidationId = null, _pvPollTimer = null;
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+}
+
+function pvRunValidation() {
+  document.getElementById('pv-run-btn').disabled = true;
+  document.getElementById('pv-results').style.display = 'none';
+  fetch('/admin/api/validation/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (!d.ok) { alert(d.error || 'Could not start validation'); document.getElementById('pv-run-btn').disabled = false; return; }
+      _pvValidationId = d.validation_id;
+      document.getElementById('pv-status-card').style.display = '';
+      document.getElementById('pv-cancel-btn').style.display = '';
+      pvPoll();
+    });
+}
+
+function pvCancelValidation() {
+  if (!_pvValidationId) return;
+  fetch('/admin/api/validation/cancel/' + _pvValidationId, {method:'POST'});
+}
+
+function pvPoll() {
+  if (_pvPollTimer) clearInterval(_pvPollTimer);
+  _pvPollTimer = setInterval(function() {
+    fetch('/admin/api/validation/status/' + _pvValidationId).then(function(r){ return r.json(); }).then(function(d){
+      if (!d.ok) return;
+      var p = d.progress;
+      var elapsed = p.started_at ? Math.round((Date.now()/1000) - p.started_at) : 0;
+      document.getElementById('pv-elapsed').textContent = elapsed + 's';
+      document.getElementById('pv-dataset').textContent = p.dataset_id || '—';
+      document.getElementById('pv-mode').textContent = p.current_mode || '—';
+      var completed = (p.completed_steps || []).length + (p.current_step === 'report' || p.current_step === 'done' ? 5 : 0);
+      var totalSteps = p.total_steps || 6;
+      var pct = Math.min(100, Math.round(100 * (p.completed_steps || []).length / 4));
+      if (p.current_step === 'compare') pct = 90;
+      if (p.current_step === 'report') pct = 95;
+      if (p.status === 'completed') pct = 100;
+      document.getElementById('pv-progress-pct').textContent = pct + '%';
+      document.getElementById('pv-progress-bar').style.width = pct + '%';
+
+      document.querySelectorAll('#pv-steps .pv-step').forEach(function(el){
+        var step = el.dataset.step;
+        var dot = el.querySelector('.dot');
+        if ((p.completed_steps || []).indexOf(step) !== -1 || (p.status === 'completed')) {
+          el.classList.add('done'); el.classList.remove('active'); dot.textContent = '✔';
+        } else if (p.current_step === step) {
+          el.classList.add('active'); dot.textContent = '…';
+        } else {
+          el.classList.remove('done', 'active'); dot.textContent = '○';
+        }
+      });
+
+      if (p.status === 'completed' || p.status === 'cancelled' || p.status === 'failed') {
+        clearInterval(_pvPollTimer);
+        document.getElementById('pv-run-btn').disabled = false;
+        document.getElementById('pv-cancel-btn').style.display = 'none';
+        if (p.status === 'completed') pvLoadReport();
+        else if (p.error) alert('Validation ' + p.status + ': ' + p.error);
+      }
+    });
+  }, 1500);
+}
+
+function pvScoreClass(v) { if (v == null) return ''; return v >= 90 ? 'pass' : (v < 50 ? 'fail' : ''); }
+
+function pvLoadReport() {
+  fetch('/admin/api/validation/report/' + _pvValidationId + '?format=json').then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) return;
+    var rep = d.report;
+    document.getElementById('pv-results').style.display = '';
+    var overall = rep.overall_status;
+    var badge = document.getElementById('pv-overall-badge');
+    badge.textContent = overall; badge.className = 'pv-badge ' + (overall === 'PASS' ? 'pass' : 'fail');
+    document.getElementById('pv-regression-overall').textContent = (rep.regression && rep.regression.overall) || 'N/A';
+    document.getElementById('pv-production-ready').textContent = overall === 'PASS' ? 'YES' : 'NO';
+
+    var sc = rep.scorecard || {};
+    document.getElementById('pv-scorecard').innerHTML = [
+      ['Conversation', sc.conversation], ['Retrieval', sc.retrieval],
+      ['Grounding', sc.grounding], ['Critical Facts', sc.critical_facts],
+    ].map(function(kv){
+      var val = kv[1] == null ? 'n/a' : kv[1] + '%';
+      var cls = pvScoreClass(kv[1]);
+      return '<div class="pv-score-cell"><div class="label">' + kv[0] + '</div><div class="value ' + cls + '">' + val + '</div></div>';
+    }).join('');
+
+    var regTbody = document.getElementById('pv-regression-tbody');
+    var perMode = (rep.regression && rep.regression.per_mode) || {};
+    var modeRows = Object.keys(perMode).map(function(k){
+      var m = perMode[k];
+      if (!m.comparable) return '<tr><td>' + esc(k) + '</td><td colspan="6" style="color:rgba(232,237,245,.4)">not comparable — no baseline run</td></tr>';
+      return '<tr><td>' + esc(k) + '</td><td>' + (m.pass_rate_change >= 0 ? '+' : '') + Math.round(m.pass_rate_change*100) + '%</td>' +
+        '<td>' + m.improved + '</td><td>' + m.regressed + '</td><td>' + m.unchanged + '</td>' +
+        '<td>' + (m.latency_change_ms >= 0 ? '+' : '') + Math.round(m.latency_change_ms) + 'ms</td>' +
+        '<td>' + (m.cost_change >= 0 ? '+' : '') + '$' + m.cost_change.toFixed(4) + '</td></tr>';
+    });
+    regTbody.innerHTML = modeRows.length ? modeRows.join('') : '<tr><td colspan="7" style="text-align:center;color:rgba(232,237,245,.4)">No baseline available.</td></tr>';
+
+    var failTbody = document.getElementById('pv-failures-tbody');
+    var failures = rep.failures || [];
+    failTbody.innerHTML = failures.length ? failures.slice(0, 50).map(function(f){
+      return '<tr><td>' + esc(f.mode) + '</td><td>' + esc(f.question) + '</td>' +
+        '<td>' + esc(JSON.stringify(f.conversation_state || {})) + '</td>' +
+        '<td>' + esc((f.retrieved_chunks || []).join(', ')) + '</td>' +
+        '<td>' + esc(f.grounding || '—') + '</td><td>' + esc(f.failure_reason || f.failure_type || '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="6" style="text-align:center;color:rgba(232,237,245,.4)">No failures.</td></tr>';
+
+    fetch('/admin/api/validation/report/' + _pvValidationId + '?format=markdown').then(function(r){ return r.text(); }).then(function(md){
+      document.getElementById('pv-report-markdown').textContent = md;
+    });
+  });
+}
+
+function pvExport(format) {
+  if (!_pvValidationId) return;
+  window.open('/admin/api/validation/report/' + _pvValidationId + '?format=' + format, '_blank');
+}
+</script>
+{% endblock %}

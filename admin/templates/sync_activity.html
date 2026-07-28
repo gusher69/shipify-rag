@@ -1,0 +1,615 @@
+{% extends "base.html" %}
+{% set active = "sync-activity" %}
+{% block title %}Sync Activity — Shipify Admin{% endblock %}
+{% block topbar_title %}Sync Activity{% endblock %}
+
+{% block extra_head %}
+<style>
+@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes pulse-row { 0%,100%{background:rgba(52,211,153,.03)} 50%{background:rgba(52,211,153,.08)} }
+
+.modal-ov{display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);backdrop-filter:blur(8px);align-items:center;justify-content:center}
+.modal-ov.open{display:flex}
+.modal-box{background:rgba(13,25,50,.98);border:1px solid rgba(27,79,155,.4);border-radius:20px;padding:28px 30px;width:720px;max-width:96vw;max-height:90vh;overflow-y:auto;position:relative;animation:fadeIn .18s ease}
+.modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:rgba(232,237,245,.4);cursor:pointer;font-size:18px;line-height:1;padding:4px}
+.modal-close:hover{color:#e8edf5}
+
+.sjob-table{width:100%;border-collapse:collapse}
+.sjob-table th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:rgba(232,237,245,.3);padding:18px 10px 10px;text-align:left;white-space:nowrap}
+.sjob-table td{padding:9px 10px;border-top:1px solid rgba(255,255,255,.05);vertical-align:middle}
+.sjob-table tbody tr{transition:background .1s}
+.sjob-table tbody tr:hover{background:rgba(27,79,155,.07)}
+.sjob-table tbody tr.is-running{animation:pulse-row 2s ease-in-out infinite}
+
+.prog-bar-wrap{height:5px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden;width:80px;flex-shrink:0}
+.prog-bar-fill{height:100%;border-radius:99px;transition:width .5s ease}
+
+.filter-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;background:rgba(27,79,155,.06);border:1px solid rgba(27,79,155,.18);border-radius:12px}
+.filter-inp,.filter-sel{background:rgba(255,255,255,.06);border:1px solid rgba(27,79,155,.25);color:#e8edf5;border-radius:7px;padding:6px 10px;font-size:12px;outline:none;height:32px}
+.filter-inp{min-width:200px}
+.filter-sel{min-width:140px}
+.filter-inp:focus,.filter-sel:focus{border-color:rgba(27,79,155,.6)}
+.filter-sel option{background:#0d1932}
+
+/* Files cell */
+.files-cell{max-width:260px}
+.files-list{display:flex;flex-direction:column;gap:2px;padding:4px 0}
+.files-primary{font-size:11.5px;color:#e8edf5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;max-width:240px}
+.files-more-btn{align-self:flex-start;font-size:11px;color:#93c5fd;background:rgba(27,79,155,.12);border:1px solid rgba(27,79,155,.28);border-radius:5px;padding:1px 8px;margin-top:2px;cursor:pointer}
+.files-more-btn:hover{background:rgba(27,79,155,.25)}
+
+/* Detail file cards */
+.jd-file-card{border:1px solid rgba(27,79,155,.22);border-radius:10px;padding:12px 14px;margin-bottom:8px;background:rgba(255,255,255,.02)}
+.jd-file-card.jd-failed{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.025)}
+.jd-fname{font-size:13px;font-weight:600;color:#e8edf5;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.jd-fname a{color:#93c5fd;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.jd-fname a:hover{text-decoration:underline}
+.jd-fmeta{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:rgba(232,237,245,.45)}
+.jd-fmeta strong{color:rgba(232,237,245,.75)}
+.jd-error{margin-top:7px;padding:6px 10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:7px;font-size:11.5px;color:#fca5a5}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- ── Header ── -->
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px">
+  <div>
+    <div class="page-title">Sync Activity</div>
+    <div class="page-sub">Track sync jobs, progress, errors, and historical import activity.</div>
+    <div style="margin-top:8px;font-size:11.5px;color:rgba(232,237,245,.4)">
+      Import Mode: <strong style="color:#e8edf5">Full Auto</strong> &nbsp;·&nbsp;
+      AI Profile: <strong style="color:#e8edf5">Advanced</strong> &nbsp;·&nbsp;
+      Knowledge Graph: <strong style="color:#e8edf5">Enabled</strong>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-shrink:0">
+    <button type="button" id="refresh-btn" onclick="refreshPage()"
+            style="background:rgba(255,255,255,.06);color:rgba(232,237,245,.6);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:7px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+      <svg id="refresh-icon" width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M13.5 8A5.5 5.5 0 1 1 3.2 4.5M3 2v3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      Refresh
+    </button>
+    <a href="/admin/documents" class="btn btn-primary" style="text-decoration:none">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 7l4-5 4 5M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      New Sync
+    </a>
+  </div>
+</div>
+
+<!-- ── Live banner ── -->
+<div id="live-banner" style="display:none;background:rgba(52,211,153,.07);border:1px solid rgba(52,211,153,.3);border-radius:12px;padding:12px 16px;margin-bottom:16px;align-items:center;gap:12px;flex-wrap:wrap">
+  <div style="display:flex;align-items:center;gap:8px;flex:1">
+    <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;box-shadow:0 0 6px #34d399"></span>
+    <span style="font-size:13px;color:#34d399;font-weight:600">Sync in progress</span>
+    <span id="live-subtitle" style="font-size:12px;color:rgba(232,237,245,.5)"></span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span id="live-pct" style="font-size:12px;color:#34d399;font-weight:600">0%</span>
+    <div class="prog-bar-wrap" style="width:120px">
+      <div id="live-bar" class="prog-bar-fill" style="width:0%;background:#34d399"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Filters ── -->
+<div class="filter-bar">
+  <input type="text" id="f-search" class="filter-inp" placeholder="Search by job ID or file name…" oninput="applyFilters()">
+  <select id="f-status" class="filter-sel" onchange="applyFilters()">
+    <option value="">All Statuses</option>
+    <option value="running">Running</option>
+    <option value="pending">Pending</option>
+    <option value="completed">Completed</option>
+    <option value="partially_failed">Partially Failed</option>
+    <option value="failed">Failed</option>
+    <option value="cancelled">Cancelled</option>
+  </select>
+  <input type="date" id="f-date-from" class="filter-inp" style="min-width:0;width:135px" onchange="applyFilters()" title="From date">
+  <input type="date" id="f-date-to" class="filter-inp" style="min-width:0;width:135px" onchange="applyFilters()" title="To date">
+  <button type="button" onclick="clearFilters()" class="btn" style="background:rgba(255,255,255,.05);color:rgba(232,237,245,.5);border:1px solid rgba(255,255,255,.1);padding:5px 12px;font-size:12px;height:32px">Clear</button>
+  <span id="f-count" style="font-size:12px;color:rgba(232,237,245,.35);margin-left:auto"></span>
+</div>
+
+{% if jobs %}
+<!-- ── Job table ── -->
+<div class="card" style="padding:0;overflow:hidden">
+  <div style="overflow-x:auto">
+  <table class="sjob-table">
+    <thead>
+      <tr>
+        <th style="padding-left:16px;width:110px">Started</th>
+        <th style="min-width:180px">Files</th>
+        <th style="width:140px">Status</th>
+        <th style="width:55px;text-align:center">Total</th>
+        <th style="width:55px;text-align:center">Done</th>
+        <th style="width:55px;text-align:center">Failed</th>
+        <th style="width:110px">Progress</th>
+        <th style="width:110px">Completed</th>
+        <th style="width:70px">Duration</th>
+        <th style="text-align:right;padding-right:16px">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="jobs-body">
+      {% for job in jobs %}
+      {% set st = job.status or 'pending' %}
+      {% set jfiles = job.files or [] %}
+      {% set fnames_all = jfiles | map(attribute='file_name') | list %}
+      {% set fnames_str = fnames_all | join('|') | lower %}
+      <tr class="job-row {% if st in ('running','pending','cancelling') %}is-running{% endif %}"
+          data-id="{{ job.id }}"
+          data-status="{{ st }}"
+          data-started="{{ job.started_at or '' }}"
+          data-failed="{{ job.failed_files or 0 }}"
+          data-files="{{ fnames_str }}">
+        <td style="padding-left:16px">
+          <div class="ts-bkk-date" style="font-size:12px;color:#e8edf5">{{ job.started_at or '' }}</div>
+          <div class="ts-bkk-time" style="font-size:11px;color:rgba(232,237,245,.35)">{{ job.started_at or '' }}</div>
+        </td>
+        <td class="files-cell">
+          {% if jfiles %}
+            {% set shown = jfiles[:5] %}
+            {% set remaining = jfiles | length - 5 %}
+            <div class="files-list">
+              {% for jf in shown %}
+              <span class="files-primary" title="{{ jf.file_name }}">{{ jf.file_name or '—' }}</span>
+              {% endfor %}
+              {% if remaining > 0 %}
+              <button type="button" class="files-more-btn" onclick="viewJobDetail('{{ job.id }}')">+ {{ remaining }} more</button>
+              {% endif %}
+            </div>
+          {% else %}
+            <span style="font-size:12px;color:rgba(232,237,245,.2)">No files recorded</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if st == 'running' %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#34d399;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.25);border-radius:20px;padding:3px 10px">
+              <span style="width:6px;height:6px;border-radius:50%;background:#34d399;flex-shrink:0"></span>Running
+            </span>
+          {% elif st == 'pending' %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#fcd34d;background:rgba(252,211,77,.08);border:1px solid rgba(252,211,77,.25);border-radius:20px;padding:3px 10px">Pending</span>
+          {% elif st == 'completed' %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#a78bfa;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.3);border-radius:20px;padding:3px 10px">✓ Completed</span>
+          {% elif st == 'partially_failed' %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#fbbf24;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:20px;padding:3px 10px">⚠ Partial</span>
+          {% elif st == 'failed' %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#fca5a5;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:20px;padding:3px 10px">❌ Failed</span>
+          {% elif st in ('cancelled','cancelling') %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:rgba(232,237,245,.4);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:3px 10px">🛑 {{ 'Cancelling' if st == 'cancelling' else 'Cancelled' }}</span>
+          {% else %}
+            <span style="font-size:11.5px;color:rgba(232,237,245,.4)">{{ st }}</span>
+          {% endif %}
+        </td>
+        <td style="font-size:13px;color:#e8edf5;text-align:center">{{ job.total_files or 0 }}</td>
+        <td style="font-size:13px;color:#34d399;text-align:center;font-weight:600">{{ job.completed_files or 0 }}</td>
+        <td style="font-size:13px;text-align:center;font-weight:600;color:{% if job.failed_files and job.failed_files > 0 %}#fca5a5{% else %}rgba(232,237,245,.2){% endif %}">{{ job.failed_files or 0 }}</td>
+        <td>
+          {% set pct = job.progress_percent or 0 %}
+          {% if st == 'completed' %}{% set bc = '#a78bfa' %}
+          {% elif st == 'failed' %}{% set bc = '#ef4444' %}
+          {% elif st == 'partially_failed' %}{% set bc = '#f59e0b' %}
+          {% elif st in ('running','pending') %}{% set bc = '#34d399' %}
+          {% elif st in ('cancelled','cancelling') %}{% set bc = '#6b7280' %}
+          {% else %}{% set bc = '#6b7280' %}{% endif %}
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="prog-bar-wrap"><div class="prog-bar-fill" style="width:{{ pct }}%;background:{{ bc }}"></div></div>
+            <span style="font-size:11px;color:rgba(232,237,245,.4)">{{ pct }}%</span>
+          </div>
+        </td>
+        <td style="font-size:11.5px;color:rgba(232,237,245,.35)">
+          <span class="ts-bkk">{{ job.completed_at or job.cancelled_at or '' }}</span>
+        </td>
+        <td style="font-size:11.5px;color:rgba(232,237,245,.35)" class="dur-cell"
+            data-start="{{ job.started_at or '' }}"
+            data-end="{{ job.completed_at or job.cancelled_at or '' }}">—</td>
+        <td style="text-align:right;padding-right:16px">
+          <div style="display:flex;gap:6px;justify-content:flex-end">
+            <button type="button" onclick="viewJobDetail('{{ job.id }}')"
+                    style="padding:4px 11px;font-size:12px;background:rgba(27,79,155,.15);color:#93c5fd;border:1px solid rgba(27,79,155,.3);border-radius:7px;cursor:pointer;transition:background .15s"
+                    onmouseover="this.style.background='rgba(27,79,155,.3)'" onmouseout="this.style.background='rgba(27,79,155,.15)'">Details</button>
+            {% if job.failed_files and job.failed_files > 0 and st not in ('running','pending','cancelling') %}
+            <button type="button" onclick="retryJob('{{ job.id }}')"
+                    style="padding:4px 11px;font-size:12px;background:rgba(245,166,35,.1);color:#fcd34d;border:1px solid rgba(245,166,35,.28);border-radius:7px;cursor:pointer;transition:background .15s"
+                    onmouseover="this.style.background='rgba(245,166,35,.22)'" onmouseout="this.style.background='rgba(245,166,35,.1)'">Retry</button>
+            {% endif %}
+            {% if st in ('running','pending','cancelling') %}
+            <button type="button" onclick="cancelJob('{{ job.id }}')"
+                    style="padding:4px 11px;font-size:12px;background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.28);border-radius:7px;cursor:pointer;transition:background .15s"
+                    onmouseover="this.style.background='rgba(239,68,68,.22)'" onmouseout="this.style.background='rgba(239,68,68,.1)'">Cancel</button>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div id="filter-empty" style="display:none;text-align:center;padding:32px;font-size:13px;color:rgba(232,237,245,.35)">No jobs match the current filters.</div>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty">
+    <div class="empty-icon">📋</div>
+    <div class="empty-text">No sync jobs yet.<br>
+      <span style="font-size:12px">Upload and sync files from the <a href="/admin/documents" style="color:#93c5fd">Knowledge Base</a> to see activity here.</span>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- ═══════ JOB DETAIL MODAL ═══════ -->
+<div class="modal-ov" id="job-modal" onclick="if(event.target===this)closeModal('job-modal')">
+  <div class="modal-box">
+    <button type="button" class="modal-close" onclick="closeModal('job-modal')">✕</button>
+    <div id="jm-title" style="font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:16px">Job Details</div>
+    <div id="jm-content">Loading…</div>
+  </div>
+</div>
+
+<!-- ═══════ CONFIRM MODAL ═══════ -->
+<div class="modal-ov" id="confirm-modal" onclick="if(event.target===this)closeModal('confirm-modal')">
+  <div class="modal-box" style="max-width:460px">
+    <button type="button" class="modal-close" onclick="closeModal('confirm-modal')">✕</button>
+    <div style="font-size:26px;margin-bottom:8px" id="cfm-icon"></div>
+    <div style="font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:10px" id="cfm-title"></div>
+    <div id="cfm-msg" style="font-size:13px;color:rgba(232,237,245,.6);margin-bottom:20px;line-height:1.55"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button type="button" id="cfm-cancel" onclick="closeModal('confirm-modal')" class="btn" style="background:rgba(255,255,255,.05);color:rgba(232,237,245,.6);border:1px solid rgba(255,255,255,.1)">Cancel</button>
+      <button type="button" id="cfm-ok" class="btn btn-primary"></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── Modal helpers ──
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── Duration formatting ──
+function fmtDuration(startStr, endStr) {
+  if (!startStr) return '—';
+  var start = new Date(startStr);
+  var end   = endStr ? new Date(endStr) : new Date();
+  var secs  = Math.floor((end - start) / 1000);
+  if (isNaN(secs) || secs < 0) return '—';
+  if (secs < 60) return secs + 's';
+  if (secs < 3600) return Math.floor(secs/60) + 'm ' + (secs%60) + 's';
+  return Math.floor(secs/3600) + 'h ' + Math.floor((secs%3600)/60) + 'm';
+}
+
+document.querySelectorAll('.dur-cell').forEach(function(td) {
+  td.textContent = fmtDuration(td.dataset.start, td.dataset.end);
+});
+
+// ── Filters ──
+function clearFilters() {
+  document.getElementById('f-search').value = '';
+  document.getElementById('f-status').value = '';
+  document.getElementById('f-date-from').value = '';
+  document.getElementById('f-date-to').value = '';
+  applyFilters();
+}
+
+function applyFilters() {
+  var search   = document.getElementById('f-search').value.toLowerCase().trim();
+  var status   = document.getElementById('f-status').value;
+  var dateFrom = document.getElementById('f-date-from').value;
+  var dateTo   = document.getElementById('f-date-to').value;
+
+  var rows = document.querySelectorAll('.job-row');
+  var visible = 0;
+
+  rows.forEach(function(row) {
+    var rid    = (row.dataset.id||'').toLowerCase();
+    var rst    = row.dataset.status||'';
+    var rdt    = (row.dataset.started||'').slice(0,10);
+    var rfiles = (row.dataset.files||'').toLowerCase();
+
+    if (search && rid.indexOf(search) === -1 && rfiles.indexOf(search) === -1) { row.style.display='none'; return; }
+    if (status && rst !== status)              { row.style.display='none'; return; }
+    if (dateFrom && rdt < dateFrom)            { row.style.display='none'; return; }
+    if (dateTo   && rdt > dateTo)              { row.style.display='none'; return; }
+
+    row.style.display=''; visible++;
+  });
+
+  document.getElementById('f-count').textContent = visible + ' / ' + rows.length + ' jobs';
+  var emptyEl = document.getElementById('filter-empty');
+  if (emptyEl) emptyEl.style.display = (visible===0 && rows.length>0) ? 'block' : 'none';
+}
+applyFilters();
+
+// ── Live sync polling ──
+var _livePoll = null;
+
+function startLivePoll() {
+  if (_livePoll) return;
+  _livePoll = setInterval(checkLiveStatus, 3000);
+  checkLiveStatus();
+}
+
+function checkLiveStatus() {
+  fetch('/admin/sync-status', {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      var banner = document.getElementById('live-banner');
+      if (d.running) {
+        banner.style.display = 'flex';
+        document.getElementById('live-subtitle').textContent = d.subtitle || '';
+        document.getElementById('live-pct').textContent = (d.pct||0) + '%';
+        document.getElementById('live-bar').style.width = (d.pct||0) + '%';
+      } else {
+        banner.style.display = 'none';
+        if (_livePoll) { clearInterval(_livePoll); _livePoll = null; }
+        if (d.done && d.log && d.log.length > 0) {
+          setTimeout(function(){ window.location.reload(); }, 1500);
+        }
+      }
+    })
+    .catch(function(){});
+}
+
+fetch('/admin/sync-status', {cache:'no-store'})
+  .then(function(r){ return r.json(); })
+  .then(function(d) { if (d.running) startLivePoll(); })
+  .catch(function(){});
+
+// ── Refresh ──
+function refreshPage() {
+  var btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  document.getElementById('refresh-icon').style.animation = 'fsync-spin .7s linear infinite';
+  window.location.reload();
+}
+
+// ── Utilities ──
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function fmtBKK(s) {
+  if (!s) return '—';
+  try {
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return '—';
+    var parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(d);
+    var map = {};
+    parts.forEach(function(p) { map[p.type] = p.value; });
+    var hh = map.hour === '24' ? '00' : map.hour;
+    return map.year + '-' + map.month + '-' + map.day + ' ' + hh + ':' + map.minute;
+  } catch(e) { return s.slice(0,16).replace('T',' '); }
+}
+
+document.querySelectorAll('.ts-bkk').forEach(function(el) {
+  el.textContent = fmtBKK(el.textContent.trim());
+});
+document.querySelectorAll('.ts-bkk-date').forEach(function(el) {
+  var full = fmtBKK(el.textContent.trim());
+  el.textContent = full === '—' ? '—' : full.slice(0,10);
+});
+document.querySelectorAll('.ts-bkk-time').forEach(function(el) {
+  var full = fmtBKK(el.textContent.trim());
+  el.textContent = full === '—' ? '' : full.slice(11,16);
+});
+
+// ── Job detail modal ──
+function viewJobDetail(jobId) {
+  document.getElementById('jm-title').textContent = 'Sync Job Details';
+  document.getElementById('jm-content').innerHTML = '<div style="text-align:center;padding:24px;color:rgba(232,237,245,.4)">Loading…</div>';
+  openModal('job-modal');
+
+  fetch('/api/knowledge/sync-jobs/' + jobId, {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (!d.job) {
+        document.getElementById('jm-content').innerHTML =
+          '<p style="color:#fca5a5;font-size:13px">Job not found. Run migration 002_sync_jobs.sql in Supabase to enable full job tracking.</p>';
+        return;
+      }
+      renderJobDetail(d.job);
+    })
+    .catch(function() {
+      document.getElementById('jm-content').innerHTML =
+        '<p style="color:rgba(232,237,245,.4);font-size:13px">Could not load job details.</p>';
+    });
+}
+
+function statusBadge(st) {
+  var cfg = {
+    synced:           ['#34d399','rgba(52,211,153,.1)','rgba(52,211,153,.3)','✓ Synced'],
+    completed:        ['#34d399','rgba(52,211,153,.1)','rgba(52,211,153,.3)','✓ Completed'],
+    done:             ['#34d399','rgba(52,211,153,.1)','rgba(52,211,153,.3)','✓ Done'],
+    failed:           ['#fca5a5','rgba(239,68,68,.1)', 'rgba(239,68,68,.3)', '❌ Failed'],
+    error:            ['#fca5a5','rgba(239,68,68,.1)', 'rgba(239,68,68,.3)', '❌ Error'],
+    embedding:        ['#F5A623','rgba(245,166,35,.1)','rgba(245,166,35,.3)','Embedding'],
+    chunking:         ['#93c5fd','rgba(27,79,155,.15)','rgba(27,79,155,.3)', 'Chunking'],
+    extracting:       ['#93c5fd','rgba(27,79,155,.15)','rgba(27,79,155,.3)', 'Extracting'],
+    saving:           ['#fcd34d','rgba(252,211,77,.1)','rgba(252,211,77,.3)', 'Saving'],
+    pending:          ['rgba(232,237,245,.5)','rgba(255,255,255,.06)','rgba(255,255,255,.15)','Pending'],
+    cancelled:        ['rgba(232,237,245,.35)','rgba(255,255,255,.04)','rgba(255,255,255,.1)','Cancelled'],
+    uploaded:         ['#93c5fd','rgba(27,79,155,.15)','rgba(27,79,155,.3)','Uploaded'],
+  };
+  var c = cfg[st] || ['rgba(232,237,245,.4)','rgba(255,255,255,.05)','rgba(255,255,255,.1)', st||'—'];
+  return '<span style="font-size:11.5px;color:'+c[0]+';background:'+c[1]+';border:1px solid '+c[2]+';padding:2px 9px;border-radius:20px;white-space:nowrap">'+c[3]+'</span>';
+}
+
+function renderJobDetail(job) {
+  var files = job.files || [];
+  var dur   = fmtDuration(job.started_at, job.completed_at || job.cancelled_at);
+
+  document.getElementById('jm-title').textContent = 'Sync Job — ' + fmtBKK(job.started_at);
+
+  var html = '';
+
+  // ── Meta grid ──
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px">';
+  html += metaCard('Job ID', '<span style="font-family:monospace;font-size:11px;color:rgba(232,237,245,.6)">'+esc(job.id||'—')+'</span>');
+  html += metaCard('Status', statusBadge(job.status||''));
+  html += metaCard('Started', fmtBKK(job.started_at));
+  html += metaCard('Completed', fmtBKK(job.completed_at || job.cancelled_at));
+  html += metaCard('Duration', dur);
+  html += metaCard('Files', (job.total_files||0)+' total &nbsp;·&nbsp; <span style="color:#34d399">'+(job.completed_files||0)+' done</span>'+(job.failed_files>0?' &nbsp;·&nbsp; <span style="color:#fca5a5">'+job.failed_files+' failed</span>':''));
+  html += '</div>';
+
+  // ── Overall progress bar ──
+  var pct = job.progress_percent || 0;
+  html += '<div style="height:5px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden;margin-bottom:16px">' +
+    '<div style="height:100%;border-radius:99px;width:'+pct+'%;background:#a78bfa;transition:width .4s"></div></div>';
+
+  // ── Error message (job-level) ──
+  if (job.error_message) {
+    html += '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:#fca5a5"><strong>Job error:</strong> '+esc(job.error_message)+'</div>';
+  }
+
+  // ── Validation: total_files must match the number of job_files rows ──
+  var expected = job.total_files || 0;
+  if (expected && files.length !== expected) {
+    console.error('[SyncValidation] job ' + job.id + ': total_files=' + expected + ' but files.length=' + files.length);
+    html += '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#fca5a5">' +
+      '⚠ Data mismatch: this job reports ' + expected + ' total file(s) but only ' + files.length + ' file record(s) were found.</div>';
+  }
+
+  // ── Files section — every file, always. >10 files collapses behind "Show all". ──
+  if (!files.length) {
+    html += '<div style="text-align:center;padding:20px 0;font-size:13px;color:rgba(232,237,245,.3)">No file records. Migration 002_sync_jobs.sql may not have been run yet.</div>';
+  } else {
+    html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:rgba(232,237,245,.3);margin-bottom:10px">Files (' + files.length + ')</div>';
+    html += '<div id="jd-files-list">';
+    html += files.map(renderFileCard).join('');
+    html += '</div>';
+  }
+
+  document.getElementById('jm-content').innerHTML = html;
+
+  // Collapse to the first 10 cards behind a "Show all" link when there are more.
+  var cards = document.querySelectorAll('#jd-files-list .jd-file-card');
+  if (cards.length > 10) {
+    for (var i = 10; i < cards.length; i++) cards[i].style.display = 'none';
+    var showAll = document.createElement('button');
+    showAll.type = 'button';
+    showAll.textContent = 'Show all ' + cards.length + ' files';
+    showAll.style.cssText = 'display:block;width:100%;margin-top:4px;padding:8px;font-size:12px;color:#93c5fd;background:rgba(27,79,155,.1);border:1px solid rgba(27,79,155,.28);border-radius:8px;cursor:pointer';
+    showAll.onclick = function() {
+      for (var i = 0; i < cards.length; i++) cards[i].style.display = '';
+      showAll.remove();
+    };
+    document.getElementById('jd-files-list').after(showAll);
+  }
+}
+
+function renderFileCard(f) {
+  var isFailed = f.status === 'failed' || !!f.error_message;
+  var fname = f.file_name || '—';
+  var libUrl = '/admin/file-library?search=' + encodeURIComponent(fname);
+  var dur = fmtDuration(f.created_at, f.updated_at);
+  var html = '<div class="jd-file-card' + (isFailed ? ' jd-failed' : '') + '">';
+  html += '<div class="jd-fname">';
+  html += '<a href="' + libUrl + '" title="View in File Library">' + esc(fname) + '</a>';
+  html += statusBadge(f.status || 'pending');
+  html += '</div>';
+  html += '<div class="jd-fmeta">';
+  html += '<span>Chunks: <strong>' + (f.chunk_count || 0) + '</strong></span>';
+  html += '<span>Stage: <strong>' + esc(f.current_step || f.status || 'pending') + '</strong></span>';
+  html += '<span>Duration: <strong>' + dur + '</strong></span>';
+  if (f.updated_at) {
+    html += '<span>Updated: <strong>' + fmtBKK(f.updated_at) + '</strong></span>';
+  }
+  html += '</div>';
+  if (f.error_message) {
+    html += '<div class="jd-error"><strong>Error:</strong> ' + esc(f.error_message) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function metaCard(label, val) {
+  return '<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:9px;padding:10px 14px">' +
+    '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:rgba(232,237,245,.3);margin-bottom:4px">' + label + '</div>' +
+    '<div style="font-size:13px;color:#e8edf5">' + val + '</div></div>';
+}
+
+// ── Job actions ──
+function retryJob(jobId) {
+  showConfirm({icon:'🔄', title:'Retry failed files?',
+    message:'Start a new sync job to retry only the failed files from this job.',
+    okText:'Retry', okColor:'#F5A623',
+    onOk: function() {
+      fetch('/api/knowledge/sync-jobs/'+jobId+'/retry-failed', {method:'POST'})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if (d.ok) { setTimeout(function(){ window.location.reload(); }, 400); }
+          else alert(d.msg||'Failed to start retry.');
+        })
+        .catch(function(){ alert('API not available.'); });
+    }
+  });
+}
+
+function cancelJob(jobId) {
+  // Fetch live job details first so the dialog shows the real current file
+  // and remaining-file count instead of a generic static message.
+  fetch('/api/knowledge/sync-jobs/' + jobId, {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      var job = d.job || {};
+      var files = job.files || [];
+      var remaining = files.filter(function(f){
+        return ['pending','extracting','chunking','embedding','saving','running'].indexOf(f.status) !== -1;
+      }).length;
+      var currentFile = job.current_file_name || (remaining ? (files.find(function(f){
+        return ['extracting','chunking','embedding','saving','running'].indexOf(f.status) !== -1;
+      }) || {}).file_name : null) || '—';
+      showConfirm({icon:'⚠️', title:'Cancel Sync?',
+        isHtml: true,
+        message: '<div>Current file: <strong style="color:#e8edf5">' + esc(currentFile) + '</strong></div>' +
+                 '<div style="margin-top:4px">Remaining files: <strong style="color:#e8edf5">' + remaining + '</strong></div>' +
+                 '<div style="margin-top:10px;font-size:12px">Files already completed will not be rolled back.</div>',
+        okText:'Cancel Sync', okColor:'#ef4444',
+        onOk: function() {
+          fetch('/api/knowledge/sync-jobs/'+jobId+'/cancel', {method:'POST'})
+            .then(function(r){return r.json();})
+            .then(function(d){
+              if (d.ok) { setTimeout(function(){ window.location.reload(); }, 400); }
+              else alert(d.msg||'Cancel failed.');
+            })
+            .catch(function(){ alert('API not available.'); });
+        }
+      });
+    })
+    .catch(function() {
+      showConfirm({icon:'⚠️', title:'Cancel Sync?',
+        message:'Cancel the running sync job? Files already completed will not be rolled back.',
+        okText:'Cancel Sync', okColor:'#ef4444',
+        onOk: function() {
+          fetch('/api/knowledge/sync-jobs/'+jobId+'/cancel', {method:'POST'})
+            .then(function(r){return r.json();})
+            .then(function(d){
+              if (d.ok) { setTimeout(function(){ window.location.reload(); }, 400); }
+              else alert(d.msg||'Cancel failed.');
+            })
+            .catch(function(){ alert('API not available.'); });
+        }
+      });
+    });
+}
+
+// ── Confirm modal ──
+var _cfmOnOk = null;
+function showConfirm(opts) {
+  document.getElementById('cfm-icon').textContent = opts.icon||'';
+  document.getElementById('cfm-title').textContent = opts.title||'';
+  var msgEl = document.getElementById('cfm-msg');
+  if (opts.isHtml) msgEl.innerHTML=opts.message||''; else msgEl.textContent=opts.message||'';
+  var okBtn = document.getElementById('cfm-ok');
+  okBtn.textContent=opts.okText||'OK';
+  okBtn.style.cssText='background:'+(opts.okColor||'#1B4F9B')+';color:#fff;border-color:'+(opts.okColor||'#1B4F9B');
+  _cfmOnOk=opts.onOk||null;
+  openModal('confirm-modal');
+}
+document.getElementById('cfm-ok').addEventListener('click', function(){
+  closeModal('confirm-modal'); if (_cfmOnOk) _cfmOnOk();
+});
+</script>
+{% endblock %}

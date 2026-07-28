@@ -1,8 +1,79 @@
+# ── Secrets / credentials — NEVER commit ────────────────────────────────
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+service_account*.json
+google-credentials*.json
+
+# ── Python ───────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
-.checkpoints/
-server.log
+*.pyd
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+build/
+dist/
+
+# ── Dev server logs / scratch output ─────────────────────────────────────
+*.log
+server_*.log
+server.log
+server_out.txt
+server_stdout.txt
+server_stderr.txt
+err.txt
+startup_error.txt
+nohup.out
+
+# ── Editor / OS ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Session / checkpoint / backup artifacts (this project's own tooling) ─
+.checkpoints/
+.backup_docs_pre_git_prep/
+backups/
+
+# ── Real ingested knowledge base content (customer data — never commit) ──
+# Uploaded documents belong in Supabase Storage, not source control.
+# Keep the folder tracked via .gitkeep so a fresh clone has the expected
+# directory, but never its contents.
+knowledge/*
+!knowledge/.gitkeep
+
+# ── Ad-hoc / scratch files accumulated during development ────────────────
+# (test spreadsheets, base64 dumps, manual upload scripts, preview-id
+# scratch files, and other one-off artifacts that don't belong in the repo)
+*_b64.txt
+preview_id*.txt
+preview_test_b64.txt
+flex_upload.js
+upload_script.js
+delete-cascade-test.xlsx
+flexible-attachment-test.xlsx
+preview-test.xlsx
+smart-import-test.xlsx
+company-profile-test.md
+graph-test.md
+analyze_excel.py
+test_azure.py
+test_supabase.py
+baseline_v1.0.json
+baseline_v1.0.1.json
+
+# ── Local admin runtime state ──────────────────────────────────────────────
+admin/sync_history.json
+
+# ── Node (only present if a JS tool is added later) ───────────────────────
+node_modules/

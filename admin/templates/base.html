@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Shipify Admin{% endblock %}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy:              #0D1F3C;
+      --navy-deep:         #060e1e;
+      --royal:             #1B4F9B;
+      --royal-light:       #2261b8;
+      --amber:             #F5A623;
+      --amber-light:       #f7b84b;
+      --glass-bg:          rgba(255,255,255,0.055);
+      --glass-border:      rgba(255,255,255,0.09);
+      --text:              #e8edf5;
+      --text-muted:        rgba(232,237,245,0.48);
+      --surface:           rgba(255,255,255,0.06);
+      --surface-hover:     rgba(255,255,255,0.10);
+      --sidebar-w:         244px;
+      --sidebar-collapsed: 64px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Without this, the page itself is dark-themed but native controls
+       (a <select>'s dropdown POPUP list, scrollbars, etc.) fall back to
+       the browser's default LIGHT UA theme — the jarring white dropdown
+       list seen against an otherwise dark page. This hints the browser
+       to render native controls using its dark palette instead. */
+    :root { color-scheme: dark; }
+
+    body {
+      font-family: 'Inter', 'Sarabun', system-ui, sans-serif;
+      background: var(--navy-deep);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Aurora background ── */
+    .aurora-bg {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    }
+    .aurora-orb {
+      position: absolute; border-radius: 50%;
+      filter: blur(90px); animation: orb-drift linear infinite; opacity: 0;
+    }
+    .aurora-orb:nth-child(1) {
+      width: 700px; height: 500px;
+      background: radial-gradient(ellipse, rgba(27,79,155,0.40) 0%, transparent 70%);
+      top: -80px; left: -200px; animation-duration: 22s; animation-delay: 0s;
+    }
+    .aurora-orb:nth-child(2) {
+      width: 500px; height: 600px;
+      background: radial-gradient(ellipse, rgba(13,31,60,0.6) 0%, transparent 70%);
+      top: 40%; right: -100px; animation-duration: 28s; animation-delay: -8s;
+    }
+    .aurora-orb:nth-child(3) {
+      width: 400px; height: 300px;
+      background: radial-gradient(ellipse, rgba(245,166,35,0.08) 0%, transparent 70%);
+      bottom: -60px; left: 30%; animation-duration: 18s; animation-delay: -12s;
+    }
+    @keyframes orb-drift {
+      0%   { transform: translate(0,0) scale(1);     opacity: 0; }
+      8%   { opacity: 1; }
+      50%  { transform: translate(50px,35px) scale(1.08); }
+      92%  { opacity: 1; }
+      100% { transform: translate(0,0) scale(1);     opacity: 0; }
+    }
+
+    .grid-overlay {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(27,79,155,0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(27,79,155,0.055) 1px, transparent 1px);
+      background-size: 44px 44px;
+    }
+
+    .scan-line {
+      position: fixed; top: 0; left: -100%; z-index: 100; pointer-events: none;
+      width: 200px; height: 58px;
+      background: linear-gradient(90deg, transparent, rgba(27,79,155,0.18), rgba(245,166,35,0.08), transparent);
+      animation: scan 8s ease-in-out infinite;
+    }
+    @keyframes scan {
+      0%   { left: -200px; opacity: 0; }
+      5%   { opacity: 1; }
+      95%  { opacity: 1; }
+      100% { left: 110%; opacity: 0; }
+    }
+
+    /* ── Layout ── */
+    #app { position: relative; z-index: 1; display: flex; min-height: 100vh; }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: var(--sidebar-w);
+      min-height: 100vh; flex-shrink: 0;
+      background: rgba(6,14,30,0.78);
+      backdrop-filter: blur(30px) saturate(1.6);
+      -webkit-backdrop-filter: blur(30px) saturate(1.6);
+      border-right: 1px solid var(--glass-border);
+      display: flex; flex-direction: column;
+      transition: width 0.26s cubic-bezier(.4,0,.2,1);
+      overflow: hidden;
+      position: sticky; top: 0; height: 100vh;
+    }
+    /* Collapsed: icon-only strip — never disappears */
+    #sidebar.collapsed { width: var(--sidebar-collapsed); }
+
+    /* ── Sidebar logo ── */
+    .sidebar-logo {
+      padding: 26px 20px 22px;
+      border-bottom: 1px solid var(--glass-border);
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo-wrap {
+      display: flex; align-items: center; justify-content: center;
+      text-decoration: none;
+      width: 100%;
+    }
+    .logo-icon {
+      width: 82%; max-width: 188px;
+      height: auto; flex-shrink: 0;
+      object-fit: contain;
+      display: block;
+      filter: brightness(1.15)
+              drop-shadow(0 0 1px rgba(255,255,255,0.95))
+              drop-shadow(0 0 3px rgba(255,255,255,0.45));
+      transition: filter 0.3s ease,
+                  width 0.26s cubic-bezier(.4,0,.2,1),
+                  max-width 0.26s cubic-bezier(.4,0,.2,1);
+    }
+    .logo-wrap:hover .logo-icon {
+      filter: brightness(1.2)
+              drop-shadow(0 0 1px rgba(255,255,255,1.0))
+              drop-shadow(0 0 4px rgba(255,255,255,0.55));
+    }
+    /* Collapsed state */
+    #sidebar.collapsed .sidebar-logo { padding: 16px 0 14px; }
+    #sidebar.collapsed .logo-wrap    { justify-content: center; }
+    #sidebar.collapsed .logo-icon    { width: 38px; max-width: 38px; }
+
+    /* ── Nav label — text that hides on collapse ── */
+    .nav-label {
+      overflow: hidden;
+      white-space: nowrap;
+      max-width: 160px;
+      opacity: 1;
+      transition: max-width 0.26s cubic-bezier(.4,0,.2,1),
+                  opacity 0.16s ease;
+      flex-shrink: 1;
+    }
+    #sidebar.collapsed .nav-label {
+      max-width: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* ── Section headings hide on collapse ── */
+    .nav-section {
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 1.6px; text-transform: uppercase;
+      color: rgba(232,237,245,0.28);
+      padding: 20px 14px 5px;
+      position: relative;
+      overflow: hidden;
+      max-height: 52px;
+      transition: max-height 0.26s ease, opacity 0.16s ease,
+                  padding 0.26s ease;
+    }
+    .nav-section::after {
+      content: '';
+      display: block; margin-top: 7px; height: 1px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.07), transparent);
+    }
+    #sidebar.collapsed .nav-section {
+      max-height: 0;
+      opacity: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    #sidebar.collapsed .nav-section::after { display: none; }
+
+    /* ── Nav links ── */
+    .sidebar-nav {
+      flex: 1; padding: 8px 10px 12px;
+      display: flex; flex-direction: column; gap: 1px;
+      overflow-y: auto; overflow-x: hidden;
+    }
+    .nav-link {
+      display: flex; align-items: center; gap: 11px;
+      padding: 9px 12px; border-radius: 8px;
+      text-decoration: none; color: rgba(232,237,245,0.52);
+      font-size: 13px; font-weight: 400;
+      transition: background 0.18s ease, color 0.18s ease,
+                  padding 0.26s cubic-bezier(.4,0,.2,1);
+      position: relative; overflow: hidden;
+      white-space: nowrap; min-height: 38px;
+    }
+    .nav-link svg { flex-shrink: 0; opacity: 0.55; transition: opacity .18s; }
+    .nav-link:hover { background: var(--surface-hover); color: var(--text); }
+    .nav-link:hover svg { opacity: 0.9; }
+    .nav-link:hover::after {
+      content: '';
+      position: absolute; inset: 0; border-radius: 10px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
+      animation: nav-shimmer .5s ease forwards;
+    }
+    @keyframes nav-shimmer {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(100%); }
+    }
+    .nav-link.active {
+      background: rgba(255,255,255,0.18);
+      color: #fff; font-weight: 500;
+    }
+    .nav-link.active svg { opacity: 1; }
+    /* Collapsed: reduce side padding so icon is centered in 64px strip */
+    #sidebar.collapsed .nav-link {
+      padding-left: 0;
+      padding-right: 0;
+      justify-content: center;
+      gap: 0;
+    }
+
+    /* ── Nav groups (collapsible) ── */
+    .nav-group-toggle {
+      width: 100%; background: none; border: none; cursor: pointer;
+      font-family: inherit; color: inherit; text-align: left; font-size: 13px;
+    }
+    .nav-group-chevron { opacity: 0.4; margin-left: auto; transition: transform .22s ease; }
+    .nav-group.group-expanded .nav-group-chevron { transform: rotate(180deg); }
+    .nav-group-items {
+      max-height: 0; overflow: hidden; opacity: 0;
+      display: flex; flex-direction: column; gap: 1px;
+      transition: max-height .28s cubic-bezier(.4,0,.2,1), opacity .2s ease;
+    }
+    .nav-group.group-expanded .nav-group-items { max-height: 480px; opacity: 1; }
+    .nav-sub-link { padding-left: 30px; font-size: 12.5px; }
+    .nav-sub-link svg { width: 14px; height: 14px; }
+    /* Collapsed sidebar: always show group children as plain icons —
+       expand/collapse state is irrelevant once labels are hidden. */
+    #sidebar.collapsed .nav-group-items { max-height: none; opacity: 1; }
+    #sidebar.collapsed .nav-sub-link { padding-left: 0; justify-content: center; }
+    #sidebar.collapsed .nav-group-chevron { display: none; }
+
+    /* ── Footer sign-out ── */
+    .sidebar-footer {
+      padding: 10px 10px 14px;
+      border-top: 1px solid var(--glass-border);
+    }
+    .sidebar-footer a {
+      display: flex; align-items: center; gap: 9px;
+      padding: 9px 12px; border-radius: 8px;
+      text-decoration: none; color: rgba(232,237,245,0.38);
+      font-size: 13px; font-weight: 400; transition: all .18s;
+      white-space: nowrap; min-height: 38px;
+    }
+    .sidebar-footer a:hover { background: rgba(248,113,113,0.1); color: #fca5a5; }
+    #sidebar.collapsed .sidebar-footer a {
+      padding-left: 0; padding-right: 0;
+      justify-content: center; gap: 0;
+    }
+
+    /* ── Main ── */
+    #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+    #topbar {
+      height: 58px; display: flex; align-items: center; gap: 14px;
+      padding: 0 26px;
+      background: rgba(6,14,30,0.60);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--glass-border);
+      position: sticky; top: 0; z-index: 10; flex-shrink: 0;
+      overflow: hidden;
+    }
+    #topbar::before {
+      content: '';
+      position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(27,79,155,0.6), rgba(245,166,35,0.3), transparent);
+      animation: topbar-glow 4s ease-in-out infinite alternate;
+    }
+    @keyframes topbar-glow {
+      0%   { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+
+    #toggle-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); padding: 6px; border-radius: 8px;
+      transition: all .18s; display: flex; align-items: center;
+      justify-content: center; flex-shrink: 0;
+    }
+    #toggle-btn:hover { background: var(--surface); color: var(--text); }
+
+    .topbar-title { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; }
+
+    .live-badge {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 12px;
+      background: rgba(27,79,155,0.18);
+      border: 1px solid rgba(27,79,155,0.32);
+      border-radius: 20px; font-size: 12px; font-weight: 500;
+      color: rgba(232,237,245,0.72);
+      animation: badge-pulse 3s ease-in-out infinite;
+    }
+    @keyframes badge-pulse {
+      0%,100% { box-shadow: 0 0 0 rgba(27,79,155,0); }
+      50%      { box-shadow: 0 0 12px rgba(27,79,155,0.35); }
+    }
+    .dot-live {
+      width: 6px; height: 6px;
+      background: #34d399; border-radius: 50%;
+      animation: dot-pulse 1.8s ease-in-out infinite;
+      box-shadow: 0 0 6px #34d399;
+    }
+    @keyframes dot-pulse { 0%,100%{opacity:1; transform:scale(1)} 50%{opacity:.4; transform:scale(0.8)} }
+
+    /* ── Content ── */
+    #content { padding: 26px; flex: 1; }
+
+    .page-header { margin-bottom: 22px; }
+    .page-title { font-size: 23px; font-weight: 700; letter-spacing: -.5px; color: #fff; }
+    .page-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px; padding: 20px 22px;
+      margin-bottom: 16px;
+      position: relative; overflow: hidden;
+      transition: border-color .25s, box-shadow .25s;
+    }
+    .card:hover {
+      border-color: rgba(27,79,155,0.30);
+      box-shadow: 0 4px 28px rgba(27,79,155,0.12);
+    }
+    .card::after {
+      content: ''; position: absolute;
+      top: -50%; left: -75%; width: 50%; height: 200%;
+      background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.04) 50%, transparent 70%);
+      pointer-events: none;
+    }
+    .card:hover::after { left: 125%; transition: left .55s ease; }
+
+    .card-title {
+      font-size: 10.5px; font-weight: 600;
+      letter-spacing: 1.2px; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 14px;
+    }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width:768px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 9px 18px; border-radius: 9px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; border: none;
+      transition: all .18s ease;
+      text-decoration: none; letter-spacing: .2px;
+      font-family: 'Inter', sans-serif;
+      position: relative; overflow: hidden;
+    }
+    .btn::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.14) 50%, transparent 60%);
+      transform: translateX(-100%); pointer-events: none;
+    }
+    .btn:hover::after { transform: translateX(200%); transition: transform .45s ease; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--royal), var(--royal-light));
+      color: #fff; box-shadow: 0 4px 14px rgba(27,79,155,0.35);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(27,79,155,0.55); }
+
+    .btn-amber {
+      background: linear-gradient(135deg, var(--amber), var(--amber-light));
+      color: var(--navy); font-weight: 700;
+      box-shadow: 0 4px 14px rgba(245,166,35,0.28);
+    }
+    .btn-amber:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(245,166,35,0.45); }
+
+    .btn-secondary {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--glass-border);
+    }
+    .btn-secondary:hover { background: var(--surface-hover); }
+
+    /* ── Alerts ── */
+    .alert {
+      padding: 11px 15px; border-radius: 9px;
+      font-size: 13px; font-weight: 500;
+      margin-bottom: 14px; border: 1px solid;
+    }
+    .alert-success { background:rgba(52,211,153,0.09); border-color:rgba(52,211,153,0.28); color:#6ee7b7; }
+    .alert-info    { background:rgba(96,165,250,0.09); border-color:rgba(96,165,250,0.25); color:#93c5fd; }
+    .alert-warn    { background:rgba(245,166,35,0.09); border-color:rgba(245,166,35,0.28); color:#fcd34d; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 20px; font-size: 11px; font-weight: 600;
+    }
+    .badge-blue  { background:rgba(27,79,155,0.28); color:#93c5fd; border:1px solid rgba(27,79,155,0.42); }
+    .badge-amber { background:rgba(245,166,35,0.16); color:#fcd34d; border:1px solid rgba(245,166,35,0.36); }
+    .badge-green { background:rgba(52,211,153,0.13); color:#6ee7b7; border:1px solid rgba(52,211,153,0.28); }
+    .badge-red   { background:rgba(248,113,113,0.13); color:#fca5a5; border:1px solid rgba(248,113,113,0.28); }
+
+    /* Developer Mode badge (Developer Mode milestone) — subtle, always
+       visible while Developer Mode is on, so the admin is never unsure
+       which mode they're in. Sidebar footer position — visible whether
+       the sidebar is expanded or collapsed. */
+    .dev-mode-badge {
+      position: fixed; left: 12px; bottom: 56px; z-index: 40;
+      background: rgba(245,166,35,0.14); color: #fcd34d;
+      border: 1px solid rgba(245,166,35,0.32); border-radius: 20px;
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      pointer-events: none; white-space: nowrap;
+    }
+    .badge-gray  { background:rgba(255,255,255,0.06); color:var(--text-muted); border:1px solid var(--glass-border); }
+
+    /* ── Table ── */
+    .table { width:100%; border-collapse:collapse; font-size:13px; }
+    .table th {
+      text-align:left; padding:9px 13px;
+      font-size:10.5px; font-weight:600;
+      letter-spacing:1px; text-transform:uppercase;
+      color:var(--text-muted); border-bottom:1px solid var(--glass-border);
+    }
+    .table td { padding:12px 13px; border-bottom:1px solid rgba(255,255,255,0.04); color:var(--text); }
+    .table tr:last-child td { border-bottom:none; }
+    .table tr { transition: background .15s; }
+    .table tr:hover td { background:rgba(27,79,155,0.06); }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 15px; }
+    .form-label {
+      display:block; font-size:11px; font-weight:600;
+      letter-spacing:.5px; color:var(--text-muted);
+      margin-bottom:6px; text-transform:uppercase;
+    }
+    .form-input {
+      width:100%; padding:10px 13px;
+      background:rgba(255,255,255,0.05);
+      border:1px solid var(--glass-border);
+      border-radius:9px; color:var(--text);
+      font-size:14px; font-family:'Inter','Sarabun',sans-serif;
+      outline:none;
+      transition: border-color .18s, background .18s, box-shadow .18s;
+    }
+    .form-input::placeholder { color:rgba(232,237,245,0.28); }
+    /* Belt-and-suspenders alongside :root's color-scheme: dark above —
+       Firefox in particular honors background-color/color set directly
+       on <option>, so the dropdown popup matches the theme even where
+       color-scheme alone isn't enough. */
+    select.form-input option { background:var(--navy); color:var(--text); }
+    .form-input:focus {
+      border-color:rgba(27,79,155,0.70);
+      background:rgba(27,79,155,0.08);
+      box-shadow:0 0 0 3px rgba(27,79,155,0.15), 0 0 18px rgba(27,79,155,0.10);
+    }
+    .form-hint { font-size:11.5px; color:var(--text-muted); margin-top:4px; }
+
+    .chip {
+      display:inline-block; padding:2px 8px;
+      background:rgba(255,255,255,0.05);
+      border:1px solid var(--glass-border);
+      border-radius:5px; font-size:11px; color:var(--text-muted);
+      font-family:'SF Mono','Fira Code',monospace;
+    }
+
+    .stat-box {
+      background:rgba(255,255,255,0.04);
+      border:1px solid var(--glass-border);
+      border-radius:11px; padding:15px; text-align:center;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .stat-box:hover {
+      border-color:rgba(27,79,155,0.35);
+      box-shadow: 0 0 18px rgba(27,79,155,0.15);
+    }
+    .stat-num { font-size:27px; font-weight:700; letter-spacing:-1px; color:#fff; }
+    .stat-label {
+      font-size:10.5px; color:var(--text-muted); font-weight:500;
+      margin-top:3px; text-transform:uppercase; letter-spacing:.8px;
+    }
+
+    .empty { text-align:center; padding:44px 20px; color:var(--text-muted); }
+    .empty-icon { font-size:36px; margin-bottom:10px; opacity:.4; }
+    .empty-text { font-size:14px; line-height:1.6; }
+
+    ::-webkit-scrollbar { width:4px; height:4px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.13); border-radius:10px; }
+
+    #content { animation: page-in .35s ease both; }
+    @keyframes page-in {
+      from { opacity:0; transform:translateY(12px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+
+    /* ── Shared themed dialogs — replace window.alert/confirm/prompt
+       everywhere in the admin (see script near end of body). Same
+       visual language as the rest of the app, non-blocking. ── */
+    .ui-toast-stack{position:fixed;bottom:24px;right:24px;z-index:9000;display:flex;flex-direction:column;
+      gap:8px;pointer-events:none;align-items:flex-end}
+    .ui-toast{background:#0f2038;border:1px solid rgba(91,157,255,.4);color:var(--text,#e8edf5);padding:12px 18px;
+      border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;align-items:center;
+      gap:8px;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;max-width:360px;
+      white-space:pre-line;pointer-events:auto}
+    .ui-toast.show{opacity:1;transform:translateY(0)}
+    .ui-toast.ui-toast-success{border-color:rgba(52,211,153,.45)}
+    .ui-toast.ui-toast-error{border-color:rgba(239,68,68,.45)}
+    .ui-toast-icon{flex-shrink:0;font-size:14px}
+    .ui-toast-close{margin-left:auto;cursor:pointer;opacity:.5;flex-shrink:0}
+    .ui-toast-close:hover{opacity:1}
+
+    .ui-confirm-ov{display:none;position:fixed;inset:0;z-index:9500;background:rgba(6,14,30,.85);
+      backdrop-filter:blur(6px);align-items:center;justify-content:center}
+    .ui-confirm-ov.open{display:flex}
+    .ui-confirm-box{background:#0f1e38;border:1px solid rgba(245,166,35,.3);border-radius:16px;
+      padding:22px 26px;width:400px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,.5);animation:uiConfirmIn .15s ease}
+    @keyframes uiConfirmIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .ui-confirm-title{font-size:14px;font-weight:700;color:var(--text,#e8edf5);margin-bottom:10px}
+    .ui-confirm-msg{font-size:13px;color:rgba(232,237,245,.65);line-height:1.65;white-space:pre-line;margin-bottom:16px}
+    .ui-confirm-input{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);
+      border-radius:8px;color:var(--text,#e8edf5);padding:8px 10px;font-size:13px;margin-bottom:18px}
+    .ui-confirm-actions{display:flex;justify-content:flex-end;gap:10px}
+    .ui-confirm-btn{font-size:13px;padding:8px 22px;border-radius:20px;cursor:pointer;font-weight:600;
+      border:1px solid transparent;transition:background .15s,border-color .15s}
+    .ui-confirm-btn-ok{background:#F5A623;color:#1a1200;border-color:#F5A623}
+    .ui-confirm-btn-ok:hover{background:#ffb84d}
+    .ui-confirm-btn-cancel{background:transparent;color:rgba(232,237,245,.75);border-color:rgba(255,255,255,.2)}
+    .ui-confirm-btn-cancel:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.35)}
+  </style>
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<div class="aurora-bg">
+  <div class="aurora-orb"></div>
+  <div class="aurora-orb"></div>
+  <div class="aurora-orb"></div>
+</div>
+<div class="grid-overlay"></div>
+<div class="scan-line"></div>
+
+<div id="app">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <nav id="sidebar">
+    <div class="sidebar-logo">
+      <a href="/admin/documents" class="logo-wrap" title="Shipify Admin">
+        <img src="/static/img/logo.png" alt="Shipify" class="logo-icon">
+      </a>
+    </div>
+
+    <div class="sidebar-nav">
+      <div class="nav-section">Platform</div>
+      {% for entry in sidebar %}
+        {% if entry.type == 'item' %}
+          {% if entry.comingSoon %}
+          <a href="#" title="{{ entry.title }}" class="nav-link" style="opacity:.35;pointer-events:none">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">{{ entry.icon_svg|safe }}</svg>
+            <span class="nav-label">{{ entry.title }} <span class="badge badge-amber" style="font-size:9.5px">Soon</span></span>
+          </a>
+          {% else %}
+          <a href="{{ entry.href }}" title="{{ entry.title }}"
+             class="nav-link {% if active == entry.key %}active{% endif %}">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">{{ entry.icon_svg|safe }}</svg>
+            <span class="nav-label">{{ entry.title }}</span>
+          </a>
+          {% endif %}
+        {% else %}
+          {% set group_active = entry.children|selectattr('key', 'equalto', active)|list|length > 0 %}
+          <div class="nav-group {% if group_active %}group-expanded{% endif %}" data-group="{{ entry.key }}">
+            <button type="button" class="nav-link nav-group-toggle" title="{{ entry.description }}"
+                    onclick="toggleNavGroup('{{ entry.key }}')">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">{{ entry.icon_svg|safe }}</svg>
+              <span class="nav-label" style="flex:1">{{ entry.title }}</span>
+              <svg class="nav-group-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M2.5 3.5L5 6.5L7.5 3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <div class="nav-group-items">
+              {% for item in entry.children %}
+                {% if item.comingSoon %}
+                <a href="#" title="{{ item.title }}" class="nav-link nav-sub-link" style="opacity:.35;pointer-events:none">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">{{ item.icon_svg|safe }}</svg>
+                  <span class="nav-label">{{ item.title }} <span class="badge badge-amber" style="font-size:9.5px">Soon</span></span>
+                </a>
+                {% else %}
+                <a href="{{ item.href }}" title="{{ item.title }}"
+                   class="nav-link nav-sub-link {% if active == item.key %}active{% endif %}">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">{{ item.icon_svg|safe }}</svg>
+                  <span class="nav-label">{{ item.title }}</span>
+                </a>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      {% endfor %}
+      <!-- The old hardcoded "System (Phase 2)" block (User Profiles /
+           LINE Analytics / ERP Sync) has been removed — those three
+           items are now part of the SAME data-driven `sidebar` loop
+           above, rendered by admin/sidebar_config.py's dynamically-built
+           "Developer Tools" group (services/developer_mode.py), visible
+           only when Developer Mode is ON. No second, hardcoded
+           visibility system remains in this template. -->
+    </div>
+
+    {% if developer_mode %}
+    <div class="dev-mode-badge" title="Developer Mode is ON — advanced/unfinished tools are visible. Toggle it off in Settings.">
+      🛠️ Developer Mode
+    </div>
+    {% endif %}
+
+    <div class="sidebar-footer">
+      <a href="/admin/logout" title="Sign Out">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">
+          <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          <path d="M10.5 11L14 8l-3.5-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M14 8H6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        <span class="nav-label">Sign Out</span>
+      </a>
+    </div>
+  </nav>
+
+  <!-- ═══ MAIN ═══ -->
+  <div id="main">
+    <header id="topbar">
+      <button id="toggle-btn" title="Toggle sidebar">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <rect x="1" y="3.5" width="16" height="1.5" rx=".75" fill="currentColor"/>
+          <rect x="1" y="8.25" width="16" height="1.5" rx=".75" fill="currentColor"/>
+          <rect x="1" y="13" width="16" height="1.5" rx=".75" fill="currentColor"/>
+        </svg>
+      </button>
+      <div class="topbar-title">{% block topbar_title %}Shipify Admin{% endblock %}</div>
+      <div class="live-badge">
+        <div class="dot-live"></div>
+        AI Active
+      </div>
+    </header>
+
+    <main id="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<script>
+  const sidebar = document.getElementById('sidebar');
+  let collapsed = localStorage.getItem('sidebar-collapsed') === '1';
+  if (collapsed) sidebar.classList.add('collapsed');
+
+  document.getElementById('toggle-btn').addEventListener('click', function() {
+    collapsed = !collapsed;
+    sidebar.classList.toggle('collapsed', collapsed);
+    localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0');
+  });
+
+  // ── Nav group expand/collapse ──
+  // Groups whose active page belongs to them are already rendered
+  // server-side with .group-expanded — that always wins. Otherwise, restore
+  // whatever the user last chose for that group.
+  window.toggleNavGroup = function(key) {
+    var el = document.querySelector('.nav-group[data-group="' + key + '"]');
+    if (!el) return;
+    var expanded = el.classList.toggle('group-expanded');
+    localStorage.setItem('nav-group-' + key, expanded ? '1' : '0');
+  };
+  document.querySelectorAll('.nav-group').forEach(function(g) {
+    if (g.classList.contains('group-expanded')) return; // active page forces this open
+    if (localStorage.getItem('nav-group-' + g.dataset.group) === '1') {
+      g.classList.add('group-expanded');
+    }
+  });
+
+  const cursor = document.createElement('div');
+  cursor.style.cssText = `
+    position:fixed; pointer-events:none; z-index:999;
+    width:320px; height:320px; border-radius:50%;
+    background:radial-gradient(circle, rgba(27,79,155,0.09) 0%, transparent 70%);
+    transform:translate(-50%,-50%);
+    transition: left .15s ease, top .15s ease;
+    left:-9999px; top:-9999px;
+  `;
+  document.body.appendChild(cursor);
+  document.addEventListener('mousemove', e => {
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top  = e.clientY + 'px';
+  });
+
+  const glowConfigs = [
+    { bg: 'rgba(245,166,35,1)',   shadow: '0 0 6px 2px rgba(245,166,35,0.9),  0 0 18px 4px rgba(245,166,35,0.5),  0 0 40px 8px rgba(245,166,35,0.2)'  },
+    { bg: 'rgba(27,79,155,1)',    shadow: '0 0 6px 2px rgba(27,79,155,0.9),   0 0 18px 4px rgba(27,79,155,0.55),  0 0 40px 8px rgba(27,79,155,0.25)' },
+    { bg: 'rgba(255,255,255,1)',  shadow: '0 0 5px 2px rgba(255,255,255,0.8), 0 0 14px 4px rgba(200,220,255,0.45),0 0 30px 6px rgba(27,79,155,0.2)'  },
+    { bg: 'rgba(100,180,255,1)',  shadow: '0 0 6px 2px rgba(100,180,255,0.9), 0 0 18px 4px rgba(100,180,255,0.5), 0 0 36px 8px rgba(27,79,155,0.25)' },
+    { bg: 'rgba(245,166,35,1)',   shadow: '0 0 4px 1px rgba(245,166,35,1),    0 0 12px 3px rgba(245,166,35,0.6),  0 0 24px 6px rgba(245,166,35,0.2)'  },
+  ];
+  const pContainer = document.createElement('div');
+  pContainer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden';
+  document.body.appendChild(pContainer);
+  for (let i = 0; i < 28; i++) {
+    const p = document.createElement('div');
+    const cfg  = glowConfigs[Math.floor(Math.random() * glowConfigs.length)];
+    const size = Math.random() * 3 + 1;
+    p.style.cssText = `
+      position:absolute; border-radius:50%;
+      width:${size}px; height:${size}px;
+      left:${Math.random()*100}%;
+      bottom:${Math.random()*10-5}%;
+      background:${cfg.bg};
+      box-shadow:${cfg.shadow};
+      filter:blur(${Math.random() < 0.35 ? '0.6' : '0'}px);
+      animation: float-up ${10+Math.random()*16}s linear ${-Math.random()*20}s infinite;
+    `;
+    pContainer.appendChild(p);
+  }
+  const style = document.createElement('style');
+  style.textContent = `@keyframes float-up {
+    0%   { transform:translateY(0) scale(1);    opacity:0; }
+    8%   { opacity:1; }
+    90%  { opacity:.5; }
+    100% { transform:translateY(-105vh) scale(.4); opacity:0; }
+  }`;
+  document.head.appendChild(style);
+</script>
+{% block extra_scripts %}{% endblock %}
+<!-- ── Global Confirm Modal ── -->
+<div id="confirm-modal" style="display:none;position:fixed;inset:0;z-index:2000;
+     align-items:center;justify-content:center;
+     background:rgba(6,14,30,0.80);backdrop-filter:blur(10px)">
+  <div style="background:rgba(13,25,50,0.97);border:1px solid rgba(27,79,155,0.45);
+              border-radius:18px;padding:32px 30px 26px;width:400px;max-width:90vw;
+              box-shadow:0 24px 60px rgba(0,0,0,0.5);
+              animation:modal-in .2s cubic-bezier(.34,1.56,.64,1) both">
+    <div id="cm-icon" style="font-size:32px;margin-bottom:12px;text-align:center"></div>
+    <div id="cm-title" style="font-size:16px;font-weight:700;color:#fff;
+                              text-align:center;margin-bottom:8px"></div>
+    <div id="cm-msg" style="font-size:13px;color:rgba(232,237,245,0.55);
+                            text-align:center;line-height:1.6;margin-bottom:24px"></div>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button id="cm-cancel"
+              style="flex:1;padding:10px;border-radius:10px;font-size:13px;font-weight:600;
+                     cursor:pointer;border:1px solid rgba(255,255,255,0.12);
+                     background:rgba(255,255,255,0.06);color:rgba(232,237,245,0.7);
+                     transition:all .15s;font-family:inherit"
+              onmouseover="this.style.background='rgba(255,255,255,0.12)'"
+              onmouseout="this.style.background='rgba(255,255,255,0.06)'"
+              onclick="closeConfirm()">Cancel</button>
+      <button id="cm-ok"
+              style="flex:1;padding:10px;border-radius:10px;font-size:13px;font-weight:600;
+                     cursor:pointer;border:none;
+                     background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;
+                     box-shadow:0 4px 14px rgba(239,68,68,0.35);
+                     transition:all .15s;font-family:inherit"
+              onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 8px 20px rgba(239,68,68,0.5)'"
+              onmouseout="this.style.transform='';this.style.boxShadow='0 4px 14px rgba(239,68,68,0.35)'"
+              onclick="confirmOk()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes modal-in {
+  from { opacity:0; transform:scale(.88) translateY(12px); }
+  to   { opacity:1; transform:scale(1)  translateY(0); }
+}
+</style>
+
+<script>
+  let _confirmCallback = null;
+
+  function showConfirm({ icon='', title='Confirm', message='', okText='Delete', okColor='#ef4444', isHtml=false, hideCancelBtn=false, onOk } = {}) {
+    const iconEl = document.getElementById('cm-icon');
+    iconEl.textContent = icon || '';
+    iconEl.style.display = icon ? '' : 'none';
+    iconEl.style.marginBottom = icon ? '' : '0';
+    document.getElementById('cm-title').textContent = title || 'Confirm';
+    const msgEl = document.getElementById('cm-msg');
+    if (isHtml) { msgEl.innerHTML = message || ''; } else { msgEl.textContent = message || ''; }
+    const okBtn = document.getElementById('cm-ok');
+    okBtn.textContent = okText || 'Delete';
+    okBtn.style.background = `linear-gradient(135deg,${okColor},${okColor}cc)`;
+    okBtn.style.boxShadow = `0 4px 14px ${okColor}55`;
+    document.getElementById('cm-cancel').style.display = hideCancelBtn ? 'none' : '';
+    _confirmCallback = onOk || null;
+    const modal = document.getElementById('confirm-modal');
+    modal.style.display = 'flex';
+  }
+
+  function confirmOk() {
+    var cb = _confirmCallback;
+    closeConfirm();
+    if (cb) cb();
+  }
+
+  function closeConfirm() {
+    document.getElementById('confirm-modal').style.display = 'none';
+    _confirmCallback = null;
+  }
+
+  // กด Escape ปิด modal
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeConfirm();
+  });
+
+  // ── Global loading overlay ──
+  function showLoading(msg) {
+    let el = document.getElementById('global-loading');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'global-loading';
+      el.style.cssText = 'display:none;position:fixed;inset:0;z-index:3000;' +
+        'align-items:center;justify-content:center;' +
+        'background:rgba(6,14,30,0.75);backdrop-filter:blur(8px)';
+      el.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:16px">' +
+        '<div style="width:44px;height:44px;border:3px solid rgba(27,79,155,0.3);' +
+        'border-top-color:#F5A623;border-radius:50%;animation:spin .7s linear infinite"></div>' +
+        '<div id="global-loading-msg" style="font-size:13px;color:rgba(232,237,245,0.6);font-weight:500"></div>' +
+        '</div>';
+      document.body.appendChild(el);
+    }
+    document.getElementById('global-loading-msg').textContent = msg || 'Please wait...';
+    el.style.display = 'flex';
+  }
+
+  function hideLoading() {
+    const el = document.getElementById('global-loading');
+    if (el) el.style.display = 'none';
+  }
+
+  // คลิก backdrop ปิด
+  document.getElementById('confirm-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeConfirm();
+  });
+</script>
+
+<script>
+  function checkAuth() {
+    fetch('/admin/check-auth', {cache: 'no-store'}).then(r => {
+      if (!r.ok) window.location.replace('/admin/login');
+    });
+  }
+  checkAuth();
+  window.addEventListener('pageshow', function(e) {
+    if (e.persisted) checkAuth();
+  });
+</script>
+
+<!-- ═══════════════════════════════════════
+     FLOATING SYNC PROGRESS PANEL
+════════════════════════════════════════ -->
+<style>
+@keyframes fsync-spin { to { transform: rotate(360deg); } }
+@keyframes fsync-in   { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+
+#fsync-panel {
+  position: fixed; bottom: 24px; right: 24px; z-index: 900;
+  width: 360px;
+  background: rgba(8,16,38,.97);
+  border: 1px solid rgba(27,79,155,.45);
+  border-radius: 16px;
+  box-shadow: 0 16px 56px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04);
+  display: none;
+  animation: fsync-in .22s cubic-bezier(.34,1.56,.64,1);
+  overflow: hidden;
+}
+#fsync-panel.visible { display: block; }
+
+/* ── Header ── */
+#fsync-header {
+  display: flex; align-items: center; gap: 9px;
+  padding: 14px 18px 13px;
+  cursor: pointer; user-select: none;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  transition: background .15s;
+}
+#fsync-header:hover { background: rgba(255,255,255,.03); }
+#fsync-spinner {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid rgba(245,166,35,.2); border-top-color: #F5A623;
+  animation: fsync-spin .75s linear infinite; flex-shrink: 0; display: none;
+}
+#fsync-title {
+  font-size: 13px; font-weight: 600; color: #e8edf5;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  letter-spacing: -.1px;
+}
+#fsync-header-right { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+#fsync-pct-mini { font-size: 12px; color: #F5A623; font-weight: 700; }
+#fsync-count-mini { font-size: 11px; color: rgba(232,237,245,.35); }
+#fsync-toggle { font-size: 12px; color: rgba(232,237,245,.3); line-height: 1; }
+
+/* ── Body ── */
+#fsync-body { padding: 18px 20px 20px; }
+
+/* Overall progress section */
+#fsync-section-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 1.2px;
+  text-transform: uppercase; color: rgba(232,237,245,.28);
+  margin-bottom: 10px;
+}
+#fsync-bar-wrap {
+  height: 7px; background: rgba(255,255,255,.07);
+  border-radius: 99px; overflow: hidden; margin-bottom: 10px;
+}
+#fsync-bar-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, #1B4F9B, #F5A623);
+  transition: width .45s ease;
+}
+#fsync-meta {
+  display: flex; align-items: center; gap: 0;
+  margin-bottom: 0; flex-wrap: nowrap;
+}
+#fsync-pct { font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -1px; line-height: 1; }
+#fsync-meta-right { margin-left: auto; text-align: right; }
+#fsync-count { font-size: 12px; color: rgba(232,237,245,.45); display: block; margin-bottom: 2px; }
+#fsync-elapsed { font-size: 11px; color: rgba(232,237,245,.28); display: block; }
+
+/* Divider */
+.fsync-divider {
+  height: 1px; background: rgba(255,255,255,.06);
+  margin: 16px 0;
+}
+
+/* File list */
+#fsync-file-list { overflow-y: auto; }
+.fsync-frow { padding: 0; }
+.fsync-frow + .fsync-frow { margin-top: 14px; }
+.fsync-frow-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 1.1px;
+  text-transform: uppercase; color: rgba(232,237,245,.28);
+  margin-bottom: 6px;
+}
+.fsync-fname {
+  font-size: 13px; font-weight: 500; color: #e8edf5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 8px; cursor: default;
+}
+.fsync-fstage-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.fsync-fstage-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 1.1px;
+  text-transform: uppercase; color: rgba(232,237,245,.28);
+  flex-shrink: 0;
+}
+.fsync-fstage {
+  display: inline-block; font-size: 11.5px; font-weight: 500;
+  padding: 2px 9px; border-radius: 20px;
+}
+.fsync-fbar-wrap {
+  height: 7px; background: rgba(255,255,255,.08);
+  border-radius: 99px; overflow: hidden;
+}
+.fsync-fbar-fill { height: 100%; border-radius: 99px; transition: width .35s ease; }
+
+/* Actions */
+#fsync-actions {
+  display: flex; gap: 8px; margin-top: 18px;
+}
+#fsync-actions a, #fsync-actions button {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  border-radius: 9px; padding: 8px 12px;
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
+  text-decoration: none; transition: all .15s; font-family: inherit;
+  letter-spacing: -.1px;
+}
+#fsync-view-btn {
+  background: rgba(27,79,155,.16); color: #93c5fd;
+  border: 1px solid rgba(27,79,155,.32);
+}
+#fsync-view-btn:hover { background: rgba(27,79,155,.28); }
+#fsync-cancel-btn {
+  background: rgba(239,68,68,.09); color: #fca5a5;
+  border: 1px solid rgba(239,68,68,.22);
+}
+#fsync-cancel-btn:hover { background: rgba(239,68,68,.18); }
+#fsync-dismiss-btn {
+  background: rgba(255,255,255,.05); color: rgba(232,237,245,.45);
+  border: 1px solid rgba(255,255,255,.1);
+}
+#fsync-dismiss-btn:hover { background: rgba(255,255,255,.10); color: rgba(232,237,245,.7); }
+
+#fsync-panel.minimized #fsync-body { display: none; }
+
+#fsync-cancel-modal-ov{display:none;position:fixed;inset:0;z-index:3000;background:rgba(6,14,30,.9);backdrop-filter:blur(8px);align-items:center;justify-content:center}
+#fsync-cancel-modal-ov.open{display:flex}
+#fsync-cancel-modal-box{background:rgba(13,25,50,.98);border:1px solid rgba(239,68,68,.35);border-radius:16px;padding:24px 26px;width:380px;max-width:92vw}
+#fsync-cancel-modal-box .fcm-title{font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:10px}
+#fsync-cancel-modal-box .fcm-row{font-size:12.5px;color:rgba(232,237,245,.6);margin-bottom:4px}
+#fsync-cancel-modal-box .fcm-row strong{color:#e8edf5;font-weight:600}
+#fsync-cancel-modal-box .fcm-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+#fsync-cancel-modal-box .fcm-btn{padding:7px 16px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+#fsync-cancel-modal-box .fcm-continue{background:rgba(255,255,255,.05);color:rgba(232,237,245,.7);border:1px solid rgba(255,255,255,.12)}
+#fsync-cancel-modal-box .fcm-confirm{background:rgba(239,68,68,.16);color:#fca5a5;border:1px solid rgba(239,68,68,.35)}
+</style>
+
+<div id="fsync-panel">
+  <div id="fsync-header" onclick="fsyncToggle()">
+    <div id="fsync-spinner"></div>
+    <svg id="fsync-done-icon" width="15" height="15" viewBox="0 0 16 16" fill="none" style="display:none;flex-shrink:0">
+      <path d="M8 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13z" stroke="#34d399" stroke-width="1.3"/>
+      <path d="M5.5 8.5l1.8 1.8L10.5 6" stroke="#34d399" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div id="fsync-title">Sync in progress…</div>
+    <div id="fsync-header-right">
+      <span id="fsync-pct-mini" style="display:none"></span>
+      <span id="fsync-count-mini" style="display:none"></span>
+      <span id="fsync-toggle">▾</span>
+    </div>
+  </div>
+  <div id="fsync-body">
+    <!-- Overall progress -->
+    <div id="fsync-section-label">Overall Progress</div>
+    <div id="fsync-bar-wrap"><div id="fsync-bar-fill" style="width:0%"></div></div>
+    <div id="fsync-meta">
+      <span id="fsync-pct">0%</span>
+      <div id="fsync-meta-right">
+        <span id="fsync-count"></span>
+        <span id="fsync-elapsed"></span>
+      </div>
+    </div>
+
+    <!-- File list -->
+    <div id="fsync-file-list"></div>
+
+    <!-- Actions -->
+    <div id="fsync-actions">
+      <a href="/admin/sync-activity" id="fsync-view-btn">View Activity</a>
+      <button type="button" id="fsync-cancel-btn" onclick="fsyncCancel()" style="display:none">Cancel</button>
+      <button type="button" id="fsync-dismiss-btn" onclick="fsyncDismiss()" style="display:none">✕ Dismiss</button>
+    </div>
+  </div>
+</div>
+
+<div id="fsync-cancel-modal-ov" onclick="if(event.target===this) fsyncCancelDialogClose()">
+  <div id="fsync-cancel-modal-box">
+    <div class="fcm-title">Cancel Sync?</div>
+    <div class="fcm-row">Current file: <strong id="fcm-current-file">—</strong></div>
+    <div class="fcm-row">Remaining files: <strong id="fcm-remaining">0</strong></div>
+    <div class="fcm-actions">
+      <button type="button" class="fcm-btn fcm-continue" onclick="fsyncCancelDialogClose()">Continue</button>
+      <button type="button" class="fcm-btn fcm-confirm" onclick="fsyncCancelConfirmed()">Cancel Sync</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var _poll = null;
+  var _startTime = null;
+  var LS_KEY = 'fsync_expanded';
+
+  // Restore expand/collapse from localStorage (default: expanded)
+  var _expanded = localStorage.getItem(LS_KEY) !== 'false';
+
+  function panel() { return document.getElementById('fsync-panel'); }
+
+  function setExpanded(v) {
+    _expanded = v;
+    localStorage.setItem(LS_KEY, v ? 'true' : 'false');
+    var t = document.getElementById('fsync-toggle');
+    if (t) t.textContent = v ? '▾' : '▸';
+    panel().classList.toggle('minimized', !v);
+    var mini = document.getElementById('fsync-pct-mini');
+    var miniC = document.getElementById('fsync-count-mini');
+    if (mini) mini.style.display = v ? 'none' : 'inline';
+    if (miniC) miniC.style.display = v ? 'none' : 'inline';
+  }
+
+  window.fsyncToggle = function() { setExpanded(!_expanded); };
+
+  function calcPct(d) {
+    if (!d.total_files) return d.pct || 0;
+    var idx = (d.file_index || 1) - 1; // 0-based index of current file
+    var filePct = 0;
+    if (d.current_file && d.file_steps && d.file_steps[d.current_file]) {
+      filePct = d.file_steps[d.current_file].pct || 0;
+    }
+    return Math.min(100, Math.round(idx / d.total_files * 100 + filePct / d.total_files));
+  }
+
+  function fmtElapsed(ms) {
+    var s = Math.round(ms / 1000);
+    return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's';
+  }
+
+  var SLABELS = { waiting:'Waiting', reading:'Extracting', chunking:'Chunking', embedding:'Embedding', saving:'Saving', done:'Done', failed:'Failed' };
+  var SCOLORS = { waiting:'rgba(232,237,245,.4)', reading:'#93c5fd', chunking:'#93c5fd', embedding:'#F5A623', saving:'#fcd34d', done:'#34d399', failed:'#fca5a5' };
+  var SBGS    = { waiting:'rgba(255,255,255,.05)', reading:'rgba(27,79,155,.18)', chunking:'rgba(27,79,155,.18)', embedding:'rgba(245,166,35,.12)', saving:'rgba(252,211,77,.1)', done:'rgba(52,211,153,.1)', failed:'rgba(239,68,68,.12)' };
+
+  function renderFileList(d) {
+    var list = document.getElementById('fsync-file-list');
+    if (!list) return;
+    var files = d.sync_files || [];
+    if (!files.length) { list.innerHTML = ''; return; }
+    var steps  = d.file_steps || {};
+    var curF   = d.current_file || '';
+
+    // Bucket files by status
+    var running = [], waiting = [], done = [], failed = [];
+    files.forEach(function(fname) {
+      var s = steps[fname];
+      if (!s || s.step === 'waiting') {
+        if (fname === curF) running.push(fname); else waiting.push(fname);
+      } else if (s.step === 'done')   done.push(fname);
+      else if (s.step === 'failed')   failed.push(fname);
+      else                            running.push(fname); // reading/chunking/embedding/saving
+    });
+
+    function renderRow(fname, s) {
+      s = s || { step: 'waiting', pct: 0 };
+      var pct    = s.step === 'done' ? 100 : (s.pct || 0);
+      var barClr = s.step === 'done' ? '#34d399' : (s.step === 'failed' ? '#ef4444' : '#F5A623');
+      return '<div class="fsync-frow">' +
+        '<div class="fsync-fname" title="' + fname + '">' + fname + '</div>' +
+        '<div class="fsync-fstage-row">' +
+          '<span class="fsync-fstage-label">Stage</span>' +
+          '<span class="fsync-fstage" style="color:' + (SCOLORS[s.step]||'#e8edf5') + ';background:' + (SBGS[s.step]||'rgba(255,255,255,.05)') + '">' + (SLABELS[s.step]||s.step) + '</span>' +
+        '</div>' +
+        '<div class="fsync-fbar-wrap"><div class="fsync-fbar-fill" style="width:' + pct + '%;background:' + barClr + '"></div></div>' +
+        '</div>';
+    }
+
+    function section(label, color, arr) {
+      if (!arr.length) return '';
+      return '<div class="fsync-frow-label" style="color:' + color + ';margin-top:14px">' + label + ' (' + arr.length + ')</div>' +
+        arr.map(function(f){ return renderRow(f, steps[f]); }).join('');
+    }
+
+    list.innerHTML = '<div class="fsync-divider"></div>' +
+      section('Running',   '#F5A623',            running) +
+      section('Waiting',   'rgba(232,237,245,.35)', waiting) +
+      section('Completed', '#34d399',            done) +
+      section('Failed',    '#fca5a5',            failed);
+  }
+
+  var _lastLoggedJobId = undefined;
+
+  function show(d) {
+    var p = panel();
+    p.classList.add('visible');
+    setExpanded(_expanded); // apply current persisted state
+
+    // Log once per job (not every 1.5s poll) so it's traceable which job_id
+    // and how many items the widget is currently bound to — a stale/mixed
+    // job_id here means the widget is reading the wrong sync_job.
+    if (d.job_id !== _lastLoggedJobId) {
+      _lastLoggedJobId = d.job_id;
+      console.log('[SyncWidget] active job_id: ' + (d.job_id || 'none'));
+      console.log('[SyncWidget] loaded items count: ' + ((d.sync_files || []).length));
+    }
+
+    var pct = d.running ? calcPct(d) : (d.done ? 100 : 0);
+    var count = d.total_files ? ((d.file_index || 0) + '/' + d.total_files) : '';
+    var elapsed = _startTime ? fmtElapsed(Date.now() - _startTime) : (d.started_at ? fmtElapsed((Date.now() - d.started_at * 1000)) : '');
+
+    document.getElementById('fsync-bar-fill').style.width = pct + '%';
+    document.getElementById('fsync-pct').textContent = pct + '%';
+    document.getElementById('fsync-count').textContent = count;
+    document.getElementById('fsync-elapsed').textContent = elapsed ? ('• ' + elapsed) : '';
+    document.getElementById('fsync-pct-mini').textContent = pct + '%';
+    document.getElementById('fsync-count-mini').textContent = count ? (' • ' + count) : '';
+
+    var spinner = document.getElementById('fsync-spinner');
+    var doneIcon = document.getElementById('fsync-done-icon');
+
+    if (d.running) {
+      spinner.style.display = 'block'; doneIcon.style.display = 'none';
+      document.getElementById('fsync-title').textContent = 'Sync in progress…';
+      document.getElementById('fsync-cancel-btn').style.display = 'inline-flex';
+      document.getElementById('fsync-dismiss-btn').style.display = 'none';
+      document.getElementById('fsync-bar-fill').style.background = 'linear-gradient(90deg,#1B4F9B,#F5A623)';
+    } else if (d.done) {
+      spinner.style.display = 'none'; doneIcon.style.display = 'block';
+      var hasErr = d.errors && d.errors.length > 0;
+      document.getElementById('fsync-title').textContent = hasErr ? 'Sync complete (with errors)' : 'Sync complete';
+      document.getElementById('fsync-cancel-btn').style.display = 'none';
+      document.getElementById('fsync-dismiss-btn').style.display = 'inline-flex';
+      document.getElementById('fsync-bar-fill').style.background = hasErr ? '#F5A623' : '#34d399';
+    }
+
+    renderFileList(d);
+  }
+
+  var _cancelledByUser = false;
+
+  function hide() {
+    panel().classList.remove('visible');
+    if (_poll) { clearInterval(_poll); _poll = null; }
+    _startTime = null;
+  }
+
+  window.fsyncDismiss = function() { hide(); };
+
+  var _lastState = null;
+
+  window.fsyncCancel = function() {
+    // Show a real confirmation dialog — current file + remaining count —
+    // instead of firing the cancel request immediately with no feedback.
+    var d = _lastState || {};
+    var remaining = Math.max((d.total_files || 0) - (d.file_index || 0), 0);
+    document.getElementById('fcm-current-file').textContent = d.current_file || '—';
+    document.getElementById('fcm-remaining').textContent = remaining;
+    document.getElementById('fsync-cancel-modal-ov').classList.add('open');
+  };
+
+  window.fsyncCancelDialogClose = function() {
+    document.getElementById('fsync-cancel-modal-ov').classList.remove('open');
+  };
+
+  window.fsyncCancelConfirmed = function() {
+    console.log('[SyncCancel] clicked');
+    fsyncCancelDialogClose();
+    _cancelledByUser = true;
+    hide(); // hide immediately — don't wait for the network round trip
+    fetch('/admin/sync-cancel', {method:'POST'})
+      .then(function(r){ return r.json(); })
+      .then(function(d) {
+        console.log('[SyncCancel] backend cancelled job');
+        console.log('[SyncCancel] cleared local state');
+        if (window.location.pathname.indexOf('/admin/documents') === 0) window.location.reload();
+      })
+      .catch(function(){});
+  };
+
+  function poll() {
+    if (_cancelledByUser) return; // ignore in-flight responses that arrive after a user cancel
+    fetch('/admin/sync-status', {cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(d) {
+        if (_cancelledByUser) return;
+        _lastState = d;
+        if (d.running) {
+          show(d);
+        } else if (d.done && d.log && d.log.length > 0) {
+          show(d);
+          if (_poll) { clearInterval(_poll); _poll = null; }
+        } else {
+          // Grace period: if started within 12s, keep polling — thread may not have set running=true yet
+          var age = _startTime ? (Date.now() - _startTime) : 99999;
+          if (age > 12000) {
+            if (_poll) { clearInterval(_poll); _poll = null; }
+          }
+          // else: keep interval alive, sync thread is still starting
+        }
+      })
+      .catch(function(){});
+  }
+
+  function startPolling() {
+    if (!_startTime) _startTime = Date.now();
+    if (_poll) clearInterval(_poll); // clear stale interval before starting fresh
+    _poll = setInterval(poll, 1500);
+    poll(); // immediate first poll
+  }
+
+  // On page load: /admin/sync/active is the canonical "is anything running"
+  // check — it returns {job: null} rather than fabricating a job from stale
+  // state, so the widget only ever resumes for a genuinely active job.
+  console.log('[SyncRestore] page loaded');
+  console.log('[SyncRestore] checking active job');
+  fetch('/admin/sync/active', {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d && d.job) {
+        console.log('[SyncRestore] active job detected — restoring widget');
+        startPolling();
+      } else {
+        console.log('[SyncRestore] no active job found');
+        console.log('[SyncRestore] widget hidden');
+        hide();
+      }
+    })
+    .catch(function(){});
+
+  window.fsyncNotifyStart = function() {
+    console.log('[SyncWidget] set visible true');
+    _cancelledByUser = false;
+    _startTime = Date.now();
+    // Show immediately in "starting" state — don't wait for first poll
+    show({ running: true, done: false, pct: 0, total_files: 0,
+           file_index: 0, sync_files: [], file_steps: {}, log: [] });
+    startPolling();
+  };
+})();
+</script>
+
+<!-- ── Shared themed dialogs (replace window.alert/confirm/prompt site-wide) ── -->
+<div class="ui-toast-stack" id="ui-toast-stack"></div>
+<div class="ui-confirm-ov" id="ui-confirm-ov">
+  <div class="ui-confirm-box">
+    <div class="ui-confirm-title" id="ui-confirm-title"></div>
+    <div class="ui-confirm-msg" id="ui-confirm-msg"></div>
+    <input class="ui-confirm-input" id="ui-confirm-input" style="display:none">
+    <div class="ui-confirm-actions">
+      <button class="ui-confirm-btn ui-confirm-btn-cancel" id="ui-confirm-cancel">Cancel</button>
+      <button class="ui-confirm-btn ui-confirm-btn-ok" id="ui-confirm-ok">OK</button>
+    </div>
+  </div>
+</div>
+<script>
+// ────────────────────────────────────────────
+// Themed, non-blocking replacements for window.alert/confirm/prompt —
+// loaded once here in base.html so every admin page gets them for free.
+// `alert()` is overridden directly (nothing ever reads its return value,
+// so a non-blocking toast is a safe drop-in). `confirm()`/`prompt()`
+// are inherently meant to block synchronously for their return value,
+// so they are NOT overridden globally (that would silently break every
+// `if (confirm(...))` call site) — use the async uiConfirm()/uiPrompt()
+// helpers below instead, updating call sites to await/then them.
+// ────────────────────────────────────────────
+(function(){
+  var activeToasts = {};
+
+  function showToast(message, type){
+    type = type || 'info';
+    var key = type + ':' + message;
+    if (activeToasts[key]) return; // de-dupe an identical toast already showing
+    activeToasts[key] = true;
+
+    var stack = document.getElementById('ui-toast-stack');
+    var el = document.createElement('div');
+    el.className = 'ui-toast' + (type === 'error' ? ' ui-toast-error' : type === 'success' ? ' ui-toast-success' : '');
+    var icon = type === 'error' ? '⚠️' : type === 'success' ? '✅' : 'ℹ️';
+    el.innerHTML = '<span class="ui-toast-icon"></span><span></span><span class="ui-toast-close">✕</span>';
+    el.querySelector('.ui-toast-icon').textContent = icon;
+    el.querySelector('span:nth-child(2)').textContent = message;
+    function dismiss(){
+      el.classList.remove('show');
+      delete activeToasts[key];
+      setTimeout(function(){ el.remove(); }, 250);
+    }
+    el.querySelector('.ui-toast-close').addEventListener('click', dismiss);
+    stack.appendChild(el);
+    requestAnimationFrame(function(){ el.classList.add('show'); });
+    setTimeout(dismiss, 4200);
+  }
+
+  window.showToast = showToast;
+  window.showErrorToast = function(message){ showToast(message || 'Something went wrong.', 'error'); };
+  window.showSuccessToast = function(message){ showToast(message, 'success'); };
+
+  // Drop-in replacement for window.alert() — same call signature, no
+  // return value used anywhere, so overriding it is safe everywhere.
+  window.alert = function(message){ showToast(message, 'info'); };
+
+  window.uiConfirm = function(message, title){
+    return new Promise(function(resolve){
+      var ov = document.getElementById('ui-confirm-ov');
+      document.getElementById('ui-confirm-title').textContent = title || 'Please confirm';
+      document.getElementById('ui-confirm-msg').textContent = message;
+      document.getElementById('ui-confirm-input').style.display = 'none';
+      ov.classList.add('open');
+
+      var okBtn = document.getElementById('ui-confirm-ok');
+      var cancelBtn = document.getElementById('ui-confirm-cancel');
+      function cleanup(result){
+        ov.classList.remove('open');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        ov.removeEventListener('click', onOverlay);
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      }
+      function onOk(){ cleanup(true); }
+      function onCancel(){ cleanup(false); }
+      function onOverlay(e){ if (e.target === ov) cleanup(false); }
+      function onKey(e){ if (e.key === 'Escape') cleanup(false); else if (e.key === 'Enter') cleanup(true); }
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      ov.addEventListener('click', onOverlay);
+      document.addEventListener('keydown', onKey);
+      cancelBtn.focus();
+    });
+  };
+
+  window.uiPrompt = function(message, defaultValue, title){
+    return new Promise(function(resolve){
+      var ov = document.getElementById('ui-confirm-ov');
+      document.getElementById('ui-confirm-title').textContent = title || 'Please enter a value';
+      document.getElementById('ui-confirm-msg').textContent = message;
+      var input = document.getElementById('ui-confirm-input');
+      input.style.display = '';
+      input.value = defaultValue || '';
+      ov.classList.add('open');
+
+      var okBtn = document.getElementById('ui-confirm-ok');
+      var cancelBtn = document.getElementById('ui-confirm-cancel');
+      function cleanup(result){
+        ov.classList.remove('open');
+        input.style.display = 'none';
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        ov.removeEventListener('click', onOverlay);
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      }
+      function onOk(){ cleanup(input.value); }
+      function onCancel(){ cleanup(null); }
+      function onOverlay(e){ if (e.target === ov) cleanup(null); }
+      function onKey(e){ if (e.key === 'Escape') cleanup(null); else if (e.key === 'Enter') cleanup(input.value); }
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      ov.addEventListener('click', onOverlay);
+      document.addEventListener('keydown', onKey);
+      input.focus();
+      input.select();
+    });
+  };
+})();
+</script>
+</body>
+</html>

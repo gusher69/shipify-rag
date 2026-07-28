@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% set active = "history" %}
+
+{% block title %}Sync History — Shipify Admin{% endblock %}
+{% block topbar_title %}Sync History{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Knowledge Base History</div>
+    <div class="page-sub">ทุกไฟล์ที่เคยอัพโหลด — สถานะ, chunk count, และดาวน์โหลดต้นฉบับ</div>
+  </div>
+</div>
+
+{% if history %}
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Filename</th>
+        <th style="width:80px">Type</th>
+        <th style="width:80px">Size</th>
+        <th style="width:80px">Chunks</th>
+        <th style="width:140px">Uploaded</th>
+        <th style="width:140px">Synced</th>
+        <th style="width:80px">Status</th>
+        <th style="text-align:right;width:120px">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in history %}
+      <tr style="{% if item.deleted_at %}opacity:0.45{% endif %}">
+        <td>
+          <strong style="font-size:13px">{{ item.filename }}</strong>
+          {% if item.deleted_at %}
+          <span style="font-size:10.5px;color:#fca5a5;margin-left:6px">(deleted)</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if item.filename.endswith('.pdf') %}<span class="badge badge-red">PDF</span>
+          {% elif item.filename.endswith('.docx') or item.filename.endswith('.doc') %}<span class="badge badge-blue">Word</span>
+          {% elif item.filename.endswith('.md') %}<span class="badge badge-green">MD</span>
+          {% else %}<span class="badge badge-gray">TXT</span>{% endif %}
+        </td>
+        <td style="font-size:12px;color:rgba(232,237,245,0.5)">
+          {% if item.size %}
+            {% if item.size > 1048576 %}{{ "%.1f"|format(item.size/1048576) }} MB
+            {% elif item.size > 1024 %}{{ "%.1f"|format(item.size/1024) }} KB
+            {% else %}{{ item.size }} B{% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td style="font-size:12px;color:#a78bfa;font-weight:600">
+          {{ item.chunk_count or '—' }}
+        </td>
+        <td style="font-size:11.5px;color:rgba(232,237,245,0.5)">
+          {% if item.uploaded_at %}
+            {{ item.uploaded_at[:16].replace('T',' ') }}
+          {% else %}—{% endif %}
+        </td>
+        <td style="font-size:11.5px;color:rgba(232,237,245,0.5)">
+          {% if item.synced_at %}
+            {{ item.synced_at[:16].replace('T',' ') }}
+          {% else %}<span style="color:#fcd34d">Not synced</span>{% endif %}
+        </td>
+        <td>
+          {% if item.deleted_at %}
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;
+                       color:#fca5a5;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);
+                       border-radius:20px;padding:2px 9px">
+            Deleted
+          </span>
+          {% elif item.synced_at %}
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;
+                       color:#a78bfa;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.3);
+                       border-radius:20px;padding:2px 9px">
+            In AI RAG
+          </span>
+          {% else %}
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;
+                       color:#fcd34d;background:rgba(252,211,77,0.08);border:1px solid rgba(252,211,77,0.25);
+                       border-radius:20px;padding:2px 9px">
+            Pending
+          </span>
+          {% endif %}
+        </td>
+        <td style="text-align:right">
+          {% if item.on_disk and not item.deleted_at %}
+          <a href="/admin/view/{{ item.filename }}"
+             style="display:inline-flex;align-items:center;gap:5px;
+                    background:rgba(27,79,155,0.18);color:#93c5fd;
+                    border:1px solid rgba(27,79,155,0.35);border-radius:7px;
+                    padding:4px 11px;font-size:12px;text-decoration:none;
+                    transition:all .15s"
+             onmouseover="this.style.background='rgba(27,79,155,0.35)'"
+             onmouseout="this.style.background='rgba(27,79,155,0.18)'"
+             download>
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+            Download
+          </a>
+          {% else %}
+          <span style="font-size:11px;color:rgba(232,237,245,0.2)">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty">
+    <div class="empty-icon">📋</div>
+    <div class="empty-text">
+      No history yet.<br>
+      <span style="font-size:12px">Upload and sync a file to see it here.</span>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

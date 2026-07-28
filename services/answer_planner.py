@@ -35,6 +35,18 @@ _CLARIFICATION_TEMPLATES = {
     "bill_ambiguous": "ต้องการชำระบิลสั่งซื้อหรือบิลค่าขนส่งคะ",
 }
 
+# Intent-specific phrasing for the warehouse-country clarification — the
+# generic "warehouse_ambiguous" template above always said "ที่อยู่"
+# (address) even when the actual question was about the phone number or
+# the map, which then made the clarification ITSELF misleading about
+# what's actually being asked. Keyed by actionable_intent so the
+# question the customer sees always matches what they asked for.
+_WAREHOUSE_CLARIFICATION_SUBJECT = {
+    "warehouse_contact": "เบอร์ติดต่อ",
+    "warehouse_map": "แผนที่",
+    "warehouse_location": "ที่อยู่",
+}
+
 # actionable_intent -> (required_facts, optional_facts, response_shape).
 # Facts are LABELS, matching rag/query_understanding.py's
 # REQUESTED_ATTRIBUTES_BY_INTENT vocabulary (kept in sync, not
@@ -231,12 +243,13 @@ def plan_answer(
     requested_attributes = requested_attributes or []
 
     if _needs_warehouse_clarification(actionable_intent, entities, chunks):
+        subject = _WAREHOUSE_CLARIFICATION_SUBJECT.get(actionable_intent, "ที่อยู่")
         return {
             "answer_goal": "Ask which warehouse location the customer means",
             "required_facts": [], "optional_facts": [], "excluded_facts": [],
             "response_shape": "clarification",
             "clarification_required": True,
-            "clarification_question": _CLARIFICATION_TEMPLATES["warehouse_ambiguous"],
+            "clarification_question": f"ต้องการ{subject}โกดังไทยหรือโกดังจีนคะ",
         }
     if _needs_bill_clarification(actionable_intent, entities, chunks):
         return {

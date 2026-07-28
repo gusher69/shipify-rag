@@ -1,0 +1,29 @@
+# Runs the Admin Web UI and (optionally) the LINE webhook, both against
+# the same hosted Supabase project configured in .env. No local database
+# container is defined — Supabase is external/hosted regardless of where
+# these services run. Copy .env.example to .env and fill in real values
+# before running `docker compose up`.
+services:
+  admin:
+    build: .
+    image: shipify-admin:local
+    command: ["uvicorn", "admin.routes:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  # Only needed if you're testing/receiving real LINE messages. Requires
+  # a public HTTPS URL registered with LINE pointing at this service.
+  line-webhook:
+    build: .
+    image: shipify-admin:local
+    command: ["uvicorn", "line_bot.webhook:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    profiles:
+      - line
