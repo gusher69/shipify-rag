@@ -538,7 +538,7 @@ def _write_env(updates: dict):
         _os.environ[k] = v
 
 SECTION_KEYS = {
-    "ai":        ["OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_EMBED_MODEL"],
+    "ai":        ["OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_EMBEDDING_MODEL"],
     "supabase":  ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"],
     "line":      ["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"],
     "admin":     ["ADMIN_USERNAME", "ADMIN_PASSWORD"],
@@ -553,8 +553,25 @@ async def settings_page(request: Request, saved: str = ""):
     if (r := auth(request)): return r
     env = _read_env()
     msg = "Saved successfully." if saved == "1" else ""
+    # 2026-07-29 embedding-dimension incident: warn (never silently
+    # switch back) if the legacy OPENAI_EMBED_MODEL alias is still set to
+    # something different from the canonical OPENAI_EMBEDDING_MODEL —
+    # config.py's precedence means the canonical value always wins when
+    # set, but a stale legacy value sitting in .env is a trap for the
+    # next person who edits it expecting it to matter.
+    legacy_embed_warning = None
+    canonical_embed = env.get("OPENAI_EMBEDDING_MODEL")
+    legacy_embed = env.get("OPENAI_EMBED_MODEL")
+    if legacy_embed and canonical_embed and legacy_embed != canonical_embed:
+        legacy_embed_warning = (
+            f"Legacy OPENAI_EMBED_MODEL is set to '{legacy_embed}', which differs from the "
+            f"active OPENAI_EMBEDDING_MODEL ('{canonical_embed}'). The canonical value above is "
+            f"what's actually used — this legacy variable is ignored, but should be updated to "
+            f"match or removed to avoid confusion."
+        )
     return render("settings.html", {"request": request, "active": "settings",
-                                     "env": env, "msg": msg, "msg_type": "success"})
+                                     "env": env, "msg": msg, "msg_type": "success",
+                                     "legacy_embed_warning": legacy_embed_warning})
 
 @app.post("/admin/settings")
 async def settings_save(request: Request):
@@ -1793,6 +1810,39 @@ def _run_sync_list(files: list, job_id: Optional[str] = None, jf_ids: Optional[d
 
     if job_id:
         _job_update(job_id, status="running")
+
+    # Fix 3 (2026-07-29 embedding-dimension incident) — fail fast, before
+    # ANY file's chunks are embedded, if the active embedding provider's
+    # dimension doesn't match knowledge_chunks' actual column width. This
+    # is checked ONCE per run (not per-file/per-chunk) so a misconfigured
+    # run never gets partway through and leaves a job looking "stuck" at
+    # partial progress — every file in this batch is marked failed
+    # immediately with the same clear, actionable reason.
+    from services.embedding_service import validate_embedding_configuration, EmbeddingConfigurationError
+    try:
+        validate_embedding_configuration(get_sb())
+    except EmbeddingConfigurationError as e:
+        print(f"[SyncJobItems] job {job_id}: {e}")
+        with _sync_lock:
+            _sync.update({"running": False, "done": True, "errors": [str(e)],
+                          "subtitle": "Embedding configuration mismatch — sync aborted."})
+        if job_id:
+            _job_update(job_id, status="failed", error_message=str(e), progress_percent=0,
+                        completed_files=0, failed_files=len(files))
+        for fname, fid in file_ids.items():
+            jf_id = jf_ids.get(fname)
+            if jf_id:
+                _jf_update(jf_id, status="failed", progress_percent=0,
+                           current_step="Aborted — embedding configuration mismatch",
+                           error_message=str(e))
+            if fid:
+                try:
+                    get_sb().table("knowledge_files").update(
+                        {"status": "failed", "last_error": str(e), "synced_at": None, "chunk_count": 0}
+                    ).eq("id", fid).execute()
+                except Exception:
+                    pass
+        return
 
     completed = 0
     failed = 0
@@ -3167,6 +3217,184 @@ async def api_set_default_policy(request: Request, policy_id: str):
     return JSONResponse({"ok": ok})
 
 
+@app.post("/admin/api/hybrid-playground/ask")
+async def hybrid_playground_ask(request: Request):
+    """Hybrid Playground (2026-07-29 integration/wiring sprint) — wires
+    the EXISTING RAG orchestrator (services/playground_orchestrator.py::
+    run_playground_turn, untouched) and the EXISTING ERP test harness
+    (services/erp_test_harness.py::run_erp_test, untouched) onto one
+    route with a mode selector. This route does NOT reimplement
+    retrieval, prompting, or ERP execution — it only dispatches to the
+    two pre-existing entry points and, for mode=Auto/Hybrid, uses the
+    deliberately-naive helpers in services/hybrid_playground_router.py
+    (labeled placeholders, not a Business Action Matcher / Decision
+    Engine). Body: {question, mode: auto|rag|erp|hybrid, action_id
+    (ERP/Hybrid, optional for Auto), template_id, session_id, and the
+    same ERP conversation-state passthrough fields api_erp_test_run()
+    accepts (history, collected_params, awaiting_information_selection,
+    available_response_options, last_normalized_result,
+    conversation_state, confirmed, enforce_confirmation_gate)."""
+    if (r := auth(request)): return r
+    body = await request.json()
+    question = (body.get("question") or "").strip()
+    mode = (body.get("mode") or "auto").strip().lower()
+    if mode not in ("auto", "rag", "erp", "hybrid"):
+        mode = "auto"
+    if not question:
+        return JSONResponse({"ok": False, "error": "Question is required"}, status_code=400)
+
+    from services.playground_orchestrator import run_playground_turn
+    from services.erp_test_harness import run_erp_test, describe_action_for_selection
+    from services.business_action_registry import get_registry as get_action_registry
+    from services.hybrid_playground_router import naive_auto_route, naive_merge_hybrid_answer
+    from dataclasses import asdict
+    import traceback
+
+    action_id = body.get("action_id")
+    errors: List[str] = []
+
+    def _run_rag():
+        try:
+            result = run_playground_turn(
+                question, template_id=body.get("template_id"),
+                top_k=int(body.get("top_k") or 3),
+                temperature=float(body.get("temperature") if body.get("temperature") is not None else 0.3),
+                max_tokens=int(body.get("max_tokens") or 500),
+                history=body.get("history") or [],
+            )
+            return result, None
+        except Exception as e:
+            print(f"[HybridPlayground] RAG path failed: {e}")
+            return None, str(e)
+
+    def _run_erp(resolved_action_id: Optional[str]):
+        if not resolved_action_id:
+            return None, "no ERP action selected"
+        try:
+            result = run_erp_test(
+                sb=get_sb(), action_id=resolved_action_id, message=question,
+                mode=body.get("erp_mode") or "simulation",
+                history=body.get("history") or [], collected_params=body.get("collected_params") or {},
+                language=body.get("language") or "th",
+                awaiting_information_selection=bool(body.get("awaiting_information_selection")),
+                available_response_options=body.get("available_response_options") or None,
+                last_normalized_result=body.get("last_normalized_result") or None,
+                conversation_form_state=body.get("conversation_state") or None,
+                confirmed=bool(body.get("confirmed")),
+                enforce_confirmation_gate=bool(body.get("enforce_confirmation_gate")),
+            )
+            return result, (result.get("error") if not result.get("ok") else None)
+        except Exception as e:
+            print(f"[HybridPlayground] ERP path failed: {e}\n{traceback.format_exc()}")
+            return {"ok": False, "error": str(e), "trace": [], "summary": {}}, str(e)
+
+    route_decision = {"route": mode, "reason": f"explicit mode={mode}"}
+    rag_result = erp_result = None
+
+    if mode == "auto":
+        # Naive keyword-heuristic router (services/hybrid_playground_
+        # router.py) — explicitly NOT a real intent classifier/Decision
+        # Engine. Falls back to RAG whenever no ERP action is matched.
+        try:
+            reg = get_action_registry(get_sb())
+            actions_summary = []
+            for a in reg.list():
+                if a.get("action_type") not in ("API", "WEBHOOK", "TOOL"):
+                    continue
+                full = reg.get_full(a["id"], mask_secrets=True)
+                if full:
+                    actions_summary.append(describe_action_for_selection(full, sb=get_sb()))
+        except Exception as e:
+            actions_summary = []
+            errors.append(f"auto-route action lookup failed: {e}")
+        route_decision = naive_auto_route(question, actions_summary)
+        if route_decision["route"] == "erp":
+            erp_result, err = _run_erp(route_decision["action_id"])
+            if err: errors.append(err)
+        else:
+            rag_result, err = _run_rag()
+            if err: errors.append(err)
+    elif mode == "rag":
+        rag_result, err = _run_rag()
+        if err: errors.append(err)
+    elif mode == "erp":
+        erp_result, err = _run_erp(action_id)
+        if err: errors.append(err)
+    elif mode == "hybrid":
+        # Both existing entry points run independently; the merge below
+        # is a labeled, naive concatenation — NOT an intelligent
+        # hybrid-answer-synthesis algorithm.
+        rag_result, err1 = _run_rag()
+        erp_result, err2 = _run_erp(action_id)
+        if err1: errors.append(err1)
+        if err2: errors.append(err2)
+        route_decision = {"route": "hybrid", "reason": "explicit mode=hybrid — both RAG and ERP executed"}
+
+    rag_out = None
+    if rag_result is not None:
+        rag_out = {
+            "answer": rag_result.answer,
+            "chunks": [{
+                "text": c.get("text"), "source": c.get("source"), "file_name": c.get("file_name"),
+                "score": c.get("score"), "hybrid_score": c.get("hybrid_score"),
+                "rerank_score": c.get("rerank_score"), "citation": c.get("citation"),
+                "embedding_provider": c.get("embedding_provider"), "embedding_model": c.get("embedding_model"),
+                "embedding_dimensions": c.get("embedding_dimensions"),
+                "raw_vector_similarity": c.get("raw_vector_similarity"), "cited": c.get("cited", False),
+            } for c in rag_result.chunks],
+            "prompt": {
+                "template_id": rag_result.prompt.template.id,
+                "final_prompt": rag_result.prompt.final_prompt_text,
+            },
+            "confidence": rag_result.confidence, "confidence_label": rag_result.confidence_label,
+            "answerability": rag_result.answerability,
+            "latency_ms": rag_result.latency_ms,
+            "embedding_model": rag_result.embedding_model, "embedding_provider": rag_result.embedding_provider,
+            "embedding_dimensions": rag_result.embedding_dimensions,
+            "input_tokens": rag_result.input_tokens, "output_tokens": rag_result.output_tokens,
+            "pipeline": [asdict(s) for s in rag_result.stages],
+        }
+
+    erp_out = None
+    if erp_result is not None:
+        erp_out = {
+            "ok": erp_result.get("ok"), "summary": erp_result.get("summary"),
+            "trace": erp_result.get("trace"), "answer": erp_result.get("answer"),
+            "collected_params": erp_result.get("collected_params"),
+            "missing_parameters": erp_result.get("missing_parameters"),
+            "clarification_question": erp_result.get("clarification_question"),
+            "normalized_result": erp_result.get("normalized_result"),
+            "conversation_strategy": erp_result.get("conversation_strategy"),
+            "conversation_state": erp_result.get("conversation_state"),
+            "conversation_form": erp_result.get("conversation_form"),
+            "awaiting_information_selection": erp_result.get("awaiting_information_selection"),
+            "available_response_options": erp_result.get("available_response_options"),
+            "error": erp_result.get("error"), "warning": erp_result.get("warning"),
+        }
+
+    hybrid_out = None
+    if mode == "hybrid":
+        merged = naive_merge_hybrid_answer(
+            rag_result.answer if rag_result else None,
+            (erp_out.get("answer") if erp_out else None) or (erp_out.get("clarification_question") if erp_out else None),
+        )
+        hybrid_out = {
+            "route": ["rag", "erp"],
+            "erp_contribution": (erp_out.get("answer") or erp_out.get("clarification_question")) if erp_out
+                                 else "ERP found nothing relevant (no action selected or execution failed).",
+            "rag_contribution": rag_result.answer if rag_result else "RAG produced no answer.",
+            "merged_answer": merged,
+            "merge_strategy": "naive concatenation — ERP section first (if present), then Knowledge Base section; "
+                               "NOT an intelligent merge/synthesis algorithm.",
+        }
+
+    return JSONResponse({
+        "ok": True, "mode": mode, "route_decision": route_decision,
+        "rag": rag_out, "erp": erp_out, "hybrid": hybrid_out,
+        "errors": errors,
+    })
+
+
 @app.post("/admin/playground/ask")
 async def playground_ask(request: Request):
     if (r := auth(request)): return r
@@ -3799,6 +4027,216 @@ async def business_actions_page(request: Request):
     return render("business_actions.html", {"request": request, "active": "business_action_center"})
 
 
+# ── ERP/AI Product Architecture Separation ───────────────────────────────
+# ERP Conversation Tester, ERP Test History, and the API Explorer all
+# belong to "Integrations" (ERP testing/verification), never to "AI"
+# (AI Playground stays a pure AI/RAG testing environment — see the
+# removed erp_test tab in preview.html). None of these three pages add
+# new execution behavior — they reuse services/erp_test_harness.py and
+# the existing Business Action Registry/Executor exactly as before,
+# just relocated + reorganized with business-facing terminology.
+
+@app.get("/admin/erp/conversation-tester", response_class=HTMLResponse)
+async def erp_conversation_tester_page(request: Request):
+    if (r := auth(request)): return r
+    if (r := require_developer_feature(request, "erp_conversation_tester")): return r
+    return render("erp_conversation_tester.html", {"request": request, "active": "erp_conversation_tester"})
+
+
+@app.get("/admin/erp/test-history", response_class=HTMLResponse)
+async def erp_test_history_page(request: Request):
+    """Not a separate sidebar item (per the sprint's exact required
+    sidebar shape) — reachable from ERP Conversation Tester / ERP
+    Integration. Guarded by the same feature key as the Conversation
+    Tester since it shows the same kind of data."""
+    if (r := auth(request)): return r
+    if (r := require_developer_feature(request, "erp_conversation_tester")): return r
+    return render("erp_test_history.html", {"request": request, "active": "erp_conversation_tester"})
+
+
+@app.get("/admin/qa/uat", response_class=HTMLResponse)
+async def uat_dashboard_page(request: Request):
+    """UAT / Regression Test Suite Developer Page (2026-07-29 reliability
+    sprint). Reuses services/uat_runner.py's run_full_uat_suite() — this
+    page does not add any new test/execution logic itself, only a
+    "Run Full UAT" button, live progress, and the finished report.
+    Not a sidebar item (this is a developer/QA tool, not a customer-
+    facing feature) — reached directly via URL, same convention as the
+    API Explorer/Integration Schema Studio pages above."""
+    if (r := auth(request)): return r
+    return render("uat_dashboard.html", {"request": request, "active": "uat_dashboard"})
+
+
+@app.post("/admin/api/uat/run")
+async def uat_run(request: Request):
+    """Runs the full UAT suite SYNCHRONOUSLY (real LLM calls, so this can
+    take a while — the page shows a loading state instead of polling a
+    background job, an intentionally low-risk choice per the sprint's
+    own scope-discipline note). Returns the full report dict produced by
+    services/uat_runner.py::run_full_uat_suite() — nothing here
+    re-derives pass/fail, it's a direct pass-through of the runner's own
+    honest results."""
+    if (r := auth(request)): return r
+    from services.uat_runner import run_full_uat_suite
+    try:
+        report = run_full_uat_suite(sb=get_sb())
+        return JSONResponse({"ok": True, "report": report})
+    except Exception as e:
+        import traceback
+        return JSONResponse({"ok": False, "error": str(e), "traceback": traceback.format_exc()}, status_code=500)
+
+
+@app.get("/admin/api/uat/report/{run_id}")
+async def uat_report(request: Request, run_id: str):
+    """Fetches a previously-saved run's report from uat_runs/<run_id>.json
+    (local disk — no DB table, per the sprint's standing constraint)."""
+    if (r := auth(request)): return r
+    import os
+    from services.uat_runner import RUNS_DIR
+    safe_id = "".join(c for c in run_id if c.isalnum() or c in "_-")
+    path = os.path.join(RUNS_DIR, f"run_{safe_id}.json")
+    if not os.path.isfile(path):
+        return JSONResponse({"ok": False, "error": "run not found"}, status_code=404)
+    import json
+    with open(path, "r", encoding="utf-8") as f:
+        return JSONResponse({"ok": True, "report": json.load(f)})
+
+
+@app.get("/admin/api/uat/runs")
+async def uat_runs_list(request: Request):
+    """Lists saved run ids (newest first) so the Developer Page can offer
+    a history dropdown without needing its own DB table."""
+    if (r := auth(request)): return r
+    import os
+    from services.uat_runner import RUNS_DIR
+    if not os.path.isdir(RUNS_DIR):
+        return JSONResponse({"ok": True, "runs": []})
+    files = sorted([f for f in os.listdir(RUNS_DIR) if f.startswith("run_") and f.endswith(".json")], reverse=True)
+    run_ids = [f[len("run_"):-len(".json")] for f in files]
+    return JSONResponse({"ok": True, "runs": run_ids})
+
+
+@app.get("/admin/erp/api-explorer", response_class=HTMLResponse)
+async def erp_api_explorer_page(request: Request):
+    """Not a separate sidebar item — reachable from ERP Integration.
+    Pure API verification (endpoint/method/headers/params/body/execute/
+    raw response), no AI involved — the direct successor to the manual
+    'Business Actions' tester tab removed from AI Playground."""
+    if (r := auth(request)): return r
+    if (r := require_developer_feature(request, "business_action_center")): return r
+    return render("erp_api_explorer.html", {"request": request, "active": "business_action_center"})
+
+
+# ── Integration Schema Studio ──────────────────────────────────────────
+# Business/conversation-layer configuration (labels, aliases, display
+# labels per language, follow-up prompts, AI synonyms, formatting,
+# visibility/security, conversation & operation-type behavior) that sits
+# ON TOP OF a Business Action, in a completely separate, versioned store
+# (services/integration_schema_service.py, migrations/
+# 033_integration_action_schemas.sql). Never touches business_actions*
+# tables. Not a new sidebar item — reachable from ERP Integration /
+# Business Action Center, same convention as the API Explorer above.
+
+@app.get("/admin/ai/business-actions/schema/{action_id}", response_class=HTMLResponse)
+async def integration_schema_studio_page(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    if (r := require_developer_feature(request, "business_action_center")): return r
+    return render("integration_schema_studio.html", {"request": request, "active": "business_action_center",
+                                                       "action_id": action_id})
+
+
+@app.get("/admin/api/integration-schema/{action_id}/versions")
+async def api_integration_schema_list_versions(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    from services.integration_schema_service import get_registry
+    return get_registry(get_sb()).list_versions(action_id)
+
+
+@app.get("/admin/api/integration-schema/{action_id}/draft")
+async def api_integration_schema_get_draft(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    from services.integration_schema_service import get_registry
+    from services.business_action_registry import get_registry as get_action_registry
+    action = get_action_registry(get_sb()).get_full(action_id, mask_secrets=True)
+    if not action:
+        return JSONResponse({"error": "action_not_found"}, status_code=404)
+    return get_registry(get_sb()).get_draft(action_id, action=action)
+
+
+@app.get("/admin/api/integration-schema/{action_id}/published")
+async def api_integration_schema_get_published(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    from services.integration_schema_service import get_registry, resolve_effective_schema
+    from services.business_action_registry import get_registry as get_action_registry
+    action = get_action_registry(get_sb()).get_full(action_id, mask_secrets=True)
+    if not action:
+        return JSONResponse({"error": "action_not_found"}, status_code=404)
+    return {"published": get_registry(get_sb()).get_published(action_id),
+            "effective": resolve_effective_schema(action, get_sb())}
+
+
+@app.get("/admin/api/integration-schema/{action_id}/effective")
+async def api_integration_schema_get_effective(request: Request, action_id: str):
+    """Part 5-6 — the DRAFT's effective schema + provenance + warnings,
+    so the Studio UI can show a live "Runtime Default / Derived / Explicit
+    Override" badge next to general.operation_type and every
+    conversation.* field while the admin is still editing (not yet
+    published). Reads the current draft (never the published version) so
+    unsaved edits are reflected immediately."""
+    if (r := auth(request)): return r
+    from services.integration_schema_service import get_registry, resolve_effective_integration_schema
+    from services.business_action_registry import get_registry as get_action_registry
+    action = get_action_registry(get_sb()).get_full(action_id, mask_secrets=True)
+    if not action:
+        return JSONResponse({"error": "action_not_found"}, status_code=404)
+    draft = get_registry(get_sb()).get_draft(action_id, action=action)
+    return resolve_effective_integration_schema(action, draft.get("schema") or {})
+
+
+@app.put("/admin/api/integration-schema/{action_id}/draft")
+async def api_integration_schema_save_draft(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    body = await request.json()
+    from services.integration_schema_service import get_registry
+    admin_user = request.session.get("admin_user") if hasattr(request, "session") else None
+    row = get_registry(get_sb()).save_draft(action_id, body.get("schema") or {}, updated_by=admin_user)
+    return row
+
+
+@app.post("/admin/api/integration-schema/{action_id}/publish")
+async def api_integration_schema_publish(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    from services.integration_schema_service import get_registry
+    admin_user = request.session.get("admin_user") if hasattr(request, "session") else None
+    row = get_registry(get_sb()).publish(action_id, updated_by=admin_user)
+    if not row:
+        return JSONResponse({"error": "no_draft_to_publish"}, status_code=400)
+    return row
+
+
+@app.post("/admin/api/integration-schema/{action_id}/rollback/{version_number}")
+async def api_integration_schema_rollback(request: Request, action_id: str, version_number: int):
+    if (r := auth(request)): return r
+    from services.integration_schema_service import get_registry
+    admin_user = request.session.get("admin_user") if hasattr(request, "session") else None
+    row = get_registry(get_sb()).rollback(action_id, version_number, updated_by=admin_user)
+    if not row:
+        return JSONResponse({"error": "version_not_found"}, status_code=404)
+    return row
+
+
+@app.get("/admin/api/integration-schema/{action_id}/diff")
+async def api_integration_schema_diff(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    q = request.query_params
+    from services.integration_schema_service import get_registry
+    try:
+        v1, v2 = int(q.get("v1")), int(q.get("v2"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "v1_and_v2_required"}, status_code=400)
+    return get_registry(get_sb()).diff_versions(action_id, v1, v2)
+
+
 @app.get("/admin/api/business-actions")
 async def api_list_business_actions(request: Request):
     if (r := auth(request)): return r
@@ -3829,14 +4267,59 @@ def _is_duplicate_key_error(exc: Exception) -> bool:
     return any(marker in str(exc) for marker in _DUPLICATE_KEY_MARKERS)
 
 
-def _duplicate_action_response(action_key: str, existing_id: Optional[str] = None):
+def _classify_duplicate_state(existing_row: Optional[Dict]) -> str:
+    """The SAME collision can mean three very different things — a live
+    Published action in production use, an in-progress Draft nobody's
+    finished configuring yet, or a stale Soft-Deleted row whose key is
+    still reserved at the DB level (see the 2026-07-29 getdatacustomer
+    incident). Each deserves its own resolution options, never one
+    generic dialog (Task 3)."""
+    if not existing_row:
+        return "none"
+    if existing_row.get("deleted_at"):
+        return "soft_deleted"
+    if existing_row.get("is_draft"):
+        return "draft"
+    return "published"
+
+
+# Per-state duplicate-resolution option sets (Task 3) — the client uses
+# these to render the right buttons; never the old generic 4-option set
+# for every situation.
+_DUPLICATE_OPTIONS_BY_STATE = {
+    "published": ["update_existing", "save_as_new", "rename_action"],
+    "draft": ["continue_editing_draft", "discard_draft", "rename_action"],
+    "soft_deleted": ["restore", "delete_permanently", "create_new"],
+    "none": ["update_existing", "save_as_new", "rename_action", "cancel"],
+}
+
+_DUPLICATE_MESSAGE_BY_STATE = {
+    "published": ("A published Business Action with the key '{key}' already exists and may be in "
+                  "active use. Update it, save this as a new action under a different key, or rename this one."),
+    "draft": ("A DRAFT Business Action with the key '{key}' already exists and hasn't been published yet. "
+              "Continue editing that draft, discard it, or use a different key."),
+    "soft_deleted": ("A Business Action with the key '{key}' already exists but was previously deleted — "
+                     "the key is still reserved at the database level. Restore it, delete it permanently, "
+                     "or create a new action under this key."),
+    "none": "Business Action already exists.",
+}
+
+
+def _duplicate_action_response(action_key: str, existing_row: Optional[Dict] = None):
     """Never expose the raw PostgreSQL unique-constraint error to the
-    admin — surface a friendly, actionable choice instead."""
+    admin — surface a friendly, actionable choice instead. The offered
+    options and message differ by the EXISTING row's actual state
+    (Task 3) — Published / Draft / Soft-Deleted are different situations
+    calling for different resolutions, not one generic dialog."""
+    state = _classify_duplicate_state(existing_row)
+    existing_id = existing_row.get("id") if existing_row else None
+    message = _DUPLICATE_MESSAGE_BY_STATE[state].format(key=action_key)
     return JSONResponse({
-        "ok": False, "error_type": "duplicate_action",
-        "error": "Business Action already exists.",
+        "ok": False, "success": False, "error_type": "duplicate_action",
+        "duplicate_state": state,
+        "error": message, "message": message,
         "action_key": action_key, "existing_action_id": existing_id,
-        "options": ["update_existing", "save_as_new", "rename_action", "cancel"],
+        "options": _DUPLICATE_OPTIONS_BY_STATE[state],
     }, status_code=409)
 
 
@@ -3849,15 +4332,20 @@ async def api_create_business_action(request: Request):
         return JSONResponse({"ok": False, "error": "action_key and name are required"}, status_code=400)
     from services.business_action_registry import get_registry
     reg = get_registry(get_sb())
-    existing = reg.get_by_key(action_key)
+    # Look PAST soft-deleted rows too (Task 4 / the getdatacustomer
+    # incident) — get_by_key() alone misses a key that belongs to a
+    # soft-deleted action, letting the call fall through to reg.create()
+    # and hit the raw Postgres unique-constraint error instead of this
+    # friendly, state-aware response.
+    existing = reg.get_by_key_including_deleted(action_key)
     if existing:
-        return _duplicate_action_response(action_key, existing.get("id"))
+        return _duplicate_action_response(action_key, existing)
     try:
         action = reg.create(body, created_by=_current_admin_user(request))
         return JSONResponse({"ok": True, "action": action})
     except Exception as e:
         if _is_duplicate_key_error(e):
-            return _duplicate_action_response(action_key)
+            return _duplicate_action_response(action_key, reg.get_by_key_including_deleted(action_key))
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
@@ -3886,7 +4374,8 @@ async def api_list_business_actions_for_playground(request: Request):
             "display_name": a.get("display_name"), "category": a.get("category"),
             "action_type": a.get("action_type"), "enabled": a.get("enabled"),
             "parameters": [{"name": p.get("name"), "display_name": p.get("display_name"),
-                            "required": p.get("required"), "example_value": p.get("example_value")}
+                            "required": p.get("required"), "example_value": p.get("example_value"),
+                            "input_source": p.get("input_source")}
                            for p in full_params],
         })
     return JSONResponse({"ok": True, "actions": out})
@@ -3902,6 +4391,302 @@ async def api_get_business_action(request: Request, action_id: str):
     return JSONResponse({"ok": True, "action": action})
 
 
+# ── ERP Action Test Harness ─────────────────────────────────────────────
+# Validates that an imported Business Action can execute and answer a
+# customer question correctly, BEFORE the (not-yet-built) Universal
+# Decision Engine ever routes real traffic to it. Manual Business Action
+# selection only — no automatic RAG-vs-ERP routing here. Entirely
+# additive: reuses services/erp_test_harness.py, which itself only
+# orchestrates the existing, unmodified Action Executor / Business
+# Action Registry / Credential Store / Decision Engine parameter binder.
+# Registered BEFORE any bare "/{action_id}"-style route below for the
+# same reason as list-for-playground above — not applicable here since
+# this uses its own "/admin/api/erp-test/..." prefix, but kept alongside
+# its closest relative for readability.
+
+@app.get("/admin/api/erp-test/actions")
+async def api_erp_test_list_actions(request: Request):
+    """Lists every Business Action with the full selection-time metadata
+    Part 2 of the ERP Action Test Harness spec requires (capability,
+    endpoint, method, auth status, required search fields, response
+    mappings, semantic intent, entities). Includes disabled/draft
+    actions too (shown, not hidden) so an admin can still test an
+    action before enabling it — the harness itself blocks execution of
+    a truly broken one via its own trace, not by hiding it here."""
+    if (r := auth(request)): return r
+    from services.business_action_registry import get_registry
+    from services.erp_test_harness import describe_action_for_selection
+    reg = get_registry(get_sb())
+    out = []
+    for a in reg.list():
+        if a.get("action_type") not in ("API", "WEBHOOK", "TOOL"):
+            continue  # ERP-style actions only — RAG/notification/human-handoff/workflow actions aren't executable via this harness
+        full = reg.get_full(a["id"], mask_secrets=True)
+        if not full:
+            continue
+        # Part 15 — sourced via the Integration Contract when possible
+        # (services/integration_contract_service.py::describe_integration_
+        # cached), never a second manual join of action+response_mapping.
+        out.append(describe_action_for_selection(full, sb=get_sb()))
+    return JSONResponse({"ok": True, "actions": out})
+
+
+@app.post("/admin/api/erp-test/run")
+async def api_erp_test_run(request: Request):
+    """Runs one turn of the ERP Action Test flow (Parts 3-12): parameter
+    extraction, missing-parameter clarification, and — depending on
+    `mode` — either nothing further (intent_param), a schema-generated
+    mock (simulation), or a REAL call via the existing Action Executor
+    (live). The caller (browser) owns conversation state across turns —
+    `history`/`collected_params` are resent every call, never persisted
+    server-side, matching this codebase's existing multi-turn convention."""
+    if (r := auth(request)): return r
+    body = await request.json()
+    action_id = (body.get("action_id") or "").strip()
+    message = (body.get("message") or "").strip()
+    mode = body.get("mode") or "intent_param"
+    history = body.get("history") or []
+    collected_params = body.get("collected_params") or {}
+    language = body.get("language") or "th"
+    if not message and mode != "live":
+        return JSONResponse({"ok": False, "error": "A message is required."}, status_code=400)
+    # Requested Information Clarification sprint (Part 3) — these three
+    # fields round-trip through the browser exactly like history/
+    # collected_params already did; never persisted server-side.
+    awaiting_information_selection = bool(body.get("awaiting_information_selection"))
+    available_response_options = body.get("available_response_options") or None
+    last_normalized_result = body.get("last_normalized_result") or None
+    # Conversation Form Generator sprint (Part 7/10/19) — additive,
+    # caller-round-tripped exactly like history/collected_params above;
+    # never persisted server-side, never required.
+    conversation_form_state = body.get("conversation_state") or None
+    confirmed = bool(body.get("confirmed"))
+    enforce_confirmation_gate = bool(body.get("enforce_confirmation_gate"))
+    from services.erp_test_harness import run_erp_test
+    result = run_erp_test(sb=get_sb(), action_id=action_id, message=message, mode=mode,
+                           history=history, collected_params=collected_params, language=language,
+                           awaiting_information_selection=awaiting_information_selection,
+                           available_response_options=available_response_options,
+                           last_normalized_result=last_normalized_result,
+                           conversation_form_state=conversation_form_state,
+                           confirmed=confirmed, enforce_confirmation_gate=enforce_confirmation_gate)
+    return JSONResponse(result)
+
+
+@app.post("/admin/api/erp-test/save-case")
+async def api_erp_test_save_case(request: Request):
+    """Part 13 — persists a saved ERP Test Case (erp_test_cases table,
+    migrations/031_erp_test_cases.sql). Deliberately NOT the full
+    Benchmark dashboard — a lightweight, per-action regression record
+    only, so a future re-run can compare against what actually happened
+    last time."""
+    if (r := auth(request)): return r
+    body = await request.json()
+    action_id = body.get("action_id")
+    if not action_id:
+        return JSONResponse({"ok": False, "error": "action_id is required."}, status_code=400)
+    row = {
+        "action_id": action_id,
+        "question": body.get("question") or "",
+        "conversation_history": body.get("conversation_history") or [],
+        "input_parameters": body.get("input_parameters") or {},
+        "expected_response_fields": body.get("expected_response_fields") or {},
+        "test_mode": body.get("test_mode") or "simulation",
+        "actual_erp_status": body.get("actual_erp_status"),
+        "actual_normalized_result": body.get("actual_normalized_result") or {},
+        "actual_answer": body.get("actual_answer"),
+        "pass_fail_status": body.get("pass_fail_status") or "warning",
+        "total_latency_ms": body.get("total_latency_ms"),
+        "notes": body.get("notes"),
+        "created_by": _current_admin_user(request),
+    }
+    try:
+        created = get_sb().table("erp_test_cases").insert(row).execute().data[0]
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"Failed to save test case: {str(e)}"}, status_code=400)
+    return JSONResponse({"ok": True, "test_case": created})
+
+
+@app.get("/admin/api/erp-test/cases")
+async def api_erp_test_list_cases(request: Request):
+    """Lists saved ERP Test Cases, optionally filtered to one Business
+    Action (?action_id=...)."""
+    if (r := auth(request)): return r
+    action_id = request.query_params.get("action_id")
+    q = get_sb().table("erp_test_cases").select("*").order("created_at", desc=True)
+    if action_id:
+        q = q.eq("action_id", action_id)
+    rows = q.execute().data or []
+    return JSONResponse({"ok": True, "test_cases": rows})
+
+
+@app.get("/admin/api/integration-contracts/capabilities")
+async def api_integration_contracts_capabilities(request: Request):
+    if (r := auth(request)): return r
+    from services.integration_contract_service import list_capabilities
+    return JSONResponse({"ok": True, "capabilities": list_capabilities(sb=get_sb())})
+
+
+@app.get("/admin/api/integration-contracts/entities")
+async def api_integration_contracts_entities(request: Request):
+    if (r := auth(request)): return r
+    from services.integration_contract_service import list_entities
+    return JSONResponse({"ok": True, "entities": list_entities(sb=get_sb())})
+
+
+@app.get("/admin/api/integration-contracts/operations")
+async def api_integration_contracts_operations(request: Request):
+    if (r := auth(request)): return r
+    from services.integration_contract_service import list_operation_types
+    return JSONResponse({"ok": True, "operation_types": list_operation_types()})
+
+
+@app.get("/admin/api/integration-contracts/providers")
+async def api_integration_contracts_providers(request: Request):
+    if (r := auth(request)): return r
+    from services.integration_contract_service import list_providers
+    return JSONResponse({"ok": True, "providers": list_providers(sb=get_sb())})
+
+
+@app.get("/admin/api/integration-contracts")
+async def api_integration_contracts_list(request: Request):
+    """Part 11 — lists every Integration Contract, supporting the same
+    ?action_type=/?enabled=/?entity=/?operation_type= filters
+    services/integration_contract_service.py::list_integrations()
+    understands. Registered BEFORE the bare "/{action_id}" route below
+    so it is never shadowed by it."""
+    if (r := auth(request)): return r
+    from services.integration_contract_service import list_integrations
+    filters = {}
+    if request.query_params.get("action_type"):
+        filters["action_type"] = request.query_params["action_type"]
+    if request.query_params.get("enabled") is not None:
+        filters["enabled"] = request.query_params["enabled"].lower() == "true"
+    if request.query_params.get("entity"):
+        filters["entity"] = request.query_params["entity"]
+    if request.query_params.get("operation_type"):
+        filters["operation_type"] = request.query_params["operation_type"]
+    return JSONResponse({"ok": True, "contracts": list_integrations(filters, sb=get_sb())})
+
+
+@app.get("/admin/api/integration-contracts/{action_id}")
+async def api_integration_contract_get(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    from services.integration_contract_service import resolve_effective_contract
+    result = resolve_effective_contract(action_id, sb=get_sb())
+    if result["contract"] is None:
+        return JSONResponse({"ok": False, "error": "action_not_found"}, status_code=404)
+    return JSONResponse({"ok": True, **result})
+
+
+@app.get("/admin/api/integration-contracts/{action_id}/validate")
+async def api_integration_contract_validate(request: Request, action_id: str):
+    if (r := auth(request)): return r
+    from services.integration_contract_service import validate_integration_contract
+    return JSONResponse({"ok": True, "validation": validate_integration_contract(action_id, sb=get_sb())})
+
+
+@app.get("/admin/api/integration-contracts/{action_id}/conversation-form")
+async def api_integration_contract_conversation_form(request: Request, action_id: str):
+    """Conversation Form Generator sprint (Parts 9/15) — preview-only.
+    Builds the Conversation Form for the action's CURRENT DRAFT schema
+    (never the published one — an admin previews changes before
+    publishing), calling the SAME generator the runtime
+    (services/erp_test_harness.py::run_erp_test) uses; this route never
+    re-implements question/option logic itself. Optional query params
+    `?state=<json>` (a previously-returned conversation_state, to
+    preview step 2/3/... of the flow) and `?language=th|en`. Never
+    executes anything — read-only."""
+    if (r := auth(request)): return r
+    from services.business_action_registry import get_registry as get_action_registry
+    from services.integration_schema_service import get_registry as get_schema_registry, \
+        resolve_effective_integration_schema
+    from services.integration_contract_service import describe_integration
+    from services.conversation_form_generator import ConversationState, generate_conversation_form
+    import json as _json
+
+    action = get_action_registry(get_sb()).get_full(action_id, mask_secrets=True)
+    if not action:
+        return JSONResponse({"ok": False, "error": "action_not_found"}, status_code=404)
+    draft = get_schema_registry(get_sb()).get_draft(action_id, action=action)
+    draft_schema = draft.get("schema") or {}
+
+    contract = describe_integration(action_id, sb=get_sb(), schema_override=draft_schema)
+    resolution = resolve_effective_integration_schema(action, draft_schema)
+
+    language = request.query_params.get("language") or "th"
+    raw_state = request.query_params.get("state")
+    try:
+        state_dict = _json.loads(raw_state) if raw_state else None
+    except (TypeError, ValueError):
+        state_dict = None
+    state = ConversationState.from_dict(state_dict)
+
+    form = generate_conversation_form(contract, state, language=language) if contract else None
+    return JSONResponse({"ok": True, "contract": contract, "conversation_form": form,
+                          "provenance": resolution.get("provenance") or {}, "warnings": resolution.get("warnings") or []})
+
+
+@app.get("/admin/api/integration-contracts/{action_id}/conversation-strategy")
+async def api_integration_contract_conversation_strategy(request: Request, action_id: str):
+    """Part 12 — Conversation Strategy Preview (Schema Studio). Same
+    CURRENT-DRAFT-schema pattern as the /conversation-form route above
+    (schema_override, never the published schema) plus the Conversation
+    Strategy Engine. Preview-only, read-only — never executes anything.
+    Query params: `?message=...` (required to get a non-trivial result),
+    `?language=th|en`, optional `?state=<json>` (a previously-returned
+    conversation_state, same convention as /conversation-form)."""
+    if (r := auth(request)): return r
+    from services.business_action_registry import get_registry as get_action_registry
+    from services.integration_schema_service import get_registry as get_schema_registry
+    from services.integration_contract_service import describe_integration
+    from services.conversation_form_generator import ConversationState
+    from services.conversation_strategy_engine import analyze_conversation_strategy
+    import json as _json
+
+    action = get_action_registry(get_sb()).get_full(action_id, mask_secrets=True)
+    if not action:
+        return JSONResponse({"ok": False, "error": "action_not_found"}, status_code=404)
+    draft = get_schema_registry(get_sb()).get_draft(action_id, action=action)
+    draft_schema = draft.get("schema") or {}
+    contract = describe_integration(action_id, sb=get_sb(), schema_override=draft_schema)
+    if not contract:
+        return JSONResponse({"ok": False, "error": "contract_unavailable"}, status_code=404)
+
+    message = request.query_params.get("message") or ""
+    language = request.query_params.get("language") or "th"
+    raw_state = request.query_params.get("state")
+    try:
+        state_dict = _json.loads(raw_state) if raw_state else None
+    except (TypeError, ValueError):
+        state_dict = None
+    state = ConversationState.from_dict(state_dict)
+
+    strategy = analyze_conversation_strategy(contract, message, state, language=language)
+    return JSONResponse({"ok": True, "message": message, "strategy": strategy})
+
+
+@app.get("/admin/analytics/conversation-strategy")
+async def conversation_analytics_dashboard_page(request: Request):
+    """Part 13 — Conversation Analytics Dashboard page (read-only,
+    in-memory data only, via get_analytics_store())."""
+    if (r := auth(request)): return r
+    return render("conversation_analytics_dashboard.html", {"request": request, "active": "business_action_center"})
+
+
+@app.get("/admin/api/conversation-analytics/metrics")
+async def api_conversation_analytics_metrics(request: Request):
+    """Part 13 — data route backing the dashboard. Reads ONLY through
+    get_analytics_store() — never a bare in-memory dict from route code."""
+    if (r := auth(request)): return r
+    from services.conversation_analytics_store import get_analytics_store
+    action_id = request.query_params.get("action_id") or None
+    store = get_analytics_store()
+    metrics = store.compute_metrics(action_id=action_id)
+    recent = store.list_conversations(action_id=action_id, limit=20)
+    return JSONResponse({"ok": True, "metrics": metrics, "recent_conversations": recent})
+
+
 @app.patch("/admin/api/business-actions/{action_id}")
 async def api_update_business_action(request: Request, action_id: str):
     if (r := auth(request)): return r
@@ -3914,15 +4699,80 @@ async def api_update_business_action(request: Request, action_id: str):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
-@app.delete("/admin/api/business-actions/{action_id}")
-async def api_delete_business_action(request: Request, action_id: str):
+@app.get("/admin/api/business-actions/{action_id}/delete-info")
+async def api_business_action_delete_info(request: Request, action_id: str):
+    """Lets the confirmation dialog pick the right tier of warning BEFORE
+    the admin commits to a permanent delete (2026-07-29 hard-delete
+    rework) — a never-executed draft gets a single lightweight
+    confirmation, a published/executed action gets a stronger one, and a
+    protected system fixture is flagged as non-deletable up front."""
     if (r := auth(request)): return r
     from services.business_action_registry import get_registry
+    reg = get_registry(get_sb())
+    action = reg.get(action_id)
+    if not action:
+        return JSONResponse({"ok": False, "error": "action_not_found"}, status_code=404)
+    dependent_counts = reg.dependent_record_counts(action_id)
+    has_execution_history = dependent_counts.get("erp_test_cases", 0) > 0
+    return JSONResponse({
+        "ok": True,
+        "action_id": action_id, "action_key": action.get("action_key"),
+        "is_draft": bool(action.get("is_draft")),
+        "is_published": (not action.get("is_draft")) and bool(action.get("enabled")),
+        "has_execution_history": has_execution_history,
+        "is_protected": reg.is_protected_fixture(action),
+        "dependent_counts": dependent_counts,
+    })
+
+
+@app.delete("/admin/api/business-actions/{action_id}")
+async def api_delete_business_action(request: Request, action_id: str):
+    """Permanent delete only (2026-07-29 rework) — soft delete used to
+    leave a dead row still occupying its action_key forever at the DB's
+    unique-constraint level (the getdatacustomer incident); there is no
+    recycle bin / restore flow for this action anymore. See
+    services/business_action_registry.py::hard_delete_action().
+
+    force=True is intentionally NEVER accepted from this (or any other)
+    public HTTP route (2026-07-29 production-readiness audit, Part 6) —
+    every route in this app shares one admin auth() gate with no
+    privilege tiers, so a `?force=true` query param would have let ANY
+    authenticated session bypass protected-fixture protection with
+    nothing more than curl/devtools. force=True is reachable ONLY via a
+    direct Python call to the registry (e.g. an internal maintenance
+    script run by someone with filesystem/DB access), never through the
+    API surface a browser session can reach."""
+    if (r := auth(request)): return r
+    from services.business_action_registry import get_registry
+    reg = get_registry(get_sb())
     try:
-        get_registry(get_sb()).delete(action_id)
-        return JSONResponse({"ok": True})
+        result = reg.hard_delete_action(action_id, actor=_current_admin_user(request))
+        # Defense-in-depth (2026-07-29 audit, Part 2): a deleted action's
+        # row is already unresolvable (get()/get_full() filter on it
+        # existing at all), so no cache lookup can ever reach a stale
+        # entry for it — but explicitly dropping the entry here also
+        # avoids it sitting as unreachable dead weight in the in-process
+        # dict for the life of the process.
+        from services.integration_contract_service import invalidate_contract_cache
+        from services.conversation_form_generator import invalidate_form_cache
+        invalidate_contract_cache(action_id)
+        invalidate_form_cache(action_id)
+        return JSONResponse({"ok": True, **result})
+    except ValueError as e:
+        reason = str(e)
+        if reason == "action_not_found":
+            return JSONResponse({"ok": False, "error": "action_not_found",
+                                  "message": "This Business Action no longer exists."}, status_code=404)
+        if reason == "protected_fixture":
+            return JSONResponse({"ok": False, "error": "protected_fixture",
+                                  "message": "This is a protected system fixture and cannot be deleted."},
+                                 status_code=403)
+        return JSONResponse({"ok": False, "error": reason}, status_code=400)
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        # Includes the orphan-records RuntimeError — never expose raw
+        # DB internals, but never silently claim success either.
+        return JSONResponse({"ok": False, "error": "delete_failed",
+                              "message": f"Delete failed and may need investigation: {e}"}, status_code=500)
 
 
 @app.post("/admin/api/business-actions/{action_id}/enabled")
@@ -4128,11 +4978,45 @@ async def api_ai_auto_setup_expand_questions(request: Request):
     return JSONResponse({"ok": True, "suggestions": suggestions})
 
 
+def _collect_avoid_phrases_for_question_generation(sb, exclude_action_id: Optional[str] = None) -> List[str]:
+    """2026-07-29 — example questions already "spoken for" by OTHER
+    Business Actions, plus RAG FAQ-style content already in the
+    knowledge base, so a brand-new AI-suggested question doesn't collide
+    with wording that already routes elsewhere. Best-effort: any failure
+    here just means fewer avoid-phrases, never blocks question
+    generation itself."""
+    phrases: List[str] = []
+    try:
+        q = sb.table("business_action_examples").select("example_text,action_id") \
+            .eq("example_type", "question").limit(1000).execute()
+        for row in (q.data or []):
+            if exclude_action_id and row.get("action_id") == exclude_action_id:
+                continue
+            if row.get("example_text"):
+                phrases.append(row["example_text"])
+    except Exception as e:
+        print(f"[ai_auto_setup] could not collect other-action example questions: {e}")
+    try:
+        c = sb.table("knowledge_chunks").select("metadata").eq("is_active", True).limit(500).execute()
+        for row in (c.data or []):
+            for qtext in ((row.get("metadata") or {}).get("suggested_questions") or []):
+                if qtext:
+                    phrases.append(qtext)
+    except Exception as e:
+        print(f"[ai_auto_setup] could not collect RAG suggested_questions: {e}")
+    return phrases
+
+
 @app.post("/admin/api/business-actions/ai-auto-setup/suggest-questions")
 async def api_ai_auto_setup_suggest_questions(request: Request):
     """AI Suggested Questions (bring-back feature) — generates 10-20
     realistic customer questions for a capability before the Business
-    Action is saved. Never saves anything itself."""
+    Action is saved. Never saves anything itself.
+
+    2026-07-29 — also avoids reusing question phrasing already spoken
+    for by another Business Action's own examples or by RAG FAQ content,
+    so future ERP-vs-RAG / ERP-vs-ERP intent routing doesn't collide on
+    near-identical example questions."""
     if (r := auth(request)): return r
     body = await request.json()
     display_name = (body.get("display_name") or "").strip()
@@ -4141,12 +5025,47 @@ async def api_ai_auto_setup_suggest_questions(request: Request):
     description = (body.get("description") or "").strip()
     category = (body.get("category") or "").strip()
     existing_questions = [q for q in (body.get("existing_questions") or []) if q and q.strip()]
+    exclude_action_id = body.get("exclude_action_id")
     from services.ai_auto_setup_service import generate_suggested_questions
+    avoid_phrases = _collect_avoid_phrases_for_question_generation(get_sb(), exclude_action_id)
     try:
-        questions = generate_suggested_questions(display_name, description, category, existing_questions)
+        questions = generate_suggested_questions(display_name, description, category, existing_questions,
+                                                  avoid_phrases=avoid_phrases)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"สร้างตัวอย่างคำถามไม่สำเร็จ: {str(e)}"}, status_code=502)
     return JSONResponse({"ok": True, "questions": questions})
+
+
+@app.get("/admin/api/business-actions/ai-auto-setup/semantic-endpoint-intents")
+async def api_ai_auto_setup_semantic_endpoint_intents(request: Request):
+    """Canonical Step-1 endpoint-intent vocabulary
+    (semantic_api_analysis_engine.ENDPOINT_INTENTS) — the Review & Edit
+    UI's Endpoint Intent override dropdown loads from here rather than
+    hardcoding the list a second time (mirrors the existing
+    /integration-contracts/operations route for the runtime vocabulary)."""
+    if (r := auth(request)): return r
+    from services.semantic_api_analysis_engine import ENDPOINT_INTENTS
+    return JSONResponse({"ok": True, "endpoint_intents": list(ENDPOINT_INTENTS)})
+
+
+@app.post("/admin/api/business-actions/ai-auto-setup/semantic-overrides/apply")
+async def api_ai_auto_setup_apply_semantic_overrides(request: Request):
+    """Semantic Analysis Review & Edit UI — the ONE place that computes
+    Detected/Override/Effective values, reusing
+    semantic_api_analysis_engine.apply_overrides() (Step 11) directly so
+    the merge logic lives in exactly one place, never duplicated in
+    JavaScript. Pure/deterministic, never touches the DB or an action;
+    the caller (Review & Edit page) calls this reactively whenever the
+    admin edits an override, then re-renders from the response."""
+    if (r := auth(request)): return r
+    body = await request.json()
+    semantic_analysis = body.get("semantic_analysis")
+    if not isinstance(semantic_analysis, dict):
+        return JSONResponse({"ok": False, "error": "missing semantic_analysis"}, status_code=400)
+    overrides = body.get("overrides") or {}
+    from services.semantic_api_analysis_engine import apply_overrides
+    effective = apply_overrides(semantic_analysis, overrides)
+    return JSONResponse({"ok": True, "effective": effective, "provenance": effective.get("provenance", {})})
 
 
 @app.post("/admin/api/business-actions/ai-auto-setup/save")
@@ -4169,7 +5088,40 @@ async def api_ai_auto_setup_save(request: Request):
 
     reg = get_registry(get_sb())
     action_key = proposal.get("action_id")
+
+    # Semantic API Analysis Engine — reuse the analysis the analyze
+    # endpoint already attached to `proposal.setup_metadata` (Steps
+    # 1-9/11/12); recompute deterministically here only for callers
+    # that saved without going through analyze_capability first (a
+    # direct/manual save, or a pre-existing test fixture) — the
+    # analysis is pure/deterministic so recomputing it from the SAME
+    # saved parameters yields the identical result either way (Step 10).
+    from services.semantic_api_analysis_engine import analyze_endpoint, apply_overrides
+    existing_semantic_metadata = (proposal.get("setup_metadata") or {}).get("semantic_analysis")
+    if existing_semantic_metadata:
+        semantic_analysis = existing_semantic_metadata
+    else:
+        semantic_analysis = analyze_endpoint(
+            endpoint_url=proposal.get("endpoint_path") or "",
+            http_method=proposal.get("http_method") or "GET",
+            description=proposal.get("description") or "",
+            headers=proposal.get("headers") or {},
+            body_fields=proposal.get("parameters") or [],
+            example_response=proposal.get("example_response"),
+        )
     existing = reg.get_by_key(action_key) if action_key else None
+
+    # Semantic Analysis Review & Edit UI (Step 11) — admin-confirmed
+    # overrides survive a re-analysis: prefer whatever the CURRENT save
+    # call carries (the Review & Edit page always resends the full,
+    # possibly-just-edited override set), falling back to whatever was
+    # already persisted on the existing row so a legacy/stale caller
+    # that doesn't know about overrides never silently erases them.
+    semantic_overrides = (proposal.get("setup_metadata") or {}).get("semantic_overrides")
+    if not semantic_overrides and existing:
+        semantic_overrides = (existing.get("setup_metadata") or {}).get("semantic_overrides")
+    semantic_overrides = semantic_overrides or {}
+    effective_semantic_analysis = apply_overrides(semantic_analysis, semantic_overrides)
     requested_enabled = bool(body.get("enabled", False))
 
     # Pre-save existence check (Part 5C, level 1) — MUST look past
@@ -4183,13 +5135,7 @@ async def api_ai_auto_setup_save(request: Request):
     if not existing and action_key and not resolve.get("target_action_id"):
         any_row = reg.get_by_key_including_deleted(action_key)
         if any_row:
-            return JSONResponse({
-                "ok": False, "success": False, "error_type": "duplicate_action",
-                "error": "A Business Action with this key already exists.",
-                "message": "A Business Action with this key already exists.",
-                "action_key": action_key, "existing_action_id": any_row.get("id"),
-                "options": ["update_existing", "save_as_new", "rename_action", "cancel"],
-            }, status_code=409)
+            return _duplicate_action_response(action_key, any_row)
 
     # "Update Existing" resolution — the client resends the SAME save
     # call with resolve_duplicate.target_action_id set to the row the
@@ -4252,8 +5198,48 @@ async def api_ai_auto_setup_save(request: Request):
             # RAG-vs-ERP Routing Configuration — never wired into the
             # Decision Engine yet, stored for later consumption only.
             "routing": routing_metadata,
+            # Semantic API Analysis Engine (Step 9's canonical metadata +
+            # Step 11's override precedence) — this is what actually
+            # wires the new engine into the Generic Integration Runtime
+            # AND the Integration Schema/Contract: `operation_type` here
+            # is read by erp_test_harness.infer_operation_type_with_
+            # evidence() (tier 2, ALREADY existing) and, through it, by
+            # integration_schema_service.resolve_effective_integration_
+            # schema()'s operation-type resolution — zero changes needed
+            # to either of those already-tested modules. Precedence,
+            # highest first: (1) a raw legacy `setup_metadata.
+            # operation_type` set directly by an older caller (back-
+            # compat), (2) the Review & Edit page's own
+            # operation_type_override (folded into `effective_...` via
+            # apply_overrides() above), (3) the freshly-derived mapping.
+            # Never silently replaced by a re-analysis (Step 11).
+            "operation_type": (proposal.get("setup_metadata") or {}).get("operation_type") or
+                               effective_semantic_analysis["mapped_runtime_operation_type"],
+            "semantic_analysis": semantic_analysis,
+            # The RAW detected analysis is stored separately from the
+            # admin's override set — `semantic_analysis` above is always
+            # the pure, deterministic detection (Step 10); overrides are
+            # layered on top at READ time via apply_overrides(), exactly
+            # like integration_schema_service's derived-vs-effective
+            # schema split. The Review & Edit UI re-applies overrides
+            # client-side (via the /semantic-overrides/apply route) so
+            # it always shows Detected/Override/Effective correctly.
+            "semantic_overrides": semantic_overrides,
         },
     }
+    # Auto-fill parameter_groups from the engine's HIGH-confidence
+    # (>=0.8) inferred validation groups only when the admin hasn't
+    # already set any explicitly — never overwrites an admin-confirmed
+    # group (Step 11's "never silently overwrite" rule applied to
+    # validation groups, not just field-level overrides).
+    if not proposal.get("parameter_groups"):
+        high_confidence_groups = [
+            {"name": f"auto_{g['rule'].lower()}_{i}", "rule": g["rule"], "members": g["members"]}
+            for i, g in enumerate(effective_semantic_analysis.get("validation_groups") or [])
+            if g.get("confidence", 1.0) >= 0.8
+        ]
+        if high_confidence_groups:
+            proposal["parameter_groups"] = high_confidence_groups
     if existing:
         # Updating an EXISTING permanent action (e.g. re-verifying
         # search_data_order through Auto Setup) must never silently
@@ -4341,13 +5327,7 @@ async def api_ai_auto_setup_save(request: Request):
         # SQLSTATE, stack traces) to the browser.
         if _is_duplicate_key_error(e):
             any_row = reg.get_by_key_including_deleted(action_key) if action_key else None
-            return JSONResponse({
-                "ok": False, "success": False, "error_type": "duplicate_action",
-                "error": "A Business Action with this key already exists.",
-                "message": "A Business Action with this key already exists.",
-                "action_key": action_key, "existing_action_id": any_row.get("id") if any_row else None,
-                "options": ["update_existing", "save_as_new", "rename_action", "cancel"],
-            }, status_code=409)
+            return _duplicate_action_response(action_key, any_row)
         return JSONResponse({
             "ok": False, "success": False, "error": "Unable to save the Business Action. Please try again or review the configuration.",
         }, status_code=400)
@@ -4531,7 +5511,13 @@ async def api_execute_business_action(request: Request, action_id: str):
     from services.action_executor import ActionExecutor
     executor = ActionExecutor(get_sb())
     params = {k: v for k, v in (body.get("parameters") or {}).items() if v not in (None, "")}
-    result = executor.execute(action_id, context={"action_params": params})
+    # Sent under BOTH keys: TOOL-type actions read "action_params"
+    # (_tool_business_provider_lookup), while API-type actions'
+    # customer_message parameters are resolved from "collected_slots"
+    # (_resolve_param_value) — action_executor.py itself is untouched;
+    # this is just making sure this manual test caller's values reach
+    # whichever key each action_type actually reads.
+    result = executor.execute(action_id, context={"action_params": params, "collected_slots": params})
     return JSONResponse({"ok": True, "result": result})
 
 

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% set active = "business_action_center" %}
+{% block title %}Conversation Analytics — Shipify Admin{% endblock %}
+{% block topbar_title %}Conversation Analytics{% endblock %}
+
+{% block extra_head %}
+<style>
+.cad-wrap{max-width:1100px}
+.cad-note{font-size:11px;color:rgba(232,237,245,.4);margin-bottom:16px}
+.cad-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.cad-tile{background:rgba(255,255,255,.02);border:1px solid rgba(27,79,155,.25);border-radius:12px;padding:14px}
+.cad-tile-label{font-size:10.5px;color:rgba(232,237,245,.45);margin-bottom:6px}
+.cad-tile-value{font-size:22px;font-weight:700;color:#F5A623}
+.cad-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:16px;margin-bottom:14px}
+.cad-panel h3{margin:0 0 10px 0;font-size:13px;color:#e8edf5}
+.cad-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:#e8edf5}
+.cad-bar-track{flex:1;background:rgba(255,255,255,.05);border-radius:6px;height:10px;overflow:hidden}
+.cad-bar-fill{height:100%;background:rgba(245,166,35,.5)}
+.cad-empty{font-size:12px;color:rgba(232,237,245,.4)}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cad-wrap">
+  <div class="cad-note">Conversation Analytics Dashboard — reads ONLY through services/conversation_analytics_store.py::get_analytics_store() (Part 9/10/13), in-memory only this sprint (no DB migration). Data resets whenever the server process restarts.</div>
+
+  <div class="cad-grid" id="cad-tiles"></div>
+
+  <div class="cad-panel">
+    <h3>Most Asked Questions</h3>
+    <div id="cad-most-asked"></div>
+  </div>
+  <div class="cad-panel">
+    <h3>Most Auto-filled Fields</h3>
+    <div id="cad-most-autofilled"></div>
+  </div>
+  <div class="cad-panel">
+    <h3>Top Cancelled Actions</h3>
+    <div id="cad-top-cancelled"></div>
+  </div>
+  <div class="cad-panel">
+    <h3>Top Missing Fields</h3>
+    <div id="cad-top-missing"></div>
+  </div>
+</div>
+
+<script>
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+function cadTile(label, value){
+  return '<div class="cad-tile"><div class="cad-tile-label">' + esc(label) + '</div><div class="cad-tile-value">' + esc(value) + '</div></div>';
+}
+
+function cadBarList(rows, maxCount){
+  if (!rows || !rows.length) return '<div class="cad-empty">No data recorded yet.</div>';
+  return rows.map(function(r){
+    var pct = maxCount ? Math.round((r.count / maxCount) * 100) : 0;
+    return '<div class="cad-bar-row"><div style="width:180px">' + esc(r.name) + '</div>' +
+      '<div class="cad-bar-track"><div class="cad-bar-fill" style="width:' + pct + '%"></div></div>' +
+      '<div style="width:36px;text-align:right">' + r.count + '</div></div>';
+  }).join('');
+}
+
+function cadRender(data){
+  var m = (data && data.metrics) || {};
+  document.getElementById('cad-tiles').innerHTML =
+    cadTile('Conversations', m.conversation_count || 0) +
+    cadTile('Average Questions', m.average_questions || 0) +
+    cadTile('Average Turns', m.average_turns || 0) +
+    cadTile('Auto-fill Rate', ((m.auto_fill_rate || 0) * 100).toFixed(1) + '%') +
+    cadTile('Confirmation Rate', ((m.confirmation_rate || 0) * 100).toFixed(1) + '%') +
+    cadTile('Cancellation Rate', ((m.cancellation_rate || 0) * 100).toFixed(1) + '%');
+
+  var maxAsked = Math.max.apply(null, (m.most_asked_questions || [{count:0}]).map(function(r){return r.count;}));
+  var maxAuto = Math.max.apply(null, (m.most_auto_filled_fields || [{count:0}]).map(function(r){return r.count;}));
+  var maxCancelled = Math.max.apply(null, (m.top_cancelled_actions || [{count:0}]).map(function(r){return r.count;}));
+  document.getElementById('cad-most-asked').innerHTML = cadBarList(m.most_asked_questions, maxAsked);
+  document.getElementById('cad-most-autofilled').innerHTML = cadBarList(m.most_auto_filled_fields, maxAuto);
+  document.getElementById('cad-top-cancelled').innerHTML = cadBarList(m.top_cancelled_actions, maxCancelled);
+  document.getElementById('cad-top-missing').innerHTML = cadBarList(m.top_missing_fields, maxAsked);
+
+  if (m.detection_accuracy == null && m.detection_accuracy_note) {
+    document.getElementById('cad-tiles').innerHTML += '<div class="cad-tile" style="grid-column:1/-1"><div class="cad-tile-label">Detection Accuracy</div><div class="cad-empty">Not available — ' + esc(m.detection_accuracy_note) + '</div></div>';
+  }
+}
+
+function cadLoad(){
+  fetch('/admin/api/conversation-analytics/metrics').then(function(r){ return r.json(); }).then(cadRender)
+    .catch(function(){ document.getElementById('cad-tiles').innerHTML = '<div class="cad-empty">Failed to load analytics.</div>'; });
+}
+cadLoad();
+</script>
+{% endblock %}

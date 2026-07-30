@@ -212,6 +212,69 @@ def get_embedding_provider() -> EmbeddingProvider:
     return _provider_singleton
 
 
+class EmbeddingConfigurationError(RuntimeError):
+    """Raised by validate_embedding_configuration() when the runtime
+    embedding provider's dimension doesn't match knowledge_chunks'
+    actual vector column width — never caught silently, always meant to
+    fail an ingestion/sync attempt fast, before any chunk is embedded."""
+    pass
+
+
+def get_expected_db_vector_dimension(sb) -> Optional[int]:
+    """Reads knowledge_chunks.embedding's ACTUAL configured width straight
+    from Postgres (pg_attribute.atttypmod — for pgvector's `vector` type
+    this holds the dimension directly, no -4 offset like varchar) rather
+    than assuming a hardcoded constant, so this stays correct across any
+    future migration that changes the column width again. Returns None
+    (never raises) if the check itself can't run — a missing/unreachable
+    DB is a separate failure mode from a real dimension mismatch, and
+    callers should not treat "couldn't check" as "definitely mismatched"."""
+    try:
+        import psycopg2
+        from config import SUPABASE_DB_URL
+        if not SUPABASE_DB_URL:
+            return None
+        conn = psycopg2.connect(SUPABASE_DB_URL, connect_timeout=5)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT atttypmod FROM pg_attribute "
+                "WHERE attrelid = 'knowledge_chunks'::regclass "
+                "AND attname = 'embedding' AND NOT attisdropped"
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[embedding_service] could not read knowledge_chunks.embedding's expected "
+              f"dimension from the database: {e}")
+        return None
+
+
+def validate_embedding_configuration(sb=None) -> None:
+    """Part of the 2026-07-29 embedding-dimension-mismatch fix (Fix 3).
+    Called once before an ingestion/sync run starts embedding ANY chunk
+    — never partway through, so a job never appears stuck at partial
+    progress because chunk N failed after chunks 1..N-1 already
+    succeeded. Compares the ACTIVE runtime provider's dimensions()
+    against the database's actual knowledge_chunks.embedding column
+    width and raises EmbeddingConfigurationError with a clear, actionable
+    message on any mismatch. A DB-unreachable/unknown result is NOT
+    treated as a mismatch (see get_expected_db_vector_dimension) — only a
+    real, confirmed mismatch blocks ingestion."""
+    provider = get_embedding_provider()
+    runtime_dim = provider.dimensions()
+    expected_dim = get_expected_db_vector_dimension(sb)
+    if expected_dim is not None and runtime_dim != expected_dim:
+        raise EmbeddingConfigurationError(
+            f"Embedding configuration mismatch: runtime model {provider.model_name()} "
+            f"produces {runtime_dim} dimensions, but knowledge_chunks expects {expected_dim} "
+            f"dimensions. Fix OPENAI_EMBEDDING_MODEL in Settings/.env before retrying — no "
+            f"chunks were embedded for this attempt."
+        )
+
+
 def build_embedding_text(*, file_name: str, document_title: Optional[str] = None,
                           heading_path: Optional[List[str]] = None,
                           section_title: Optional[str] = None,

@@ -52,7 +52,7 @@ class TestNormalMenusUnaffected(unittest.TestCase):
 
     def test_only_developer_only_features_are_governed(self):
         for key, feature in FEATURE_DEFINITIONS.items():
-            if key == "business_action_center":
+            if key in ("business_action_center", "erp_conversation_tester"):
                 self.assertFalse(feature["developer_only"], msg=key)
                 continue
             self.assertTrue(feature["developer_only"], msg=key)
@@ -63,6 +63,13 @@ class TestNormalMenusUnaffected(unittest.TestCase):
                 self.assertEqual(get_feature_state("business_action_center"), FEATURE_STATE_VISIBLE,
                                   msg=f"dev_mode={dev_mode}")
                 self.assertTrue(is_feature_route_accessible("business_action_center"), msg=f"dev_mode={dev_mode}")
+
+    def test_erp_conversation_tester_always_visible_regardless_of_developer_mode(self):
+        for dev_mode in ("true", "false"):
+            with patch.dict(os.environ, _no_env(DEVELOPER_MODE=dev_mode), clear=True):
+                self.assertEqual(get_feature_state("erp_conversation_tester"), FEATURE_STATE_VISIBLE,
+                                  msg=f"dev_mode={dev_mode}")
+                self.assertTrue(is_feature_route_accessible("erp_conversation_tester"), msg=f"dev_mode={dev_mode}")
 
 
 class TestCompletedDeveloperMenus(unittest.TestCase):
@@ -104,11 +111,13 @@ class TestComingSoonDeveloperMenus(unittest.TestCase):
             for key in ("excel_engine", "attachment_manager", "storage",
                         "user_profiles", "line_analytics"):
                 self.assertEqual(get_feature_state(key), FEATURE_STATE_HIDDEN, msg=key)
-            # business_action_center (ERP Integration) is Category C —
-            # always VISIBLE, the only item build_developer_menu_items()
-            # still returns with Developer Mode off.
+            # business_action_center (ERP Integration) and
+            # erp_conversation_tester (ERP Conversation Tester) are both
+            # Category C — always VISIBLE, the only items
+            # build_developer_menu_items() still returns with Developer
+            # Mode off.
             remaining_keys = {i["feature_key"] for i in build_developer_menu_items()}
-            self.assertEqual(remaining_keys, {"business_action_center"})
+            self.assertEqual(remaining_keys, {"business_action_center", "erp_conversation_tester"})
 
     def test_coming_soon_never_accessible_as_a_route(self):
         for feature in FEATURE_DEFINITIONS.values():
@@ -289,14 +298,18 @@ class TestSidebarIntegration(unittest.TestCase):
             self.assertNotIn("erp_sync", keys)
             self.assertNotIn("erp-sync", keys)
 
-    def test_only_one_erp_related_menu_item(self):
+    def test_erp_related_menu_items_are_integration_and_conversation_tester(self):
+        """Product Architecture Separation sprint — ERP Integration
+        (configuration) and ERP Conversation Tester (testing) are two
+        DELIBERATELY separate menu items under Integrations, never
+        merged and never duplicated beyond these two."""
         with patch.dict(os.environ, _no_env(DEVELOPER_MODE="true"), clear=True):
             from admin.sidebar_config import get_sidebar
             erp_titles = []
             for e in get_sidebar():
                 if e["type"] == "group":
                     erp_titles.extend(c["title"] for c in e["children"] if "ERP" in c["title"])
-            self.assertEqual(erp_titles, ["ERP Integration"])
+            self.assertEqual(erp_titles, ["ERP Integration", "ERP Conversation Tester"])
 
     def test_sidebar_group_order(self):
         with patch.dict(os.environ, _no_env(DEVELOPER_MODE="true"), clear=True):

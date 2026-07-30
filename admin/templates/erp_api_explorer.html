@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% set active = "business_action_center" %}
+{% block title %}API Explorer — Shipify Admin{% endblock %}
+{% block topbar_title %}API Explorer{% endblock %}
+
+{% block extra_head %}
+<style>
+.ba-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.ba-guidance{background:rgba(91,157,255,.06);border:1px solid rgba(91,157,255,.2);border-radius:10px;padding:12px 14px;font-size:12.5px;color:rgba(232,237,245,.7);margin-bottom:16px}
+.ba-input{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:#e8edf5;padding:7px 9px;font-size:12.5px;margin-bottom:8px}
+.btn{padding:6px 12px;font-size:12.5px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#e8edf5;cursor:pointer}
+.btn-primary{background:#5b9dff;border-color:#5b9dff;color:#0b1220;font-weight:600}
+.ae-row{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:6px">
+  <div class="page-title">API Explorer</div>
+</div>
+<div class="ba-guidance">
+  A lightweight, Postman-like tool for verifying an ERP API directly — endpoint, method, headers, parameters,
+  body, execute, raw response. Pure API verification — no AI is involved here.
+  <a href="/admin/ai/business-actions" style="color:#5b9dff">← Back to ERP Integration</a>
+</div>
+
+<div class="ba-card">
+  <label style="font-size:11px;color:rgba(232,237,245,.6);display:block;margin-bottom:2px">ERP API</label>
+  <select id="ae-action-select" class="ba-input" onchange="aeOnActionChange()"></select>
+
+  <div id="ae-request-summary" style="font-size:12px;color:rgba(232,237,245,.6);margin-bottom:8px"></div>
+
+  <b style="font-size:12px;display:block;margin-top:8px;margin-bottom:4px">Parameters</b>
+  <div id="ae-param-form"></div>
+
+  <button class="btn btn-primary" onclick="aeExecute()">Test ERP API</button>
+</div>
+
+<div class="ba-card" id="ae-response-card" style="display:none">
+  <b style="font-size:12px">Raw Response</b>
+  <pre id="ae-response" style="white-space:pre-wrap;font-size:11.5px;background:rgba(255,255,255,.03);padding:10px;border-radius:6px;margin-top:8px;max-height:320px;overflow-y:auto"></pre>
+
+  <div id="ae-save-mapping-section" style="margin-top:10px;display:none">
+    <b style="font-size:12px">Save Mapping</b>
+    <div style="font-size:11px;color:rgba(232,237,245,.5);margin:4px 0">Pick a detected field to add to this ERP API's Response Mapping.</div>
+    <div class="ae-row">
+      <select id="ae-mapping-field-select" class="ba-input" style="margin-bottom:0;flex:1"></select>
+      <input type="text" id="ae-mapping-label-input" class="ba-input" style="margin-bottom:0;flex:1" placeholder="Business label, e.g. Wallet Balance">
+      <button class="btn" onclick="aeSaveMapping()">Save Mapping</button>
+    </div>
+    <div id="ae-mapping-status" style="font-size:11px;color:rgba(232,237,245,.5);margin-top:4px"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+// API Explorer — the direct successor to the manual "Business Actions"
+// tester tab removed from AI Playground (Part 3 of the ERP/AI product
+// separation sprint). Same backend endpoint
+// (/admin/api/business-actions/{id}/execute -> Registry -> Executor),
+// relocated under ERP Integration since it's pure API verification, no
+// AI involved — never routed through the Decision Engine or LINE OA.
+var _aeActions = [];
+var _aeSelectedAction = null;
+var _aeLastResponse = null;
+
+function aeLoad() {
+  fetch('/admin/api/business-actions/list-for-playground').then(function(r){ return r.json(); }).then(function(d) {
+    _aeActions = d.actions || [];
+    var select = document.getElementById('ae-action-select');
+    select.innerHTML = _aeActions.map(function(a, i) {
+      return '<option value="' + i + '">' + esc(a.display_name || a.name || a.action_key) + ' (' + esc(a.action_key) + ', ' + esc(a.action_type) + ')</option>';
+    }).join('') || '<option value="">No ERP APIs configured yet</option>';
+    aeOnActionChange();
+  });
+}
+
+function aeOnActionChange() {
+  var idx = parseInt(document.getElementById('ae-action-select').value || '0', 10);
+  _aeSelectedAction = _aeActions[idx] || null;
+  document.getElementById('ae-response-card').style.display = 'none';
+  aeRenderParamForm();
+}
+
+function aeRenderParamForm() {
+  var a = _aeSelectedAction;
+  var summaryEl = document.getElementById('ae-request-summary');
+  var form = document.getElementById('ae-param-form');
+  if (!a) { summaryEl.textContent = ''; form.innerHTML = ''; return; }
+  var askable = (a.parameters || []).filter(function(p){ return ['secret_configuration', 'credential_store'].indexOf(p.input_source) === -1; });
+  var secretParams = (a.parameters || []).filter(function(p){ return ['secret_configuration', 'credential_store'].indexOf(p.input_source) !== -1; });
+  summaryEl.innerHTML = '<b>Integration Type:</b> ' + esc(a.action_type) + '<br>' +
+    (askable.length ? '' : '<span style="color:rgba(232,237,245,.4)">No parameters configured.</span>') +
+    (secretParams.length ? '<div style="margin-top:4px;color:rgba(232,237,245,.4)">🔒 ' + secretParams.length +
+      ' credential parameter(s) resolved automatically from the Credential Store — never re-entered here.</div>' : '');
+  form.innerHTML = askable.map(function(p) {
+    return '<div style="margin-bottom:6px">' +
+      '<label style="font-size:11px;color:rgba(232,237,245,.6);display:block;margin-bottom:2px">' + esc(p.display_name || p.name) + (p.required ? ' *' : '') + '</label>' +
+      '<input type="text" class="ba-input" style="margin-bottom:0" data-param-name="' + esc(p.name) + '" placeholder="' + esc(p.example_value || '') + '">' +
+      '</div>';
+  }).join('');
+}
+
+function aeExecute() {
+  var a = _aeSelectedAction;
+  if (!a) { alert('Select an ERP API first.'); return; }
+  var params = {};
+  document.querySelectorAll('#ae-param-form [data-param-name]').forEach(function(input) {
+    if (input.value) params[input.getAttribute('data-param-name')] = input.value;
+  });
+  document.getElementById('ae-response-card').style.display = 'block';
+  document.getElementById('ae-response').textContent = 'Running…';
+  document.getElementById('ae-save-mapping-section').style.display = 'none';
+  fetch('/admin/api/business-actions/' + a.id + '/execute', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({parameters: params}),
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    var result = d.result || d;
+    _aeLastResponse = (result.result && result.result.response) || null;
+    document.getElementById('ae-response').textContent = JSON.stringify(result, null, 2);
+    aeRenderMappingPicker();
+  }).catch(function(e){ document.getElementById('ae-response').textContent = 'Error: ' + e; });
+}
+
+function _aeFlatten(obj, prefix, out) {
+  out = out || [];
+  Object.keys(obj || {}).forEach(function(key) {
+    var value = obj[key];
+    var path = prefix ? prefix + '.' + key : key;
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) _aeFlatten(value, path, out);
+    else out.push(path);
+  });
+  return out;
+}
+
+function aeRenderMappingPicker() {
+  var section = document.getElementById('ae-save-mapping-section');
+  if (!_aeSelectedAction || !_aeLastResponse || typeof _aeLastResponse !== 'object') { section.style.display = 'none'; return; }
+  var paths = _aeFlatten(_aeLastResponse, '');
+  if (!paths.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  document.getElementById('ae-mapping-field-select').innerHTML = paths.map(function(p){ return '<option value="' + esc(p) + '">$.' + esc(p) + '</option>'; }).join('');
+}
+
+function aeSaveMapping() {
+  var a = _aeSelectedAction;
+  var path = document.getElementById('ae-mapping-field-select').value;
+  var label = document.getElementById('ae-mapping-label-input').value.trim();
+  var statusEl = document.getElementById('ae-mapping-status');
+  if (!a || !path || !label) { statusEl.textContent = 'Pick a field and enter a label first.'; return; }
+  statusEl.textContent = 'Saving…';
+  fetch('/admin/api/business-actions/' + a.id).then(function(r){ return r.json(); }).then(function(d) {
+    var existing = (d.action && d.action.response_mapping) || [];
+    var updated = existing.concat([{json_path: '$.' + path, mapped_label: label}]);
+    return fetch('/admin/api/business-actions/' + a.id + '/response-mapping', {
+      method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mapping: updated}),
+    });
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    statusEl.textContent = d.ok ? '✓ Saved to Response Mapping.' : ('Failed: ' + (d.error || 'unknown error'));
+  }).catch(function(e){ statusEl.textContent = 'Failed: ' + e; });
+}
+
+aeLoad();
+</script>
+{% endblock %}

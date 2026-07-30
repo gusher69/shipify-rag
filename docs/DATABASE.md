@@ -42,6 +42,12 @@ There is no migration runner/CLI — apply files via the Supabase SQL Editor or 
 | `business_action_embeddings` | Embeddings used for semantic similarity/duplicate detection between Business Actions |
 | `integration_credentials` | (Legacy/earlier) per-integration credential storage — see also `credentials`/Credential Store below |
 | `credential_audit_log` | Audit trail for credential create/rotate/use events |
+| `erp_test_cases` (migration 031) | Saved ERP Conversation Tester test cases (intent_param/simulation/live) per Business Action |
+| `integration_action_schemas` (migration 033) | Integration Schema Studio's draft/published/archived versioned business/conversation-layer schema per action — completely separate from the technical `business_action_*` tables above; never modifies them |
+| `business_action_audit_log` (migration 034) | Immutable audit record for **permanent** Business Action deletion (2026-07-29 hard-delete rework) — mirrors `credential_audit_log`'s shape/RLS convention; never stores secrets/credentials/request-response payloads; a write failure never blocks the delete itself, only surfaces `audit_log_warning` in the API response |
+| migration 032 (`field_metadata`) | Additive per-field display metadata columns consumed by the Conversation Form Generator |
+
+**Note (2026-07-29 architecture change):** `business_actions` deletion is **no longer soft-delete**. The old `deleted_at`/restore convention was replaced with a genuine `DELETE` relying on `ON DELETE CASCADE` FKs across 9 dependent tables (verified against live `information_schema`/`pg_constraint`, not just code assumptions) — see `docs/adr/0001-business-action-hard-delete.md` and `services/business_action_registry.py::hard_delete_action()`.
 
 ### Credential Store
 | Table | Purpose |

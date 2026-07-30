@@ -156,6 +156,76 @@ class TestAiAutoSetupRoutes(unittest.TestCase):
         self.assertEqual(data["action"]["setup_metadata"]["routing"]["source_preference"], "kb_then_erp")
         self.assertEqual(data["action"]["setup_metadata"]["routing"]["intent"], "custom_intent")
 
+    def test_save_persists_semantic_analysis_and_derives_operation_type(self):
+        """Semantic Analysis Review & Edit UI sprint — a fresh save with
+        no admin override at all still gets a deterministic
+        setup_metadata.operation_type + semantic_analysis persisted."""
+        proposal = _valid_proposal("semantic_fresh")
+        proposal["endpoint_path"] = "/GetUrlProductDetail"
+        proposal["parameters"] = [
+            {"name": "URL", "display_name": "URL", "required": True, "input_source": "customer_message",
+             "secret_ref": None, "example_value": "https://item.taobao.com/item.htm?id=1",
+             "validation_type": "non_empty", "validation_pattern": None, "validation_confidence": "high",
+             "follow_up_options": ["กรุณาแจ้งลิงก์สินค้าครับ"]},
+        ]
+        resp = self.client.post("/admin/api/business-actions/ai-auto-setup/save",
+                                 json={"proposal": proposal, "enabled": False})
+        data = resp.json()
+        self.assertTrue(data["ok"])
+        meta = data["action"]["setup_metadata"]
+        self.assertIn("semantic_analysis", meta)
+        self.assertEqual(meta["operation_type"], "TRANSFORM")
+
+    def test_admin_override_persists_and_survives_re_save_without_client_echo(self):
+        """Step 11 — an admin-confirmed semantic override, once saved,
+        must survive a LATER save call that doesn't re-send it (e.g. a
+        legacy/stale caller), never silently erased."""
+        proposal = _valid_proposal("semantic_override_action")
+        proposal["setup_metadata"] = {"semantic_overrides": {"operation_type_override": "WORKFLOW",
+                                                                "field_overrides": {}}}
+        first = self.client.post("/admin/api/business-actions/ai-auto-setup/save",
+                                  json={"proposal": proposal, "enabled": False})
+        first_data = first.json()
+        self.assertTrue(first_data["ok"])
+        self.assertEqual(first_data["action"]["setup_metadata"]["operation_type"], "WORKFLOW")
+        self.assertEqual(first_data["action"]["setup_metadata"]["semantic_overrides"]["operation_type_override"], "WORKFLOW")
+
+        # Re-save WITHOUT re-sending semantic_overrides (simulates a caller
+        # that doesn't know about the override system at all).
+        second_proposal = _valid_proposal("semantic_override_action")
+        second = self.client.post("/admin/api/business-actions/ai-auto-setup/save",
+                                   json={"proposal": second_proposal, "enabled": False})
+        second_data = second.json()
+        self.assertTrue(second_data["ok"])
+        self.assertEqual(second_data["action"]["setup_metadata"]["operation_type"], "WORKFLOW")
+        self.assertEqual(second_data["action"]["setup_metadata"]["semantic_overrides"]["operation_type_override"], "WORKFLOW")
+
+    def test_re_save_with_explicit_empty_overrides_resets_to_detected(self):
+        """A deliberate reset (client resends an empty override set) is
+        respected — this is the admin's own explicit action, not a
+        silent loss."""
+        url_param = {"name": "URL", "display_name": "URL", "required": True, "input_source": "customer_message",
+                     "secret_ref": None, "example_value": "https://item.taobao.com/item.htm?id=1",
+                     "validation_type": "non_empty", "validation_pattern": None, "validation_confidence": "high",
+                     "follow_up_options": ["กรุณาแจ้งลิงก์สินค้าครับ"]}
+        proposal = _valid_proposal("semantic_reset_action")
+        proposal["endpoint_path"] = "/GetUrlProductDetail"
+        proposal["parameters"] = [url_param]
+        proposal["setup_metadata"] = {"semantic_overrides": {"operation_type_override": "WORKFLOW", "field_overrides": {}}}
+        first = self.client.post("/admin/api/business-actions/ai-auto-setup/save",
+                                  json={"proposal": proposal, "enabled": False})
+        self.assertEqual(first.json()["action"]["setup_metadata"]["operation_type"], "WORKFLOW")
+
+        reset_proposal = _valid_proposal("semantic_reset_action")
+        reset_proposal["endpoint_path"] = "/GetUrlProductDetail"
+        reset_proposal["parameters"] = [url_param]
+        reset_proposal["setup_metadata"] = {"semantic_overrides": {"field_overrides": {}}}
+        second = self.client.post("/admin/api/business-actions/ai-auto-setup/save",
+                                   json={"proposal": reset_proposal, "enabled": False})
+        second_data = second.json()
+        self.assertTrue(second_data["ok"])
+        self.assertEqual(second_data["action"]["setup_metadata"]["operation_type"], "TRANSFORM")
+        self.assertNotIn("operation_type_override", second_data["action"]["setup_metadata"]["semantic_overrides"])
 
     def test_part9_case5_edit_preserves_credential_ref_without_replacement(self):
         """Part 9, test case 5 — editing/re-saving an existing action whose
@@ -206,6 +276,10 @@ class TestAiAutoSetupRoutes(unittest.TestCase):
         self.assertEqual(data["questions"], ["ขอข้อมูลลูกค้า", "เช็คข้อมูลสมาชิก"])
 
     def test_create_duplicate_action_key_returns_friendly_error_not_raw_db_error(self):
+        # is_draft not set (default False/None) + enabled=True default ->
+        # classified as "published" (Task 3 duplicate-state differentiation,
+        # 2026-07-29) — a live, in-use action gets its own option set,
+        # never the old one-size-fits-all generic dialog.
         self.registry.create({"action_key": "dup_action", "name": "Dup", "action_type": "API"})
         resp = self.client.post("/admin/api/business-actions",
                                  json={"action_key": "dup_action", "name": "Dup Again", "action_type": "API"})
@@ -213,9 +287,10 @@ class TestAiAutoSetupRoutes(unittest.TestCase):
         data = resp.json()
         self.assertFalse(data["ok"])
         self.assertEqual(data["error_type"], "duplicate_action")
-        self.assertEqual(data["error"], "Business Action already exists.")
+        self.assertEqual(data["duplicate_state"], "published")
+        self.assertIn("dup_action", data["error"])
         self.assertNotIn("duplicate key value violates", data["error"])
-        self.assertEqual(set(data["options"]), {"update_existing", "save_as_new", "rename_action", "cancel"})
+        self.assertEqual(set(data["options"]), {"update_existing", "save_as_new", "rename_action"})
 
     def test_create_non_duplicate_action_succeeds_normally(self):
         resp = self.client.post("/admin/api/business-actions",
@@ -266,7 +341,12 @@ class TestAiSetupSaveDuplicateBug(unittest.TestCase):
         self.assertFalse(data["ok"])
         self.assertEqual(data["error_type"], "duplicate_action")
         self.assertEqual(data["existing_action_id"], action_id)
-        self.assertEqual(set(data["options"]), {"update_existing", "save_as_new", "rename_action", "cancel"})
+        # Task 3 (2026-07-29): a SOFT-DELETED collision gets its own
+        # resolution set — restore / delete permanently / create new —
+        # never the generic "update/save-as-new/rename" set meant for a
+        # live published or draft action.
+        self.assertEqual(data["duplicate_state"], "soft_deleted")
+        self.assertEqual(set(data["options"]), {"restore", "delete_permanently", "create_new"})
         full_text = json.dumps(data)
         for leaked in ("duplicate key value violates", "unique constraint", "23505", "psycopg", "Traceback"):
             self.assertNotIn(leaked, full_text)

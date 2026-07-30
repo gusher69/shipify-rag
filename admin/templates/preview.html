@@ -281,6 +281,21 @@
         Ask a question below to start testing the AI pipeline.
       </div>
     </div>
+    <div class="pg-input-row" style="gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;width:100%;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:rgba(232,237,245,.6)">Hybrid Mode</label>
+        <select id="hp-mode" onchange="hpModeChanged()" style="background:#1b2230;color:#e8edf5;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 8px;font-size:12.5px">
+          <option value="rag">RAG (classic)</option>
+          <option value="auto">Auto</option>
+          <option value="erp">ERP</option>
+          <option value="hybrid">Hybrid</option>
+        </select>
+        <select id="hp-action" style="display:none;background:#1b2230;color:#e8edf5;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 8px;font-size:12.5px;max-width:280px">
+          <option value="">Select ERP action…</option>
+        </select>
+        <span id="hp-mode-hint" style="font-size:11px;color:rgba(232,237,245,.35)"></span>
+      </div>
+    </div>
     <div class="pg-input-row">
       <div class="pg-input-wrap">
         <div class="pg-input-textwrap">
@@ -301,7 +316,8 @@
       <div class="pg-tab dev-only" data-tab="json" onclick="switchTab('json')">Raw JSON</div>
       <div class="pg-tab" data-tab="explain" onclick="switchTab('explain')">Explainability</div>
       <div class="pg-tab" data-tab="chunks" onclick="switchTab('chunks')">Retrieved Chunks</div>
-      <div class="pg-tab dev-only" data-tab="actions" onclick="switchTab('actions'); loadActionTester()">Business Actions</div>
+      <div class="pg-tab" data-tab="hybrid" onclick="switchTab('hybrid')">Hybrid Trace</div>
+      <div class="pg-tab" data-tab="debug" onclick="switchTab('debug')">Developer Debug</div>
     </div>
     <div class="pg-tab-content">
       <div class="pg-tab-pane active" id="tab-answer">
@@ -325,20 +341,16 @@
       <div class="pg-tab-pane" id="tab-chunks">
         <div id="pg-chunks-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No answer yet — ask a question on the left.</div>
       </div>
-      <div class="pg-tab-pane" id="tab-actions">
-        <!-- Business Action Framework + ERP Sync milestone, Phase 6 —
-             manual execution of any registered Business Action, going
-             straight through Registry -> Executor -> Provider. Never
-             routed through the Decision Engine (paused this milestone)
-             or LINE OA. -->
-        <div style="margin-bottom:10px;color:rgba(232,237,245,.5);font-size:11.5px">
-          Manually runs a Business Action via Registry → Executor → Provider (mock providers only, today).
-          Never goes through the Decision Engine or LINE OA.
+      <div class="pg-tab-pane" id="tab-hybrid">
+        <div id="hp-hybrid-content" style="color:rgba(232,237,245,.4);font-size:12.5px">
+          Select Auto / ERP / Hybrid mode above and ask a question to see the RAG Trace / ERP Trace / Hybrid Trace here.
         </div>
-        <select id="pg-action-select" style="width:100%;padding:6px;margin-bottom:8px;background:rgba(255,255,255,.05);color:#e8edf5;border:1px solid rgba(255,255,255,.12);border-radius:6px" onchange="renderActionParamForm()"></select>
-        <div id="pg-action-param-form" style="margin-bottom:8px"></div>
-        <button class="pg-copy-btn" onclick="runActionTest()">Run Action</button>
-        <div id="pg-action-result" style="margin-top:10px;font-size:12px;color:rgba(232,237,245,.7);white-space:pre-wrap"></div>
+      </div>
+      <div class="pg-tab-pane" id="tab-debug">
+        <div id="hp-debug-content" style="color:rgba(232,237,245,.4);font-size:12.5px">
+          No execution yet. This panel always shows Conversation State, Strategy Decisions, Integration Contract,
+          LLM Prompt/Response, Token Count, Latency and Errors for the most recent turn, regardless of mode.
+        </div>
       </div>
     </div>
   </div>
@@ -1074,8 +1086,8 @@ function renderAnswer(d) {
       '<span class="pg-confidence dev-only-inline ' + confClass + '">' + Math.round(m.confidence*100) + '% · ' + esc(m.confidence_label) + ' Confidence' +
         (m.answerability ? ' <span style="opacity:.6;font-weight:400">(' + esc(m.answerability.replace(/_/g,' ')) + ')</span>' : '') + '</span>' +
       '<div style="display:flex;gap:6px">' +
-        '<button class="pg-copy-btn" onclick="copyValue(' + JSON.stringify(d.answer) + ', this)">Copy Answer</button>' +
-        '<button class="pg-copy-btn" onclick="copyValue(' + JSON.stringify((d.chunks||[]).filter(c=>c.cited).map(c=>c.citation).filter(Boolean).join('\\n')) + ', this)">Copy Citations</button>' +
+        '<button class="pg-copy-btn" onclick="copyValue(' + esc(JSON.stringify(d.answer)) + ', this)">Copy Answer</button>' +
+        '<button class="pg-copy-btn" onclick="copyValue(' + esc(JSON.stringify((d.chunks||[]).filter(c=>c.cited).map(c=>c.citation).filter(Boolean).join('\\n'))) + ', this)">Copy Citations</button>' +
         '<button class="pg-copy-btn dev-only-inline" onclick="copyAnswerJson(this)">Copy Answer JSON</button>' +
         '<button class="pg-copy-btn dev-only-inline" onclick="copyAllDebug(this)">Copy All Debug</button>' +
         '<button class="pg-copy-btn" onclick="explainAnswer()">🔍 Explain Answer</button>' +
@@ -1140,7 +1152,7 @@ function renderPrompt(d) {
   document.getElementById('pg-prompt-content').innerHTML =
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
       '<div><strong style="color:#e8edf5">'+esc(p.template_name)+'</strong> <span style="color:rgba(232,237,245,.4);font-size:11px">v'+esc(p.template_version)+'</span></div>' +
-      '<button class="pg-copy-btn" onclick="copyText('+JSON.stringify(p.final_prompt)+')">Copy Prompt</button>' +
+      '<button class="pg-copy-btn" onclick="copyText('+esc(JSON.stringify(p.final_prompt))+')">Copy Prompt</button>' +
     '</div>' +
     '<div class="pg-panel-title" style="margin-bottom:6px">System Prompt</div>' +
     '<div class="pg-json" style="margin-bottom:14px">' + esc(p.system_prompt) + '</div>' +
@@ -1188,7 +1200,7 @@ function renderJson(d) {
   var text = JSON.stringify(d, null, 2);
   document.getElementById('pg-json-content').innerHTML =
     '<div style="display:flex;justify-content:flex-end;margin-bottom:8px">' +
-      '<button class="pg-copy-btn" onclick="copyText('+JSON.stringify(text)+')">Copy JSON</button>' +
+      '<button class="pg-copy-btn" onclick="copyText('+esc(JSON.stringify(text))+')">Copy JSON</button>' +
     '</div>' +
     '<div class="pg-json">' + esc(text) + '</div>';
 }
@@ -1243,7 +1255,7 @@ function _fallbackCopy(text, onDone) {
 // Customer Mode where appropriate (Part 10, item 8). stopPropagation
 // keeps a click from also expanding/collapsing the parent card (item 10).
 function copyIconBtn(value, cls, ariaLabel) {
-  var safeValue = JSON.stringify(value == null ? '' : String(value));
+  var safeValue = esc(JSON.stringify(value == null ? '' : String(value)));
   var label = ariaLabel || 'Copy value';
   return '<button type="button" class="pg-copy-icon ' + (cls || '') + '" ' +
     'aria-label="' + esc(label) + '" title="' + esc(label) + '" ' +
@@ -1252,67 +1264,6 @@ function copyIconBtn(value, cls, ariaLabel) {
 
 function explainAnswer() {
   switchTab('explain');
-}
-
-// Business Action Framework + ERP Sync milestone, Phase 6 — manual
-// Business Action tester. Fetches the registered action list, lets the
-// admin pick one and fill its parameters, and executes it directly via
-// the generic Executor endpoint — never through the Decision Engine or
-// LINE OA (both explicitly out of scope this milestone).
-var _actionTesterActions = [];
-var _actionTesterLoaded = false;
-
-function loadActionTester() {
-  if (_actionTesterLoaded) return;
-  _actionTesterLoaded = true;
-  fetch('/admin/api/business-actions/list-for-playground')
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      _actionTesterActions = (d.actions || []);
-      var select = document.getElementById('pg-action-select');
-      select.innerHTML = _actionTesterActions.map(function (a, i) {
-        return '<option value="' + i + '">' + esc(a.display_name || a.name || a.action_key) +
-          ' (' + esc(a.action_key) + ', ' + esc(a.action_type) + ')</option>';
-      }).join('');
-      renderActionParamForm();
-    })
-    .catch(function () { _actionTesterLoaded = false; });
-}
-
-function renderActionParamForm() {
-  var select = document.getElementById('pg-action-select');
-  var idx = parseInt(select.value || '0', 10);
-  var action = _actionTesterActions[idx];
-  var form = document.getElementById('pg-action-param-form');
-  if (!action) { form.innerHTML = ''; return; }
-  form.innerHTML = (action.parameters || []).map(function (p) {
-    return '<div style="margin-bottom:6px">' +
-      '<label style="font-size:11px;color:rgba(232,237,245,.6);display:block;margin-bottom:2px">' +
-        esc(p.display_name || p.name) + (p.required ? ' *' : '') + '</label>' +
-      '<input type="text" data-param-name="' + esc(p.name) + '" placeholder="' + esc(p.example_value || '') + '" ' +
-        'style="width:100%;padding:5px;background:rgba(255,255,255,.05);color:#e8edf5;border:1px solid rgba(255,255,255,.1);border-radius:5px">' +
-      '</div>';
-  }).join('') || '<div style="color:rgba(232,237,245,.4);font-size:11.5px">This action has no parameters.</div>';
-}
-
-function runActionTest() {
-  var select = document.getElementById('pg-action-select');
-  var idx = parseInt(select.value || '0', 10);
-  var action = _actionTesterActions[idx];
-  var resultEl = document.getElementById('pg-action-result');
-  if (!action) { resultEl.textContent = 'No action selected.'; return; }
-  var params = {};
-  document.querySelectorAll('#pg-action-param-form [data-param-name]').forEach(function (input) {
-    if (input.value) params[input.getAttribute('data-param-name')] = input.value;
-  });
-  resultEl.textContent = 'Running...';
-  fetch('/admin/api/business-actions/' + action.id + '/execute', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ parameters: params }),
-  })
-    .then(function (r) { return r.json(); })
-    .then(function (d) { resultEl.textContent = JSON.stringify(d.result || d, null, 2); })
-    .catch(function (e) { resultEl.textContent = 'Error: ' + e; });
 }
 
 // Copy Answer JSON (Part 11, P0 2026-07-21) — a clean, redacted payload
@@ -1648,10 +1599,205 @@ function renderExplain(d) {
     '</div></div>';
 }
 
+// ── Hybrid Playground (2026-07-29 integration/wiring sprint) ──────────
+// Mode selector (Auto/RAG/ERP/Hybrid) wired onto this SAME AI Playground
+// page per the user's stated preference, rather than a brand new page.
+// RAG mode keeps using the pre-existing /admin/playground/ask flow
+// (session recording, chat history) completely unchanged; Auto/ERP/
+// Hybrid use the new /admin/api/hybrid-playground/ask route added in
+// admin/routes.py, which itself only dispatches to the two pre-existing
+// entry points (run_playground_turn / run_erp_test) — see that route's
+// docstring for the naive Auto-heuristic / Hybrid-merge disclaimers.
+var _hpActions = [];
+var _lastHybridResp = null;
+
+function hpModeChanged() {
+  var mode = document.getElementById('hp-mode').value;
+  var actionSel = document.getElementById('hp-action');
+  var hint = document.getElementById('hp-mode-hint');
+  actionSel.style.display = (mode === 'erp' || mode === 'hybrid') ? '' : 'none';
+  if (mode === 'auto') {
+    hint.textContent = 'Auto = naive keyword heuristic (not a real intent classifier) picks RAG or ERP.';
+  } else if (mode === 'hybrid') {
+    hint.textContent = 'Hybrid = runs RAG + ERP (selected action) and naively concatenates both answers.';
+  } else if (mode === 'erp') {
+    hint.textContent = 'ERP = runs the ERP Test Harness against the selected action only.';
+  } else {
+    hint.textContent = '';
+  }
+}
+
+function loadErpActionsForHybrid() {
+  fetch('/admin/api/erp-test/actions')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (!d.ok) return;
+      _hpActions = d.actions || [];
+      var sel = document.getElementById('hp-action');
+      sel.innerHTML = '<option value="">Select ERP action…</option>' + _hpActions.map(function(a) {
+        return '<option value="' + esc(a.id) + '">' + esc(a.capability || a.name) + '</option>';
+      }).join('');
+    })
+    .catch(function(){});
+}
+loadErpActionsForHybrid();
+
+function hpEscHtml(s) {
+  return esc(String(s == null ? '' : s));
+}
+
+function hpRenderTrace(list) {
+  if (!list || !list.length) return '<div style="color:rgba(232,237,245,.35)">No trace steps.</div>';
+  return '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+    list.map(function(t) {
+      var color = t.status === 'error' ? '#ff6b6b' : (t.status === 'warning' || t.status === 'blocked' ? '#f5c344' : '#5fd88a');
+      return '<tr style="border-bottom:1px solid rgba(255,255,255,.06)">' +
+        '<td style="padding:4px 8px;white-space:nowrap;color:rgba(232,237,245,.6)">' + hpEscHtml(t.step) + '</td>' +
+        '<td style="padding:4px 8px;color:' + color + '">' + hpEscHtml(t.status) + '</td>' +
+        '<td style="padding:4px 8px;color:rgba(232,237,245,.5)">' + hpEscHtml(t.explanation || t.error || '') + '</td>' +
+        '</tr>';
+    }).join('') + '</table>';
+}
+
+function hpSection(title, bodyHtml) {
+  return '<div style="margin-bottom:16px"><div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#e8edf5">' +
+    hpEscHtml(title) + '</div><div>' + bodyHtml + '</div></div>';
+}
+
+function hpKV(pairs) {
+  return '<table style="width:100%;border-collapse:collapse;font-size:12px">' + pairs.map(function(p) {
+    return '<tr><td style="padding:3px 8px;color:rgba(232,237,245,.5);white-space:nowrap">' + hpEscHtml(p[0]) +
+      '</td><td style="padding:3px 8px;color:#e8edf5;word-break:break-word">' + (p[1] == null ? '<em style="color:rgba(232,237,245,.35)">Not available</em>' : hpEscHtml(p[1])) + '</td></tr>';
+  }).join('') + '</table>';
+}
+
+function renderHybridTabs(d) {
+  var mode = d.mode;
+  var html = '';
+
+  if (d.rag) {
+    var rag = d.rag;
+    html += hpSection('RAG Trace', hpKV([
+      ['Question', document.getElementById('pg-question')._lastQ || ''],
+      ['Answer', rag.answer],
+      ['Confidence', (rag.confidence != null ? Math.round(rag.confidence*100)+'%' : null) + (rag.confidence_label ? ' (' + rag.confidence_label + ')' : '')],
+      ['Answerability', rag.answerability],
+      ['Embedding Provider/Model', rag.embedding_provider + ' / ' + rag.embedding_model + (rag.embedding_dimensions ? ' (' + rag.embedding_dimensions + 'd)' : '')],
+      ['Latency (ms)', rag.latency_ms != null ? Math.round(rag.latency_ms) : null],
+      ['Retrieved Chunks', rag.chunks ? rag.chunks.length : 0],
+    ]) + '<div style="margin-top:8px;font-size:12px">' + (rag.chunks || []).map(function(c) {
+      return '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06)">' +
+        '<div style="color:rgba(232,237,245,.6)">' + hpEscHtml(c.file_name || c.source || 'chunk') +
+        ' — score ' + hpEscHtml(c.hybrid_score != null ? c.hybrid_score : c.score) +
+        (c.cited ? ' <span style="color:#5fd88a">[cited]</span>' : '') + '</div>' +
+        '<div style="color:rgba(232,237,245,.4)">' + hpEscHtml((c.text || '').slice(0, 220)) + '</div></div>';
+    }).join('') + '</div>');
+  } else if (mode === 'rag' || mode === 'auto') {
+    html += hpSection('RAG Trace', '<div style="color:rgba(232,237,245,.35)">RAG path did not run this turn.</div>');
+  }
+
+  if (d.erp) {
+    var erp = d.erp;
+    html += hpSection('ERP Trace', hpKV([
+      ['Selected Action', document.getElementById('hp-action').selectedOptions[0] ? document.getElementById('hp-action').selectedOptions[0].textContent : null],
+      ['Strategy', erp.conversation_strategy ? JSON.stringify(erp.conversation_strategy).slice(0,300) : null],
+      ['Collected Parameters', erp.collected_params ? JSON.stringify(erp.collected_params) : null],
+      ['Missing Parameters', erp.missing_parameters ? erp.missing_parameters.join(', ') : null],
+      ['Mapped Response', erp.normalized_result ? JSON.stringify(erp.normalized_result).slice(0,500) : null],
+      ['Answer', erp.answer || erp.clarification_question],
+      ['Overall', erp.summary ? erp.summary.overall : null],
+      ['Latency (ms)', erp.summary ? erp.summary.total_latency_ms : null],
+      ['Error', erp.error],
+      ['Warning', erp.warning],
+    ]) + '<div style="margin-top:8px">' + hpRenderTrace(erp.trace) + '</div>');
+  } else if (mode === 'erp' || mode === 'hybrid') {
+    html += hpSection('ERP Trace', '<div style="color:rgba(232,237,245,.35)">ERP path did not run this turn (no action selected, or an error — see Errors below).</div>');
+  }
+
+  html += hpSection('Route Decision (Auto mode heuristic)', hpKV([
+    ['Route', d.route_decision ? JSON.stringify(d.route_decision.route) : mode],
+    ['Reason', d.route_decision ? d.route_decision.reason : null],
+  ]));
+
+  if (d.hybrid) {
+    html += hpSection('Hybrid Trace', hpKV([
+      ['Route', d.hybrid.route.join(' + ')],
+      ['ERP Contribution', d.hybrid.erp_contribution],
+      ['RAG Contribution', d.hybrid.rag_contribution],
+      ['Merged Answer', d.hybrid.merged_answer],
+      ['Merge Strategy', d.hybrid.merge_strategy],
+    ]));
+  }
+
+  document.getElementById('hp-hybrid-content').innerHTML = html;
+
+  // Developer Debug — always visible regardless of mode (Part 5).
+  var dbg = '';
+  dbg += hpSection('Conversation State', erp && erp.conversation_state ? '<pre style="white-space:pre-wrap;font-size:11px">' + hpEscHtml(JSON.stringify(erp.conversation_state, null, 2)) + '</pre>' : '<em style="color:rgba(232,237,245,.35)">Not available (no ERP path ran)</em>');
+  dbg += hpSection('Strategy Decisions', erp && erp.conversation_strategy ? '<pre style="white-space:pre-wrap;font-size:11px">' + hpEscHtml(JSON.stringify(erp.conversation_strategy, null, 2)) + '</pre>' : '<em style="color:rgba(232,237,245,.35)">Not available (no ERP path ran)</em>');
+  dbg += hpSection('LLM Prompt', d.rag && d.rag.prompt ? '<pre style="white-space:pre-wrap;font-size:11px">' + hpEscHtml(d.rag.prompt.final_prompt) + '</pre>' : '<em style="color:rgba(232,237,245,.35)">Not available (no RAG path ran)</em>');
+  dbg += hpSection('LLM Response', d.rag ? hpEscHtml(d.rag.answer) : (d.erp ? hpEscHtml(d.erp.answer) : null) || '<em style="color:rgba(232,237,245,.35)">Not available</em>');
+  dbg += hpSection('Token Count', hpKV([
+    ['Input Tokens', d.rag ? d.rag.input_tokens : null],
+    ['Output Tokens', d.rag ? d.rag.output_tokens : null],
+  ]));
+  dbg += hpSection('Latency', hpKV([
+    ['RAG (ms)', d.rag ? Math.round(d.rag.latency_ms) : null],
+    ['ERP (ms)', d.erp && d.erp.summary ? d.erp.summary.total_latency_ms : null],
+  ]));
+  dbg += hpSection('Errors', (d.errors && d.errors.length) ? '<ul>' + d.errors.map(function(e){return '<li style="color:#ff6b6b">' + hpEscHtml(e) + '</li>';}).join('') + '</ul>' : '<em style="color:rgba(232,237,245,.35)">None</em>');
+  document.getElementById('hp-debug-content').innerHTML = dbg;
+}
+
+function hybridAskQuestion(question, mode) {
+  var input = document.getElementById('pg-question');
+  input._lastQ = question;
+  _conversation.push({role: 'user', text: question});
+  renderConversation();
+  input.value = '';
+  input.dispatchEvent(new Event('input'));
+
+  var btn = document.getElementById('pg-ask-btn');
+  btn.disabled = true; btn.textContent = 'Thinking…';
+
+  var actionId = document.getElementById('hp-action').value || null;
+
+  fetch('/admin/api/hybrid-playground/ask', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({question: question, mode: mode, action_id: actionId}),
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = 'Ask';
+      if (!d.ok) {
+        _conversation.push({role: 'ai', text: 'Error: ' + (d.error || 'unknown error'), meta: ''});
+        renderConversation();
+        return;
+      }
+      _lastHybridResp = d;
+      var displayAnswer = d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : '(no answer)'));
+      _conversation.push({role: 'ai', text: displayAnswer, meta: 'mode=' + d.mode + (d.route_decision ? ' · route=' + d.route_decision.route : '')});
+      renderConversation();
+      renderHybridTabs(d);
+      switchTab('hybrid');
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Ask';
+      _conversation.push({role: 'ai', text: 'Network error: ' + e, meta: ''});
+      renderConversation();
+    });
+}
+
 function askQuestion() {
   var input = document.getElementById('pg-question');
   var question = input.value.trim();
   if (!question) return;
+
+  var hpMode = document.getElementById('hp-mode').value;
+  if (hpMode !== 'rag') {
+    hybridAskQuestion(question, hpMode);
+    return;
+  }
 
   _conversation.push({role: 'user', text: question});
   renderConversation();

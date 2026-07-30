@@ -1,0 +1,751 @@
+{% extends "base.html" %}
+{% set active = "business_action_center" %}
+{% block title %}Integration Schema Studio — Shipify Admin{% endblock %}
+{% block topbar_title %}Integration Schema Studio{% endblock %}
+
+{% block extra_head %}
+<style>
+.iss-wrap{max-width:1100px}
+.iss-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:10px}
+.iss-tab{font-size:12px;padding:7px 13px;border-radius:8px;cursor:pointer;color:rgba(232,237,245,.6);border:1px solid transparent}
+.iss-tab:hover{background:rgba(255,255,255,.05)}
+.iss-tab.active{background:rgba(245,166,35,.15);color:#F5A623;border-color:rgba(245,166,35,.35);font-weight:700}
+.iss-section{display:none}
+.iss-section.active{display:block}
+.iss-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:16px}
+.iss-field-card{background:rgba(255,255,255,.02);border:1px solid rgba(27,79,155,.25);border-radius:10px;padding:12px;margin-bottom:10px}
+.iss-field-head{font-size:12.5px;font-weight:700;color:#e8edf5;margin-bottom:8px;display:flex;justify-content:space-between}
+.iss-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
+.iss-lbl{font-size:10.5px;color:rgba(232,237,245,.45);display:block;margin-bottom:3px}
+.iss-input,.iss-ta,.iss-select{width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);
+  color:#e8edf5;border-radius:7px;padding:6px 9px;font-size:12.5px;outline:none;font-family:inherit}
+.iss-input:focus,.iss-ta:focus{border-color:rgba(245,166,35,.5)}
+.iss-btn{font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.05);color:rgba(232,237,245,.8)}
+.iss-btn:hover{background:rgba(255,255,255,.1)}
+.iss-btn-primary{background:rgba(245,166,35,.18);color:#F5A623;border-color:rgba(245,166,35,.4)}
+.iss-btn-primary:hover{background:rgba(245,166,35,.28)}
+.iss-btn-green{background:rgba(52,211,153,.15);color:#34d399;border-color:rgba(52,211,153,.35)}
+.iss-actions{display:flex;gap:8px;margin:16px 0}
+.iss-note{font-size:11px;color:rgba(232,237,245,.4);margin-bottom:10px}
+.iss-version-row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;
+  background:rgba(255,255,255,.03);margin-bottom:6px;font-size:12px}
+.iss-status-pill{font-size:9.5px;padding:2px 7px;border-radius:10px;font-weight:700}
+.iss-status-draft{background:rgba(251,191,36,.15);color:#fbbf24}
+.iss-status-published{background:rgba(52,211,153,.15);color:#34d399}
+.iss-status-archived{background:rgba(255,255,255,.06);color:rgba(232,237,245,.4)}
+.iss-prov{font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700;margin-left:6px;vertical-align:middle}
+.iss-prov-explicit{background:rgba(245,166,35,.18);color:#F5A623}
+.iss-prov-derived{background:rgba(52,211,153,.15);color:#34d399}
+.iss-prov-runtime_default{background:rgba(255,255,255,.08);color:rgba(232,237,245,.55)}
+.iss-reset-link{font-size:10px;color:#7aa7e8;cursor:pointer;margin-left:8px;text-decoration:underline}
+.iss-warning{font-size:11px;color:#fbbf24;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.25);
+  border-radius:8px;padding:8px 10px;margin-bottom:10px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="iss-wrap">
+  <div class="iss-note">Integration Schema Studio — business/conversation configuration layered on top of Business Action <code id="iss-action-id">{{ action_id }}</code>. Editing here never touches the underlying API/parameter wiring; nothing is required — every section falls back to safe, derived defaults until you publish a schema. <a href="/admin/ai/business-actions" style="color:#F5A623">← Back to Business Actions</a></div>
+
+  <div class="iss-actions">
+    <button class="iss-btn iss-btn-primary" onclick="issSaveDraft()">Save Draft</button>
+    <button class="iss-btn iss-btn-green" onclick="issPublish()">Publish</button>
+    <button class="iss-btn" onclick="issOpenHistory()">Version History</button>
+    <span id="iss-status-msg" style="align-self:center;font-size:11.5px;color:rgba(232,237,245,.5)"></span>
+  </div>
+
+  <div class="iss-tabs" id="iss-tabs"></div>
+
+  <div class="iss-section active" data-tab="general"><div class="iss-panel" id="iss-general"></div></div>
+  <div class="iss-section" data-tab="input_fields"><div class="iss-panel" id="iss-input-fields"></div></div>
+  <div class="iss-section" data-tab="response_fields"><div class="iss-panel" id="iss-response-fields"></div></div>
+  <div class="iss-section" data-tab="localization"><div class="iss-panel" id="iss-localization"></div></div>
+  <div class="iss-section" data-tab="conversation"><div class="iss-panel" id="iss-conversation"></div></div>
+  <div class="iss-section" data-tab="ai_synonyms"><div class="iss-panel" id="iss-ai-synonyms"></div></div>
+  <div class="iss-section" data-tab="security"><div class="iss-panel" id="iss-security"></div></div>
+  <div class="iss-section" data-tab="examples"><div class="iss-panel" id="iss-examples"></div></div>
+  <div class="iss-section" data-tab="contract_preview"><div class="iss-panel" id="iss-contract-preview"></div></div>
+  <div class="iss-section" data-tab="conversation_preview"><div class="iss-panel" id="iss-conversation-preview"></div></div>
+  <div class="iss-section" data-tab="conversation_inspector"><div class="iss-panel" id="iss-conversation-inspector"></div></div>
+  <div class="iss-section" data-tab="conversation_strategy_preview"><div class="iss-panel" id="iss-conversation-strategy-preview"></div></div>
+
+  <div class="ps-modal-ov" id="iss-history-modal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);align-items:center;justify-content:center">
+    <div style="background:rgba(13,25,50,.98);border:1px solid rgba(27,79,155,.4);border-radius:16px;padding:22px;width:480px;max-width:94vw;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+        <b style="color:#e8edf5">Version History</b>
+        <button class="iss-btn" onclick="document.getElementById('iss-history-modal').style.display='none'">Close</button>
+      </div>
+      <div id="iss-history-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+var ISS_ACTION_ID = {{ action_id | tojson }};
+var TABS = [
+  ["general","General"],["input_fields","Input Fields"],["response_fields","Response Fields"],
+  ["localization","Localization"],["conversation","Conversation"],["ai_synonyms","AI Synonyms"],
+  ["security","Security"],["examples","Examples"],["contract_preview","Contract Preview"],
+  ["conversation_preview","Conversation Preview"],["conversation_inspector","Conversation Inspector"],
+  ["conversation_strategy_preview","Strategy Preview"],
+];
+var _issContract = null;
+var _issContractValidation = null;
+var _issSchema = null;
+var _issProvenance = {};
+var _issWarnings = [];
+// Part 9/15 — Conversation Preview/Inspector state (this sprint). The
+// generated form/state ALWAYS comes from GET .../conversation-form
+// (services/conversation_form_generator.py via the server) — this
+// script only renders it, never independently decides a question or
+// option list itself (Requirement 3).
+var _issConvForm = null;
+var _issConvState = null;
+var _issConvProvenance = {};
+var _issDraftContract = null; // the DRAFT-schema-based contract returned alongside conversation_form
+// Part 6 — Reset to Inherited: conversation.* keys the admin has reset
+// this session are tracked here and OMITTED from the next save, so the
+// key falls back to derived/runtime-default on next resolve rather than
+// being immediately re-written as an explicit false/true by the
+// checkbox's own current (now-inherited-driven) rendered state.
+var _issResetConversationKeys = {};
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+function issProvBadgeFrom(prov, path){
+  var level = (prov || {})[path];
+  if (!level) return '';
+  var label = level === 'explicit' ? 'Explicit Override' : (level === 'derived' ? 'Derived' : 'Runtime Default');
+  return '<span class="iss-prov iss-prov-' + level + '">' + label + '</span>';
+}
+
+function issProvBadge(path){
+  return issProvBadgeFrom(_issProvenance, path);
+}
+
+function issFetchEffective(){
+  return fetch('/admin/api/integration-schema/' + ISS_ACTION_ID + '/effective').then(function(r){return r.json();}).then(function(data){
+    _issProvenance = (data && data.provenance) || {};
+    _issWarnings = (data && data.warnings) || [];
+  }).catch(function(){ _issProvenance = {}; _issWarnings = []; });
+}
+
+// Canonical runtime operation-type vocabulary (erp_test_harness.
+// OPERATION_TYPES via services/integration_contract_service.py::
+// list_operation_types()) — loaded once here rather than hardcoded a
+// second time in this template (Dynamic Operation Vocabulary, Review &
+// Edit UI hardening sprint). Static fallback ONLY covers the case where
+// the fetch itself fails (offline/error), so the dropdown never renders
+// completely empty; it is not a second maintained copy of the list.
+var _issOperationTypes = ['LOOKUP','SEARCH','LIST','STATUS','CALCULATION','TRANSFORM','CREATE','UPDATE','DELETE','CANCEL','WORKFLOW','NOTIFICATION','NOTIFY','UNKNOWN'];
+
+function issFetchOperationTypes(){
+  return fetch('/admin/api/integration-contracts/operations').then(function(r){return r.json();}).then(function(d){
+    if (d && d.ok && Array.isArray(d.operation_types) && d.operation_types.length) _issOperationTypes = d.operation_types;
+  }).catch(function(){ /* keep static fallback */ });
+}
+
+function issInit(){
+  document.getElementById('iss-tabs').innerHTML = TABS.map(function(t,i){
+    return '<div class="iss-tab' + (i===0?' active':'') + '" data-tab="' + t[0] + '" onclick="issSwitchTab(\'' + t[0] + '\')">' + t[1] + '</div>';
+  }).join('');
+  Promise.all([
+    fetch('/admin/api/integration-schema/' + ISS_ACTION_ID + '/draft').then(function(r){return r.json();}),
+    issFetchEffective(),
+    issFetchContract(),
+    issFetchOperationTypes(),
+  ]).then(function(results){
+    var row = results[0];
+    _issSchema = (row && row.schema) || {};
+    issRenderAll();
+  });
+}
+
+// ── Part 16 — Contract Preview tab ──────────────────────────────────────
+// Reads the same Integration Contract the runtime now resolves (Part 14)
+// via services/integration_contract_service.py — never re-joins
+// action+schema itself, purely a read + render of
+// GET /admin/api/integration-contracts/{action_id}.
+function issFetchContract(){
+  return fetch('/admin/api/integration-contracts/' + ISS_ACTION_ID).then(function(r){return r.json();}).then(function(data){
+    _issContract = (data && data.contract) || null;
+    _issContractValidation = (data && data.validation) || null;
+  }).catch(function(){ _issContract = null; _issContractValidation = null; });
+}
+
+function issValidateContract(){
+  fetch('/admin/api/integration-contracts/' + ISS_ACTION_ID + '/validate').then(function(r){return r.json();}).then(function(data){
+    _issContractValidation = (data && data.validation) || null;
+    issRenderContractPreview();
+  });
+}
+
+function issCopyContract(){
+  var text = JSON.stringify(_issContract || {}, null, 2);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text);
+  }
+  var el = document.getElementById('iss-contract-copy-status');
+  if (el) { el.textContent = 'Copied to clipboard.'; setTimeout(function(){ el.textContent = ''; }, 2500); }
+}
+
+function issContractValidationHtml(){
+  var v = _issContractValidation;
+  if (!v) return '<div class="iss-note">No validation run yet.</div>';
+  var badge = v.valid
+    ? '<span class="iss-status-pill iss-status-published">VALID</span>'
+    : '<span class="iss-status-pill" style="background:rgba(239,68,68,.15);color:#ef4444">INVALID</span>';
+  var errs = (v.errors || []).map(function(e){ return '<div style="color:#ef4444;font-size:11.5px">✗ ' + esc(e) + '</div>'; }).join('');
+  var warns = (v.warnings || []).map(function(w){ return '<div style="color:#fbbf24;font-size:11.5px">⚠ ' + esc(w) + '</div>'; }).join('');
+  return '<div style="margin-bottom:8px">' + badge + '</div>' + errs + warns;
+}
+
+function issContractCard(title, rows){
+  return '<div class="iss-field-card"><div class="iss-field-head"><span>' + esc(title) + '</span></div>' +
+    rows.map(function(r){
+      return '<div class="iss-row"><div><label class="iss-lbl">' + esc(r[0]) + '</label>' +
+        '<div style="font-size:12.5px;color:#e8edf5">' + esc(r[1] == null ? '—' : (typeof r[1] === 'object' ? JSON.stringify(r[1]) : String(r[1]))) + '</div></div><div></div></div>';
+    }).join('') + '</div>';
+}
+
+function issRenderContractPreview(){
+  var el = document.getElementById('iss-contract-preview');
+  if (!el) return;
+  var c = _issContract;
+  if (!c) { el.innerHTML = '<div class="iss-note">No contract could be resolved for this action.</div>'; return; }
+  var summary = issContractCard('Contract Summary', [
+    ['Capability', c.capability], ['Operation Type', c.operation_type], ['Status', c.status],
+    ['Entities', (c.entities || []).join(', ') || '—'],
+    ['Contract Version', c.contract_version], ['Schema Version', c.schema_version],
+    ['Resolver Version', c.resolver_version],
+  ]);
+  var inputs = issContractCard('Inputs (' + (c.inputs || []).length + ')',
+    (c.inputs || []).map(function(f){ return [f.technical_name, (f.required ? 'required · ' : 'optional · ') + (f.business_label || '')]; }));
+  var outputs = issContractCard('Outputs (' + (c.outputs || []).length + ')',
+    (c.outputs || []).map(function(f){ return [f.canonical_name, (f.visible ? 'visible' : 'hidden') + ' · ' + (f.formatter || {}).type]; }));
+  var conversation = issContractCard('Conversation', Object.keys(c.conversation || {}).map(function(k){ return [k, c.conversation[k]]; }));
+  var execution = issContractCard('Execution', [
+    ['Method', c.execution.method], ['Endpoint', c.execution.endpoint],
+    ['Credential Reference', c.execution.credential_reference],
+  ]);
+  var security = issContractCard('Security', [
+    ['Customer Visible Fields', c.security.customer_visible_fields],
+    ['Sensitive Outputs', c.security.sensitive_outputs],
+    ['Allow Live Execution', c.security.allow_live_execution],
+  ]);
+  var localization = issContractCard('Localization', Object.keys(c.localization || {}).map(function(k){ return [k, c.localization[k]]; }));
+
+  el.innerHTML =
+    '<div class="iss-actions" style="margin:0 0 12px 0">' +
+      '<button class="iss-btn iss-btn-primary" onclick="issCopyContract()">Copy Contract</button>' +
+      '<button class="iss-btn iss-btn-green" onclick="issValidateContract()">Validate Contract</button>' +
+      '<span id="iss-contract-copy-status" style="align-self:center;font-size:11.5px;color:rgba(232,237,245,.5)"></span>' +
+    '</div>' +
+    issContractValidationHtml() +
+    summary + inputs + outputs + conversation + execution + security + localization +
+    '<div class="iss-field-card"><div class="iss-field-head"><span>Raw JSON</span></div>' +
+    '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;color:rgba(232,237,245,.8);max-height:420px;overflow:auto">' +
+    esc(JSON.stringify(c, null, 2)) + '</pre></div>';
+}
+
+// ── Parts 9/15 — Conversation Preview + Conversation Inspector ──────────
+// Both read from the ONE server-side generator
+// (services/conversation_form_generator.py, via
+// GET /admin/api/integration-contracts/{id}/conversation-form) — never a
+// second, JS-side reimplementation of question/option/display-type logic.
+function issFetchConversationForm(stateOverride){
+  var url = '/admin/api/integration-contracts/' + ISS_ACTION_ID + '/conversation-form';
+  var qs = [];
+  if (stateOverride) qs.push('state=' + encodeURIComponent(JSON.stringify(stateOverride)));
+  if (qs.length) url += '?' + qs.join('&');
+  return fetch(url).then(function(r){return r.json();}).then(function(data){
+    _issConvForm = (data && data.conversation_form) || null;
+    _issConvState = (_issConvForm && _issConvForm.state) || null;
+    _issConvProvenance = (data && data.provenance) || {};
+    _issDraftContract = (data && data.contract) || null;
+    return data;
+  }).catch(function(){ _issConvForm = null; _issConvState = null; _issConvProvenance = {}; });
+}
+
+var _issPreviewChannel = 'web';
+var ISS_CHANNELS = [["web","Web"],["line","LINE OA"],["api","API"],["cli","CLI"]];
+
+function issSetPreviewChannel(channel){
+  _issPreviewChannel = channel;
+  issRenderConversationPreview();
+}
+
+// Renders ONLY what services/conversation_form_generator.py already put
+// into comp.channel_variants[channel] — no per-channel generation logic
+// lives here (Requirement 2/3). "web" falls back to the component's own
+// top-level shape (component_type/options) when no web-specific variant
+// diverges from it, since that's the shape the ERP Conversation Tester's
+// live simulation already renders identically.
+function issConvComponentHtml(comp, channel){
+  channel = channel || 'web';
+  var variant = (comp.channel_variants || {})[channel] || {};
+  var label = esc(comp.label || comp.field);
+
+  if (channel === 'api') {
+    return '<div style="margin-bottom:6px"><b style="font-size:12px;color:#e8edf5">' + label + '</b></div>' +
+      '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;color:rgba(232,237,245,.8);background:rgba(255,255,255,.03);border-radius:8px;padding:8px;margin:0 0 6px 0">' +
+      esc(JSON.stringify(variant.schema !== undefined ? variant.schema : variant, null, 2)) + '</pre>';
+  }
+
+  if (channel === 'cli') {
+    var choices = variant.choices || [];
+    var lines = choices.length
+      ? choices.map(function(c){ return c.index + '. ' + (c.label || c.value); }).join('\n')
+      : (variant.render_as === 'text_prompt' ? '> ' + (comp.placeholder || label) : '');
+    return '<div style="margin-bottom:6px"><b style="font-size:12px;color:#e8edf5">' + label + '</b>' +
+      ' <span class="iss-status-pill" style="background:rgba(255,255,255,.08);color:rgba(232,237,245,.6)">' + esc(variant.render_as || comp.component_type) + '</span></div>' +
+      (lines ? '<pre style="white-space:pre-wrap;font-size:12px;color:#e8edf5;background:rgba(255,255,255,.03);border-radius:8px;padding:8px;margin:0 0 6px 0;font-family:monospace">' + esc(lines) + '</pre>' : '');
+  }
+
+  if (channel === 'line') {
+    var labels = variant.labels || [];
+    var pills = labels.map(function(l){
+      return '<span class="iss-status-pill" style="background:rgba(122,167,232,.15);color:#7aa7e8;margin-right:6px">' + esc(l) + '</span>';
+    }).join('');
+    return '<div style="margin-bottom:6px"><b style="font-size:12px;color:#e8edf5">' + label + '</b>' +
+      ' <span class="iss-status-pill" style="background:rgba(255,255,255,.08);color:rgba(232,237,245,.6)">' + esc(variant.render_as || 'text') + '</span></div>' +
+      (pills ? '<div style="margin-bottom:4px">' + pills + '</div>' : '') +
+      (variant.note ? '<div class="iss-note" style="margin-bottom:6px">⚠ ' + esc(variant.note) + '</div>' : '');
+  }
+
+  // web (default)
+  var opts = (comp.options || []).map(function(o){
+    return '<span class="iss-status-pill" style="background:rgba(122,167,232,.15);color:#7aa7e8;margin-right:6px">' + esc(o.label) + '</span>';
+  }).join('');
+  var renderAs = variant.render_as || comp.component_type;
+  return '<div style="margin-bottom:6px"><b style="font-size:12px;color:#e8edf5">' + label + '</b>' +
+    ' <span class="iss-status-pill" style="background:rgba(255,255,255,.08);color:rgba(232,237,245,.6)">' + esc(renderAs) + '</span></div>' +
+    (opts ? '<div style="margin-bottom:6px">' + opts + '</div>' : '');
+}
+
+function issRenderConversationPreview(){
+  var el = document.getElementById('iss-conversation-preview');
+  if (!el) return;
+  if (!_issConvForm) { el.innerHTML = '<div class="iss-note">No conversation form could be generated (draft schema/contract unavailable).</div>'; return; }
+  var f = _issConvForm;
+  var channel = _issPreviewChannel;
+  var channelTabsHtml = '<div class="iss-actions" style="margin:0 0 10px 0">' + ISS_CHANNELS.map(function(c){
+    return '<button class="iss-btn' + (c[0]===channel ? ' iss-btn-primary' : '') + '" onclick="issSetPreviewChannel(\'' + c[0] + '\')">' + c[1] + '</button>';
+  }).join('') + '</div>';
+  var stepsHtml = (f.steps || []).map(function(step, i){
+    return '<div class="iss-field-card"><div class="iss-field-head"><span>Step ' + (i+1) + ' — ' + esc(step.kind) + '</span></div>' +
+      (step.question ? '<div style="font-size:12.5px;color:#e8edf5;margin-bottom:6px">' + esc(step.question) + '</div>' : '') +
+      (step.components || []).map(function(comp){ return issConvComponentHtml(comp, channel); }).join('') + '</div>';
+  }).join('') || '<div class="iss-note">No further questions — form is ready to execute.</div>';
+  var buttonsHtml = (f.buttons || []).map(function(b){ return '<span class="iss-status-pill iss-status-draft">' + esc(b.label) + '</span>'; }).join(' ');
+  el.innerHTML =
+    '<div class="iss-note">Preview-only — generated from the current DRAFT schema\'s resolved contract via services/conversation_form_generator.py. Never executes anything. The channel selector below only RE-RENDERS each component\'s already-generated channel_variants — no channel-specific logic lives in this page.</div>' +
+    '<div class="iss-actions" style="margin:0 0 12px 0"><button class="iss-btn iss-btn-primary" onclick="issFetchConversationForm().then(issRenderConversationPreview)">Refresh Preview</button></div>' +
+    channelTabsHtml +
+    issContractCard('Form Summary', [
+      ['Title', f.title], ['Ready to Execute', f.ready_to_execute], ['Needs Confirmation', f.needs_confirmation],
+      ['Missing Fields', f.missing_fields], ['Buttons', buttonsHtml || '—'],
+    ]) + stepsHtml +
+    issContractCard('Groups Status', (f.groups_status || []).map(function(g){ return [g.name, g.rule + ' · satisfied=' + g.satisfied + (g.selected_field ? (' · selected=' + g.selected_field) : '')]; }));
+}
+
+function issConversationInspectorRows(){
+  var c = _issDraftContract;
+  if (!c) return [];
+  var rows = (c.inputs || []).slice().sort(function(a,b){
+    return (a.display_order||0) - (b.display_order||0);
+  });
+  var groupedNames = {};
+  (c.required_field_groups || []).forEach(function(g){ (g.members||[]).forEach(function(m){ groupedNames[m] = g.name; }); });
+  return rows.map(function(f, i){
+    var question = (f.follow_up_prompts||{}).th || ('กรุณาระบุ ' + (f.business_label||f.technical_name));
+    var path = 'input_fields.' + f.technical_name;
+    // Hardening pass Requirement 1 — value source / schema field path /
+    // channel override source, ALL read from the existing Effective
+    // Schema provenance dict (_issConvProvenance, from the same
+    // conversation-form route this Inspector already fetches) — never a
+    // second provenance resolver, just looking up the same generic
+    // "{section}.{field}.{attr}" keys services/integration_schema_
+    // service.py::resolve_effective_integration_schema already produces.
+    var valueSourceBadge = issProvBadgeFrom(_issConvProvenance, path + '.display_type') || '<span class="iss-prov iss-prov-runtime_default">Runtime Default</span>';
+    var hasChannelOverride = !!(f.channel_overrides && Object.keys(f.channel_overrides).length);
+    var channelOverrideSource = hasChannelOverride
+      ? (issProvBadgeFrom(_issConvProvenance, path + '.channel_overrides') || '<span class="iss-prov iss-prov-derived">Derived</span>')
+      : '—';
+    return {
+      field: f.technical_name,
+      question: question,
+      validation: f.validation && (f.validation.pattern || f.validation.min || f.validation.max) ?
+        JSON.stringify(f.validation) : '—',
+      display_type: f.display_type || '(auto-derived)',
+      value_source: valueSourceBadge,
+      schema_field_path: path + '.display_type',
+      option_source: f.options && f.options.length ? 'explicit' : 'auto_derived',
+      channel_override_source: channelOverrideSource,
+      group: groupedNames[f.technical_name] || '—',
+      order: f.display_order != null ? f.display_order : i,
+    };
+  });
+}
+
+function issRenderConversationInspector(){
+  var el = document.getElementById('iss-conversation-inspector');
+  if (!el) return;
+  var rows = issConversationInspectorRows();
+  if (!rows.length) { el.innerHTML = '<div class="iss-note">No input fields to inspect.</div>'; return; }
+  var head = '<tr>' + ['Field','Generated Question','Validation','Display Type','Value Source','Schema Field Path','Option Source','Channel Override Source','Required Group','Order'].map(function(h){
+    return '<th style="text-align:left;font-size:10.5px;color:rgba(232,237,245,.45);padding:4px 8px">' + h + '</th>';
+  }).join('') + '</tr>';
+  var body = rows.map(function(r){
+    return '<tr>' +
+      ['field', 'question', 'validation', 'display_type'].map(function(k){
+        return '<td style="font-size:12px;color:#e8edf5;padding:4px 8px;border-top:1px solid rgba(255,255,255,.06)">' + esc(r[k]) + '</td>';
+      }).join('') +
+      '<td style="font-size:12px;padding:4px 8px;border-top:1px solid rgba(255,255,255,.06)">' + r.value_source + '</td>' +
+      '<td style="font-size:11px;color:rgba(232,237,245,.5);padding:4px 8px;border-top:1px solid rgba(255,255,255,.06);font-family:monospace">' + esc(r.schema_field_path) + '</td>' +
+      '<td style="font-size:12px;color:#e8edf5;padding:4px 8px;border-top:1px solid rgba(255,255,255,.06)">' + esc(r.option_source) + '</td>' +
+      '<td style="font-size:12px;padding:4px 8px;border-top:1px solid rgba(255,255,255,.06)">' + r.channel_override_source + '</td>' +
+      ['group', 'order'].map(function(k){
+        return '<td style="font-size:12px;color:#e8edf5;padding:4px 8px;border-top:1px solid rgba(255,255,255,.06)">' + esc(r[k]) + '</td>';
+      }).join('') +
+    '</tr>';
+  }).join('');
+  el.innerHTML = '<div class="iss-note">Read-only, generated by the SAME contract/generator the runtime uses — no separate logic here. Value Source / Schema Field Path / Channel Override Source come from the existing Effective Schema provenance data (services/integration_schema_service.py), never a second provenance resolver.</div>' +
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;white-space:nowrap">' + head + body + '</table></div>';
+}
+
+// ── Part 12 — Conversation Strategy Preview tab ─────────────────────────
+// Preview-only, read-only: an admin types a sample message and sees
+// EXACTLY what GET .../conversation-strategy returns (services/
+// conversation_strategy_engine.py, current DRAFT schema). This script
+// only renders the returned dict — no detection/confidence/ranking
+// logic lives here (Requirement 3's Strategy-Engine/Form-Generator
+// boundary applies to the frontend too).
+function issRenderStrategyPreview(){
+  var el = document.getElementById('iss-conversation-strategy-preview');
+  if (!el) return;
+  el.innerHTML =
+    '<div class="iss-note">Preview-only, never executes anything. Type a sample customer message and see what the Conversation Strategy Engine would auto-detect/skip/ask for the CURRENT DRAFT schema.</div>' +
+    '<div class="iss-row"><div style="grid-column:1/-1"><label class="iss-lbl">Sample Message</label>' +
+    '<input class="iss-input" id="iss-strategy-message" placeholder="e.g. ขอดูของที่ออกจากจีนล่าสุด" value="' + esc(window._issStrategyLastMessage || '') + '"/></div></div>' +
+    '<div class="iss-actions" style="margin:10px 0"><button class="iss-btn iss-btn-primary" onclick="issRunStrategyPreview()">Run Strategy Preview</button></div>' +
+    '<div id="iss-strategy-result"></div>';
+}
+
+function issRunStrategyPreview(){
+  var input = document.getElementById('iss-strategy-message');
+  var message = input ? input.value : '';
+  window._issStrategyLastMessage = message;
+  var resultEl = document.getElementById('iss-strategy-result');
+  if (resultEl) resultEl.innerHTML = '<div class="iss-note">Running…</div>';
+  fetch('/admin/api/integration-contracts/' + ISS_ACTION_ID + '/conversation-strategy?message=' + encodeURIComponent(message))
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (!resultEl) return;
+      if (!data || !data.ok) { resultEl.innerHTML = '<div class="iss-note">No strategy result (' + esc((data && data.error) || 'unknown error') + ').</div>'; return; }
+      var s = data.strategy || {};
+      var readyRows = Object.keys(s.ready_fields || {}).map(function(k){ return [k, JSON.stringify(s.ready_fields[k])]; });
+      var confRows = Object.keys(s.confidence || {}).map(function(k){ return [k, s.confidence[k]]; });
+      var reasoningHtml = Object.keys(s.reasoning || {}).map(function(k){
+        var r = s.reasoning[k];
+        return '<div class="iss-field-card"><div class="iss-field-head"><span>' + esc(k) + '</span></div>' +
+          '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;color:rgba(232,237,245,.8)">' + esc(JSON.stringify(r, null, 2)) + '</pre></div>';
+      }).join('') || '<div class="iss-note">No fields detected from this message.</div>';
+      resultEl.innerHTML =
+        issContractCard('Ready Fields (auto-detected, auto-filled)', readyRows.length ? readyRows : [['(none)', '—']]) +
+        issContractCard('Confidence Scores', confRows.length ? confRows : [['(none)', '—']]) +
+        issContractCard('Questions To Skip', (s.questions_to_skip || []).map(function(q){ return [q, 'skipped']; })) +
+        issContractCard('Questions To Ask (ranked)', (s.questions_to_ask || []).map(function(q, i){ return [q, 'rank ' + (i+1)]; })) +
+        '<div class="iss-field-head" style="margin:10px 0 6px"><span>Reasoning Trace</span></div>' + reasoningHtml;
+    })
+    .catch(function(){ if (resultEl) resultEl.innerHTML = '<div class="iss-note">Request failed.</div>'; });
+}
+
+function issSwitchTab(tab){
+  document.querySelectorAll('.iss-tab').forEach(function(el){ el.classList.toggle('active', el.dataset.tab===tab); });
+  document.querySelectorAll('.iss-section').forEach(function(el){ el.classList.toggle('active', el.dataset.tab===tab); });
+}
+
+function issRenderAll(){
+  issRenderGeneral(); issRenderInputFields(); issRenderResponseFields();
+  issRenderLocalization(); issRenderConversation(); issRenderAiSynonyms();
+  issRenderSecurity(); issRenderExamples(); issRenderContractPreview();
+  issFetchConversationForm().then(function(){ issRenderConversationPreview(); issRenderConversationInspector(); });
+  issRenderStrategyPreview();
+}
+
+function issWarningsHtml(){
+  if (!_issWarnings.length) return '';
+  return '<div class="iss-warning">' + _issWarnings.map(function(w){ return '⚠ ' + esc(w); }).join('<br/>') + '</div>';
+}
+
+function issRenderGeneral(){
+  var g = _issSchema.general || {};
+  document.getElementById('iss-general').innerHTML = issWarningsHtml() +
+    '<div class="iss-row"><div><label class="iss-lbl">Operation Type Override' + issProvBadge('general.operation_type') + '</label>' +
+    '<select class="iss-select" id="g-op-type"><option value="">(inherit — derived/runtime default)</option>' +
+    _issOperationTypes.map(function(o){
+      return '<option value="' + o + '"' + (g.operation_type===o?' selected':'') + '>' + o + '</option>';
+    }).join('') + '</select>' +
+    (g.operation_type ? '<span class="iss-reset-link" onclick="issResetOperationType()">Reset to Inherited</span>' : '') + '</div>' +
+    '<div><label class="iss-lbl">Primary Entity</label><input class="iss-input" id="g-entity" value="' + esc(g.primary_entity||'') + '" placeholder="derived automatically"/></div></div>';
+}
+
+function issResetOperationType(){
+  _issSchema.general = _issSchema.general || {};
+  _issSchema.general.operation_type = null;
+  issRenderGeneral();
+}
+
+// Requirement 1 — the known display_type vocabulary (generic, never a
+// per-field-name list) offered in the Studio's select control.
+var ISS_DISPLAY_TYPES = ['','text','textarea','number','currency','phone','email','date','datetime','time',
+  'dropdown','radio','checkbox','buttons','quick_reply','autocomplete','entity_lookup','multi_select',
+  'hidden','read_only'];
+
+function issOptionRowHtml(o, fi){
+  o = o || {};
+  return '<div class="iss-row iss-opt-row" style="grid-template-columns:1fr 1fr 1fr 1fr auto">' +
+    '<div><input class="iss-input" data-opt-k="value" value="' + esc(o.value||'') + '" placeholder="value"/></div>' +
+    '<div><input class="iss-input" data-opt-k="label" value="' + esc(o.label||'') + '" placeholder="label"/></div>' +
+    '<div><input class="iss-input" data-opt-k="icon" value="' + esc(o.icon||'') + '" placeholder="icon"/></div>' +
+    '<div><input class="iss-input" data-opt-k="color" value="' + esc(o.color||'') + '" placeholder="color"/></div>' +
+    '<div><button type="button" class="iss-btn" onclick="this.closest(\'.iss-opt-row\').remove()">✕</button></div></div>';
+}
+
+function issAddOptionRow(btn){
+  var container = btn.previousElementSibling;
+  container.insertAdjacentHTML('beforeend', issOptionRowHtml({}, 0));
+}
+
+function issFieldCard(f, idx, kind){
+  var nameKey = kind==='input' ? 'technical_name' : 'canonical_name';
+  var followTh = (f.follow_up_prompts||{}).th || '';
+  var followEn = (f.follow_up_prompts||{}).en || '';
+  var fmt = (f.formatting||{}).type || '';
+  var displayType = f.display_type || '';
+  var options = f.options || [];
+  var displayMetaHtml =
+    '<div class="iss-row"><div><label class="iss-lbl">Display Type</label><select class="iss-select" data-k="display_type">' +
+      ISS_DISPLAY_TYPES.map(function(v){ return '<option value="' + v + '"' + (displayType===v?' selected':'') + '>' + (v||'(auto-derived)') + '</option>'; }).join('') +
+      '</select></div><div><label class="iss-lbl">Display Order</label><input class="iss-input" type="number" data-k="display_order" value="' + esc(f.display_order==null?'':f.display_order) + '"/></div></div>' +
+    '<div class="iss-row"><div><label class="iss-lbl">Placeholder</label><input class="iss-input" data-k="placeholder" value="' + esc(f.placeholder||'') + '"/></div>' +
+    '<div><label class="iss-lbl">Help Text</label><input class="iss-input" data-k="help_text" value="' + esc(f.help_text||'') + '"/></div></div>' +
+    '<div class="iss-row"><div><label class="iss-lbl">Group</label><input class="iss-input" data-k="group" value="' + esc(f.group||'') + '"/></div>' +
+    '<div><label class="iss-lbl">Empty Message</label><input class="iss-input" data-k="empty_message" value="' + esc(f.empty_message||'') + '"/></div></div>' +
+    '<div class="iss-row"><div><label class="iss-lbl">Icon</label><input class="iss-input" data-k="icon" value="' + esc(f.icon||'') + '"/></div>' +
+    '<div><label class="iss-lbl">Color</label><input class="iss-input" data-k="color" value="' + esc(f.color||'') + '"/></div></div>' +
+    '<div class="iss-row"><div style="grid-column:1/-1"><label class="iss-lbl">Examples (comma-separated)</label><input class="iss-input" data-k="examples" value="' + esc((f.examples||[]).join(', ')) + '"/></div></div>' +
+    '<div style="margin-top:6px"><label class="iss-lbl">Enum Options (value / label / icon / color) — leave empty for a non-enum field</label>' +
+    '<div class="iss-opt-list">' + options.map(function(o){ return issOptionRowHtml(o, idx); }).join('') + '</div>' +
+    '<button type="button" class="iss-btn" onclick="issAddOptionRow(this)" style="margin-top:4px">+ Add Option</button></div>';
+  return '<div class="iss-field-card">' +
+    '<div class="iss-field-head"><span>' + esc(f[nameKey] || ('field ' + idx)) + ' <span style="color:rgba(232,237,245,.4);font-weight:400">(' + esc(f.canonical_name||'') + ')</span></span></div>' +
+    '<div class="iss-row"><div><label class="iss-lbl">Business Label</label><input class="iss-input" data-k="business_label" value="' + esc(f.business_label||'') + '"/></div>' +
+    '<div><label class="iss-lbl">Visibility</label><select class="iss-select" data-k="visibility">' +
+      ['customer','developer','hidden','masked','developer_only','customer_only'].map(function(v){
+        return '<option value="' + v + '"' + (f.visibility===v?' selected':'') + '>' + v + '</option>';
+      }).join('') + '</select></div></div>' +
+    '<div class="iss-row"><div><label class="iss-lbl">Aliases (comma-separated)</label><input class="iss-input" data-k="aliases" value="' + esc((f.aliases||[]).join(', ')) + '"/></div>' +
+    '<div><label class="iss-lbl">AI Synonyms (comma-separated)</label><input class="iss-input" data-k="synonyms" value="' + esc((f.synonyms||[]).join(', ')) + '"/></div></div>' +
+    '<div class="iss-row"><div><label class="iss-lbl">Display Label (TH)</label><input class="iss-input" data-k="display_th" value="' + esc((f.display_labels||{}).th||'') + '"/></div>' +
+    '<div><label class="iss-lbl">Display Label (EN)</label><input class="iss-input" data-k="display_en" value="' + esc((f.display_labels||{}).en||'') + '"/></div></div>' +
+    '<div class="iss-row"><div><label class="iss-lbl">Follow-up Prompt (TH)</label><input class="iss-input" data-k="followup_th" value="' + esc(followTh) + '"/></div>' +
+    '<div><label class="iss-lbl">Follow-up Prompt (EN)</label><input class="iss-input" data-k="followup_en" value="' + esc(followEn) + '"/></div></div>' +
+    (kind==='response' ? ('<div class="iss-row"><div><label class="iss-lbl">Formatting Type</label><select class="iss-select" data-k="formatting">' +
+      ['','currency','date','time','boolean','status','list','table','link','markdown','image','phone','address','rich_text','number','percent'].map(function(v){
+        return '<option value="' + v + '"' + (fmt===v?' selected':'') + '>' + (v||'(none)') + '</option>';
+      }).join('') + '</select></div><div></div></div>') : '') +
+    displayMetaHtml +
+    '</div>';
+}
+
+function issRenderInputFields(){
+  var fields = _issSchema.input_fields || [];
+  document.getElementById('iss-input-fields').innerHTML = fields.length
+    ? fields.map(function(f,i){ return issFieldCard(f,i,'input'); }).join('')
+    : '<div class="iss-note">No input fields derived — this action has no customer-askable parameters.</div>';
+}
+
+function issRenderResponseFields(){
+  var fields = _issSchema.response_fields || [];
+  document.getElementById('iss-response-fields').innerHTML = fields.length
+    ? fields.map(function(f,i){ return issFieldCard(f,i,'response'); }).join('')
+    : '<div class="iss-note">No response fields derived — check this action\'s Response Mapping.</div>';
+}
+
+function issRenderLocalization(){
+  var l = _issSchema.localization || {};
+  document.getElementById('iss-localization').innerHTML =
+    '<div class="iss-note">Per-field display labels are edited on the Input Fields / Response Fields tabs. This section controls the schema\'s overall language defaults.</div>' +
+    '<label class="iss-lbl">Default Language</label><input class="iss-input" id="loc-default" value="' + esc(l.default_language||'th') + '" style="max-width:160px"/>';
+}
+
+function issRenderConversation(){
+  var c = _issSchema.conversation || {};
+  var eff = (_issProvenance && Object.keys(_issProvenance).length) ? null : null; // provenance already keyed by conversation.<key>
+  var keys = [
+    ['ask_requested_information','Ask which field the customer wants'],
+    ['require_confirmation_before_execute','Require confirmation before execute'],
+    ['allow_multiple_fields','Allow multiple fields per answer'],
+    ['allow_all_fields','Allow "show everything"'],
+    ['auto_execute','Auto-execute once parameters are complete'],
+    ['reuse_last_result','Reuse last ERP result for follow-ups'],
+    ['result_cache_enabled','Cache ERP result'],
+  ];
+  var html = keys.map(function(k){
+    var explicit = c[k[0]] !== undefined && c[k[0]] !== null && !_issResetConversationKeys[k[0]];
+    var val = !!c[k[0]];
+    var badge = issProvBadge('conversation.' + k[0]);
+    var reset = explicit ? '<span class="iss-reset-link" onclick="issResetConversationKey(\'' + k[0] + '\')">Reset to Inherited</span>' : '';
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+      '<input type="checkbox" id="conv-' + k[0] + '" ' + (val?'checked':'') + ' onchange="issMarkConversationExplicit(\'' + k[0] + '\')"/>' +
+      '<label for="conv-' + k[0] + '" style="font-size:12.5px">' + k[1] + '</label>' + badge + reset + '</div>';
+  }).join('');
+  html += '<div class="iss-row"><div><label class="iss-lbl">TTL Seconds</label><input class="iss-input" id="conv-ttl" value="' + esc(c.ttl_seconds||'') + '"/></div>' +
+    '<div><label class="iss-lbl">Conversation Timeout Seconds</label><input class="iss-input" id="conv-timeout" value="' + esc(c.conversation_timeout_seconds||'') + '"/></div></div>';
+  document.getElementById('iss-conversation').innerHTML = html;
+}
+
+function issMarkConversationExplicit(key){
+  // The admin actively toggled the checkbox — this is now an explicit
+  // override again, even if it was previously reset to inherited.
+  delete _issResetConversationKeys[key];
+}
+
+function issResetConversationKey(key){
+  _issSchema.conversation = _issSchema.conversation || {};
+  delete _issSchema.conversation[key];
+  _issResetConversationKeys[key] = true;
+  issFetchEffective().then(issRenderConversation);
+}
+
+function issRenderAiSynonyms(){
+  var ab = _issSchema.ai_behaviour || {};
+  document.getElementById('iss-ai-synonyms').innerHTML =
+    '<div class="iss-note">Schema-level synonyms apply across every field (e.g. business-wide abbreviations). Per-field synonyms live on the Input Fields / Response Fields tabs.</div>' +
+    '<label class="iss-lbl">Global Synonyms (comma-separated)</label>' +
+    '<input class="iss-input" id="ai-synonyms" value="' + esc((ab.synonyms||[]).join(', ')) + '"/>';
+}
+
+function issRenderSecurity(){
+  var s = _issSchema.security || {};
+  document.getElementById('iss-security').innerHTML =
+    '<div class="iss-note">Per-field visibility (customer / developer / hidden / masked) is set on the Input Fields / Response Fields tabs. This section is reserved for schema-wide security notes.</div>' +
+    '<label class="iss-lbl">Notes</label><textarea class="iss-ta" id="sec-notes" rows="3">' + esc(s.notes||'') + '</textarea>';
+}
+
+function issRenderExamples(){
+  var examples = _issSchema.examples || [];
+  document.getElementById('iss-examples').innerHTML =
+    '<div class="iss-note">Example customer questions used to seed future Matcher/Decision Engine training — read-only preview here, edited via Business Action Examples.</div>' +
+    (examples.length ? '<ul>' + examples.map(function(e){ return '<li style="font-size:12.5px;margin-bottom:4px">' + esc(e.example_text||'') + '</li>'; }).join('') + '</ul>' : '<div class="iss-note">No examples configured.</div>');
+}
+
+function issCollectFieldCard(card, base){
+  var out = Object.assign({}, base);
+  card.querySelectorAll('[data-k]').forEach(function(el){
+    var k = el.dataset.k, v = el.value;
+    if (k === 'aliases' || k === 'synonyms' || k === 'examples') out[k] = v.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    else if (k === 'display_th' || k === 'display_en') { out.display_labels = out.display_labels || {}; out.display_labels[k==='display_th'?'th':'en'] = v; }
+    else if (k === 'followup_th' || k === 'followup_en') { out.follow_up_prompts = out.follow_up_prompts || {}; out.follow_up_prompts[k==='followup_th'?'th':'en'] = v; }
+    else if (k === 'formatting') { out.formatting = v ? {type: v} : {}; }
+    else if (k === 'display_type') { out.display_type = v || null; }
+    else if (k === 'display_order') { out.display_order = v === '' ? null : Number(v); }
+    else out[k] = v;
+  });
+  // Requirement 1 — enum options editor: read back {value, label, icon,
+  // color} rows into f.options; an empty list means "not an enum field",
+  // generically (no field-name special-casing).
+  var optionRows = card.querySelectorAll('.iss-opt-row');
+  var options = [];
+  optionRows.forEach(function(row){
+    var o = {};
+    row.querySelectorAll('[data-opt-k]').forEach(function(el){ o[el.dataset.optK] = el.value || null; });
+    if (o.value || o.label) options.push(o);
+  });
+  out.options = options;
+  return out;
+}
+
+function issCollectSchema(){
+  var s = JSON.parse(JSON.stringify(_issSchema || {}));
+  s.general = s.general || {};
+  s.general.operation_type = document.getElementById('g-op-type') ? document.getElementById('g-op-type').value || null : s.general.operation_type;
+  s.general.primary_entity = document.getElementById('g-entity') ? document.getElementById('g-entity').value || null : s.general.primary_entity;
+
+  var inputCards = document.querySelectorAll('#iss-input-fields .iss-field-card');
+  s.input_fields = (s.input_fields||[]).map(function(f,i){ return inputCards[i] ? issCollectFieldCard(inputCards[i], f) : f; });
+
+  var responseCards = document.querySelectorAll('#iss-response-fields .iss-field-card');
+  s.response_fields = (s.response_fields||[]).map(function(f,i){ return responseCards[i] ? issCollectFieldCard(responseCards[i], f) : f; });
+
+  s.localization = s.localization || {};
+  if (document.getElementById('loc-default')) s.localization.default_language = document.getElementById('loc-default').value;
+
+  s.conversation = s.conversation || {};
+  ['ask_requested_information','require_confirmation_before_execute','allow_multiple_fields','allow_all_fields','auto_execute','reuse_last_result','result_cache_enabled'].forEach(function(k){
+    // Part 6 — Reset to Inherited: a key the admin just reset is
+    // OMITTED from the saved schema entirely (never re-written as an
+    // explicit true/false from the checkbox's current, inherited-value
+    // rendering) unless the admin has since actively toggled it again.
+    if (_issResetConversationKeys[k]) { delete s.conversation[k]; return; }
+    var el = document.getElementById('conv-' + k); if (el) s.conversation[k] = el.checked;
+  });
+  if (document.getElementById('conv-ttl')) s.conversation.ttl_seconds = Number(document.getElementById('conv-ttl').value) || null;
+  if (document.getElementById('conv-timeout')) s.conversation.conversation_timeout_seconds = Number(document.getElementById('conv-timeout').value) || null;
+
+  s.ai_behaviour = s.ai_behaviour || {};
+  if (document.getElementById('ai-synonyms')) s.ai_behaviour.synonyms = document.getElementById('ai-synonyms').value.split(',').map(function(x){return x.trim();}).filter(Boolean);
+
+  s.security = s.security || {};
+  if (document.getElementById('sec-notes')) s.security.notes = document.getElementById('sec-notes').value;
+
+  return s;
+}
+
+function issSaveDraft(){
+  var schema = issCollectSchema();
+  fetch('/admin/api/integration-schema/' + ISS_ACTION_ID + '/draft', {
+    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({schema: schema}),
+  }).then(function(r){return r.json();}).then(function(row){
+    _issSchema = row.schema || schema;
+    _issResetConversationKeys = {};
+    issFetchEffective().then(issRenderAll);
+    document.getElementById('iss-status-msg').textContent = 'Draft saved.';
+  });
+}
+
+function issPublish(){
+  issSaveDraft();
+  setTimeout(function(){
+    fetch('/admin/api/integration-schema/' + ISS_ACTION_ID + '/publish', {method:'POST'})
+      .then(function(r){return r.json();}).then(function(row){
+        document.getElementById('iss-status-msg').textContent = row && row.status === 'published' ? 'Published version ' + row.version_number + '.' : 'Publish failed.';
+      });
+  }, 300);
+}
+
+function issOpenHistory(){
+  fetch('/admin/api/integration-schema/' + ISS_ACTION_ID + '/versions').then(function(r){return r.json();}).then(function(rows){
+    document.getElementById('iss-history-list').innerHTML = (rows||[]).slice().reverse().map(function(v){
+      return '<div class="iss-version-row"><span>v' + v.version_number + ' <span class="iss-status-pill iss-status-' + v.status + '">' + v.status + '</span></span>' +
+        (v.status !== 'draft' ? '<button class="iss-btn" onclick="issRollback(' + v.version_number + ')">Rollback</button>' : '') + '</div>';
+    }).join('') || '<div class="iss-note">No versions yet.</div>';
+    document.getElementById('iss-history-modal').style.display = 'flex';
+  });
+}
+
+function issRollback(versionNumber){
+  fetch('/admin/api/integration-schema/' + ISS_ACTION_ID + '/rollback/' + versionNumber, {method:'POST'})
+    .then(function(r){return r.json();}).then(function(row){
+      if (row && row.schema) { _issSchema = row.schema; issRenderAll(); }
+      document.getElementById('iss-history-modal').style.display = 'none';
+      document.getElementById('iss-status-msg').textContent = 'Rolled back to a new draft from v' + versionNumber + '.';
+    });
+}
+
+issInit();
+</script>
+{% endblock %}

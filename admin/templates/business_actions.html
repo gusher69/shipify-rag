@@ -21,6 +21,14 @@
 .ba-badge.on{background:rgba(52,211,153,.12);color:#34d399}
 .ba-badge.off{background:rgba(248,113,113,.12);color:#f87171}
 .ba-badge.type{background:rgba(91,157,255,.12);color:#5b9dff}
+.ba-badge.info{background:rgba(91,157,255,.12);color:#5b9dff}
+.ba-badge.rec{background:rgba(167,139,250,.14);color:#a78bfa}
+.ba-badge.warn{background:rgba(245,158,11,.14);color:#f59e0b}
+.ba-badge.err{background:rgba(248,113,113,.14);color:#f87171}
+.ba-sem-row{padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);display:flex}
+.ba-sem-row:last-child{border-bottom:none}
+.ba-sem-override{font-size:11px;color:rgba(232,237,245,.5)}
+.ba-sem-override a{color:#5b9dff;margin-left:4px;text-decoration:none}
 .ba-filter-bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .ba-filter-chip{padding:4px 10px;border-radius:20px;font-size:11.5px;border:1px solid rgba(255,255,255,.1);color:rgba(232,237,245,.6);cursor:pointer}
 .ba-filter-chip.active{border-color:#5b9dff;color:#5b9dff;background:rgba(91,157,255,.08)}
@@ -32,6 +40,23 @@ textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(25
 .ba-row>div{flex:1}
 .ba-list-item{display:flex;gap:8px;align-items:center;margin-bottom:6px}
 .ba-list-item input{margin-bottom:0}
+/* AI Analyze loading state — same spin keyframe already used by the
+   sync-progress widget (base.html's #fsync-spinner) and the global
+   loading overlay, reused here rather than a new animation style. */
+@keyframes ba-ai-spin { to { transform: rotate(360deg); } }
+.ba-ai-loading{display:flex;align-items:center;gap:8px}
+.ba-ai-loading-spinner{
+  width:13px;height:13px;border-radius:50%;flex-shrink:0;
+  border:2px solid rgba(91,157,255,.2);border-top-color:#5b9dff;
+  animation:ba-ai-spin .7s linear infinite;
+}
+.ba-ai-loading-dots{display:inline-flex;gap:3px;margin-left:2px}
+.ba-ai-loading-dots span{
+  width:4px;height:4px;border-radius:50%;background:#5b9dff;display:inline-block;
+  animation:dot-pulse 1.2s ease-in-out infinite;
+}
+.ba-ai-loading-dots span:nth-child(2){animation-delay:.15s}
+.ba-ai-loading-dots span:nth-child(3){animation-delay:.3s}
 </style>
 {% endblock %}
 
@@ -566,6 +591,19 @@ document.addEventListener('input', function(e) {
 function esc(s){ if (s==null) return ''; return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 function csv(v){ return (v||'').split(',').map(function(s){return s.trim();}).filter(Boolean); }
 
+// AI Analyze loading state — renders a small spinner + pulsing dots
+// next to the status text instead of a plain static label. Purely
+// cosmetic; el's plain textContent still works everywhere this isn't
+// called, so no other loading-state call site needs to change.
+function baShowAiLoading(el, message){
+  if (!el) return;
+  el.innerHTML = '<span class="ba-ai-loading">' +
+    '<span class="ba-ai-loading-spinner"></span>' +
+    '<span>' + esc(message) + '</span>' +
+    '<span class="ba-ai-loading-dots"><span></span><span></span><span></span></span>' +
+    '</span>';
+}
+
 function baRenderSummaryCards() {
   var all = _baActions;
   var counts = {total: all.length, API: 0, RAG: 0, TOOL: 0, HN: 0, disabled: 0};
@@ -614,6 +652,7 @@ function baLoadActions() {
           '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="baToggleMoreMenu(this)">⋯</button>' +
           '<div class="ba-more-menu" style="display:none;position:absolute;right:0;top:100%;background:#0f1a30;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:4px;z-index:10;min-width:120px">' +
             '<div style="padding:6px 8px;cursor:pointer;font-size:11.5px" onclick="baToggleEnabled(\'' + a.id + '\', ' + (!a.enabled) + ')">' + (a.enabled?'Disable':'Enable') + '</div>' +
+            '<div style="padding:6px 8px;cursor:pointer;font-size:11.5px" onclick="window.location.href=\'/admin/ai/business-actions/schema/' + a.id + '\'">Integration Schema</div>' +
             '<div style="padding:6px 8px;cursor:pointer;font-size:11.5px" onclick="baDuplicate(\'' + a.id + '\')">Duplicate</div>' +
             '<div style="padding:6px 8px;cursor:pointer;font-size:11.5px" onclick="baExportAction(\'' + a.id + '\')">Export JSON</div>' +
             '<div style="padding:6px 8px;cursor:pointer;font-size:11.5px;color:#f87171" onclick="baDelete(\'' + a.id + '\')">Delete</div>' +
@@ -978,6 +1017,11 @@ function baEditWithAi(action) {
   document.getElementById('ba-ai-input').value = 'Edit existing capability: ' + (action.display_name || action.name) +
     '\nOriginal description: ' + (action.description || action.ai_description || '');
   document.getElementById('ba-ai-action-key').value = action.action_key;
+  // Preserve any admin-confirmed semantic overrides already persisted on
+  // this action across a fresh re-analysis (Step 11 — never silently
+  // discarded); baAiOpenSetup() above resets to the empty default first.
+  var existingOverrides = (action.setup_metadata || {}).semantic_overrides;
+  if (existingOverrides) _baAiSemanticOverrides = Object.assign({field_overrides: {}}, existingOverrides);
 }
 
 function baOpenAdvancedEditor(id) {
@@ -1238,11 +1282,42 @@ function baDuplicate(id) {
   fetch('/admin/api/business-actions/' + id + '/duplicate', {method:'POST'}).then(function(){ baLoadActions(); });
 }
 
+// Permanent delete only (2026-07-29 rework) — no soft delete, no
+// recycle bin/restore flow for Business Actions anymore (a soft-deleted
+// row used to occupy its action_key forever, blocking recreation — the
+// getdatacustomer incident). The confirmation tier is decided by
+// GET .../delete-info: a never-executed draft gets one lightweight
+// confirmation, a published/executed action gets a stronger one
+// spelling out exactly what gets removed, and a protected system
+// fixture is refused outright before any dialog is even shown.
 function baDelete(id) {
-  uiConfirm('Delete this Business Action?', 'Delete Business Action').then(function(ok) {
-    if (!ok) return;
-    fetch('/admin/api/business-actions/' + id, {method:'DELETE'}).then(function(){ baLoadActions(); });
-  });
+  fetch('/admin/api/business-actions/' + id + '/delete-info').then(function(r){ return r.json(); }).then(function(info) {
+    if (!info.ok) { showErrorToast(info.error || 'Could not check this action before deleting.'); return; }
+    if (info.is_protected) {
+      showErrorToast('This is a protected system fixture and cannot be deleted.');
+      return;
+    }
+    var title, message;
+    if (info.is_published || info.has_execution_history) {
+      title = 'Delete permanently';
+      message = 'This action ("' + info.action_key + '") is ' +
+        (info.is_published ? 'published' : 'has execution history') +
+        '. Deleting it will PERMANENTLY remove the action, its Integration Schema, ' +
+        'parameters, response mapping, and all test-execution history. This cannot be undone — ' +
+        'there is no recycle bin. Delete permanently?';
+    } else {
+      title = 'Delete permanently';
+      message = 'Permanently delete this draft ("' + info.action_key + '")? This cannot be undone.';
+    }
+    uiConfirm(message, title).then(function(ok) {
+      if (!ok) return;
+      fetch('/admin/api/business-actions/' + id, {method:'DELETE'}).then(function(r){ return r.json(); }).then(function(d) {
+        if (!d.ok) { showErrorToast(d.message || d.error || 'Delete failed.'); return; }
+        showSuccessToast('Deleted permanently. The action key is available again.');
+        baLoadActions();
+      }).catch(function(){ showErrorToast('Delete failed — please try again.'); });
+    });
+  }).catch(function(){ showErrorToast('Could not check this action before deleting.'); });
 }
 
 function baImportFile(input) {
@@ -1589,12 +1664,25 @@ var _baAiProposal = null, _baAiExistingActionKey = null, _baAiUploadedIsKnowledg
 var _baAiConfidenceDetail = null, _baAiResponseFieldMapping = [], _baAiDetectedCredentialsRaw = [], _baAiSelfReview = null;
 var _baAiResponseFieldState = {}; // {json_path: {label, hidden}} — admin edits (Part 8: Rename/Hide/Show)
 
+// Semantic Analysis Review & Edit UI (Steps 1-13 sprint hardening) —
+// `_baAiSemanticAnalysis` is the raw, deterministic detection returned
+// by analyze_capability() (never mutated in place); `_baAiSemanticEffective`
+// is the last Detected+Override merge computed by the backend's
+// apply_overrides() (via the /semantic-overrides/apply route — the ONE
+// place that logic lives, never duplicated here); `_baAiSemanticOverrides`
+// is what the admin has explicitly confirmed and what gets persisted to
+// setup_metadata.semantic_overrides on save.
+var _baAiSemanticAnalysis = null, _baAiSemanticEffective = null;
+var _baAiSemanticOverrides = {field_overrides: {}};
+var _baOperationTypesCache = null, _baEndpointIntentsCache = null;
+
 function baAiOpenSetup() {
   _baAiProposal = null; _baAiExistingActionKey = null; _baAiUploadedIsKnowledgeDoc = false; _baAiKnowledgeChoice = null;
   _baAiCredentialValues = {}; _baAiCredentialDisplayNames = {}; _baAiCredentialTypes = {}; _baAiCredentialChoices = {};
   _baInlineQuestionsExpanded = false;
   _baAiConfidenceDetail = null; _baAiResponseFieldMapping = []; _baAiDetectedCredentialsRaw = []; _baAiSelfReview = null;
   _baAiResponseFieldState = {};
+  _baAiSemanticAnalysis = null; _baAiSemanticEffective = null; _baAiSemanticOverrides = {field_overrides: {}};
   document.getElementById('ba-ai-input').value = '';
   document.getElementById('ba-ai-purpose').value = '';
   document.getElementById('ba-ai-search-info').value = '';
@@ -1653,7 +1741,7 @@ function baAiAnalyze() {
   errEl.textContent = '';
   if (!userInput) { errEl.textContent = 'Please paste an API link, cURL command, document, or describe what you need.'; return; }
 
-  errEl.textContent = 'Checking document…';
+  baShowAiLoading(errEl, 'Checking document');
   fetch('/admin/api/business-actions/ai-auto-setup/detect-endpoints', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({document_text: userInput}),
@@ -1728,7 +1816,7 @@ function baAiAnalyzeSingle() {
   var examples = (document.getElementById('ba-ai-examples').value || '').split('\n').map(function(s){return s.trim();}).filter(Boolean).slice(0, 10);
   var errEl = document.getElementById('ba-ai-stage1-error');
 
-  errEl.textContent = 'Analyzing with AI…';
+  baShowAiLoading(errEl, 'Analyzing with AI');
   fetch('/admin/api/business-actions/ai-auto-setup/analyze', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({user_input: userInput, business_purpose: businessPurpose, search_info: searchInfo, example_questions: examples}),
@@ -1749,6 +1837,14 @@ function baAiAnalyzeSingle() {
     _baAiResponseFieldMapping = d.response_field_mapping || [];
     _baAiDetectedCredentialsRaw = d.detected_credentials || [];
     _baAiSelfReview = d.self_review || null;
+    _baAiSemanticAnalysis = d.semantic_analysis || null;
+    // A re-analysis (e.g. "Edit with AI" on an already-saved draft) must
+    // never silently discard admin-confirmed overrides — carry forward
+    // whatever was already persisted, if any, before this fresh analysis.
+    _baAiSemanticOverrides = (_baAiProposal.setup_metadata && _baAiProposal.setup_metadata.semantic_overrides) ||
+      _baAiSemanticOverrides || {field_overrides: {}};
+    if (!_baAiSemanticOverrides.field_overrides) _baAiSemanticOverrides.field_overrides = {};
+    baAiRefreshSemanticEffective();
 
     var confidence = _baAiProposal.detection_confidence || 'high';
     if (_baAiUploadedIsKnowledgeDoc && _baAiProposal.detected_action_type === 'RAG' && !_baAiKnowledgeChoice) {
@@ -2237,6 +2333,12 @@ function baAiRenderSummaryCard() {
   html += baAiRenderSemanticScore(p);
   html += baAiRenderExportableMetadata(p);
 
+  // Semantic Analysis Review & Edit panel — the canonical, deterministic
+  // Semantic API Analysis Engine output (Steps 1-9/11/12), rendered into
+  // its own placeholder so override edits re-render just this section
+  // (baAiRenderSemanticPanel()) without rebuilding the whole summary card.
+  html += '<div id="ba-ai-semantic-panel"></div>';
+
   var warnings = baAiComputeWarnings(p);
   if (warnings.length) {
     html += '<div class="ba-card" style="margin-top:10px;border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06)">' +
@@ -2246,6 +2348,7 @@ function baAiRenderSummaryCard() {
   html += baAiRenderRecommendationCard(p);
 
   document.getElementById('ba-ai-summary-card').innerHTML = html;
+  baAiRenderSemanticPanel();
 
   // Part 2: auto-generate an initial set of example questions if the AI
   // didn't already propose any, WITHOUT requiring the admin to click
@@ -2942,6 +3045,15 @@ function baAiSaveProposal(resolveDuplicate) {
   // "existing"/"save" both flow through normally: credential_ref may
   // already point at the picked existing key, or _baAiCredentialValues
   // carries the value captured from the pasted input (never re-typed).
+  // Persist admin-confirmed semantic overrides (Step 11) alongside the
+  // raw detected analysis — additive to setup_metadata, never replacing
+  // it; the save route (admin/routes.py) merges/persists both.
+  if (_baAiSemanticAnalysis) {
+    _baAiProposal.setup_metadata = Object.assign({}, _baAiProposal.setup_metadata, {
+      semantic_analysis: _baAiSemanticAnalysis,
+      semantic_overrides: _baAiSemanticOverrides,
+    });
+  }
   var payload = {
     proposal: _baAiProposal, enabled: false,
     credential_values: _baAiCredentialValues, credential_display_names: _baAiCredentialDisplayNames,
@@ -3103,7 +3215,7 @@ function baQuestionsAddManual() {
 function baQuestionsGenerateMore() {
   var p = _baAiProposal;
   var status = document.getElementById('ba-questions-status');
-  status.textContent = 'Generating questions with AI…';
+  baShowAiLoading(status, 'Generating questions with AI');
   fetch('/admin/api/business-actions/ai-auto-setup/suggest-questions', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -3255,6 +3367,243 @@ function baAiRenderReview() {
   baAiOnActionIdInput(document.getElementById('ba-ai-review-action-id'));
 }
 
+// ── Semantic Analysis Review & Edit panel ───────────────────────────────
+// Surfaces services/semantic_api_analysis_engine.py's canonical,
+// deterministic analysis (Steps 1-9/11/12) that analyze_capability()
+// already computes and attaches as `semantic_analysis` — this section
+// only DISPLAYS it and lets the admin override specific fields; all
+// merge/precedence logic (Detected -> Override -> Effective) is
+// computed server-side by apply_overrides() via the
+// /ai-auto-setup/semantic-overrides/apply route, never duplicated here.
+
+var _baSemSeverityMeta = {
+  info: {cls: 'info', label: 'Info'},
+  recommendation: {cls: 'rec', label: 'Recommendation'},
+  warning: {cls: 'warn', label: 'Warning'},
+  error: {cls: 'err', label: 'Error'},
+};
+
+function baAiSemBadge(text, cls) {
+  return '<span class="ba-badge ' + cls + '" style="margin-right:4px">' + esc(text) + '</span>';
+}
+
+function baAiLoadOperationTypesOnce(cb) {
+  if (_baOperationTypesCache) { cb(_baOperationTypesCache); return; }
+  fetch('/admin/api/integration-contracts/operations').then(function(r){return r.json();}).then(function(d) {
+    _baOperationTypesCache = (d && d.ok && d.operation_types) || ['LOOKUP','SEARCH','LIST','STATUS','CALCULATION','TRANSFORM','CREATE','UPDATE','DELETE','CANCEL','WORKFLOW','NOTIFICATION','NOTIFY','UNKNOWN'];
+    cb(_baOperationTypesCache);
+  }).catch(function(){
+    _baOperationTypesCache = ['LOOKUP','SEARCH','LIST','STATUS','CALCULATION','TRANSFORM','CREATE','UPDATE','DELETE','CANCEL','WORKFLOW','NOTIFICATION','NOTIFY','UNKNOWN'];
+    cb(_baOperationTypesCache);
+  });
+}
+
+function baAiLoadEndpointIntentsOnce(cb) {
+  if (_baEndpointIntentsCache) { cb(_baEndpointIntentsCache); return; }
+  fetch('/admin/api/business-actions/ai-auto-setup/semantic-endpoint-intents').then(function(r){return r.json();}).then(function(d) {
+    _baEndpointIntentsCache = (d && d.ok && d.endpoint_intents) || ['LOOKUP','SEARCH','LIST','DETAIL','TRANSFORM','COMMAND','NOTIFICATION','MUTATION','UPLOAD','DOWNLOAD','AUTHENTICATION','HEALTHCHECK','UTILITY','UNKNOWN'];
+    cb(_baEndpointIntentsCache);
+  }).catch(function(){
+    _baEndpointIntentsCache = ['LOOKUP','SEARCH','LIST','DETAIL','TRANSFORM','COMMAND','NOTIFICATION','MUTATION','UPLOAD','DOWNLOAD','AUTHENTICATION','HEALTHCHECK','UTILITY','UNKNOWN'];
+    cb(_baEndpointIntentsCache);
+  });
+}
+
+function baAiRefreshSemanticEffective() {
+  if (!_baAiSemanticAnalysis) { _baAiSemanticEffective = null; baAiRenderSemanticPanel(); return; }
+  fetch('/admin/api/business-actions/ai-auto-setup/semantic-overrides/apply', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({semantic_analysis: _baAiSemanticAnalysis, overrides: _baAiSemanticOverrides}),
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    _baAiSemanticEffective = (d && d.ok) ? d.effective : null;
+    baAiRenderSemanticPanel();
+  }).catch(function(){ _baAiSemanticEffective = null; baAiRenderSemanticPanel(); });
+}
+
+// Roles (Step 5) that count as a genuine search/filter criterion —
+// mirrors semantic_api_analysis_engine._SEARCH_CRITERIA_ROLES exactly,
+// for DISPLAY grouping only (never a classification decision made
+// here — that stays server-side).
+var BA_SEM_SEARCH_CRITERIA_ROLES = ['search', 'filter', 'date_start', 'date_end', 'enum', 'limit', 'pagination'];
+
+function baAiSemResponseMappingLabel(status, fieldCount) {
+  if (status === 'analyzed' && fieldCount > 0) return {label: 'Detected', cls: 'on'};
+  if (status === 'analyzed') return {label: 'Partial', cls: 'type'};
+  if (status === 'pending') return {label: 'Pending', cls: 'type'};
+  return {label: 'Missing', cls: 'off'};
+}
+
+function baAiRenderSemanticPanel() {
+  var el = document.getElementById('ba-ai-semantic-panel');
+  if (!el) return;
+  var raw = _baAiSemanticAnalysis;
+  if (!raw) { el.innerHTML = ''; return; }
+  var eff = _baAiSemanticEffective || raw; // fall back to raw until the first effective-merge round-trip resolves
+  var prov = (eff && eff.provenance) || {};
+  var fields = eff.fields || [];
+  var authFields = fields.filter(function(f){ return (f.roles||[]).indexOf('authentication') !== -1 || (f.roles||[]).indexOf('credential') !== -1; });
+  var nonAuthFields = fields.filter(function(f){ return authFields.indexOf(f) === -1; });
+  var requiredFields = nonAuthFields.filter(function(f){ return f.required; });
+  var optionalFields = nonAuthFields.filter(function(f){ return !f.required; });
+  var searchFields = nonAuthFields.filter(function(f){ return (f.roles||[]).some(function(r){ return BA_SEM_SEARCH_CRITERIA_ROLES.indexOf(r) !== -1; }); });
+  var responseStatus = (eff.response_analysis || {}).response_mapping_status;
+  var responseFieldCount = ((eff.response_analysis || {}).fields || []).length;
+  var respLabel = baAiSemResponseMappingLabel(responseStatus, responseFieldCount);
+  var safety = eff.operation_safety || {};
+
+  function fieldRow(f) {
+    return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px">' +
+      '<b>' + esc(f.business_entity || f.name) + '</b> <span style="color:rgba(232,237,245,.4)">(' + esc(f.name) + ')</span>' +
+      '<div style="margin-top:2px">' + (f.roles||[]).map(function(r){ return baAiSemBadge(r, 'type'); }).join('') + '</div>' +
+      '</div>';
+  }
+
+  var html = '<div class="ba-card"><b>🧬 Semantic Analysis</b>' +
+    '<div style="font-size:11px;color:rgba(232,237,245,.4);margin-bottom:6px">ผลวิเคราะห์เชิงความหมายจาก Semantic API Analysis Engine (deterministic, ไม่เรียก AI ซ้ำ)</div>';
+
+  // Endpoint Intent — Detected / Override / Effective
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center">' +
+    '<span><b>Endpoint Intent</b> ' + baAiSemBadge((raw.endpoint_intent||{}).intent || '—', 'type') +
+    ' <span style="font-size:11px;color:rgba(232,237,245,.4)">confidence ' + (((raw.endpoint_intent||{}).confidence != null) ? (raw.endpoint_intent.confidence*100).toFixed(0)+'%' : '—') + '</span></span>' +
+    (prov['endpoint_intent'] === 'explicit' ? '<span class="ba-sem-override">Override: <b>' + esc(eff.endpoint_intent.intent) + '</b> <a href="#" onclick="baAiResetIntentOverride();return false">Reset to Detected</a></span>' : '') +
+    '</div>' +
+    '<div style="font-size:11px;color:rgba(232,237,245,.4);margin-top:2px">' + ((raw.endpoint_intent||{}).evidence||[]).map(esc).join('; ') + '</div>' +
+    '<div id="ba-sem-intent-select-holder" style="margin-top:4px"></div>' +
+    '</div>';
+
+  // Runtime Operation Type — Detected / Override / Effective
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center">' +
+    '<span><b>Runtime Operation Type</b> ' + baAiSemBadge(eff.mapped_runtime_operation_type || '—', 'type') + '</span>' +
+    (prov['mapped_runtime_operation_type'] === 'explicit' ? '<span class="ba-sem-override">Admin override <a href="#" onclick="baAiResetOperationTypeOverride();return false">Reset to Detected</a></span>' : '') +
+    '</div>' +
+    '<div style="font-size:11px;color:rgba(232,237,245,.4)">Detected: ' + esc(raw.mapped_runtime_operation_type || '—') + '</div>' +
+    '<div id="ba-sem-optype-select-holder" style="margin-top:4px"></div>' +
+    '</div>';
+
+  // Authentication fields — names only, never values
+  if (authFields.length) {
+    html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch">' +
+      '<b>Authentication Fields</b> <span style="font-size:11px;color:rgba(232,237,245,.4)">(ชื่อเท่านั้น ไม่แสดงค่าจริง)</span>' +
+      authFields.map(function(f){ return '<div style="font-size:12px;margin-top:2px">🔒 ' + esc(f.name) + '</div>'; }).join('') +
+      '</div>';
+  }
+
+  // Required / Optional fields
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch"><b>Required Fields</b>' +
+    (requiredFields.length ? requiredFields.map(fieldRow).join('') : '<div style="font-size:12px;color:rgba(232,237,245,.4)">— none —</div>') + '</div>';
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch"><b>Optional Fields</b>' +
+    (optionalFields.length ? optionalFields.map(fieldRow).join('') : '<div style="font-size:12px;color:rgba(232,237,245,.4)">— none —</div>') + '</div>';
+
+  // Search Criteria (Step 5) — primary role + "search criterion: yes"
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch"><b>Search Criteria</b>' +
+    (searchFields.length ? searchFields.map(function(f) {
+      var primary = (f.roles||[]).filter(function(r){ return BA_SEM_SEARCH_CRITERIA_ROLES.indexOf(r) !== -1; })[0] || (f.roles||[])[0];
+      return '<div style="font-size:12px;margin-top:3px"><b>' + esc(f.name) + '</b> — Primary role: ' + esc(primary) + ' — Search criterion: yes</div>';
+    }).join('') : '<div style="font-size:12px;color:rgba(232,237,245,.4)">— none detected —</div>') + '</div>';
+
+  // Validation Groups (Step 3) — with a per-group rule override
+  var groups = eff.validation_groups || [];
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch"><b>Validation Groups</b>' +
+    (prov['validation_groups'] === 'explicit' ? '<span class="ba-sem-override"> (admin edited) <a href="#" onclick="baAiResetValidationGroupsOverride();return false">Reset to Detected</a></span>' : '') +
+    (groups.length ? groups.map(function(g, i) {
+      return '<div style="font-size:12px;margin-top:4px">' + baAiSemBadge(GROUP_RULE_LABELS[g.rule] || g.rule, 'type') +
+        esc((g.members||[]).join(', ')) +
+        (g.confidence != null ? ' <span style="font-size:10.5px;color:rgba(232,237,245,.35)">(confidence ' + (g.confidence*100).toFixed(0) + '%)</span>' : '') +
+        '<select class="ba-input" style="display:inline-block;width:auto;margin:0 0 0 6px;padding:1px 4px" onchange="baAiSetValidationGroupRuleOverride(' + i + ', this.value)">' +
+        ['ALL','AT_LEAST_ONE','EXACTLY_ONE','OPTIONAL'].map(function(r){ return '<option value="' + r + '"' + (r===g.rule?' selected':'') + '>' + esc(GROUP_RULE_LABELS[r]||r) + '</option>'; }).join('') +
+        '</select></div>';
+    }).join('') : '<div style="font-size:12px;color:rgba(232,237,245,.4)">— none detected —</div>') + '</div>';
+
+  // Business Entities — from non-auth fields only; an authentication
+  // field's own "business_entity" label (e.g. "Secret Code") is not a
+  // meaningful business entity the customer/admin discusses.
+  var entities = {};
+  nonAuthFields.forEach(function(f){ if (f.business_entity) entities[f.business_entity] = (entities[f.business_entity]||0)+1; });
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch"><b>Business Entities</b>' +
+    (Object.keys(entities).length ? Object.keys(entities).map(function(e){ return baAiSemBadge(e, 'type'); }).join('') : '<div style="font-size:12px;color:rgba(232,237,245,.4)">— none —</div>') + '</div>';
+
+  // Side Effect / Confirmation Required / Audit Required
+  var sideEffect = safety.state_change || safety.notification || safety.destructive || safety.financial;
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch">' +
+    '<div><b>Side Effect</b> ' + baAiSemBadge(sideEffect ? 'Yes' : 'No', sideEffect ? 'warn' : 'on') +
+    (safety.destructive ? baAiSemBadge('Destructive', 'err') : '') +
+    (safety.financial ? baAiSemBadge('Financial', 'warn') : '') +
+    (safety.notification ? baAiSemBadge('Notification', 'type') : '') + '</div>' +
+    '<div style="margin-top:4px"><label style="font-size:12px"><input type="checkbox" ' + (safety.confirmation_required ? 'checked' : '') +
+      ' onchange="baAiSetConfirmationOverride(this.checked)"> Confirmation Required' +
+      (prov['operation_safety.confirmation_required'] === 'explicit' ? ' <a href="#" onclick="baAiResetConfirmationOverride();return false;event.stopPropagation();">Reset</a>' : '') + '</label></div>' +
+    '<div><label style="font-size:12px"><input type="checkbox" ' + (safety.audit_required ? 'checked' : '') +
+      ' onchange="baAiSetAuditOverride(this.checked)"> Audit Required' +
+      (prov['operation_safety.audit_required'] === 'explicit' ? ' <a href="#" onclick="baAiResetAuditOverride();return false;event.stopPropagation();">Reset</a>' : '') + '</label></div>' +
+    '</div>';
+
+  // Response Mapping Status (Step 7)
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch"><b>Response Mapping Status</b> ' +
+    baAiSemBadge(respLabel.label, respLabel.cls) +
+    (responseStatus === 'pending' ? '<div style="font-size:11px;color:rgba(232,237,245,.4);margin-top:2px">ยังไม่มีตัวอย่าง Response — ต้องแนบตัวอย่างจริงเพื่อให้ระบุ field mapping ได้แม่นยำ (ระบบจะไม่สร้าง field ปลอมขึ้นมาเอง)</div>' : '') +
+    '</div>';
+
+  // Recommendations (Step 6 — severity-tagged)
+  var recs = eff.recommendations_detailed || [];
+  html += '<div class="ba-sem-row" style="flex-direction:column;align-items:stretch"><b>Recommendations</b>' +
+    (recs.length ? recs.map(function(r) {
+      var meta = _baSemSeverityMeta[r.severity] || _baSemSeverityMeta.info;
+      return '<div style="font-size:12px;margin-top:3px">' + baAiSemBadge(meta.label, meta.cls) + esc(r.message) + '</div>';
+    }).join('') : '<div style="font-size:12px;color:rgba(232,237,245,.4)">— none —</div>') + '</div>';
+
+  html += '</div>'; // close ba-card
+
+  el.innerHTML = html;
+
+  // Populate the two dynamic-vocabulary <select>s (Step 4 — loaded once
+  // from the canonical backend source, never duplicated in this template).
+  baAiLoadEndpointIntentsOnce(function(intents) {
+    var holder = document.getElementById('ba-sem-intent-select-holder');
+    if (!holder) return;
+    var current = eff.endpoint_intent.intent;
+    holder.innerHTML = '<select class="ba-input" style="display:inline-block;width:auto" onchange="baAiSetIntentOverride(this.value)">' +
+      '<option value="">(use detected value)</option>' +
+      intents.map(function(o){ return '<option value="' + o + '"' + (o===current && prov['endpoint_intent']==='explicit' ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') +
+      '</select>';
+  });
+  baAiLoadOperationTypesOnce(function(types) {
+    var holder = document.getElementById('ba-sem-optype-select-holder');
+    if (!holder) return;
+    var current = eff.mapped_runtime_operation_type;
+    holder.innerHTML = '<select class="ba-input" style="display:inline-block;width:auto" onchange="baAiSetOperationTypeOverride(this.value)">' +
+      '<option value="">(use detected value)</option>' +
+      types.map(function(o){ return '<option value="' + o + '"' + (o===current && prov['mapped_runtime_operation_type']==='explicit' ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') +
+      '</select>';
+  });
+}
+
+function baAiSetIntentOverride(val) {
+  if (!val) { delete _baAiSemanticOverrides.intent_override; } else { _baAiSemanticOverrides.intent_override = val; }
+  baAiRefreshSemanticEffective();
+}
+function baAiResetIntentOverride() { baAiSetIntentOverride(''); }
+
+function baAiSetOperationTypeOverride(val) {
+  if (!val) { delete _baAiSemanticOverrides.operation_type_override; } else { _baAiSemanticOverrides.operation_type_override = val; }
+  baAiRefreshSemanticEffective();
+}
+function baAiResetOperationTypeOverride() { baAiSetOperationTypeOverride(''); }
+
+function baAiSetConfirmationOverride(checked) { _baAiSemanticOverrides.confirmation_required_override = !!checked; baAiRefreshSemanticEffective(); }
+function baAiResetConfirmationOverride() { delete _baAiSemanticOverrides.confirmation_required_override; baAiRefreshSemanticEffective(); }
+function baAiSetAuditOverride(checked) { _baAiSemanticOverrides.audit_required_override = !!checked; baAiRefreshSemanticEffective(); }
+function baAiResetAuditOverride() { delete _baAiSemanticOverrides.audit_required_override; baAiRefreshSemanticEffective(); }
+
+function baAiSetValidationGroupRuleOverride(idx, rule) {
+  var base = (_baAiSemanticOverrides.validation_groups_override || (_baAiSemanticEffective || _baAiSemanticAnalysis).validation_groups || []).map(function(g){ return Object.assign({}, g); });
+  if (base[idx]) base[idx].rule = rule;
+  _baAiSemanticOverrides.validation_groups_override = base;
+  baAiRefreshSemanticEffective();
+}
+function baAiResetValidationGroupsOverride() { delete _baAiSemanticOverrides.validation_groups_override; baAiRefreshSemanticEffective(); }
+
 function baAiRemoveExample(i) {
   _baAiProposal.example_questions.splice(i, 1);
   baAiRenderReview();
@@ -3341,6 +3690,15 @@ function baAiSetCredentialChoice(radio, paramName) {
 function baAiCollectReviewEdits() {
   var actionIdInput = document.getElementById('ba-ai-review-action-id');
   if (actionIdInput && actionIdInput.value.trim()) _baAiProposal.action_id = actionIdInput.value.trim();
+  // Persist admin-confirmed semantic overrides (Step 11) alongside the
+  // raw detected analysis — additive to setup_metadata, never replacing
+  // it; the save route (admin/routes.py) merges/persists both.
+  if (_baAiSemanticAnalysis) {
+    _baAiProposal.setup_metadata = Object.assign({}, _baAiProposal.setup_metadata, {
+      semantic_analysis: _baAiSemanticAnalysis,
+      semantic_overrides: _baAiSemanticOverrides,
+    });
+  }
   var whenToCallInput = document.getElementById('ba-ai-review-when-to-call');
   if (whenToCallInput) _baAiProposal.when_to_call = whenToCallInput.value.trim();
   document.querySelectorAll('[data-ai-question-custom]').forEach(function(el) {

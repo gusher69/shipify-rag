@@ -75,5 +75,10 @@ baseline_v1.0.1.json
 # ── Local admin runtime state ──────────────────────────────────────────────
 admin/sync_history.json
 
+# ── UAT run history (generated at runtime by services/uat_runner.py,
+# read back by admin/routes.py's /admin/api/uat/* routes) — real,
+# locally-useful run data, but generated output, not source. ─────────────
+uat_runs/*.json
+
 # ── Node (only present if a JS tool is added later) ───────────────────────
 node_modules/

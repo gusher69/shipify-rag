@@ -97,10 +97,16 @@ EMBEDDING_DIM   = 768  # only meaningful for the local provider
 # "openai" (default, active) | "local" (explicit opt-in fallback only —
 # must be set deliberately via env var, never chosen automatically).
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "openai")
-# Single source of truth for the OpenAI embedding model. OPENAI_EMBED_MODEL
-# is accepted only as a legacy alias for backward compatibility with any
-# existing deployment env vars — new configuration should set
-# OPENAI_EMBEDDING_MODEL directly.
+# Single source of truth for the OpenAI embedding model. If
+# OPENAI_EMBEDDING_MODEL is explicitly set, it ALWAYS wins — the legacy
+# OPENAI_EMBED_MODEL alias is only ever consulted as a fallback when the
+# canonical variable is absent, and must never silently override an
+# explicitly-configured canonical value. (2026-07-29 incident: an .env
+# with only the legacy alias set to text-embedding-3-small silently
+# resolved here to 1536 dimensions while knowledge_chunks.embedding is
+# VECTOR(3072) — see services/embedding_service.py::
+# validate_embedding_configuration() for the startup/pre-ingestion check
+# that now catches this class of mismatch before any chunk is embedded.)
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-large"))
 # Optional — the OpenAI embeddings API supports a `dimensions` param that
 # truncates the model's native output (e.g. text-embedding-3-large

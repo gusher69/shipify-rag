@@ -362,9 +362,14 @@ class BusinessActionRegistry:
         return rows[0] if rows else None
 
     def delete(self, action_id: str, *, hard: bool = False) -> bool:
-        """Soft delete by default (deleted_at timestamp) — matches
-        knowledge_items' own convention; hard=True permanently removes
-        the row (and cascades to every related table)."""
+        """DEPRECATED soft-delete path — kept only for any caller that
+        still explicitly wants the old deleted_at-timestamp behavior.
+        The normal admin "Delete" action now goes through
+        hard_delete_action() below (2026-07-29 rework: soft delete left
+        a dead row still occupying its action_key forever at the DB's
+        unique-constraint level — see the getdatacustomer incident).
+        hard=True here is the same one-statement cascade delete
+        hard_delete_action() uses, minus its fixture guard/verification."""
         if hard:
             self._sb.table("business_actions").delete().eq("id", action_id).execute()
         else:
@@ -372,6 +377,106 @@ class BusinessActionRegistry:
             self._sb.table("business_actions").update({"deleted_at": datetime.now(timezone.utc).isoformat()}) \
                 .eq("id", action_id).execute()
         return True
+
+    # Dependent tables an action's own row cascades to (migrations 026/
+    # 031/033 — all declared `ON DELETE CASCADE REFERENCES
+    # business_actions(id)`). A single DELETE on business_actions is
+    # therefore ALREADY one atomic Postgres statement covering every one
+    # of these — true rollback-on-failure is provided by the database
+    # engine itself, not a manual client-side multi-step transaction
+    # (which the Supabase REST layer doesn't expose anyway). This list
+    # exists so hard_delete_action() can (a) report what it removed and
+    # (b) defensively verify nothing was left behind, rather than to
+    # implement the atomicity itself.
+    _DEPENDENT_TABLES = (
+        "business_action_parameters", "business_action_execution", "business_action_examples",
+        "business_action_response_mapping", "business_action_tags", "business_action_validation",
+        "business_action_embeddings", "integration_action_schemas", "erp_test_cases",
+    )
+
+    # Categories that must never be hard-deleted without an explicit
+    # force=True — system/demo fixtures other features' tests or live
+    # verification depend on (see scripts/create_generic_runtime_fixtures.py).
+    _PROTECTED_CATEGORIES = ("Internal Test Fixtures",)
+
+    def is_protected_fixture(self, action: Dict) -> bool:
+        return (action.get("category") or "") in self._PROTECTED_CATEGORIES
+
+    def dependent_record_counts(self, action_id: str) -> Dict[str, int]:
+        counts = {}
+        for table in self._DEPENDENT_TABLES:
+            try:
+                res = self._sb.table(table).select("id", count="exact").eq("action_id", action_id).execute()
+                counts[table] = res.count or 0
+            except Exception:
+                counts[table] = 0
+        return counts
+
+    def hard_delete_action(self, action_id: str, *, force: bool = False, actor: Optional[str] = None) -> Dict:
+        """Permanently removes a Business Action AND every dependent row
+        (see _DEPENDENT_TABLES) — the action_key becomes immediately
+        reusable, no recycle bin, no deleted_at row left behind.
+
+        Raises ValueError with a short, stable reason code (never a raw
+        DB exception) on:
+          - "action_not_found"
+          - "protected_fixture" (unless force=True)
+        Raises RuntimeError("orphan_records_after_delete: {...}") if,
+        after the delete, any dependent table still has rows for this
+        action_id — this should be structurally impossible given the
+        ON DELETE CASCADE FKs, but is verified explicitly rather than
+        assumed, per the "never leave partial orphan records" rule.
+
+        Writes an immutable business_action_audit_log row (event
+        "business_action.deleted", migrations/034) AFTER the delete
+        succeeds — audit logging is best-effort and NEVER reverses an
+        already-completed deletion if it fails, but a failure is
+        surfaced via `audit_log_warning` in the return value rather than
+        silently swallowed (stronger than the credential_store.py
+        precedent this otherwise mirrors), so the caller/admin can see
+        it happened. `actor` should be the identity of whoever triggered
+        the delete (e.g. the admin username) — never required, but
+        omitted from the audit event as None when not supplied.
+
+        Returns {"ok": True, "action_id", "action_key", "removed_dependent_counts",
+        "audit_log_warning": Optional[str]}."""
+        action = self.get(action_id)
+        if not action:
+            raise ValueError("action_not_found")
+        if not force and self.is_protected_fixture(action):
+            raise ValueError("protected_fixture")
+
+        removed_counts = self.dependent_record_counts(action_id)
+        previous_status = "draft" if action.get("is_draft") else ("published" if action.get("enabled") else "disabled")
+        had_execution_history = removed_counts.get("erp_test_cases", 0) > 0
+
+        rows = self._sb.table("business_actions").delete().eq("id", action_id).execute().data
+        if not rows:
+            raise ValueError("action_not_found")
+
+        orphans = {t: c for t, c in self.dependent_record_counts(action_id).items() if c > 0}
+        if orphans:
+            raise RuntimeError(f"orphan_records_after_delete: {orphans}")
+
+        audit_log_warning = None
+        try:
+            self._sb.table("business_action_audit_log").insert({
+                "action_id": action_id, "action_key": action.get("action_key"),
+                "event": "business_action.deleted", "actor": actor,
+                "detail": {
+                    "display_name": action.get("display_name"),
+                    "previous_status": previous_status,
+                    "had_execution_history": had_execution_history,
+                    "dependent_record_counts": removed_counts,
+                    "deletion_result": "ok",
+                    "forced_past_protection": bool(force),
+                },
+            }).execute()
+        except Exception as e:
+            audit_log_warning = f"Deletion succeeded but the audit-log write failed: {e}"
+
+        return {"ok": True, "action_id": action_id, "action_key": action.get("action_key"),
+                "removed_dependent_counts": removed_counts, "audit_log_warning": audit_log_warning}
 
     def set_enabled(self, action_id: str, enabled: bool) -> Optional[Dict]:
         rows = self._sb.table("business_actions").update({"enabled": enabled}).eq("id", action_id).execute().data

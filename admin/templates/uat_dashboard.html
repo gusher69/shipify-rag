@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% set active = "uat_dashboard" %}
+{% block title %}UAT / Regression Suite — Shipify Admin{% endblock %}
+{% block topbar_title %}UAT / Regression Test Suite{% endblock %}
+
+{% block extra_head %}
+<style>
+.uat-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.uat-guidance{background:rgba(91,157,255,.06);border:1px solid rgba(91,157,255,.2);border-radius:10px;padding:12px 14px;font-size:12.5px;color:rgba(232,237,245,.7);margin-bottom:16px}
+.btn{padding:7px 14px;font-size:12.5px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#e8edf5;cursor:pointer}
+.btn:hover{background:rgba(255,255,255,.08)}
+.btn-primary{background:#5b9dff;border-color:#5b9dff;color:#0b1220;font-weight:600}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.uat-stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.uat-stat{flex:1;min-width:110px;border-radius:8px;padding:10px 12px;text-align:center}
+.uat-stat .n{font-size:22px;font-weight:700}
+.uat-stat .l{font-size:11px;color:rgba(232,237,245,.55);margin-top:2px}
+.uat-pass{background:rgba(60,200,120,.1);border:1px solid rgba(60,200,120,.3)}
+.uat-pass .n{color:#3cc878}
+.uat-fail{background:rgba(255,90,90,.1);border:1px solid rgba(255,90,90,.3)}
+.uat-fail .n{color:#ff5a5a}
+.uat-skip{background:rgba(255,190,60,.1);border:1px solid rgba(255,190,60,.3)}
+.uat-skip .n{color:#ffbe3c}
+.uat-neutral{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1)}
+.uat-section-title{font-size:13px;font-weight:600;margin:18px 0 8px}
+.uat-case{border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:6px;overflow:hidden}
+.uat-case summary{padding:8px 10px;cursor:pointer;font-size:12px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.uat-case summary::-webkit-details-marker{display:none}
+.uat-badge{display:inline-block;padding:1px 8px;border-radius:20px;font-size:10.5px;font-weight:600;flex-shrink:0}
+.uat-badge-pass{background:rgba(60,200,120,.18);color:#3cc878}
+.uat-badge-fail{background:rgba(255,90,90,.18);color:#ff5a5a}
+.uat-badge-skipped{background:rgba(255,190,60,.18);color:#ffbe3c}
+.uat-case-body{padding:8px 10px;font-size:11.5px;border-top:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.015)}
+.uat-case-body pre{white-space:pre-wrap;word-break:break-word;font-size:11px;background:rgba(0,0,0,.25);border-radius:6px;padding:8px;margin:4px 0}
+.uat-progress{font-size:12px;color:rgba(232,237,245,.7);margin-top:8px}
+.uat-reg-list{font-size:12px;margin:4px 0 0 18px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:6px">
+  <div class="page-title">UAT / Regression Test Suite</div>
+</div>
+<div class="uat-guidance">
+  Exercises the EXISTING, frozen RAG orchestrator, ERP runtime, and Hybrid Playground — this page adds no new
+  product behavior, it only validates what already exists. Real LLM calls are made for RAG cases, so a full run
+  can take a minute or more. Nothing here is ever fabricated: a case that cannot be executed honestly is marked
+  SKIPPED with a stated reason instead of a fake PASS.
+</div>
+
+<div class="uat-card">
+  <button class="btn btn-primary" id="uat-run-btn" onclick="uatRunSuite()">Run Full UAT</button>
+  <button class="btn" id="uat-history-btn" onclick="uatLoadHistory()">View Run History</button>
+  <span class="uat-progress" id="uat-progress"></span>
+</div>
+
+<div id="uat-report-container"></div>
+<div id="uat-history-container"></div>
+
+<script>
+async function uatRunSuite() {
+  const btn = document.getElementById('uat-run-btn');
+  const progress = document.getElementById('uat-progress');
+  btn.disabled = true;
+  progress.textContent = 'Running full suite (RAG -> ERP -> Hybrid) — this calls the real LLM, please wait...';
+  document.getElementById('uat-report-container').innerHTML = '';
+  try {
+    const resp = await fetch('/admin/api/uat/run', { method: 'POST' });
+    const data = await resp.json();
+    if (!data.ok) {
+      progress.textContent = 'Run failed: ' + (data.error || 'unknown error');
+      btn.disabled = false;
+      return;
+    }
+    progress.textContent = 'Run complete — ' + data.report.run_id;
+    uatRenderReport(data.report);
+  } catch (e) {
+    progress.textContent = 'Run failed: ' + e;
+  }
+  btn.disabled = false;
+}
+
+function uatEsc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function uatBadge(status) {
+  const cls = status === 'pass' ? 'uat-badge-pass' : (status === 'fail' ? 'uat-badge-fail' : 'uat-badge-skipped');
+  return '<span class="uat-badge ' + cls + '">' + uatEsc(status.toUpperCase()) + '</span>';
+}
+
+function uatRenderCase(c) {
+  let body = '<div class="uat-case-body">';
+  body += '<div><b>Reason:</b> ' + uatEsc(c.reason || '') + '</div>';
+  if (c.latency_ms !== null && c.latency_ms !== undefined) {
+    body += '<div><b>Latency:</b> ' + Math.round(c.latency_ms) + ' ms</div>';
+  }
+  if (c.expected !== null && c.expected !== undefined) {
+    body += '<div><b>Expected:</b><pre>' + uatEsc(JSON.stringify(c.expected, null, 2)) + '</pre></div>';
+  }
+  if (c.actual !== null && c.actual !== undefined) {
+    body += '<div><b>Actual:</b><pre>' + uatEsc(JSON.stringify(c.actual, null, 2)) + '</pre></div>';
+  }
+  if (c.traceback) {
+    body += '<div><b>Traceback:</b><pre>' + uatEsc(c.traceback) + '</pre></div>';
+  }
+  body += '</div>';
+  return '<details class="uat-case"><summary>' + uatBadge(c.status) + '<span style="flex:1">' +
+    uatEsc(c.category) + '</span><span style="color:rgba(232,237,245,.4)">' + uatEsc(c.id) + '</span></summary>' +
+    body + '</details>';
+}
+
+function uatRenderSection(title, results) {
+  if (!results || !results.length) return '';
+  let html = '<div class="uat-section-title">' + uatEsc(title) + ' (' + results.length + ')</div>';
+  for (const c of results) html += uatRenderCase(c);
+  return html;
+}
+
+function uatRenderReport(report) {
+  const o = report.overall;
+  let html = '<div class="uat-card">';
+  html += '<div style="font-size:12px;color:rgba(232,237,245,.5)">Run ' + uatEsc(report.run_id) +
+    ' — generated ' + uatEsc(report.generated_at) + ' — duration ' + o.duration_seconds + 's' +
+    (o.avg_latency_ms !== null ? ' — avg latency ' + Math.round(o.avg_latency_ms) + 'ms' : '') + '</div>';
+  html += '<div class="uat-stat-row">';
+  html += '<div class="uat-stat uat-pass"><div class="n">' + o.pass + '</div><div class="l">PASS</div></div>';
+  html += '<div class="uat-stat uat-fail"><div class="n">' + o.fail + '</div><div class="l">FAIL</div></div>';
+  html += '<div class="uat-stat uat-skip"><div class="n">' + o.skipped + '</div><div class="l">SKIPPED</div></div>';
+  html += '<div class="uat-stat uat-neutral"><div class="n">' + o.total + '</div><div class="l">TOTAL</div></div>';
+  html += '</div></div>';
+
+  const reg = report.regressions || {};
+  html += '<div class="uat-card"><div class="uat-section-title" style="margin-top:0">Regression Detection</div>';
+  if (!reg.has_previous_run) {
+    html += '<div style="font-size:12px;color:rgba(232,237,245,.6)">' + uatEsc(reg.note || 'No previous run to compare against.') + '</div>';
+  } else {
+    html += '<div style="font-size:12px">Compared against run ' + uatEsc(reg.previous_run_id) + '</div>';
+    html += '<div style="font-size:12px;margin-top:4px">Avg latency: ' + Math.round(reg.avg_latency_ms_previous || 0) +
+      'ms -> ' + Math.round(reg.avg_latency_ms_current || 0) + 'ms (delta ' + reg.latency_delta_ms + 'ms)</div>';
+    html += '<div style="font-size:12px;margin-top:6px"><b style="color:#ff5a5a">New failures (' + reg.new_failures.length + '):</b>';
+    html += '<ul class="uat-reg-list">' + (reg.new_failures.length ? reg.new_failures.map(function (f) {
+      return '<li>' + uatEsc(f.id) + ' — ' + uatEsc(f.reason || '') + '</li>';
+    }).join('') : '<li style="color:rgba(232,237,245,.4)">none</li>') + '</ul></div>';
+    html += '<div style="font-size:12px;margin-top:6px"><b style="color:#3cc878">Fixed since last run (' + reg.fixed_failures.length + '):</b>';
+    html += '<ul class="uat-reg-list">' + (reg.fixed_failures.length ? reg.fixed_failures.map(function (f) {
+      return '<li>' + uatEsc(f.id) + '</li>';
+    }).join('') : '<li style="color:rgba(232,237,245,.4)">none</li>') + '</ul></div>';
+  }
+  html += '</div>';
+
+  html += uatRenderSection('RAG Tests', report.rag_results);
+  html += uatRenderSection('ERP Tests', report.erp_results);
+  html += uatRenderSection('Hybrid Tests', report.hybrid_results);
+
+  document.getElementById('uat-report-container').innerHTML = html;
+}
+
+async function uatLoadHistory() {
+  const container = document.getElementById('uat-history-container');
+  try {
+    const resp = await fetch('/admin/api/uat/runs');
+    const data = await resp.json();
+    if (!data.ok || !data.runs.length) {
+      container.innerHTML = '<div class="uat-card">No saved runs yet.</div>';
+      return;
+    }
+    let html = '<div class="uat-card"><div class="uat-section-title" style="margin-top:0">Run History</div>';
+    for (const runId of data.runs.slice(0, 20)) {
+      html += '<div style="font-size:12px;margin:2px 0"><a href="#" onclick="uatLoadRun(\'' + runId + '\');return false;" style="color:#5b9dff">' + uatEsc(runId) + '</a></div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="uat-card">Failed to load history: ' + uatEsc(String(e)) + '</div>';
+  }
+}
+
+async function uatLoadRun(runId) {
+  const resp = await fetch('/admin/api/uat/report/' + encodeURIComponent(runId));
+  const data = await resp.json();
+  if (data.ok) uatRenderReport(data.report);
+}
+</script>
+{% endblock %}

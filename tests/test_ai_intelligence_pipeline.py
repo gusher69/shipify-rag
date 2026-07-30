@@ -122,12 +122,28 @@ class TestIntentClassification(unittest.TestCase):
         self.assertEqual(intent["intent_display_name"], "Customer Lookup")
 
     def test_classifies_tracking(self):
+        # 2026-07-29: intent_id is now generically composed as
+        # "{entity}_{operation}" (services/semantic_api_analysis_engine.py
+        # + erp_test_harness.detect_entities/_primary_entity) instead of
+        # being looked up from the removed hardcoded _INTENT_TAXONOMY —
+        # the entity itself ("tracking") is still correctly detected.
         p = _proposal(description="ติดตามพัสดุจากเลขพัสดุ", display_name="Tracking Lookup", category="tracking")
         intent = classify_intent(p)
-        self.assertEqual(intent["intent_id"], "tracking")
+        self.assertTrue(intent["intent_id"].startswith("tracking"))
 
     def test_falls_back_to_unknown_never_guesses_wrong_category(self):
-        p = _proposal(description="xyz completely unrelated text", display_name="Xyz", category="misc", keywords=[])
+        # 2026-07-29: entity detection now generically scans BOTH
+        # description/category text AND parameter/response field names
+        # (services.erp_test_harness.detect_entities/_primary_entity —
+        # the same convention already used at runtime), so parameters
+        # must also be unrelated for a genuine "no entity detected" case.
+        p = _proposal(description="xyz completely unrelated text", display_name="Xyz", category="misc",
+                       keywords=[], parameters=[{"name": "Foo", "display_name": "Foo", "required": True,
+                                                  "input_source": "customer_message", "secret_ref": None,
+                                                  "example_value": "bar", "validation_type": "string",
+                                                  "validation_pattern": None, "validation_confidence": "low",
+                                                  "follow_up_options": []}],
+                       response_mapping=[])
         intent = classify_intent(p)
         self.assertEqual(intent["intent_id"], "unknown")
 

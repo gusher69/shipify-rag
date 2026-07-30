@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% set active = "erp_conversation_tester" %}
+{% block title %}ERP Test History — Shipify Admin{% endblock %}
+{% block topbar_title %}ERP Test History{% endblock %}
+
+{% block extra_head %}
+<style>
+.ba-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.ba-guidance{background:rgba(91,157,255,.06);border:1px solid rgba(91,157,255,.2);border-radius:10px;padding:12px 14px;font-size:12.5px;color:rgba(232,237,245,.7);margin-bottom:16px}
+.ba-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.ba-table th{text-align:left;padding:8px 10px;color:rgba(232,237,245,.5);border-bottom:1px solid rgba(255,255,255,.08);white-space:nowrap}
+.ba-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}
+.ba-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:600}
+.btn{padding:5px 10px;font-size:11.5px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#e8edf5;cursor:pointer}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:6px">
+  <div class="page-title">ERP Test History</div>
+</div>
+<div class="ba-guidance">
+  Every saved ERP Test Case, across all ERP APIs — the debugging center for reviewing what was tested,
+  when, and whether it passed. <a href="/admin/erp/conversation-tester" style="color:#5b9dff">← Back to ERP Conversation Tester</a>
+</div>
+
+<div class="ba-card">
+  <table class="ba-table" id="eth-table">
+    <thead><tr>
+      <th>ERP API</th><th>Date</th><th>Status</th><th>Latency</th><th>Mode</th><th>Conversation</th><th></th>
+    </tr></thead>
+    <tbody id="eth-tbody"><tr><td colspan="7" style="color:rgba(232,237,245,.4)">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<!-- Raw trace viewer -->
+<div class="ba-card" id="eth-trace-viewer" style="display:none">
+  <div style="display:flex;justify-content:space-between"><b style="font-size:12px">Trace</b>
+    <span style="cursor:pointer;color:rgba(232,237,245,.5)" onclick="document.getElementById('eth-trace-viewer').style.display='none'">✕</span></div>
+  <pre id="eth-trace-content" style="white-space:pre-wrap;font-size:11px;margin-top:8px;max-height:400px;overflow-y:auto"></pre>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+var ETH_STATUS_COLOR = {pass: '#34d399', warning: '#f59e0b', fail: '#f87171'};
+var _ethActionsById = {};
+var _ethCases = [];
+
+function ethLoad() {
+  fetch('/admin/api/business-actions').then(function(r){ return r.json(); }).then(function(d) {
+    (d.actions || []).forEach(function(a){ _ethActionsById[a.id] = a; });
+    return fetch('/admin/api/erp-test/cases').then(function(r){ return r.json(); });
+  }).then(function(d) {
+    _ethCases = d.test_cases || [];
+    ethRender();
+  });
+}
+
+function ethRender() {
+  var tbody = document.getElementById('eth-tbody');
+  if (!_ethCases.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:rgba(232,237,245,.4)">No ERP Test Cases saved yet — save one from ERP Conversation Tester.</td></tr>'; return; }
+  tbody.innerHTML = _ethCases.map(function(c, i) {
+    var action = _ethActionsById[c.action_id];
+    var color = ETH_STATUS_COLOR[c.pass_fail_status] || '#e8edf5';
+    var date = c.created_at ? new Date(c.created_at).toLocaleString() : '—';
+    return '<tr>' +
+      '<td>' + esc(action ? (action.display_name || action.name) : c.action_id) + '</td>' +
+      '<td>' + esc(date) + '</td>' +
+      '<td><span class="ba-badge" style="background:' + color + '22;color:' + color + '">' + esc((c.pass_fail_status || '').toUpperCase()) + '</span></td>' +
+      '<td>' + esc(c.total_latency_ms || '—') + '</td>' +
+      '<td>' + esc(c.test_mode === 'live' ? 'Live' : (c.test_mode === 'simulation' ? 'Simulation' : 'Intent Only')) + '</td>' +
+      '<td style="max-width:260px;white-space:normal">' + esc(c.question || '') + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn" onclick="ethOpenTrace(' + i + ')">Open Trace</button> ' +
+        (action ? '<button class="btn" onclick="window.open(\'/admin/ai/business-actions\',\'_blank\')">Open ERP API</button> ' : '') +
+        '<button class="btn" onclick="ethRerun(' + i + ')">Rerun</button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+function ethOpenTrace(i) {
+  var c = _ethCases[i];
+  document.getElementById('eth-trace-content').textContent = JSON.stringify(c, null, 2);
+  document.getElementById('eth-trace-viewer').style.display = 'block';
+}
+
+function ethRerun(i) {
+  var c = _ethCases[i];
+  // Hands off to the Conversation Tester with this case's question
+  // pre-filled — the actual re-run happens there (single source of
+  // truth for ERP execution), never duplicated here.
+  sessionStorage.setItem('erp_test_history_rerun', JSON.stringify({action_id: c.action_id, question: c.question, mode: c.test_mode}));
+  window.location.href = '/admin/erp/conversation-tester?rerun=1';
+}
+
+ethLoad();
+</script>
+{% endblock %}

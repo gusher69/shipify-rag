@@ -479,55 +479,71 @@ def build_response_field_mapping(proposal: Dict) -> List[Dict]:
     return out
 
 
-# ── Part 5: Intent Classification — a fixed business taxonomy, matched
-# by keyword/category heuristics (never invents a category outside this
-# list; falls back to "unknown" rather than guessing confidently wrong).
-_INTENT_TAXONOMY = [
-    ("customer_lookup", "Customer Lookup", [r"customer.*(look|get|search|find)", r"ลูกค้า.*(ค้นหา|ดึง)"]),
-    ("customer_update", "Customer Update", [r"customer.*(update|edit|change)", r"แก้ไข.*ลูกค้า"]),
-    ("order_lookup", "Order Lookup", [r"order.*(look|get|search|status)", r"ออเดอร์|คำสั่งซื้อ"]),
-    ("order_update", "Order Update", [r"order.*(update|cancel|edit)"]),
-    ("shipment", "Shipment", [r"shipment|delivery|จัดส่ง"]),
-    ("tracking", "Tracking", [r"track", r"ติดตาม|พัสดุ"]),
-    ("finance", "Finance", [r"wallet|balance|invoice|refund|payment|finance"]),
-    ("authentication", "Authentication", [r"login|auth|token|otp"]),
-    ("notification", "Notification", [r"notify|notification|alert|แจ้งเตือน"]),
-    ("report", "Report", [r"report|summary|analytics"]),
-    ("file_upload", "File Upload", [r"upload|file"]),
-    ("ocr", "OCR", [r"\bocr\b"]),
-    ("vision", "Vision", [r"vision|image.*(analy|detect)"]),
-]
-
-_SYNONYM_TABLE = {
-    "customer": ["ลูกค้า", "client", "member"], "order": ["ออเดอร์", "คำสั่งซื้อ", "po"],
-    "tracking": ["ติดตาม", "พัสดุ", "shipment"], "wallet": ["เงิน", "ยอดเงิน", "balance"],
-}
-
-
+# ── Part 5: Intent Classification — GENERIC, no hardcoded per-domain
+# taxonomy/synonym table (that hardcoded regex list was a real "no
+# endpoint-specific logic" violation — REMOVED as of the Semantic API
+# Analysis Engine sprint, not extended). Delegates entity detection to
+# services/erp_test_harness.py's already-generic detect_entities()/
+# _primary_entity() and endpoint-intent classification to
+# services/semantic_api_analysis_engine.py::classify_endpoint_intent()
+# — this function is now a thin composition of those two generic
+# building blocks, never a second competing classifier.
 def classify_intent(proposal: Dict) -> Dict:
-    """Part 5 — Intent Classification. Matches the proposal's own
-    description/display_name/category/keywords against a fixed taxonomy.
-    Never returns a category outside _INTENT_TAXONOMY plus "unknown"."""
-    haystack = " ".join([
-        proposal.get("description") or "", proposal.get("display_name") or "",
-        proposal.get("category") or "", " ".join(proposal.get("keywords") or []),
-    ]).lower()
+    """Part 5 — Intent Classification, entirely derived from the
+    proposal's own text via generic entity + endpoint-intent detection
+    (no fixed keyword taxonomy). Falls back to "unknown" rather than
+    guessing confidently wrong when no entity is detected at all."""
+    from services import erp_test_harness as harness
+    from services.semantic_api_analysis_engine import classify_endpoint_intent
 
-    for intent_id, display_name, patterns in _INTENT_TAXONOMY:
-        if any(re.search(p, haystack, re.IGNORECASE) for p in patterns):
-            keywords = proposal.get("keywords") or [proposal.get("category") or intent_id]
-            synonyms = sorted(set(sum((_SYNONYM_TABLE.get(k.lower(), []) for k in keywords), [])))
-            return {
-                "intent_id": intent_id, "intent_display_name": display_name,
-                "intent_description": proposal.get("description") or display_name,
-                "example_user_questions": proposal.get("example_questions") or [],
-                "keywords": keywords, "synonyms": synonyms,
-            }
+    pseudo_action = {
+        "parameters": proposal.get("parameters") or [],
+        "response_mapping": proposal.get("response_mapping") or [],
+        "display_name": proposal.get("display_name") or "",
+        "description": proposal.get("description") or "",
+        "category": proposal.get("category") or "",
+        "search_keywords": proposal.get("keywords") or [],
+    }
+    entity = harness._primary_entity(pseudo_action)
+    keywords = proposal.get("keywords") or ([proposal.get("category")] if proposal.get("category") else [])
+    description = proposal.get("description") or proposal.get("display_name") or ""
+
+    if not entity:
+        return {
+            "intent_id": "unknown", "intent_display_name": "Unknown",
+            "intent_description": proposal.get("description") or "Could not confidently classify this capability.",
+            "example_user_questions": proposal.get("example_questions") or [],
+            "keywords": keywords, "synonyms": [],
+        }
+
+    endpoint_result = classify_endpoint_intent(
+        endpoint_url=proposal.get("endpoint_path") or "",
+        http_method=proposal.get("http_method") or "GET",
+        description=description,
+        body_fields=proposal.get("parameters") or [],
+        example_response=None,
+    )
+    # A bare-entity-name category (e.g. "tracking") reads naturally on
+    # its own; otherwise compose entity + a lookup-family suffix so
+    # "customer" + LOOKUP-family intent reads as "customer_lookup".
+    op = endpoint_result["intent"]
+    lookup_family = op in ("LOOKUP", "SEARCH", "LIST", "DETAIL")
+    if lookup_family:
+        intent_id = f"{entity}_lookup"
+    else:
+        intent_id = f"{entity}_{op.lower()}"
+
+    display_name = _humanize_name(intent_id)
+    # Generic synonym enrichment: reuse whatever entity string was
+    # detected (no fixed per-entity synonym dict) — synonyms are simply
+    # any OTHER entity keywords already present in the proposal's own
+    # keyword list, never a hardcoded translation table.
+    synonyms = sorted({k for k in keywords if k and k.lower() != entity.lower()})
     return {
-        "intent_id": "unknown", "intent_display_name": "Unknown",
-        "intent_description": proposal.get("description") or "Could not confidently classify this capability.",
+        "intent_id": intent_id, "intent_display_name": display_name,
+        "intent_description": proposal.get("description") or display_name,
         "example_user_questions": proposal.get("example_questions") or [],
-        "keywords": proposal.get("keywords") or [], "synonyms": [],
+        "keywords": keywords, "synonyms": synonyms,
     }
 
 
@@ -793,6 +809,31 @@ def analyze_capability(user_input: str, business_purpose: str, example_questions
         response_preview = generate_response_preview(proposal, mock_data)
         self_review = run_self_review(proposal, business_mapping, response_field_mapping,
                                        confidence, similarity, response_preview)
+
+        # Semantic API Analysis Engine (Steps 1-9/11/12) — the ONE
+        # canonical, deterministic classification for this endpoint,
+        # additive to `proposal`/`result` (existing keys/consumers are
+        # unaffected). `setup_metadata.operation_type` is what actually
+        # wires this into the Generic Integration Runtime/Integration
+        # Schema at save time (see admin/routes.py's save endpoint) via
+        # the ALREADY-EXISTING setup_metadata override tier — no second
+        # runtime classifier, no schema/contract format change.
+        from services.semantic_api_analysis_engine import analyze_endpoint
+        semantic_analysis = analyze_endpoint(
+            endpoint_url=proposal.get("endpoint_path") or "",
+            http_method=proposal.get("http_method") or "GET",
+            description=proposal.get("description") or "",
+            headers=proposal.get("headers") or {},
+            body_fields=proposal.get("parameters") or [],
+            example_response=proposal.get("example_response"),
+            avoid_phrase_overlap=similarity.get("recommendation") in ("merge", "reuse_existing"),
+        )
+        proposal["setup_metadata"] = {
+            **(proposal.get("setup_metadata") or {}),
+            "operation_type": semantic_analysis["mapped_runtime_operation_type"],
+            "semantic_analysis": semantic_analysis,
+        }
+
         result.update({
             "business_mapping": business_mapping,
             "response_field_mapping": response_field_mapping,
@@ -802,6 +843,7 @@ def analyze_capability(user_input: str, business_purpose: str, example_questions
             "mock_data": mock_data,
             "response_preview": response_preview,
             "self_review": self_review,
+            "semantic_analysis": semantic_analysis,
         })
         # Deliberately NOT overwriting proposal["detection_confidence"]
         # here — that string still drives the existing Stage 1b
@@ -993,16 +1035,67 @@ def expand_example_questions(seed_question: str, business_purpose: str = "", *,
         return [seed_question]
 
 
+def _normalize_for_collision_check(text: str) -> str:
+    """Loose normalization for near-duplicate detection — lowercase,
+    collapse whitespace, strip common Thai/English question punctuation.
+    Deliberately simple (no NLP/embedding similarity) since this is only
+    meant to catch obvious literal overlap with existing RAG/API
+    phrasing, not paraphrase detection."""
+    import re
+    t = (text or "").strip().lower()
+    t = re.sub(r"[?？！!.,ๆฯ]+", "", t)
+    t = re.sub(r"\s+", " ", t)
+    return t
+
+
+def _collides_with_avoid_phrases(question: str, avoid_normalized: set) -> bool:
+    """True if `question` is an exact (normalized) match OR a near-total
+    substring overlap with any already-used phrase — catching the
+    "AI just reworded an existing RAG FAQ / other API's example
+    question" case without needing real semantic similarity."""
+    norm = _normalize_for_collision_check(question)
+    if not norm:
+        return False
+    if norm in avoid_normalized:
+        return True
+    for phrase in avoid_normalized:
+        if not phrase:
+            continue
+        # One fully contains the other (either direction) — a strong
+        # signal of "same question, different wrapper words" without
+        # requiring an exact match.
+        if len(phrase) >= 6 and (phrase in norm or norm in phrase):
+            return True
+    return False
+
+
 def generate_suggested_questions(display_name: str, description: str = "", category: str = "",
                                   existing_questions: Optional[List[str]] = None, *,
+                                  avoid_phrases: Optional[List[str]] = None,
                                   model: str = "gpt-4o-mini", max_tokens: int = 700) -> List[str]:
     """AI Suggested Questions (bring-back feature) — generates 10-20
     realistic, natural-language Thai customer questions that should
     trigger THIS ERP capability, grouped by similar meaning and deduped,
     mixing short and long phrasings plus common synonyms. Never raises;
     falls back to `existing_questions` (or []) on any AI/parsing failure
-    so the caller's UI degrades gracefully instead of erroring."""
+    so the caller's UI degrades gracefully instead of erroring.
+
+    `avoid_phrases` (2026-07-29): example questions already used by
+    OTHER Business Actions or already present as RAG FAQ content —
+    passed to the LLM as explicit negative examples, AND enforced
+    afterward via a plain literal-overlap filter (never a real
+    similarity model), so a new action's suggested questions don't
+    collide with wording that already routes elsewhere."""
     existing_questions = existing_questions or []
+    avoid_phrases = [p for p in (avoid_phrases or []) if p and p.strip()]
+    avoid_block = ""
+    if avoid_phrases:
+        sample = avoid_phrases[:60]  # keep the prompt bounded regardless of how much exists system-wide
+        avoid_block = (
+            "\nคำถามต่อไปนี้ถูกใช้แล้วโดย API อื่นหรือมีอยู่แล้วในฐานความรู้ (RAG) — "
+            "ห้ามเสนอคำถามที่ซ้ำความหมายหรือใกล้เคียงกับข้อความเหล่านี้ เพื่อป้องกันการชนกันตอน AI เลือกว่าจะเรียก API ไหน:\n"
+            + "\n".join(f"- {p}" for p in sample)
+        )
     messages = [
         {"role": "system", "content": (
             "คุณคือผู้ช่วยสร้างตัวอย่างคำถามลูกค้าสำหรับแพลตฟอร์ม AI Customer Service "
@@ -1013,6 +1106,7 @@ def generate_suggested_questions(display_name: str, description: str = "", categ
         {"role": "user", "content": (
             f"ความสามารถ (Capability): {display_name}\nคำอธิบาย: {description}\nหมวดหมู่: {category}\n"
             "โปรดเสนอคำถามลูกค้าที่เป็นธรรมชาติ 10-20 ข้อ ไม่ซ้ำความหมายกัน เป็น JSON array ของ string"
+            + avoid_block
         )},
     ]
     try:
@@ -1021,7 +1115,9 @@ def generate_suggested_questions(display_name: str, description: str = "", categ
         suggestions = _parse_json_response(response.text)
         if not isinstance(suggestions, list):
             return existing_questions
-        cleaned = [s.strip() for s in suggestions if isinstance(s, str) and s.strip()]
+        avoid_normalized = {_normalize_for_collision_check(p) for p in avoid_phrases}
+        cleaned = [s.strip() for s in suggestions if isinstance(s, str) and s.strip()
+                   and not _collides_with_avoid_phrases(s, avoid_normalized)]
         seen, deduped = set(), []
         for q in existing_questions + cleaned:
             if q not in seen:

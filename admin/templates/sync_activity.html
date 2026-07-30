@@ -244,19 +244,6 @@
   </div>
 </div>
 
-<!-- ═══════ CONFIRM MODAL ═══════ -->
-<div class="modal-ov" id="confirm-modal" onclick="if(event.target===this)closeModal('confirm-modal')">
-  <div class="modal-box" style="max-width:460px">
-    <button type="button" class="modal-close" onclick="closeModal('confirm-modal')">✕</button>
-    <div style="font-size:26px;margin-bottom:8px" id="cfm-icon"></div>
-    <div style="font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:10px" id="cfm-title"></div>
-    <div id="cfm-msg" style="font-size:13px;color:rgba(232,237,245,.6);margin-bottom:20px;line-height:1.55"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button type="button" id="cfm-cancel" onclick="closeModal('confirm-modal')" class="btn" style="background:rgba(255,255,255,.05);color:rgba(232,237,245,.6);border:1px solid rgba(255,255,255,.1)">Cancel</button>
-      <button type="button" id="cfm-ok" class="btn btn-primary"></button>
-    </div>
-  </div>
-</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -595,21 +582,17 @@ function cancelJob(jobId) {
     });
 }
 
-// ── Confirm modal ──
-var _cfmOnOk = null;
-function showConfirm(opts) {
-  document.getElementById('cfm-icon').textContent = opts.icon||'';
-  document.getElementById('cfm-title').textContent = opts.title||'';
-  var msgEl = document.getElementById('cfm-msg');
-  if (opts.isHtml) msgEl.innerHTML=opts.message||''; else msgEl.textContent=opts.message||'';
-  var okBtn = document.getElementById('cfm-ok');
-  okBtn.textContent=opts.okText||'OK';
-  okBtn.style.cssText='background:'+(opts.okColor||'#1B4F9B')+';color:#fff;border-color:'+(opts.okColor||'#1B4F9B');
-  _cfmOnOk=opts.onOk||null;
-  openModal('confirm-modal');
-}
-document.getElementById('cfm-ok').addEventListener('click', function(){
-  closeModal('confirm-modal'); if (_cfmOnOk) _cfmOnOk();
-});
+// Confirm dialogs (retryJob/cancelJob above) use the shared, global
+// showConfirm() already defined once in base.html — same call signature
+// ({icon, title, message, okText, okColor, onOk}) — never a second,
+// locally-shadowing definition here. A duplicate id="confirm-modal" +
+// local showConfirm() used to live in this file; removed because two
+// elements sharing that id meant base.html's showConfirm() (the one
+// that actually wins, since it's declared later in the page) wrote
+// icon/title/message into base.html's own (correct but hidden) modal,
+// while THIS file's now-removed div — the first "confirm-modal" match
+// in the DOM — was the one actually shown, empty, via forced
+// `style.display='flex'`. That was the real cause of the blank
+// Retry-confirmation dialog.
 </script>
 {% endblock %}

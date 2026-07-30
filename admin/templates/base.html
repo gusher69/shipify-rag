@@ -420,15 +420,21 @@
 
     /* Developer Mode badge (Developer Mode milestone) — subtle, always
        visible while Developer Mode is on, so the admin is never unsure
-       which mode they're in. Sidebar footer position — visible whether
-       the sidebar is expanded or collapsed. */
+       which mode they're in. Flows naturally in the sidebar, directly
+       above the Sign Out footer — NOT position:fixed (a fixed pixel
+       offset used to float independently of the sidebar's own layout,
+       colliding with the footer whenever the nav content above it grew
+       or shrank). */
     .dev-mode-badge {
-      position: fixed; left: 12px; bottom: 56px; z-index: 40;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 10px 10px; z-index: 40;
       background: rgba(245,166,35,0.14); color: #fcd34d;
       border: 1px solid rgba(245,166,35,0.32); border-radius: 20px;
-      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      padding: 5px 10px; font-size: 11px; font-weight: 600;
       pointer-events: none; white-space: nowrap;
     }
+    #sidebar.collapsed .dev-mode-badge { padding: 5px; }
+    #sidebar.collapsed .dev-mode-badge .dev-mode-badge-label { display: none; }
     .badge-gray  { background:rgba(255,255,255,0.06); color:var(--text-muted); border:1px solid var(--glass-border); }
 
     /* ── Table ── */
@@ -626,7 +632,7 @@
 
     {% if developer_mode %}
     <div class="dev-mode-badge" title="Developer Mode is ON — advanced/unfinished tools are visible. Toggle it off in Settings.">
-      🛠️ Developer Mode
+      🛠️<span class="dev-mode-badge-label" style="margin-left:6px">Developer Mode</span>
     </div>
     {% endif %}
 

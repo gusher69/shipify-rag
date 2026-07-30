@@ -90,6 +90,18 @@ FEATURE_DEFINITIONS: Dict[str, Dict] = {
         "developer_only": False, "implementation_status": "complete",
         "env_override": "SHOW_BUSINESS_ACTION_CENTER", "navigation_group": "integrations",
     },
+    # ERP/AI Product Architecture Separation (this sprint) — ERP testing
+    # (conversation-driven verification that an imported ERP API works)
+    # is its own page/responsibility, distinct from ERP Integration
+    # (configuration) and from AI Playground (pure AI/RAG testing). Same
+    # always-on visibility as business_action_center — never gated
+    # behind Developer Mode, since ERP testing is a normal, everyday
+    # Admin task, not an advanced/unfinished tool.
+    "erp_conversation_tester": {
+        "title": "ERP Conversation Tester", "route": "/admin/erp/conversation-tester", "icon": "message-square",
+        "developer_only": False, "implementation_status": "complete",
+        "env_override": "SHOW_BUSINESS_ACTION_CENTER", "navigation_group": "integrations",
+    },
     "excel_engine": {
         "title": "Excel Engine", "route": None, "icon": "table",
         "developer_only": True, "implementation_status": "coming_soon", "env_override": None,

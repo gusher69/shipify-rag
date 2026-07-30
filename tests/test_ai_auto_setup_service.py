@@ -400,5 +400,46 @@ class TestPart9CurlSourceOfTruth(unittest.TestCase):
         self.assertTrue(ok, errors)
 
 
+class TestSuggestedQuestionsAvoidCollisions(unittest.TestCase):
+    """2026-07-29 — generate_suggested_questions() must not suggest a
+    question that collides (exact or near-literal overlap) with an
+    avoid_phrase already used by another API or already present as RAG
+    FAQ content, so future intent routing doesn't collide on wording."""
+
+    def test_colliding_suggestion_is_filtered_out(self):
+        from services.ai_auto_setup_service import generate_suggested_questions
+        fake_llm = MagicMock()
+        fake_llm.generate.return_value = LLMResponse(
+            text=json.dumps(["ยอดเงินใน Wallet ของฉันมีเท่าไหร่", "สถานะคำสั่งซื้อของฉันเป็นอย่างไร"]),
+            model="gpt-4o-mini", provider="openai", input_tokens=10, output_tokens=20, latency_ms=50.0)
+        with patch("services.ai_auto_setup_service.get_llm_service", return_value=fake_llm):
+            result = generate_suggested_questions(
+                "Order Lookup", avoid_phrases=["ยอดเงินใน Wallet ของฉันมีเท่าไหร่"])
+        self.assertNotIn("ยอดเงินใน Wallet ของฉันมีเท่าไหร่", result)
+        self.assertIn("สถานะคำสั่งซื้อของฉันเป็นอย่างไร", result)
+
+    def test_avoid_phrases_are_included_in_the_prompt(self):
+        from services.ai_auto_setup_service import generate_suggested_questions
+        fake_llm = MagicMock()
+        fake_llm.generate.return_value = LLMResponse(
+            text=json.dumps(["คำถามใหม่"]), model="gpt-4o-mini", provider="openai",
+            input_tokens=5, output_tokens=5, latency_ms=50.0)
+        with patch("services.ai_auto_setup_service.get_llm_service", return_value=fake_llm):
+            generate_suggested_questions("Order Lookup", avoid_phrases=["มีบริการอะไรบ้าง"])
+        sent_messages = fake_llm.generate.call_args[0][0]
+        sent_text = json.dumps(sent_messages, ensure_ascii=False)
+        self.assertIn("มีบริการอะไรบ้าง", sent_text)
+
+    def test_no_avoid_phrases_behaves_exactly_as_before(self):
+        from services.ai_auto_setup_service import generate_suggested_questions
+        fake_llm = MagicMock()
+        fake_llm.generate.return_value = LLMResponse(
+            text=json.dumps(["คำถามหนึ่ง", "คำถามสอง"]), model="gpt-4o-mini", provider="openai",
+            input_tokens=5, output_tokens=5, latency_ms=50.0)
+        with patch("services.ai_auto_setup_service.get_llm_service", return_value=fake_llm):
+            result = generate_suggested_questions("Order Lookup")
+        self.assertEqual(result, ["คำถามหนึ่ง", "คำถามสอง"])
+
+
 if __name__ == "__main__":
     unittest.main()

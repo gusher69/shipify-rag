@@ -29,7 +29,7 @@
                 style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
                        background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px">👁</button>
       </div>
-      <div class="form-hint">ใช้สำหรับ Embedding (text-embedding-3-small) และ Chat completion (gpt-4o)</div>
+      <div class="form-hint">ใช้สำหรับ Embedding (text-embedding-3-large, 3072 dimensions) และ Chat completion (gpt-4o)</div>
     </div>
     <div class="grid-2">
       <div class="form-group">
@@ -41,12 +41,17 @@
       </div>
       <div class="form-group">
         <label class="form-label">Embedding Model</label>
-        <input type="text" name="OPENAI_EMBED_MODEL" class="form-input"
-               value="{{ env.OPENAI_EMBED_MODEL or 'text-embedding-3-small' }}"
-               placeholder="text-embedding-3-small">
-        <div class="form-hint">e.g. text-embedding-3-small, text-embedding-3-large</div>
+        <input type="text" name="OPENAI_EMBEDDING_MODEL" class="form-input"
+               value="{{ env.OPENAI_EMBEDDING_MODEL or 'text-embedding-3-large' }}"
+               placeholder="text-embedding-3-large">
+        <div class="form-hint">text-embedding-3-large, 3072 dimensions — must match the knowledge_chunks.embedding column width. Changing this requires re-embedding all existing content; never edit casually.</div>
       </div>
     </div>
+    {% if legacy_embed_warning %}
+    <div class="form-hint" style="color:#F5A623;background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.25);border-radius:6px;padding:8px 10px;margin-top:8px">
+      ⚠ {{ legacy_embed_warning }}
+    </div>
+    {% endif %}
     <button type="submit" class="btn btn-primary">Save OpenAI Config</button>
   </form>
 </div>
