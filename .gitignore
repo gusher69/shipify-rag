@@ -1,6 +1,7 @@
 # ── Secrets / credentials — NEVER commit ────────────────────────────────
 .env
 .env.*
+gusher_secret.txt
 !.env.example
 *.pem
 *.key
