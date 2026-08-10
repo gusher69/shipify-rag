@@ -262,6 +262,45 @@ def get_active_prompt_for_channel(channel: str) -> PromptTemplate:
     return get_default_template()
 
 
+def get_active_prompt_for_tier(tier: str) -> Optional[PromptTemplate]:
+    """Phase 3.4 (2026-08-05, Conversation Intelligence sprint) — Prompt
+    Studio's "Customer Tier Prompt" section. Mirrors
+    get_active_prompt_for_channel() exactly, but keyed by
+    services.customer_tier_service.py's conversation_tier
+    (cold/warm/hot/negative) instead of channel. Returns None (not a
+    fallback template) when no assignment is configured for this tier —
+    callers must fall back to channel/global resolution themselves, since
+    "no tier prompt configured" is a valid, common state (tier prompts are
+    opt-in), unlike a missing channel assignment."""
+    try:
+        ares = _get_sb().table("ai_prompt_tier_assignments").select("prompt_template_id") \
+            .eq("tier", tier).eq("is_active", True).limit(1).execute()
+        if ares.data:
+            tres = _get_sb().table("ai_prompt_templates").select("*") \
+                .eq("id", ares.data[0]["prompt_template_id"]).is_("deleted_at", "null").execute()
+            if tres.data:
+                return _row_to_template(tres.data[0])
+    except Exception as e:
+        print(f"[prompt_builder] get_active_prompt_for_tier({tier}) failed: {e}")
+    return None
+
+
+def get_active_prompt(*, channel: Optional[str] = None, tier: Optional[str] = None) -> PromptTemplate:
+    """The single resolution entry point Decision Engine uses: Customer
+    Tier Prompt (if one is configured for this tier) takes priority over
+    the channel's own assignment, which takes priority over the Global
+    Default — never a manual per-conversation choice (users cannot select
+    a prompt directly; see CLAUDE.md Phase 3.4). Falling through this
+    chain is the ONLY way a prompt gets selected for real traffic."""
+    if tier:
+        tier_prompt = get_active_prompt_for_tier(tier)
+        if tier_prompt:
+            return tier_prompt
+    if channel:
+        return get_active_prompt_for_channel(channel)
+    return get_default_template()
+
+
 @dataclass
 class BuiltPrompt:
     template: PromptTemplate

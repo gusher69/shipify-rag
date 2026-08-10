@@ -20,7 +20,7 @@
 .pg-layout{display:grid;grid-template-columns:minmax(300px,40%) 1fr;gap:16px;align-items:start}
 @media (max-width:960px){.pg-layout{grid-template-columns:1fr}}
 
-.pg-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;display:flex;flex-direction:column;height:calc(100vh - 260px);min-height:520px}
+.pg-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;display:flex;flex-direction:column;height:calc(100vh - 260px);min-height:520px;position:sticky;top:16px}
 .pg-panel-header{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .pg-panel-title{font-size:12px;font-weight:600;color:rgba(232,237,245,.6);text-transform:uppercase;letter-spacing:.05em}
 
@@ -85,6 +85,32 @@
 .pg-stage-detail{font-size:10.5px;color:rgba(232,237,245,.4)}
 .pg-stage-duration{font-size:11px;color:rgba(232,237,245,.45);font-family:monospace}
 
+/* ── Unified Pipeline Timeline (2026-08-02 Phase 2) ──
+   Conversation -> Intent -> Entities -> Selection -> Business Action ->
+   Retrieved Knowledge -> Prompt Builder -> Prompt -> LLM -> ERP Response ->
+   Grounding -> Citation -> Confidence -> Final Answer, one real-data-only
+   collapsible <details> per stage. Never fabricates a value — a stage
+   with no real data for the current mode/turn renders "N/A". */
+.pl-timeline{display:flex;flex-direction:column;gap:0}
+.pl-stage{border-bottom:1px solid rgba(255,255,255,.06)}
+.pl-stage:last-child{border-bottom:none}
+.pl-stage > summary{list-style:none;cursor:pointer;padding:11px 4px;display:flex;align-items:center;gap:10px;user-select:none}
+.pl-stage > summary::-webkit-details-marker{display:none}
+.pl-stage-chevron{flex-shrink:0;color:rgba(232,237,245,.35);transition:transform .15s;font-size:10px}
+.pl-stage[open] > summary .pl-stage-chevron{transform:rotate(90deg)}
+.pl-stage-num{flex-shrink:0;width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.06);color:rgba(232,237,245,.5);
+  font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.pl-stage-title{flex:1;font-size:12.5px;font-weight:600;color:#e8edf5}
+.pl-stage-summary{font-size:11px;color:rgba(232,237,245,.4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}
+.pl-stage-na{color:rgba(232,237,245,.3);font-style:italic}
+.pl-stage-body{padding:0 4px 14px 34px;font-size:12px;color:rgba(232,237,245,.75);line-height:1.6}
+.pl-stage.pl-highlight{background:rgba(245,166,35,.035);border-left:3px solid rgba(245,166,35,.5);border-radius:6px;margin:2px 0}
+.pl-stage.pl-highlight > summary .pl-stage-title{color:#F5A623}
+.pl-kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin-bottom:8px}
+.pl-kv dt{color:rgba(232,237,245,.45);font-size:11px;white-space:nowrap}
+.pl-kv dd{margin:0;color:#e8edf5;font-size:12px;word-break:break-word}
+.pl-note{font-size:10.5px;color:rgba(252,211,77,.85);margin-top:6px;padding:6px 8px;background:rgba(252,211,77,.06);border-radius:6px;border:1px solid rgba(252,211,77,.15)}
+
 .pg-svc-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 10px;border-radius:14px;margin:3px}
 .pg-svc-success{background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.25)}
 .pg-svc-failed{background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.25)}
@@ -99,19 +125,13 @@
 .pg-copy-icon:hover{background:rgba(255,255,255,.1);color:rgba(232,237,245,.8)}
 .pg-copy-icon:focus-visible,.pg-copy-btn:focus-visible{outline:2px solid #60a5fa;outline-offset:1px}
 
-/* Customer-demo P0 fix: reintroduces a Customer/Developer view toggle
-   scoped to .pg-layout3 (not <body>, to avoid touching any other admin
-   page). Customer mode hides numeric confidence/"Low Confidence" and the
-   Prompt/Pipeline/Raw JSON tabs — Answer/Sources/Attachments only.
-   Developer mode (toggle it on) restores everything, unchanged from
-   before. Default is Customer mode for tomorrow's demo. */
+/* AI Playground redesign (2026-08-02 Phase 2) — Developer Mode is now
+   always visible, no Customer/Developer toggle, no hidden panels: every
+   .dev-only/.dev-only-inline element (confidence score, Prompt/Pipeline/
+   Raw JSON tabs, per-field copy icons, etc.) is always shown. The toggle
+   and its pg-customer-mode hiding rules are intentionally removed. */
 .dev-only{display:block}
 .dev-only-inline{display:inline-flex}
-.pg-layout3.pg-customer-mode .dev-only{display:none}
-.pg-layout3.pg-customer-mode .dev-only-inline{display:none}
-.pg-mode-toggle{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:rgba(232,237,245,.6);
-  border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:4px 10px;cursor:pointer;user-select:none}
-.pg-mode-toggle:hover{background:rgba(255,255,255,.06)}
 
 /* ── Prompt Template selector — custom listbox matching the dark navy
    enterprise theme (native <select> can't be restyled cross-browser to
@@ -234,10 +254,7 @@
 </div>
 
 <!-- Split Layout -->
-<div class="pg-layout3 pg-customer-mode" id="pg-layout3-root">
-  <div style="grid-column:1/-1;display:flex;justify-content:flex-end;margin-bottom:2px">
-    <span class="pg-mode-toggle" id="pg-mode-toggle" onclick="togglePgMode()">👤 Customer Mode (click for Developer Mode)</span>
-  </div>
+<div class="pg-layout3" id="pg-layout3-root">
   <!-- SESSIONS SIDEBAR -->
   <div class="sess-panel">
     <div class="sess-header">
@@ -310,17 +327,20 @@
   <!-- RIGHT: Tabs -->
   <div class="pg-panel">
     <div class="pg-tabs">
-      <div class="pg-tab active" data-tab="answer" onclick="switchTab('answer')">Answer</div>
-      <div class="pg-tab dev-only" data-tab="prompt" onclick="switchTab('prompt')">Prompt</div>
-      <div class="pg-tab dev-only" data-tab="pipeline" onclick="switchTab('pipeline')">Pipeline</div>
-      <div class="pg-tab dev-only" data-tab="json" onclick="switchTab('json')">Raw JSON</div>
+      <div class="pg-tab active" data-tab="pipeline" onclick="switchTab('pipeline')">Pipeline</div>
+      <div class="pg-tab" data-tab="answer" onclick="switchTab('answer')">Answer</div>
+      <div class="pg-tab" data-tab="prompt" onclick="switchTab('prompt')">Prompt</div>
+      <div class="pg-tab" data-tab="json" onclick="switchTab('json')">Raw JSON</div>
       <div class="pg-tab" data-tab="explain" onclick="switchTab('explain')">Explainability</div>
       <div class="pg-tab" data-tab="chunks" onclick="switchTab('chunks')">Retrieved Chunks</div>
       <div class="pg-tab" data-tab="hybrid" onclick="switchTab('hybrid')">Hybrid Trace</div>
       <div class="pg-tab" data-tab="debug" onclick="switchTab('debug')">Developer Debug</div>
     </div>
     <div class="pg-tab-content">
-      <div class="pg-tab-pane active" id="tab-answer">
+      <div class="pg-tab-pane active" id="tab-pipeline">
+        <div id="pg-pipeline-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No pipeline run yet — ask a question on the left.</div>
+      </div>
+      <div class="pg-tab-pane" id="tab-answer">
         <div style="text-align:center;padding:40px 10px;color:rgba(232,237,245,.3);font-size:13px" id="pg-answer-empty">
           No answer yet — ask a question on the left.
         </div>
@@ -328,9 +348,6 @@
       </div>
       <div class="pg-tab-pane" id="tab-prompt">
         <div id="pg-prompt-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No prompt built yet.</div>
-      </div>
-      <div class="pg-tab-pane" id="tab-pipeline">
-        <div id="pg-pipeline-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No pipeline run yet.</div>
       </div>
       <div class="pg-tab-pane" id="tab-json">
         <div id="pg-json-content" style="color:rgba(232,237,245,.4);font-size:12.5px">No response yet.</div>
@@ -392,24 +409,6 @@ function currentTab() {
 function switchTab(name) {
   document.querySelectorAll('.pg-tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab === name); });
   document.querySelectorAll('.pg-tab-pane').forEach(function(p){ p.classList.toggle('active', p.id === 'tab-' + name); });
-}
-
-// Customer/Developer view toggle (customer-demo P0 fix) — Customer mode
-// (default) hides numeric confidence/"Low Confidence" and the
-// Prompt/Pipeline/Raw JSON tabs; never changes any underlying score,
-// only what's rendered. Scoped to #pg-layout3-root, not <body>.
-function togglePgMode() {
-  var root = document.getElementById('pg-layout3-root');
-  var label = document.getElementById('pg-mode-toggle');
-  var isCustomer = root.classList.toggle('pg-customer-mode');
-  label.textContent = isCustomer
-    ? '👤 Customer Mode (click for Developer Mode)'
-    : '🛠️ Developer Mode (click for Customer Mode)';
-  if (!isCustomer) return;
-  // Leaving a dev-only tab active in customer mode would show a blank
-  // pane (tab hidden via CSS but still "active") — fall back to Answer.
-  var activeTab = document.querySelector('.pg-tab.active');
-  if (activeTab && activeTab.classList.contains('dev-only')) switchTab('answer');
 }
 
 /* ══════════════ Prompt Template selector (custom listbox) ══════════════
@@ -756,7 +755,10 @@ function selectSession(id) {
         renderChunks(dObj.chunks);
         renderAnswer(dObj);
         renderPrompt(dObj);
-        renderPipeline(dObj);
+        renderUnifiedPipeline({
+          mode: 'rag', question: session.name || session.last_question || '',
+          rag: _plNormalizeRagFromMetadata(dObj), erp: null, hybrid: null, route_decision: null,
+        });
         renderJson(dObj);
         renderExplain(dObj);
       } else {
@@ -764,6 +766,7 @@ function selectSession(id) {
         renderChunks([]);
         document.getElementById('pg-answer-empty').style.display = '';
         document.getElementById('pg-answer-content').style.display = 'none';
+        document.getElementById('pg-pipeline-content').innerHTML = 'No pipeline run yet — ask a question on the left.';
       }
     })
     .catch(function(){});
@@ -1162,38 +1165,291 @@ function renderPrompt(d) {
     '<div class="pg-json">' + esc(p.final_prompt) + '</div>';
 }
 
-function stageIconClass(status) {
-  return {success:'pg-stage-success', failed:'pg-stage-failed', skipped:'pg-stage-skipped', triggered:'pg-stage-triggered'}[status] || 'pg-stage-skipped';
+/* ══════════════ Unified Pipeline Timeline (2026-08-02 Phase 2) ══════════════
+   ONE real-data-only vertical view, in the exact stage order requested:
+   Conversation -> Intent Detection -> Entity Extraction -> Decision Engine
+   (Action Selection) -> Selected Business Action -> Retrieved Knowledge ->
+   Prompt Builder -> Final Prompt -> LLM -> ERP Payload -> ERP Response ->
+   Grounding -> Citation -> Confidence -> Final Answer.
+
+   `src` shape: {mode, question, rag, erp, hybrid, route_decision}
+     rag:   normalized RAG result — {answer, chunks, prompt{template_name|
+            template_id, template_version, system_prompt, final_prompt},
+            confidence, confidence_label, answerability, model, latency_ms,
+            input_tokens, output_tokens, broad_intent, actionable_intent,
+            intent_confidence, intent_entities} — or null if RAG didn't run.
+     erp:   the hybrid-playground/ask route's erp_out — {trace[], answer,
+            clarification_question, normalized_result, ...} — or null.
+     hybrid: {merged_answer, ...} — or null.
+     route_decision: {route, reason} from the Auto-mode heuristic, or null.
+
+   Every field is read, never invented — a stage with nothing real for the
+   current mode/turn always renders "N/A", per the explicit requirement. */
+function _plStage(num, title, bodyHtml, opts) {
+  opts = opts || {};
+  return '<details class="pl-stage' + (opts.highlight ? ' pl-highlight' : '') + '" open>' +
+    '<summary><span class="pl-stage-chevron">▶</span>' +
+    '<span class="pl-stage-num">' + num + '</span>' +
+    '<span class="pl-stage-title">' + esc(title) + '</span>' +
+    (opts.summary ? '<span class="pl-stage-summary">' + esc(opts.summary) + '</span>' : '') +
+    '</summary><div class="pl-stage-body">' + bodyHtml + '</div></details>';
 }
-function stageIconChar(status) {
-  return {success:'✓', failed:'✕', skipped:'—', triggered:'!'}[status] || '?';
+
+function _plNA(msg) { return '<span class="pl-stage-na">' + esc(msg || 'N/A') + '</span>'; }
+
+function _plKV(pairs) {
+  var rows = pairs.filter(function(p) { return p[1] !== undefined; });
+  if (!rows.length) return '';
+  return '<dl class="pl-kv">' + rows.map(function(p) {
+    return '<dt>' + esc(p[0]) + '</dt><dd>' + (p[1] == null || p[1] === '' ? _plNA() : esc(p[1])) + '</dd>';
+  }).join('') + '</dl>';
 }
 
-function renderPipeline(d) {
-  var stagesHtml = (d.pipeline || []).map(function(s) {
-    return '<div class="pg-stage">' +
-      '<div class="pg-stage-icon '+stageIconClass(s.status)+'">'+stageIconChar(s.status)+'</div>' +
-      '<div class="pg-stage-name">'+esc(s.name)+'<div class="pg-stage-detail">'+esc(s.detail||'')+'</div></div>' +
-      '<div class="pg-stage-duration">'+Number(s.duration_ms||0).toFixed(1)+' ms</div>' +
-    '</div>';
-  }).join('');
+function _plJson(text) { return '<div class="pg-json">' + esc(text) + '</div>'; }
 
-  var svcHtml = (d.services_used || []).map(function(s) {
-    return '<span class="pg-svc-chip pg-svc-'+esc(s.status)+'">'+esc(s.name)+' · '+esc(s.status)+'</span>';
-  }).join('');
+function renderUnifiedPipeline(src) {
+  var rag = src.rag || null;
+  var erp = src.erp || null;
+  var hybrid = src.hybrid || null;
+  var erpTrace = (erp && erp.trace) || [];
+  function erpStep(name) { return erpTrace.find(function(t) { return t.step === name; }); }
+  var chunks = (rag && rag.chunks) || [];
+  var html = '';
 
-  var policyHtml = (d.policy.verdicts || []).map(function(v) {
-    return '<div class="pg-stage"><div class="pg-stage-icon '+stageIconClass(v.status)+'">'+stageIconChar(v.status)+'</div>' +
-      '<div class="pg-stage-name">'+esc(v.name)+'<div class="pg-stage-detail">'+esc(v.detail)+'</div></div></div>';
-  }).join('');
+  // 1. Conversation
+  html += _plStage(1, 'Conversation', _plKV([['User', src.question], ['Mode', src.mode]]));
 
-  document.getElementById('pg-pipeline-content').innerHTML =
-    '<div class="pg-panel-title" style="margin-bottom:8px">Execution Timeline (total: '+d.metadata.latency_ms+' ms)</div>' +
-    '<div style="margin-bottom:18px">' + stagesHtml + '</div>' +
-    '<div class="pg-panel-title" style="margin-bottom:8px">System Components</div>' +
-    '<div style="margin-bottom:18px">' + svcHtml + '</div>' +
-    '<div class="pg-panel-title" style="margin-bottom:8px">AI Policies Applied ('+d.policy.active_count+' active)</div>' +
-    '<div>' + policyHtml + '</div>';
+  // 2. Intent Detection — RAG's own classify_actionable_intent(), or the
+  // ERP Integration Contract's resolved capability as a stand-in when
+  // only the ERP path ran this turn.
+  var contractStep = erpStep('contract_resolution');
+  var contractCap = contractStep && contractStep.output_summary ? contractStep.output_summary.capability : null;
+  var intentVal = (rag && rag.actionable_intent) || contractCap;
+  html += _plStage(2, 'Intent Detection', intentVal
+    ? _plKV([
+        ['Detected Intent', intentVal],
+        ['Broad Intent', rag ? rag.broad_intent : undefined],
+        ['Confidence', rag && rag.intent_confidence != null ? Math.round(rag.intent_confidence * 100) + '%' : undefined],
+      ])
+    : _plNA(), { summary: intentVal || 'N/A' });
+
+  // 3. Entity Extraction — RAG's intent_entities, or the ERP path's
+  // extracted parameter values (services/slot_filling_engine.py binding).
+  var paramStep = erpStep('parameter_extraction');
+  var entities = (rag && rag.intent_entities) ||
+    (paramStep && paramStep.output_summary && paramStep.output_summary.parameters) || null;
+  var entityKeys = entities ? Object.keys(entities).filter(function(k) { return entities[k]; }) : [];
+  html += _plStage(3, 'Entity Extraction', entityKeys.length
+    ? _plKV(entityKeys.map(function(k) { return [k, entities[k]]; }))
+    : _plNA());
+
+  // 4. Decision Engine (Action Selection) — HONEST label: this Playground
+  // uses a deterministic, Registry-driven classifier for Auto mode
+  // (services/hybrid_question_classifier.py, added in the Hybrid Question
+  // Segmentation sprint) and a naive concatenation-only heuristic for
+  // Hybrid-mode question segmentation — NEITHER is the real production
+  // Decision Engine (services/decision_engine.py), which remains unwired
+  // to both production and this Playground (Technical Debt P0-A in
+  // docs/NEXT_STEPS.md). Never silently implied to be running here.
+  var rd = src.route_decision;
+  var cls = src.classification;
+  var clr = src.clarification;
+  var stage4Body = '';
+  if (rd) {
+    stage4Body += _plKV([['Route', rd.route], ['Reason', rd.reason],
+                          ['Confidence', rd.confidence != null ? Math.round(rd.confidence * 100) + '%' : undefined]]);
+  }
+  if (cls) {
+    stage4Body += _plKV([
+      ['Classification', cls.classification],
+      ['Classifier Confidence', cls.confidence != null ? Math.round(cls.confidence * 100) + '%' : undefined],
+    ]);
+    if ((cls.evidence || []).length) {
+      stage4Body += '<div style="margin-top:6px"><b style="font-size:11px;color:rgba(232,237,245,.5)">Evidence</b><ul style="margin:4px 0 0 18px;padding:0">' +
+        cls.evidence.map(function(e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+    }
+    if (cls.erp_sub_question || cls.rag_sub_question) {
+      stage4Body += '<div style="margin-top:6px">' + _plKV([
+        ['ERP Sub-question', cls.erp_sub_question], ['RAG Sub-question', cls.rag_sub_question],
+      ]) + '</div>';
+    }
+  }
+  if (clr) {
+    stage4Body += '<div class="pl-note" style="color:#fcd34d">Clarification required: ' + esc(clr.message) +
+      ' (candidates: ' + esc((clr.candidate_action_ids || []).join(', ')) + ')</div>';
+  }
+  stage4Body += '<div class="pl-note">' +
+    (cls ? 'Deterministic, Registry-driven classifier (services/hybrid_question_classifier.py)'
+         : 'Heuristic router (services/hybrid_playground_router.py)') +
+    ' — not the production Decision Engine. See Technical Debt P0-A in docs/NEXT_STEPS.md.</div>';
+  stage4Body += '<div style="margin-top:6px">' + _plKV([
+    ['RAG execution count', rag ? 1 : 0], ['ERP execution count', erp ? 1 : 0],
+  ]) + '</div>';
+  html += _plStage(4, 'Decision Engine (Action Selection)', stage4Body ||
+    _plNA('N/A — an explicit mode was selected, no routing decision was needed.'));
+
+  // 5. Selected Business Action
+  var selStep = erpStep('selected_action');
+  html += _plStage(5, 'Selected Business Action', selStep && selStep.output_summary
+    ? _plKV([['Name', selStep.output_summary.name], ['Type', selStep.output_summary.action_type]])
+    : _plNA('N/A — no ERP action ran this turn.'));
+
+  // 6. Retrieved Knowledge
+  var chunksBody = chunks.length
+    ? '<div style="margin-bottom:6px">' + chunks.length + ' chunk(s) retrieved</div>' +
+      chunks.slice(0, 5).map(function(c) {
+        return '<div style="margin-top:6px;padding:6px 8px;background:rgba(255,255,255,.03);border-radius:6px">' +
+          '<div style="color:rgba(232,237,245,.65)">' + esc(c.file_name || c.source || 'chunk') +
+          ' — score ' + esc(c.hybrid_score != null ? c.hybrid_score : c.score) +
+          (c.cited ? ' <span style="color:#34d399">[cited]</span>' : '') + '</div>' +
+          '<div style="color:rgba(232,237,245,.4);font-size:11px;margin-top:2px">' + esc((c.text || '').slice(0, 180)) + '</div></div>';
+      }).join('')
+    : _plNA('N/A — no RAG retrieval ran this turn.');
+  html += _plStage(6, 'Retrieved Knowledge', chunksBody, { highlight: true, summary: chunks.length ? (chunks.length + ' chunks') : 'N/A' });
+
+  // 7. Prompt Builder — Prompt Studio integration (2026-08-02 Phase 3):
+  // Prompt Version/Template come from services/prompt_builder.py's
+  // BuiltPrompt.template (itself resolved from Prompt Studio's
+  // ai_prompt_templates table); Applied Policies from the SAME
+  // PolicyResult services/policy_engine.py already computed. Policy sets
+  // are explicitly NOT versioned in this architecture (by design — see
+  // services/policy_studio_service.py's own docstring), so "Policy
+  // Version" always honestly reads N/A, never an invented number.
+  var promptObj = rag ? rag.prompt : null;
+  var policyObj = rag ? rag.policy : null;
+  var promptBuilderBody = '';
+  if (promptObj) {
+    promptBuilderBody += _plKV([
+      ['Prompt Version', promptObj.template_version],
+      ['Prompt Template', promptObj.template_name || promptObj.template_id],
+      ['Policy Set', policyObj ? policyObj.policy_set_name : undefined],
+      ['Policy Version', 'N/A — AI Policies are not versioned in this architecture'],
+    ]);
+  } else {
+    promptBuilderBody += _plNA('N/A — no RAG prompt was built this turn.');
+  }
+  if (policyObj && (policyObj.verdicts || []).length) {
+    promptBuilderBody += '<div style="margin-top:8px"><b style="font-size:11px;color:rgba(232,237,245,.5)">Applied Policies</b>' +
+      policyObj.verdicts.map(function(v) {
+        var color = v.status === 'triggered' ? '#fcd34d' : (v.status === 'applied' ? '#34d399' : 'rgba(232,237,245,.4)');
+        return '<div style="padding:3px 0"><span style="color:' + color + ';font-weight:600">' + esc(v.status) + '</span> — ' +
+          esc(v.name) + (v.detail ? ': ' + esc(v.detail) : '') + '</div>';
+      }).join('') + '</div>';
+  } else if (promptObj) {
+    promptBuilderBody += '<div style="margin-top:8px">' + _plNA('N/A — no AI Policy set evaluated this turn.') + '</div>';
+  }
+  // Injected Variables — this architecture has no named {{variable}}
+  // substitution system (confirmed: services/prompt_builder.py only
+  // concatenates fixed blocks); the real per-turn dynamic content folded
+  // into the prompt is the policy notes / answer plan / conversation
+  // summary below, shown honestly as what they actually are.
+  if (policyObj) {
+    var injected = [];
+    if ((policyObj.notes || []).length) injected.push(policyObj.notes.length + ' active policy note(s)');
+    promptBuilderBody += '<div style="margin-top:8px"><b style="font-size:11px;color:rgba(232,237,245,.5)">Injected Variables</b><div>' +
+      (injected.length ? esc(injected.join(', ')) : _plNA('None this turn')) + '</div></div>';
+  }
+  if (promptObj && promptObj.system_prompt) {
+    promptBuilderBody += '<div style="margin-top:8px"><b style="font-size:11px;color:rgba(232,237,245,.5)">System Prompt</b>' + _plJson(promptObj.system_prompt) + '</div>';
+  }
+  if (promptObj && promptObj.user_prompt) {
+    promptBuilderBody += '<div style="margin-top:8px"><b style="font-size:11px;color:rgba(232,237,245,.5)">User Prompt</b>' + _plJson(promptObj.user_prompt) + '</div>';
+  }
+  html += _plStage(7, 'Prompt Builder', promptBuilderBody);
+
+  // 8. Final Prompt (sent to the LLM)
+  html += _plStage(8, 'Final Prompt', (promptObj && promptObj.final_prompt) ? _plJson(promptObj.final_prompt) : _plNA(), { highlight: true });
+
+  // 9. LLM — RAG's model/latency/tokens, or the ERP path's grounded-answer
+  // LLM call (services/erp_test_harness.py::generate_grounded_answer,
+  // already computed, just read through the trace here).
+  var genStep = erpStep('generated_answer');
+  var genSummary = (genStep && genStep.output_summary) || {};
+  var llmModel = (rag && rag.model) || genSummary.llm_model;
+  var llmLatency = (rag && rag.latency_ms != null) ? rag.latency_ms : genSummary.llm_latency_ms;
+  var llmIn = (rag && rag.input_tokens != null) ? rag.input_tokens : genSummary.llm_input_tokens;
+  var llmOut = (rag && rag.output_tokens != null) ? rag.output_tokens : genSummary.llm_output_tokens;
+  // Temperature is real (services/llm_service.py's generate() call), Top
+  // P is genuinely never set/passed anywhere in this codebase — confirmed
+  // by grep, not just missing from this view — so it always honestly
+  // reads N/A rather than assuming a provider default.
+  html += _plStage(9, 'LLM', llmModel
+    ? _plKV([['Model', llmModel], ['Latency', llmLatency != null ? Math.round(llmLatency) + ' ms' : undefined],
+             ['Input Tokens', llmIn], ['Output Tokens', llmOut],
+             ['Temperature', rag && rag.temperature != null ? rag.temperature : undefined],
+             ['Top P', 'N/A — not configured in this architecture']])
+    : _plNA('N/A — no LLM call this turn.'), { summary: llmModel || 'N/A' });
+
+  // 10. ERP Payload — the exact request the Action Executor sent (secret
+  // values already masked server-side, never unmasked here).
+  var reqStep = erpStep('request_construction');
+  html += _plStage(10, 'ERP Payload', (reqStep && reqStep.output_summary)
+    ? _plKV([['Endpoint', reqStep.output_summary.endpoint], ['Method', reqStep.output_summary.method]]) +
+      _plJson(JSON.stringify(reqStep.output_summary.body || {}, null, 2))
+    : _plNA('N/A — no ERP call this turn.'), { highlight: true });
+
+  // 11. ERP Response
+  var execStep = erpStep('erp_execution');
+  var erpResponseBody = execStep
+    ? _plKV([['Status', execStep.status], ['HTTP Status Code', execStep.output_summary ? execStep.output_summary.status_code : undefined], ['Error', execStep.error]]) +
+      (erp && erp.normalized_result ? _plJson(JSON.stringify(erp.normalized_result, null, 2)) : '')
+    : _plNA('N/A — no ERP call this turn.');
+  html += _plStage(11, 'ERP Response', erpResponseBody, { highlight: true });
+
+  // 12. Grounding
+  var groundingBody = (genStep && genStep.explanation)
+    ? '<div>' + esc(genStep.explanation) + '</div>'
+    : genStep
+    ? '<div>Answer grounded strictly in the ERP Response above — the model is instructed never to invent data.</div>'
+    : (chunks.length ? '<div>Answer grounded strictly in the retrieved, cited chunks above — the model is instructed never to use outside knowledge.</div>' : _plNA());
+  html += _plStage(12, 'Grounding', groundingBody);
+
+  // 13. Citation
+  var cited = chunks.filter(function(c) { return c.cited; });
+  html += _plStage(13, 'Citation', cited.length
+    ? cited.map(function(c) { return '<div style="padding:3px 0">' + esc(c.citation || c.file_name || c.source || '') + '</div>'; }).join('')
+    : _plNA('N/A — no cited sources this turn.'));
+
+  // 14. Confidence
+  var confVal = rag ? rag.confidence : null;
+  html += _plStage(14, 'Confidence', confVal != null
+    ? _plKV([['Score', Math.round(confVal * 100) + '%'], ['Label', rag.confidence_label], ['Answerability', rag.answerability]])
+    : _plNA('N/A — this path does not yet compute an overall confidence score (see Technical Debt P1-D in docs/NEXT_STEPS.md).'));
+
+  // 15. Merge Strategy — Hybrid mode only. Shown in full, never hidden:
+  // the current merge is a naive, explicitly-labeled concatenation
+  // (services/hybrid_playground_router.py::naive_merge_hybrid_answer),
+  // not an intelligent synthesis. Each contribution is shown separately
+  // so it's fully auditable whether the ERP section and RAG section
+  // actually stayed within their own domain for this turn (a compound
+  // question can cause either independent path's own LLM call to touch
+  // on the other's topic — a real, disclosed limitation of running two
+  // independent full-question answerers rather than a labeling bug).
+  html += _plStage(15, 'Merge Strategy', hybrid
+    ? _plKV([['Strategy', hybrid.merge_strategy]]) +
+      '<div style="margin-top:8px"><b style="font-size:11px;color:rgba(232,237,245,.5)">ERP Contribution</b>' + _plJson(hybrid.erp_contribution || 'N/A') + '</div>' +
+      '<div style="margin-top:8px"><b style="font-size:11px;color:rgba(232,237,245,.5)">RAG Contribution</b>' + _plJson(hybrid.rag_contribution || 'N/A') + '</div>'
+    : _plNA('N/A — only single-path mode ran this turn, no merge was needed.'));
+
+  // 16. Final Answer
+  var finalAnswer = hybrid ? hybrid.merged_answer
+    : (rag ? rag.answer : (erp ? (erp.answer || erp.clarification_question)
+    : (clr ? clr.message : null)));
+  html += _plStage(16, 'Final Answer', finalAnswer ? _plJson(finalAnswer) : _plNA(), { highlight: true });
+
+  document.getElementById('pg-pipeline-content').innerHTML = '<div class="pl-timeline">' + html + '</div>';
+}
+
+function _plNormalizeRagFromMetadata(d) {
+  var m = d.metadata || {};
+  return {
+    answer: d.answer, chunks: d.chunks, prompt: d.prompt,
+    confidence: m.confidence, confidence_label: m.confidence_label, answerability: m.answerability,
+    model: m.model, latency_ms: m.latency_ms, input_tokens: m.input_tokens, output_tokens: m.output_tokens,
+    temperature: m.temperature, policy: d.policy,
+    broad_intent: d.broad_intent, actionable_intent: d.actionable_intent,
+    intent_confidence: d.intent_confidence, intent_entities: d.intent_entities,
+  };
 }
 
 function renderJson(d) {
@@ -1775,11 +2031,13 @@ function hybridAskQuestion(question, mode) {
         return;
       }
       _lastHybridResp = d;
-      var displayAnswer = d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : '(no answer)'));
+      var displayAnswer = d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : (d.clarification ? d.clarification.message : '(no answer)')));
       _conversation.push({role: 'ai', text: displayAnswer, meta: 'mode=' + d.mode + (d.route_decision ? ' · route=' + d.route_decision.route : '')});
       renderConversation();
       renderHybridTabs(d);
-      switchTab('hybrid');
+      renderUnifiedPipeline({mode: d.mode, question: question, rag: d.rag, erp: d.erp, hybrid: d.hybrid,
+                              route_decision: d.route_decision, classification: d.classification, clarification: d.clarification});
+      switchTab('pipeline');
     })
     .catch(function(e) {
       btn.disabled = false; btn.textContent = 'Ask';
@@ -1846,7 +2104,7 @@ function askQuestion() {
       renderChunks(d.chunks || []);
       renderAnswer(d);
       renderPrompt(d);
-      renderPipeline(d);
+      renderUnifiedPipeline({mode: 'rag', question: question, rag: _plNormalizeRagFromMetadata(d), erp: null, hybrid: null, route_decision: null});
       renderJson(d);
       renderExplain(d);
       refreshStatusBar();

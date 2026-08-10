@@ -733,6 +733,7 @@ class BusinessActionRegistry:
                  # that None reaches the DB and violates the column's NOT NULL
                  # constraint, silently failing every save of a detected secret.
                  "validation_confidence": p.get("validation_confidence") or "high",
+                 "field_metadata": p.get("field_metadata") or {},
                  }).execute().data[0]
             out.append(row)
         return out
@@ -755,7 +756,7 @@ class BusinessActionRegistry:
         for i, m in enumerate(mapping):
             row = self._sb.table("business_action_response_mapping").insert(
                 {"action_id": action_id, "json_path": m["json_path"], "mapped_label": m["mapped_label"],
-                 "sort_order": m.get("sort_order", i)}).execute().data[0]
+                 "sort_order": m.get("sort_order", i), "field_metadata": m.get("field_metadata") or {}}).execute().data[0]
             out.append(row)
         return out
 

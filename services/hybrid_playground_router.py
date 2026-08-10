@@ -2,14 +2,25 @@
 
 Sprint scope note (2026-07-29 Hybrid Integration Flow sprint): this
 module is DELIBERATELY DUMB. It is a naive keyword heuristic used only
-to decide RAG-vs-ERP in "Auto" mode, and a naive answer concatenation
-used only in "Hybrid" mode — NOT the future Business Action Matcher and
-NOT the future Decision Engine. Do not extend this file with real
-intent classification, scoring models, or learned routing. If a change
-here would take this past ~20-30 lines of actual decision logic, that
-change belongs in a future, separately-scoped sprint, not here.
+to decide RAG-vs-ERP in "Auto" mode, and (via naive_merge_hybrid_answer,
+legacy) a naive answer concatenation — NOT the future Business Action
+Matcher and NOT the production Decision Engine. Do not extend this file
+with real intent classification, scoring models, or learned routing.
+
+Playground-only status (2026-08-02 Production Integration Sprint, Phase 1
+Step B): the real synthesis logic used by BOTH the Playground and the
+production Decision Engine now lives in services/hybrid_runtime_service.py
+— `synthesize_hybrid_answer` is re-exported here, unchanged, purely for
+backward compatibility with existing imports/tests. Nothing in this file
+is imported by services/decision_engine.py.
 """
 from typing import Dict, List, Optional
+
+# Re-exported for backward compatibility — the real implementation moved
+# to services/hybrid_runtime_service.py (2026-08-02 Production Integration
+# Sprint, Phase 1 Step B) so production code (services/decision_engine.py)
+# never has to import this Playground-only module.
+from services.hybrid_runtime_service import synthesize_hybrid_answer  # noqa: F401
 
 
 def naive_auto_route(question: str, erp_actions: List[Dict]) -> Dict:
@@ -53,7 +64,13 @@ def naive_merge_hybrid_answer(rag_answer: Optional[str], erp_answer: Optional[st
     more authoritative, structured/transactional source), followed by
     the knowledge-base answer if one exists; otherwise whichever single
     answer is available. This is plain concatenation with section
-    labels, never a re-write or LLM-based combination of the two."""
+    labels, never a re-write or LLM-based combination of the two.
+
+    Kept for backward compatibility — superseded by
+    services/hybrid_runtime_service.py::synthesize_hybrid_answer()
+    (2026-08-02 Hybrid Question Segmentation sprint; re-exported above),
+    which additionally handles per-path errors honestly and never
+    fabricates a section for a path that produced nothing."""
     parts = []
     if erp_answer:
         parts.append(f"From ERP:\n{erp_answer}")

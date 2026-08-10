@@ -1,41 +1,96 @@
 {% extends "base.html" %}
 {% set active = "erp_conversation_tester" %}
-{% block title %}ERP Conversation Tester — Shipify Admin{% endblock %}
-{% block topbar_title %}ERP Conversation Tester{% endblock %}
+{% block title %}AI Conversation Playground — Shipify Admin{% endblock %}
+{% block topbar_title %}AI Conversation Playground{% endblock %}
 
 {% block extra_head %}
 <style>
 /* Reuses the exact ba-* visual language from business_actions.html and
-   pg-* chat-bubble pattern from preview.html — no new design system. */
+   pg-* chat-bubble pattern from preview.html — no new design system.
+   2026-08-02 redesign: adds the AI-reasoning-timeline / stage-panel /
+   parameter-chip / LLM-info primitives described below, all built purely
+   from data services/erp_test_harness.py already returns (trace step
+   input_summary/output_summary/confidence/latency_ms/explanation/error,
+   plus the newly-surfaced-not-newly-computed llm_model/llm_latency_ms/
+   llm_input_tokens/llm_output_tokens on the generated_answer step). No
+   backend orchestration, Action Executor, Integration Schema, or
+   Decision Engine behavior changed by this file. */
 .ba-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px;margin-bottom:12px}
 .ba-guidance{background:rgba(91,157,255,.06);border:1px solid rgba(91,157,255,.2);border-radius:10px;padding:12px 14px;font-size:12.5px;color:rgba(232,237,245,.7);margin-bottom:16px}
 .ba-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:600}
 .ba-input{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:#e8edf5;padding:7px 9px;font-size:12.5px}
-.ect-layout{display:grid;grid-template-columns:1fr 380px;gap:16px;align-items:start}
+select.ba-input{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none; color-scheme:dark;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%235b9dff' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat; background-position:right 10px center; padding-right:26px; cursor:pointer;
+}
+select.ba-input option{background:#0f1a30;color:#e8edf5}
+.ect-layout{display:grid;grid-template-columns:1fr 400px;gap:16px;align-items:start}
 @media (max-width:980px){.ect-layout{grid-template-columns:1fr}}
-.ect-conv{max-height:340px;overflow-y:auto;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px;margin-bottom:10px}
+.ect-conv{max-height:280px;overflow-y:auto;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px;margin-bottom:10px}
 .ect-bubble{display:flex;margin:4px 0}
 .ect-bubble .ect-bubble-inner{max-width:85%;border-radius:8px;padding:6px 10px;font-size:12.5px}
-.ect-trace-group{border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:8px;overflow:hidden}
-.ect-trace-group summary{padding:8px 10px;cursor:pointer;font-size:12px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
-.ect-trace-group summary::-webkit-details-marker{display:none}
-.ect-trace-step{border-left:3px solid rgba(255,255,255,.15);padding:5px 8px;margin:4px 8px;background:rgba(255,255,255,.02);font-size:11.5px}
-.ect-summary-bar{border-radius:8px;padding:10px;font-size:12.5px}
 .btn{padding:6px 12px;font-size:12.5px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#e8edf5;cursor:pointer}
 .btn:hover{background:rgba(255,255,255,.08)}
 .btn-primary{background:#5b9dff;border-color:#5b9dff;color:#0b1220;font-weight:600}
+/* Send/Save button loading state — same spin keyframe pattern already
+   established in business_actions.html's .ba-ai-loading-spinner, reused
+   here rather than a new animation style. */
+@keyframes ect-spin { to { transform: rotate(360deg); } }
+.ba-btn-spinner{
+  width:12px;height:12px;border-radius:50%;flex-shrink:0;display:inline-block;
+  border:2px solid currentColor;border-top-color:transparent;opacity:.85;
+  animation:ect-spin .7s linear infinite;vertical-align:-2px;margin-right:6px;
+}
+.ect-summary-bar{border-radius:8px;padding:10px;font-size:12.5px}
+
+/* ── AI Reasoning Timeline (main, always-visible view) ── */
+.ect-timeline{display:flex;flex-direction:column;gap:0}
+.ect-tl-node{position:relative;padding:10px 12px 10px 34px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:2px}
+.ect-tl-node::before{content:"";position:absolute;left:14px;top:0;bottom:-2px;width:2px;background:rgba(255,255,255,.1)}
+.ect-tl-node:last-child::before{bottom:50%}
+.ect-tl-node:first-child::before{top:50%}
+.ect-tl-icon{position:absolute;left:6px;top:9px;width:17px;height:17px;border-radius:50%;background:#0f1a30;border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:10px;z-index:1}
+.ect-tl-icon.ok{border-color:#34d399}
+.ect-tl-icon.warn{border-color:#f59e0b}
+.ect-tl-icon.err{border-color:#f87171}
+.ect-tl-label{font-size:11.5px;font-weight:700;color:#e8edf5;display:flex;align-items:center;gap:6px}
+.ect-tl-body{font-size:12px;color:rgba(232,237,245,.75);margin-top:3px;line-height:1.5}
+.ect-tl-meta{font-size:10.5px;color:rgba(232,237,245,.4);margin-top:3px}
+.ect-tl-confidence{display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(91,157,255,.12);color:#5b9dff}
+
+/* ── Parameter chips ── */
+.ect-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ect-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid}
+.ect-chip.got{background:rgba(52,211,153,.1);border-color:rgba(52,211,153,.35);color:#34d399}
+.ect-chip.missing{background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.3);color:#f87171}
+
+/* ── Developer Mode: 7-stage expandable panel ── */
+.ect-stage{border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:6px;overflow:hidden}
+.ect-stage summary{padding:8px 10px;cursor:pointer;font-size:12px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ect-stage summary::-webkit-details-marker{display:none}
+.ect-stage-right{display:flex;align-items:center;gap:6px;font-weight:400}
+.ect-stage-status{font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px}
+.ect-substep{border-left:3px solid rgba(255,255,255,.15);padding:5px 8px;margin:4px 8px;background:rgba(255,255,255,.02);font-size:11.5px}
+.ect-kv{font-size:10.5px;color:rgba(232,237,245,.45);margin-top:2px;word-break:break-word}
+.ect-kv pre{white-space:pre-wrap;word-break:break-word;font-size:10.5px;margin:2px 0 0;color:rgba(232,237,245,.6)}
+
+/* ── LLM Info / ERP Execution info blocks ── */
+.ect-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:11.5px}
+.ect-info-grid .k{color:rgba(232,237,245,.45)}
+.ect-info-grid .v{color:#e8edf5}
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="page-header" style="margin-bottom:6px">
-  <div class="page-title">ERP Conversation Tester</div>
+  <div class="page-title">AI Conversation Playground</div>
 </div>
 <div class="ba-guidance">
-  Test imported ERP APIs through natural-language conversations before connecting them to the AI Decision Engine.
-  This is the ONLY place used for ERP testing — configuration lives in
+  Have a natural-language conversation with an imported ERP API and watch exactly what the AI understood, decided,
+  and did — before connecting it to the live Decision Engine. Configuration lives in
   <a href="/admin/ai/business-actions" style="color:#5b9dff">ERP Integration</a>.
-  <a href="/admin/erp/test-history" style="color:#5b9dff;margin-left:10px">View ERP Test History →</a>
+  <a href="/admin/erp/test-history" style="color:#5b9dff;margin-left:10px">View Test History →</a>
   <a href="/admin/erp/api-explorer" style="color:#5b9dff;margin-left:10px">API Explorer →</a>
 </div>
 
@@ -63,29 +118,31 @@
 </div>
 
 <div class="ect-layout">
-  <!-- Main panel: Conversation -->
+  <!-- Main panel: Conversation + AI Reasoning Timeline -->
   <div>
     <div class="ba-card">
       <b style="font-size:12px">Conversation</b>
       <div class="ect-conv" id="ect-conversation" style="margin-top:8px">
         <div style="color:rgba(232,237,245,.3);font-size:11.5px">No messages yet — select an ERP API above and send a message below.</div>
       </div>
-      <!-- Part 12 — clickable quick replies when the system is waiting
-           to know which piece of information the customer wants. The
-           free-text input below always keeps working too. -->
       <div id="ect-quick-replies" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
-      <!-- Parts 10/19 — Conversation Form Generator-driven controls
-           (criterion selection / enum values / number / date /
-           confirmation) for MISSING PARAMETERS, distinct from the
-           response-field quick replies above. -->
       <div id="ect-generated-controls" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
       <div style="display:flex;gap:6px">
         <input type="text" id="ect-message-input" class="ba-input" style="margin-bottom:0"
                placeholder="e.g. ขอดูข้อมูลลูกค้า / What's my wallet balance?"
                onkeydown="if(event.key==='Enter'){ectSend();event.preventDefault();}">
-        <button class="btn btn-primary" onclick="ectSend()">Send</button>
+        <button class="btn btn-primary" id="ect-send-btn" onclick="ectSend()">Send</button>
         <button class="btn" onclick="ectResetConversation()">Reset conversation</button>
       </div>
+    </div>
+
+    <!-- AI Reasoning Timeline — the centerpiece: makes the AI's reasoning
+         visible turn-by-turn, exactly the gap the redesign closes. Built
+         entirely from the SAME trace/summary data the old plain-text
+         Developer Trace used, just organized as a story instead of a log. -->
+    <div class="ba-card" id="ect-timeline-card" style="display:none">
+      <b style="font-size:12px">🧠 AI Reasoning — Latest Turn</b>
+      <div class="ect-timeline" id="ect-timeline" style="margin-top:10px"></div>
     </div>
 
     <div class="ba-card" id="ect-summary-card" style="display:none">
@@ -94,25 +151,37 @@
         <button class="btn" onclick="ectSend(true)">Re-run</button>
         <button class="btn" onclick="ectOpenErpApi()">Open ERP API</button>
         <button class="btn" onclick="ectCopyAnswer()">Copy answer</button>
-        <button class="btn btn-primary" onclick="ectSaveTestCase()">💾 Save ERP Test Case</button>
+        <button class="btn btn-primary" id="ect-save-btn" onclick="ectSaveTestCase(this)">💾 Save ERP Test Case</button>
       </div>
       <div id="ect-save-status" style="font-size:11.5px;color:rgba(232,237,245,.5);margin-top:6px"></div>
     </div>
   </div>
 
-  <!-- Right panel: Developer Trace -->
-  <div class="ba-card">
-    <b style="font-size:12px">Developer Trace</b>
-    <div id="ect-trace" style="margin-top:8px;color:rgba(232,237,245,.4);font-size:11.5px">No test run yet.</div>
-  </div>
+  <!-- Right panel: Developer Mode — 7-stage pipeline detail -->
+  <div>
+    <div class="ba-card">
+      <b style="font-size:12px">🛠️ Developer Mode — Pipeline Stages</b>
+      <div id="ect-stages" style="margin-top:8px;color:rgba(232,237,245,.4);font-size:11.5px">No test run yet.</div>
+    </div>
 
-  <!-- Part 14 — Strategy Simulation: renders ONLY conversation_strategy
-       returned by run_erp_test() (services/conversation_strategy_engine.py
-       via services/erp_test_harness.py) — no detection/confidence/ranking
-       logic lives in this page. -->
-  <div class="ba-card">
-    <b style="font-size:12px">Strategy Simulation</b>
-    <div id="ect-strategy" style="margin-top:8px;color:rgba(232,237,245,.4);font-size:11.5px">No test run yet.</div>
+    <div class="ba-card">
+      <b style="font-size:12px">🤖 LLM Call</b>
+      <div id="ect-llm-info" style="margin-top:8px;color:rgba(232,237,245,.4);font-size:11.5px">No LLM call in the latest turn.</div>
+    </div>
+
+    <div class="ba-card">
+      <b style="font-size:12px">🔌 ERP Execution</b>
+      <div id="ect-erp-info" style="margin-top:8px;color:rgba(232,237,245,.4);font-size:11.5px">No test run yet.</div>
+    </div>
+
+    <!-- Part 14 — Strategy Simulation: renders ONLY conversation_strategy
+         returned by run_erp_test() (services/conversation_strategy_engine.py
+         via services/erp_test_harness.py) — no detection/confidence/ranking
+         logic lives in this page. -->
+    <div class="ba-card">
+      <b style="font-size:12px">📐 Strategy Simulation</b>
+      <div id="ect-strategy" style="margin-top:8px;color:rgba(232,237,245,.4);font-size:11.5px">No test run yet.</div>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -124,32 +193,35 @@ function esc(s) {
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 }
+function ectSetButtonLoading(btn, text) {
+  if (!btn || btn.dataset.ectLoading === '1') return;
+  btn.dataset.ectLoading = '1'; btn.dataset.ectHtml = btn.innerHTML; btn.disabled = true;
+  btn.innerHTML = text || 'Working…';
+}
+function ectClearButtonLoading(btn) {
+  if (!btn || btn.dataset.ectLoading !== '1') return;
+  btn.disabled = false; btn.innerHTML = btn.dataset.ectHtml;
+  delete btn.dataset.ectLoading; delete btn.dataset.ectHtml;
+}
 
-// ── ERP Conversation Tester — moved out of AI Playground; ERP testing
-// is an Integrations responsibility, never an AI Playground one. Same
-// backend (/admin/api/erp-test/*), same services/erp_test_harness.py —
-// this sprint reorganizes the UI/UX, it does not change ERP execution
-// behavior. Terminology is business-facing: "ERP API" (not "Business
-// Action"), "Test ERP API" (not "Run Action"), "Integration Type" (not
-// "Action Type"), "Detected Customer Intent" (not "Semantic Intent") —
-// "Business Action" remains the internal architecture name only.
+// ── AI Conversation Playground (formerly "ERP Conversation Tester" —
+// 2026-08-02 UX redesign). Same backend (/admin/api/erp-test/*), same
+// services/erp_test_harness.py, same run_erp_test() orchestration — this
+// sprint ONLY changes how the response is rendered (a reasoning timeline
+// + 7-stage Developer Mode panel + LLM/ERP info blocks, all built from
+// data the backend already returned) — it does not change ERP execution,
+// the Action Executor, Integration Schema, or Decision Engine behavior.
+// Terminology stays business-facing: "ERP API" (not "Business Action"),
+// "Test ERP API" (not "Run Action") — "Business Action" remains the
+// internal architecture name only.
 var _ectActions = [];
 var _ectSelectedAction = null;
 var _ectHistory = [];
 var _ectCollectedParams = {};
 var _ectLastResult = null;
-// Requested Information Clarification layer — round-trips through the
-// browser exactly like _ectCollectedParams already does; never
-// persisted server-side (services/erp_test_harness.py owns the logic).
 var _ectAwaitingInformationSelection = false;
 var _ectAvailableResponseOptions = [];
 var _ectLastNormalizedResult = null;
-// Conversation Form Generator sprint (Parts 10/19) — additive
-// conversation_form/conversation_state round-tripped through the
-// browser exactly like everything above; the generator itself lives
-// entirely server-side (services/conversation_form_generator.py) — this
-// script only RENDERS whatever it returns (Requirement 3), never decides
-// a question/component/option itself.
 var _ectConversationState = null;
 var _ectConversationForm = null;
 
@@ -211,7 +283,11 @@ function ectResetConversation() {
   _ectConversationState = null; _ectConversationForm = null;
   document.getElementById('ect-conversation').innerHTML = '<div style="color:rgba(232,237,245,.3);font-size:11.5px">No messages yet — send a message below.</div>';
   document.getElementById('ect-summary-card').style.display = 'none';
-  document.getElementById('ect-trace').innerHTML = 'No test run yet.';
+  document.getElementById('ect-timeline-card').style.display = 'none';
+  document.getElementById('ect-timeline').innerHTML = '';
+  document.getElementById('ect-stages').innerHTML = 'No test run yet.';
+  document.getElementById('ect-llm-info').innerHTML = 'No LLM call in the latest turn.';
+  document.getElementById('ect-erp-info').innerHTML = 'No test run yet.';
   document.getElementById('ect-save-status').textContent = '';
   var qr = document.getElementById('ect-quick-replies');
   if (qr) qr.innerHTML = '';
@@ -246,6 +322,8 @@ function ectSend(isRerun, quickReplyText, opts) {
   if (!message && !opts.confirmed) { alert('Type a message first.'); return; }
   if (!isRerun && message && !opts.skipUserBubble) { _ectHistory.push({role: 'user', text: message}); _ectRenderConversation(); input.value = ''; }
   ectRenderQuickReplies([]); // clear while a request is in flight
+  var sendBtn = document.getElementById('ect-send-btn');
+  ectSetButtonLoading(sendBtn, '<span class="ba-btn-spinner"></span>Thinking…');
   fetch('/admin/api/erp-test/run', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -253,13 +331,12 @@ function ectSend(isRerun, quickReplyText, opts) {
       awaiting_information_selection: _ectAwaitingInformationSelection,
       available_response_options: _ectAvailableResponseOptions,
       last_normalized_result: _ectLastNormalizedResult,
-      // Conversation Form Generator sprint (Parts 7/10/19) — additive,
-      // round-tripped exactly like the fields above.
       conversation_state: _ectConversationState,
       confirmed: !!opts.confirmed,
       enforce_confirmation_gate: true,
     }),
   }).then(function(r){ return r.json(); }).then(function(d) {
+    ectClearButtonLoading(sendBtn);
     _ectLastResult = d;
     if (!d.ok) { alert(d.error || 'Unknown error'); return; }
     _ectCollectedParams = d.collected_params || _ectCollectedParams;
@@ -270,20 +347,250 @@ function ectSend(isRerun, quickReplyText, opts) {
     _ectConversationForm = d.conversation_form || null;
     var replyText = d.clarification_question || d.answer ||
       (d.warning === 'awaiting_confirmation' ? 'Please confirm before this executes.' : null) ||
-      (d.summary.overall === 'fail' ? 'Something went wrong — see Developer Trace.' : 'Understood — no reply generated in this mode.');
+      (d.summary.overall === 'fail' ? 'Something went wrong — see the pipeline stages on the right.' : 'Understood — no reply generated in this mode.');
     if (!isRerun && message) { _ectHistory.push({role: 'assistant', text: replyText}); _ectRenderConversation(); }
     document.getElementById('ect-summary-card').style.display = 'block';
     ectRenderSummary(d.summary, d.warning);
-    ectRenderTrace(d.trace);
-    // Part 12 — clickable quick-reply buttons whenever the system is
-    // waiting for the customer to pick which information they want,
-    // PLUS Parts 10/19 — generator-driven controls for MISSING
-    // PARAMETERS (criterion selection / enum values / numeric / date /
-    // confirmation) sourced entirely from conversation_form.
+    ectRenderTimeline(d);
+    ectRenderStages(d.trace);
+    ectRenderLlmInfo(d.trace);
+    ectRenderErpInfo(d.trace, _ectSelectedAction);
     ectRenderQuickReplies(_ectAwaitingInformationSelection ? _ectAvailableResponseOptions : []);
     ectRenderGeneratedControls(_ectConversationForm);
     ectRenderStrategySimulation(d.conversation_strategy);
-  }).catch(function(e){ alert('Request failed: ' + e); });
+  }).catch(function(e){ ectClearButtonLoading(sendBtn); alert('Request failed: ' + e); });
+}
+
+// ── AI Reasoning Timeline ────────────────────────────────────────────────
+// Turns the flat trace array into the story a developer actually wants to
+// read: what the AI understood, which action it's working with, which
+// parameters it has/needs, whether it executed the ERP call, and what it
+// finally said — built ENTIRELY from fields services/erp_test_harness.py
+// already computes per trace step (never re-decided here).
+var ECT_STEP_ICON = {ok: '✓', simulated: '◆', warning: '⚠', blocked: '⛔', error: '✕', skipped: '–', not_run: '–'};
+function _ectIconClass(status) {
+  if (status === 'error' || status === 'blocked') return 'err';
+  if (status === 'warning') return 'warn';
+  return 'ok';
+}
+function _ectByStep(trace) {
+  var byStep = {};
+  (trace || []).forEach(function(t){ byStep[t.step] = t; });
+  return byStep;
+}
+function _ectParamChips(collectedParams, missingParameters) {
+  var required = (_ectSelectedAction && _ectSelectedAction.required_search_fields) || [];
+  var names = {};
+  required.forEach(function(f){ names[f.name] = f.business_label || f.name; });
+  (missingParameters || []).forEach(function(n){ if (!(n in names)) names[n] = n; });
+  Object.keys(collectedParams || {}).forEach(function(n){ if (!(n in names)) names[n] = n; });
+  var missingSet = {}; (missingParameters || []).forEach(function(n){ missingSet[n] = true; });
+  return Object.keys(names).map(function(n) {
+    var got = (collectedParams || {}).hasOwnProperty(n) && !missingSet[n];
+    return '<span class="ect-chip ' + (got ? 'got' : 'missing') + '">' + (got ? '✓' : '✕') + ' ' + esc(names[n]) + '</span>';
+  }).join('');
+}
+
+function ectRenderTimeline(d) {
+  var card = document.getElementById('ect-timeline-card');
+  var el = document.getElementById('ect-timeline');
+  var byStep = _ectByStep(d.trace);
+  var nodes = [];
+
+  function node(icon, label, bodyHtml, status, metaHtml) {
+    nodes.push('<div class="ect-tl-node">' +
+      '<div class="ect-tl-icon ' + _ectIconClass(status || 'ok') + '">' + icon + '</div>' +
+      '<div class="ect-tl-label">' + label + '</div>' +
+      (bodyHtml ? '<div class="ect-tl-body">' + bodyHtml + '</div>' : '') +
+      (metaHtml ? '<div class="ect-tl-meta">' + metaHtml + '</div>' : '') +
+    '</div>');
+  }
+
+  // 🧠 AI Understanding — parameter_extraction's own reason/confidence IS
+  // the AI's understanding of this message (what it bound, what it
+  // couldn't). requested_information_detection covers the "which field
+  // do you want back" turns.
+  var pe = byStep['parameter_extraction'];
+  var rid = byStep['requested_information_detection'];
+  var understanding = pe || rid;
+  if (understanding) {
+    var confPct = understanding.confidence != null ? Math.round(understanding.confidence * 100) + '%' : '—';
+    node('🧠', 'AI Understanding', esc(understanding.explanation || '—'), understanding.status,
+      '<span class="ect-tl-confidence">Confidence ' + confPct + '</span>');
+  }
+
+  // 🎯 Action Selection — the ERP API this turn is running against
+  // (chosen from the dropdown above; the trace step confirms it resolved).
+  var sel = byStep['selected_action'];
+  if (sel) {
+    node('🎯', 'Business Action', esc((_ectSelectedAction && (_ectSelectedAction.capability || _ectSelectedAction.name)) || '—'),
+      sel.status, esc(sel.explanation || ''));
+  }
+
+  // 📝 Parameter Extraction — chips
+  if (pe || (d.collected_params && Object.keys(d.collected_params).length)) {
+    node('📝', 'Parameter Extraction', '<div class="ect-chip-row">' + _ectParamChips(d.collected_params, d.missing_parameters) + '</div>',
+      pe ? pe.status : 'ok');
+  }
+
+  // ⚠ Missing Parameters — only when the turn is actually blocked on them
+  if (d.missing_parameters && d.missing_parameters.length) {
+    node('⚠', 'Missing Parameters', 'Need at least one of: ' + esc(d.missing_parameters.join(', ')), 'warning');
+  }
+
+  // 🚀 Execute ERP / 📦 ERP Response — only reached once parameters were complete
+  var erp = byStep['erp_execution'];
+  if (erp) {
+    var erpBody = erp.status === 'simulated'
+      ? 'Simulated — a schema-generated mock response was used, the real ERP was never called.'
+      : (erp.error || esc(erp.explanation || ''));
+    node(erp.status === 'simulated' ? '◆' : '🚀', 'Execute ERP', erpBody, erp.status,
+      erp.latency_ms ? erp.latency_ms + ' ms' : '');
+    var rm = byStep['response_mapping'];
+    if (rm) {
+      var fieldCount = rm.output_summary ? Object.keys(rm.output_summary).length : 0;
+      node('📦', 'ERP Response', fieldCount + ' field(s) mapped from the response.', rm.status);
+    }
+  }
+
+  // 🧠 AI Response Generation / 💬 Final Answer
+  var ga = byStep['generated_answer'];
+  if (ga) {
+    var llmBits = [];
+    if (ga.output_summary && ga.output_summary.llm_model) {
+      llmBits.push(esc(ga.output_summary.llm_model));
+      if (ga.output_summary.llm_latency_ms != null) llmBits.push(ga.output_summary.llm_latency_ms + ' ms');
+    } else {
+      llmBits.push('No LLM call — fixed message used.');
+    }
+    node('🧠', 'AI Response Generation', llmBits.join(' · '), ga.status);
+    node('💬', 'Final Answer', esc((ga.output_summary && ga.output_summary.answer) || d.clarification_question || '—'), ga.status);
+  } else if (d.clarification_question) {
+    node('💬', 'AI Response', esc(d.clarification_question), 'warning');
+  }
+
+  if (!nodes.length) { card.style.display = 'none'; return; }
+  el.innerHTML = nodes.join('');
+  card.style.display = 'block';
+}
+
+// ── Developer Mode — 7-stage pipeline detail ────────────────────────────
+// Groups the SAME flat trace array into the 7 named stages a developer
+// debugging this pipeline actually thinks in — never re-decides
+// detection/confidence/status here, only re-presents what each trace step
+// already reported.
+var ECT_STAGE_GROUPS = [
+  {key: 'understanding', label: '1. AI Understanding', icon: '🧠', steps: ['parameter_extraction', 'requested_information_detection', 'information_clarification']},
+  {key: 'selection', label: '2. Business Action Selection', icon: '🎯', steps: ['selected_action', 'contract_resolution']},
+  {key: 'extraction', label: '3. Parameter Extraction', icon: '📝', steps: ['parameter_extraction']},
+  {key: 'validation', label: '4. Validation', icon: '✅', steps: ['missing_parameter_validation', 'confirmation_gate']},
+  {key: 'execution', label: '5. ERP Execution', icon: '🚀', steps: ['credential_resolution', 'request_construction', 'erp_execution', 'response_validation']},
+  {key: 'mapping', label: '6. Response Mapping', icon: '📦', steps: ['response_mapping', 'available_information_options', 'answer_field_selection']},
+  {key: 'nlg', label: '7. Natural Language Generation', icon: '💬', steps: ['prompt_builder', 'generated_answer']},
+];
+var ECT_STATUS_COLOR = {pass: '#34d399', ok: '#34d399', warning: '#f59e0b', blocked: '#f59e0b', fail: '#f87171', error: '#f87171', simulated: '#5b9dff', skipped: 'rgba(232,237,245,.4)', not_run: 'rgba(232,237,245,.3)'};
+var ECT_STATUS_RANK = {error: 0, blocked: 1, warning: 2, ok: 3, simulated: 3, skipped: 4, not_run: 5};
+
+function _ectFmtVal(v) {
+  if (v == null) return '—';
+  if (typeof v === 'object') return '<pre>' + esc(JSON.stringify(v, null, 2)) + '</pre>';
+  return esc(String(v));
+}
+
+function ectRenderStages(trace) {
+  var byStep = _ectByStep(trace);
+  var el = document.getElementById('ect-stages');
+  var html = ECT_STAGE_GROUPS.map(function(group) {
+    var steps = group.steps.map(function(s){ return byStep[s]; }).filter(Boolean);
+    if (!steps.length) return '';
+    var worst = steps.reduce(function(a, b){ return ECT_STATUS_RANK[a.status] <= ECT_STATUS_RANK[b.status] ? a : b; });
+    var duration = steps.reduce(function(sum, s){ return sum + (s.latency_ms || 0); }, 0);
+    var confidences = steps.map(function(s){ return s.confidence; }).filter(function(c){ return c != null; });
+    var confidence = confidences.length ? Math.round(Math.max.apply(null, confidences) * 100) + '%' : '—';
+    var color = ECT_STATUS_COLOR[worst.status] || '#e8edf5';
+    var openAttr = (worst.status === 'error' || worst.status === 'blocked' || worst.status === 'warning') ? ' open' : '';
+    return '<details class="ect-stage"' + openAttr + '>' +
+      '<summary>' +
+        '<span>' + group.icon + ' ' + esc(group.label) + '</span>' +
+        '<span class="ect-stage-right">' +
+          '<span style="color:rgba(232,237,245,.4)">' + Math.round(duration) + 'ms</span>' +
+          '<span style="color:#5b9dff">conf ' + confidence + '</span>' +
+          '<span class="ect-stage-status" style="background:' + color + '22;color:' + color + '">' + esc(worst.status) + '</span>' +
+        '</span>' +
+      '</summary>' +
+      steps.map(function(t) {
+        var c = ECT_STATUS_COLOR[t.status] || '#e8edf5';
+        return '<div class="ect-substep" style="border-left-color:' + c + '">' +
+          '<div style="display:flex;justify-content:space-between"><b>' + esc(t.step.replace(/_/g, ' ')) + '</b>' +
+            '<span style="color:' + c + '">' + esc(t.status) + (t.latency_ms ? ' · ' + t.latency_ms + 'ms' : '') + (t.confidence != null ? ' · conf ' + Math.round(t.confidence * 100) + '%' : '') + '</span></div>' +
+          (t.explanation ? '<div style="color:rgba(232,237,245,.55);margin-top:2px">' + esc(t.explanation) + '</div>' : '') +
+          (t.error ? '<div style="color:#f87171;margin-top:2px">' + esc(t.error) + '</div>' : '') +
+          (t.input_summary ? '<div class="ect-kv"><b>Input:</b> ' + _ectFmtVal(t.input_summary) + '</div>' : '') +
+          (t.output_summary ? '<div class="ect-kv"><b>Output:</b> ' + _ectFmtVal(t.output_summary) + '</div>' : '') +
+        '</div>';
+      }).join('') +
+    '</details>';
+  }).join('');
+  el.innerHTML = html || 'No test run yet.';
+}
+
+// ── LLM Call info — Model / Latency / Token Usage / Reasoning Summary.
+// Prompt Version and Policy are honestly reported as not applicable: this
+// harness's generate_grounded_answer() uses a fixed system prompt, not a
+// Prompt-Studio-versioned template, and isn't policy-gated — showing a
+// fabricated version/policy would be worse than admitting it doesn't
+// apply here.
+function ectRenderLlmInfo(trace) {
+  var el = document.getElementById('ect-llm-info');
+  var byStep = _ectByStep(trace);
+  var ga = byStep['generated_answer'];
+  var out = ga && ga.output_summary;
+  if (!out || !out.llm_model) { el.innerHTML = 'No LLM call in the latest turn (fixed message, or nothing to answer yet).'; return; }
+  el.innerHTML = '<div class="ect-info-grid">' +
+    '<div class="k">Model</div><div class="v">' + esc(out.llm_model) + '</div>' +
+    '<div class="k">Latency</div><div class="v">' + (out.llm_latency_ms != null ? out.llm_latency_ms + ' ms' : '—') + '</div>' +
+    '<div class="k">Input tokens</div><div class="v">' + (out.llm_input_tokens != null ? out.llm_input_tokens : '—') + '</div>' +
+    '<div class="k">Output tokens</div><div class="v">' + (out.llm_output_tokens != null ? out.llm_output_tokens : '—') + '</div>' +
+    '<div class="k">Prompt Version</div><div class="v" style="color:rgba(232,237,245,.4)">N/A — fixed system prompt, not Prompt-Studio-versioned</div>' +
+    '<div class="k">Policy</div><div class="v" style="color:rgba(232,237,245,.4)">N/A — not policy-gated in this harness</div>' +
+  '</div>' +
+  '<div style="margin-top:8px"><div class="k" style="margin-bottom:2px">Reasoning Summary</div>' +
+    '<div class="v" style="font-size:11.5px">' + esc(ga.explanation || 'Grounded strictly in the normalized ERP result — the raw ERP response is never sent to the LLM.') + '</div></div>';
+}
+
+// ── ERP Execution info — method/endpoint/latency/status/credential/
+// request(sanitized)/response(mapped fields). request_construction's
+// output_summary is ALREADY the secret-masked request_preview
+// services/action_executor.py::run_rest_call() builds — never
+// re-sanitized or altered here.
+function ectRenderErpInfo(trace, action) {
+  var el = document.getElementById('ect-erp-info');
+  var byStep = _ectByStep(trace);
+  var erp = byStep['erp_execution'];
+  if (!erp) { el.innerHTML = 'No test run yet.'; return; }
+  var req = byStep['request_construction'];
+  var mapping = byStep['response_mapping'];
+  var credStep = byStep['credential_resolution'];
+  var color = ECT_STATUS_COLOR[erp.status] || '#e8edf5';
+  var credText = !credStep ? '—'
+    : credStep.status === 'skipped' ? 'Not required'
+    : 'Resolved (value never leaves the server)';
+  var html = '<div class="ect-info-grid">' +
+    '<div class="k">Method</div><div class="v">' + esc((action && action.http_method) || '—') + '</div>' +
+    '<div class="k">Endpoint</div><div class="v" style="word-break:break-all">' + esc((action && action.endpoint) || '—') + '</div>' +
+    '<div class="k">Latency</div><div class="v">' + (erp.latency_ms ? erp.latency_ms + ' ms' : '—') + '</div>' +
+    '<div class="k">Status</div><div class="v" style="color:' + color + '">' + esc(erp.status) + (erp.output_summary && erp.output_summary.status_code ? ' (HTTP ' + erp.output_summary.status_code + ')' : '') + '</div>' +
+    '<div class="k">Credential</div><div class="v">' + esc(credText) + '</div>' +
+  '</div>';
+  if (req && req.output_summary) {
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:rgba(232,237,245,.5);font-size:11px">Request (sanitized)</summary>' +
+      '<pre style="white-space:pre-wrap;word-break:break-word;font-size:10.5px;color:rgba(232,237,245,.65);margin-top:4px">' + esc(JSON.stringify(req.output_summary, null, 2)) + '</pre></details>';
+  }
+  if (mapping && mapping.output_summary) {
+    html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:rgba(232,237,245,.5);font-size:11px">Response — Mapped Fields (pretty JSON)</summary>' +
+      '<pre style="white-space:pre-wrap;word-break:break-word;font-size:10.5px;color:rgba(232,237,245,.65);margin-top:4px">' + esc(JSON.stringify(mapping.output_summary, null, 2)) + '</pre></details>';
+  }
+  el.innerHTML = html;
 }
 
 // Part 14 — Strategy Simulation panel. Purely a RENDERING of the
@@ -344,9 +651,7 @@ function ectRenderQuickReplies(options) {
 // buttons/options where the component has options, and the confirmation
 // buttons when the generator says needs_confirmation — entirely reading
 // conversation_form's own shape (services/conversation_form_generator.py);
-// never independently deciding a question or option list here
-// (Requirement 3). Falls back to nothing extra when there is no
-// generated form (e.g. intent_param mode, or contract unavailable).
+// never independently deciding a question or option list here.
 function ectRenderGeneratedControls(form) {
   var container = document.getElementById('ect-generated-controls');
   if (!container) return;
@@ -372,8 +677,6 @@ function ectRenderGeneratedControls(form) {
   container.innerHTML = html;
 }
 
-var ECT_STATUS_COLOR = {pass: '#34d399', ok: '#34d399', warning: '#f59e0b', blocked: '#f59e0b', fail: '#f87171', error: '#f87171', simulated: '#5b9dff', skipped: 'rgba(232,237,245,.4)', not_run: 'rgba(232,237,245,.3)'};
-
 function ectRenderSummary(summary, warning) {
   var color = ECT_STATUS_COLOR[summary.overall] || '#e8edf5';
   document.getElementById('ect-summary-bar').innerHTML =
@@ -385,38 +688,6 @@ function ectRenderSummary(summary, warning) {
     '</div>';
 }
 
-// Part 6 — Developer Trace grouped into Conversation -> Execution -> AI,
-// each collapsible, default collapsed EXCEPT a group containing a
-// failed/error step (opened automatically so the admin sees it first).
-var ECT_TRACE_GROUPS = [
-  {key: 'conversation', label: 'Conversation', steps: ['selected_action', 'conversation_context', 'parameter_extraction', 'missing_parameter_validation']},
-  {key: 'execution', label: 'Execution', steps: ['credential_resolution', 'request_construction', 'erp_execution', 'response_validation', 'response_mapping', 'available_information_options']},
-  {key: 'ai', label: 'AI', steps: ['requested_information_detection', 'information_clarification', 'answer_field_selection', 'prompt_builder', 'generated_answer']},
-];
-
-function ectRenderTrace(trace) {
-  var byStep = {};
-  (trace || []).forEach(function(t){ byStep[t.step] = t; });
-  var el = document.getElementById('ect-trace');
-  el.innerHTML = ECT_TRACE_GROUPS.map(function(group) {
-    var steps = group.steps.map(function(s){ return byStep[s]; }).filter(Boolean);
-    if (!steps.length) return '';
-    var hasFailure = steps.some(function(s){ return s.status === 'error' || s.status === 'blocked' || s.status === 'warning'; });
-    return '<details class="ect-trace-group"' + (hasFailure ? ' open' : '') + '>' +
-      '<summary>' + esc(group.label) + (hasFailure ? ' <span style="color:#f59e0b;font-size:10.5px">⚠ needs attention</span>' : '') + '</summary>' +
-      steps.map(function(t) {
-        var color = ECT_STATUS_COLOR[t.status] || '#e8edf5';
-        return '<div class="ect-trace-step" style="border-left-color:' + color + '">' +
-          '<div style="display:flex;justify-content:space-between"><b>' + esc(t.step.replace(/_/g, ' ')) + '</b>' +
-            '<span style="color:' + color + '">' + esc(t.status) + (t.latency_ms ? ' · ' + t.latency_ms + 'ms' : '') + '</span></div>' +
-          (t.explanation ? '<div style="color:rgba(232,237,245,.55);margin-top:2px">' + esc(t.explanation) + '</div>' : '') +
-          (t.error ? '<div style="color:#f87171;margin-top:2px">' + esc(t.error) + '</div>' : '') +
-        '</div>';
-      }).join('') +
-    '</details>';
-  }).join('');
-}
-
 function ectCopyAnswer() {
   var answer = _ectLastResult && (_ectLastResult.answer || _ectLastResult.clarification_question);
   if (answer && navigator.clipboard) navigator.clipboard.writeText(answer);
@@ -426,12 +697,13 @@ function ectOpenErpApi() {
   if (_ectSelectedAction) window.open('/admin/ai/business-actions', '_blank');
 }
 
-function ectSaveTestCase() {
+function ectSaveTestCase(btn) {
   var a = _ectSelectedAction, r = _ectLastResult;
   var statusEl = document.getElementById('ect-save-status');
   if (!a || !r || !r.ok) { statusEl.textContent = 'Nothing to save yet — run a test first.'; return; }
   var lastUserMsg = (_ectHistory.filter(function(t){ return t.role === 'user'; }).pop() || {}).text || '';
-  statusEl.textContent = 'Saving…';
+  statusEl.textContent = '';
+  ectSetButtonLoading(btn, '<span class="ba-btn-spinner"></span>Saving…');
   fetch('/admin/api/erp-test/save-case', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -442,8 +714,9 @@ function ectSaveTestCase() {
       total_latency_ms: r.summary.total_latency_ms,
     }),
   }).then(function(res){ return res.json(); }).then(function(d) {
+    ectClearButtonLoading(btn);
     statusEl.textContent = d.ok ? '✓ Saved as ERP Test Case.' : ('Failed to save: ' + (d.error || 'unknown error'));
-  }).catch(function(e){ statusEl.textContent = 'Failed to save: ' + e; });
+  }).catch(function(e){ ectClearButtonLoading(btn); statusEl.textContent = 'Failed to save: ' + e; });
 }
 
 // Handles arriving from ERP Test History's "Rerun" button (Part 7) —
@@ -467,6 +740,20 @@ function ectApplyRerunHandoff() {
   } catch (e) { /* malformed handoff payload — ignore, just a normal empty page load */ }
 }
 
-ectLoadActions(ectApplyRerunHandoff);
+// Handles arriving from ERP Integration's "Simulate Conversation" button
+// (business_actions.html) — pre-selects that one action so the developer
+// lands straight on it instead of the list default, one manual Send click
+// away from testing it.
+function ectApplyActionIdFromQuery() {
+  var actionId = new URLSearchParams(window.location.search).get('action_id');
+  if (!actionId) return;
+  var idx = _ectActions.findIndex(function(a){ return a.id === actionId; });
+  if (idx >= 0) {
+    document.getElementById('ect-action-select').value = idx;
+    ectOnActionChange();
+  }
+}
+
+ectLoadActions(function() { ectApplyActionIdFromQuery(); ectApplyRerunHandoff(); });
 </script>
 {% endblock %}

@@ -275,6 +275,43 @@ def validate_embedding_configuration(sb=None) -> None:
         )
 
 
+def report_and_validate_embedding_configuration(sb=None) -> Optional[dict]:
+    """Startup-time embedding configuration check (2026-08-01 configuration-
+    hardening pass). Logs the three numbers an operator needs to see once,
+    at boot — active embedding model, active dimension, expected database
+    dimension — then delegates the actual pass/fail decision to
+    validate_embedding_configuration() (composed, not duplicated: there is
+    still exactly one place that decides "mismatch or not").
+
+    Only a CONFIRMED mismatch (both sides known, and different) raises —
+    same principle validate_embedding_configuration()/
+    get_expected_db_vector_dimension() already use for "DB unreachable is
+    not a mismatch". A provider that can't even be constructed (e.g.
+    OPENAI_API_KEY unset) is logged and treated as "couldn't check", not
+    as a fatal startup error — an unrelated config gap should produce a
+    clear log line, not block the whole app from starting the same way a
+    genuine vector-dimension mismatch must.
+    """
+    try:
+        provider = get_embedding_provider()
+    except Exception as e:
+        print(f"[embedding_service] Startup embedding check skipped — could not construct the "
+              f"embedding provider ({type(e).__name__}: {e}). Fix OPENAI_API_KEY / "
+              f"EMBEDDING_PROVIDER before relying on ingestion or search.")
+        return None
+
+    runtime_dim = provider.dimensions()
+    expected_dim = get_expected_db_vector_dimension(sb)
+    print(f"[embedding_service] Startup embedding check — active model: {provider.model_name()} "
+          f"({provider.provider_name}) | active dimension: {runtime_dim} | "
+          f"expected DB dimension: "
+          f"{expected_dim if expected_dim is not None else 'unknown (DB unreachable at startup)'}")
+
+    validate_embedding_configuration(sb)  # raises EmbeddingConfigurationError on a CONFIRMED mismatch only
+    return {"provider": provider.provider_name, "model": provider.model_name(),
+            "runtime_dimension": runtime_dim, "expected_db_dimension": expected_dim}
+
+
 def build_embedding_text(*, file_name: str, document_title: Optional[str] = None,
                           heading_path: Optional[List[str]] = None,
                           section_title: Optional[str] = None,

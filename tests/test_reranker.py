@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -71,9 +72,57 @@ class TestUnimplementedProviders(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             LLMReranker().rerank("q", [], top_n=1)
 
-    def test_cross_encoder_reranker_raises_clear_error(self):
-        with self.assertRaises(NotImplementedError):
-            CrossEncoderReranker().rerank("q", [], top_n=1)
+
+class TestCrossEncoderReranker(unittest.TestCase):
+    """Phase 3.6 (2026-08-05) — CrossEncoderReranker is now a real
+    implementation (services/reranker.py), not a stub. Never hits the
+    real sentence-transformers model/network in these tests — the model
+    loader (_get_cross_encoder_model) is mocked so unit tests stay fast
+    and deterministic; the real model was separately verified live
+    (correctly scored a relevant Thai chunk 4.39 vs -9.70 for an
+    irrelevant one) during the Phase 3 implementation pass."""
+
+    def test_empty_candidates_returns_empty_without_loading_model(self):
+        with patch("services.reranker._get_cross_encoder_model") as mock_loader:
+            result = CrossEncoderReranker().rerank("q", [], top_n=3)
+        self.assertEqual(result, [])
+        mock_loader.assert_not_called()
+
+    def test_scores_and_reranks_using_model_predictions(self):
+        fake_model = MagicMock()
+        fake_model.predict.return_value = [0.1, 0.9]  # second candidate scores higher
+        candidates = [_chunk(0.5, classification="direct_evidence", content="a"),
+                      _chunk(0.5, classification="direct_evidence", content="b")]
+        with patch("services.reranker._get_cross_encoder_model", return_value=fake_model):
+            result = CrossEncoderReranker().rerank("q", candidates, top_n=2)
+        self.assertEqual(result[0]["content"], "b")
+        self.assertEqual(result[0]["rerank_score"], 0.9)
+
+    def test_never_promotes_a_lower_tier_above_a_higher_tier(self):
+        """Same tier-preservation guarantee as HeuristicReranker — a
+        higher cross-encoder score must never let a lower evidence tier
+        outrank a higher one."""
+        fake_model = MagicMock()
+        fake_model.predict.return_value = [0.99, 0.01]  # weaker tier scores much higher
+        weaker_tier_high_score = _chunk(0.5, classification="supporting_evidence", content="weak-tier")
+        stronger_tier_lower_score = _chunk(0.5, classification="direct_evidence", content="strong-tier")
+        with patch("services.reranker._get_cross_encoder_model", return_value=fake_model):
+            result = CrossEncoderReranker().rerank("q", [weaker_tier_high_score, stronger_tier_lower_score], top_n=2)
+        self.assertEqual(result[0]["classification"], "direct_evidence")
+
+    def test_top_n_truncates(self):
+        fake_model = MagicMock()
+        fake_model.predict.return_value = [0.5, 0.4, 0.3]
+        candidates = [_chunk(0.5, content=str(i)) for i in range(3)]
+        with patch("services.reranker._get_cross_encoder_model", return_value=fake_model):
+            result = CrossEncoderReranker().rerank("q", candidates, top_n=2)
+        self.assertEqual(len(result), 2)
+
+    def test_model_load_failure_raises_clear_actionable_error(self):
+        with patch("services.reranker._get_cross_encoder_model", side_effect=OSError("no network")):
+            with self.assertRaises(RuntimeError) as ctx:
+                CrossEncoderReranker().rerank("q", [_chunk(0.5)], top_n=1)
+        self.assertIn("could not load model", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -27,13 +27,10 @@ vector score alone.
 import re
 from typing import Dict, List, Optional, Tuple
 
-import os
-
-# Retained for backward compatibility (some callers/tests may still read
-# this constant) — no longer used to hard-reject a candidate; see
-# apply_hybrid_ranking()'s adaptive filtering, driven by
-# services/retrieval_settings.py instead.
-RAG_WEAK_SEMANTIC_RELATIVE_THRESHOLD = float(os.getenv("RAG_WEAK_SEMANTIC_RELATIVE_THRESHOLD", "0.75"))
+# NOTE: RAG_WEAK_SEMANTIC_RELATIVE_THRESHOLD was removed here (2026-08-01
+# final config cleanup) — confirmed never referenced anywhere, including
+# within this module itself. Adaptive filtering is driven by
+# services/retrieval_settings.py instead. See LEGACY_ENV.md.
 
 # Section headings considered generically "important" across any
 # business document — never entity-specific, just common document

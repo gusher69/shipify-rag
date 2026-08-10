@@ -14,6 +14,12 @@ from typing import Dict, List, Optional
 
 CHANNELS = ["Global", "LINE OA", "Website", "Shopee", "Lazada", "TikTok Shop", "Facebook", "Instagram"]
 
+# Phase 3.4 (2026-08-05) — Customer Tier Prompt. Fixed 4-tier set, matching
+# services/customer_tier_service.py::TIERS exactly (never user-editable —
+# the tier set itself is a platform constant, only which PROMPT is
+# assigned to each tier is admin-editable).
+TIERS = ["cold", "warm", "hot", "negative"]
+
 _supabase = None
 
 
@@ -291,6 +297,57 @@ class PromptStudioService:
         if not assignment:
             return {"ok": False, "error": "Assignment not found"}
         return self.assign_channel(assignment["channel"], prompt_template_id)
+
+    # ── Customer Tier Prompt (Phase 3.4, 2026-08-05) ────────────────
+    # Mirrors the channel-assignment methods above exactly, keyed by tier
+    # instead of channel — services/prompt_builder.py::get_active_prompt()
+    # reads ai_prompt_tier_assignments the same way it reads
+    # ai_prompt_assignments for channels, with tier taking priority.
+    def list_tier_assignments(self) -> List[Dict]:
+        try:
+            res = _get_sb().table("ai_prompt_tier_assignments").select(
+                "*, ai_prompt_templates(id,name,version)"
+            ).eq("is_active", True).execute()
+            return res.data or []
+        except Exception as e:
+            print(f"[PromptStudio] list_tier_assignments failed: {e}")
+            return []
+
+    def assign_tier(self, tier: str, prompt_template_id: str) -> Dict:
+        """Enforces "only one active prompt assignment per tier", same
+        belt-and-suspenders pattern as assign_channel (DB partial unique
+        index uniq_active_assignment_per_tier is the real enforcement)."""
+        if tier not in TIERS:
+            return {"ok": False, "error": f"Unknown tier '{tier}'. Must be one of: {', '.join(TIERS)}"}
+        prompt = self.get_prompt(prompt_template_id)
+        if not prompt:
+            return {"ok": False, "error": "Prompt template not found"}
+        sb = _get_sb()
+        try:
+            sb.table("ai_prompt_tier_assignments").update(
+                {"is_active": False, "updated_at": _now_iso()}
+            ).eq("tier", tier).eq("is_active", True).execute()
+            res = sb.table("ai_prompt_tier_assignments").insert({
+                "tier": tier, "prompt_template_id": prompt_template_id, "is_active": True,
+            }).execute()
+            return {"ok": True, "assignment": (res.data or [None])[0]}
+        except Exception as e:
+            print(f"[PromptStudio] assign_tier failed: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def unassign_tier(self, tier: str) -> Dict:
+        """Removes the tier's prompt override entirely — the tier then
+        falls back to channel/global resolution (see
+        services/prompt_builder.py::get_active_prompt), which is a valid,
+        common state (tier prompts are opt-in, unlike channel assignment)."""
+        try:
+            _get_sb().table("ai_prompt_tier_assignments").update(
+                {"is_active": False, "updated_at": _now_iso()}
+            ).eq("tier", tier).eq("is_active", True).execute()
+            return {"ok": True}
+        except Exception as e:
+            print(f"[PromptStudio] unassign_tier failed: {e}")
+            return {"ok": False, "error": str(e)}
 
     # ── Test ─────────────────────────────────────────────────────
     def test_prompt(self, prompt_id: str, question: str, top_k: int = 3) -> Optional[object]:

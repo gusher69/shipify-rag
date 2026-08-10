@@ -375,6 +375,22 @@ def _handle_sync_job_files_on_delete(file_id: str):
 
 
 @app.on_event("startup")
+async def _validate_embedding_configuration_at_startup():
+    """2026-08-01 configuration-hardening pass — logs the active embedding
+    model/dimension and the database's expected dimension once, at boot,
+    and refuses to finish starting if they're CONFIRMED to differ (see
+    services/embedding_service.py::report_and_validate_embedding_configuration).
+    Runs before the sync-job reconciliation below so a misconfigured
+    embedding setup is caught before anything else touches the DB.
+    An unreachable DB / unconfigured provider is logged, not fatal — only
+    a genuine, confirmed dimension mismatch stops the app from serving,
+    so ingestion or search can never silently run against the wrong
+    vector space."""
+    from services.embedding_service import report_and_validate_embedding_configuration
+    report_and_validate_embedding_configuration()
+
+
+@app.on_event("startup")
 async def _reconcile_orphaned_sync_jobs():
     """Never resume a job on restart. Any job left 'pending'/'running' from
     a previous process (crash, redeploy, manual kill — no worker thread
@@ -540,13 +556,119 @@ def _write_env(updates: dict):
 SECTION_KEYS = {
     "ai":        ["OPENAI_API_KEY", "OPENAI_CHAT_MODEL", "OPENAI_EMBEDDING_MODEL"],
     "supabase":  ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY"],
-    "line":      ["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"],
+    # 2026-08-01: was ["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"] — the second
+    # key never matched what config.py/line_bot/webhook.py actually read
+    # (LINE_CHANNEL_TOKEN), so saving it from this UI had no effect. Confirmed no
+    # existing .env had a value under the wrong name before this rename (nothing to
+    # migrate) — see the 2026-08-01 Settings-key-consistency audit.
+    "line":      ["LINE_CHANNEL_SECRET", "LINE_CHANNEL_TOKEN"],
     "admin":     ["ADMIN_USERNAME", "ADMIN_PASSWORD"],
     # Developer Mode milestone — same persistence mechanism (the .env
     # file, read/written via _read_env()/_write_env() above), no new
     # storage layer, no localStorage.
     "developer": ["DEVELOPER_MODE"],
 }
+
+# ── Settings field metadata (2026-08-01 configuration-hardening pass) ──────
+# Single source of truth for the Settings page's reload/sensitivity badges
+# and grouping — the template renders from this dict, never a second
+# hardcoded copy, so a field's displayed classification can't drift out of
+# sync with its actual reload behavior.
+#
+#   group="live"    — re-read from the environment (or DB) on every call;
+#                     takes effect immediately, no restart.
+#   group="restart" — written to .env immediately, but the running
+#                     process already cached the OLD value in a config.py
+#                     module constant and/or a singleton built from it at
+#                     import/first-use time — takes effect only after the
+#                     process restarts.
+#   group="secret"  — sensitive credential; classified by sensitivity
+#                     first regardless of reload timing (most secrets here
+#                     also require a restart — see each note).
+#
+# Verified against the actual consumer for each key (not assumed):
+# services/embedding_service.py (embedding model), services/llm_service.py
+# (chat model / API key, cached in a provider singleton), admin/routes.py
+# ::get_sb() (Supabase, cached client singleton), config.py (admin
+# username/password, read once), services/developer_mode.py (re-reads
+# os.getenv on every call — the one genuinely live file-backed setting).
+SETTINGS_FIELD_METADATA = {
+    "OPENAI_API_KEY": {
+        "label": "OpenAI API Key", "group": "secret", "restart_too": True,
+        "note": "Cached in services/llm_service.py's provider singleton at first use.",
+    },
+    "OPENAI_CHAT_MODEL": {
+        "label": "Chat Model", "group": "restart",
+        "note": "Read once into config.OPENAI_CHAT_MODEL at process start.",
+    },
+    "OPENAI_EMBEDDING_MODEL": {
+        "label": "Embedding Model", "group": "restart",
+        "note": "Read once into config.OPENAI_EMBEDDING_MODEL and cached in the embedding "
+                "provider singleton. Changing this also requires re-embedding existing content "
+                "— never edit casually (see hint below).",
+    },
+    "SUPABASE_URL": {
+        "label": "Supabase URL", "group": "restart",
+        "note": "Cached in the Supabase client singleton (admin/routes.py::get_sb()).",
+    },
+    "SUPABASE_ANON_KEY": {
+        "label": "Supabase Anon Key", "group": "secret", "restart_too": True,
+        "note": "Not currently read by any consumer in this codebase (config.py has no "
+                "SUPABASE_ANON_KEY constant) — saving this field has no effect today. Flagged "
+                "during the 2026-08-01 audit, not changed.",
+    },
+    "SUPABASE_SERVICE_KEY": {
+        "label": "Supabase Service Key", "group": "secret", "restart_too": True,
+        "note": "Cached in the Supabase client singleton (admin/routes.py::get_sb()).",
+    },
+    "LINE_CHANNEL_SECRET": {
+        "label": "LINE Channel Secret", "group": "secret", "restart_too": True,
+        "note": "Consumed by line_bot/webhook.py (a separate process) — restart that process too.",
+    },
+    "LINE_CHANNEL_TOKEN": {
+        "label": "LINE Channel Access Token", "group": "secret", "restart_too": True,
+        "note": "Consumed by line_bot/webhook.py (a separate process) — restart that process "
+                "too. Renamed from the non-functional LINE_CHANNEL_ACCESS_TOKEN key during the "
+                "2026-08-01 Settings-key-consistency fix (confirmed no existing .env had a "
+                "value under the old name, so nothing needed migrating).",
+    },
+    "ADMIN_USERNAME": {
+        "label": "Admin Username", "group": "restart",
+        "note": "Read once into config.ADMIN_USERNAME at process start.",
+    },
+    "ADMIN_PASSWORD": {
+        "label": "Admin Password", "group": "secret", "restart_too": True,
+        "note": "Read once into config.ADMIN_PASSWORD at process start.",
+    },
+    "DEVELOPER_MODE": {
+        "label": "Developer Mode", "group": "live",
+        "note": "Re-read from the environment on every request (services/developer_mode.py) "
+                "— takes effect immediately, no restart.",
+    },
+}
+
+SETTINGS_GROUP_LABELS = {
+    "live":    "Runtime Settings (Live Reload)",
+    "restart": "Restart Required",
+    "secret":  "Secrets / Credentials",
+}
+SETTINGS_GROUP_ORDER = ["live", "restart", "secret"]
+
+
+def _build_settings_groups(env: dict) -> list:
+    """Groups SETTINGS_FIELD_METADATA into the 3 categories for the
+    Configuration Overview card — never the raw secret value, only
+    whether something is currently set, so this adds zero new exposure
+    beyond what the existing per-field forms already show."""
+    groups = {g: [] for g in SETTINGS_GROUP_ORDER}
+    for key, meta in SETTINGS_FIELD_METADATA.items():
+        groups[meta["group"]].append({
+            "key": key, "label": meta["label"], "note": meta["note"],
+            "restart_too": meta.get("restart_too", False),
+            "configured": bool(env.get(key)),
+        })
+    return [{"group": g, "title": SETTINGS_GROUP_LABELS[g], "fields": groups[g]} for g in SETTINGS_GROUP_ORDER]
+
 
 @app.get("/admin/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, saved: str = ""):
@@ -571,7 +693,9 @@ async def settings_page(request: Request, saved: str = ""):
         )
     return render("settings.html", {"request": request, "active": "settings",
                                      "env": env, "msg": msg, "msg_type": "success",
-                                     "legacy_embed_warning": legacy_embed_warning})
+                                     "legacy_embed_warning": legacy_embed_warning,
+                                     "field_meta": SETTINGS_FIELD_METADATA,
+                                     "settings_groups": _build_settings_groups(env)})
 
 @app.post("/admin/settings")
 async def settings_save(request: Request):
@@ -2867,6 +2991,79 @@ async def delete_pending_file(request: Request, file_id: str):
     return JSONResponse({"ok": True, "filename": filename, "orphans": orphans or None})
 
 
+@app.get("/admin/knowledge-collections", response_class=HTMLResponse)
+async def knowledge_collections_page(request: Request):
+    if (r := auth(request)): return r
+    return render("knowledge_collections.html", {"request": request, "active": "knowledge-collections"})
+
+
+@app.get("/admin/api/knowledge-collections")
+async def api_list_knowledge_collections(request: Request):
+    if (r := auth(request)): return r
+    from services.knowledge_collection_service import get_knowledge_collection_service
+    return JSONResponse({"ok": True, "collections": get_knowledge_collection_service().list_collections()})
+
+
+@app.post("/admin/api/knowledge-collections")
+async def api_create_knowledge_collection(request: Request):
+    if (r := auth(request)): return r
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
+    from services.knowledge_collection_service import get_knowledge_collection_service
+    collection = get_knowledge_collection_service().create_collection(name, body.get("description"))
+    if not collection:
+        return JSONResponse({"ok": False, "error": "Could not create collection"}, status_code=500)
+    return JSONResponse({"ok": True, "collection": collection})
+
+
+@app.put("/admin/api/knowledge-collections/{collection_id}")
+async def api_update_knowledge_collection(request: Request, collection_id: str):
+    if (r := auth(request)): return r
+    body = await request.json()
+    from services.knowledge_collection_service import get_knowledge_collection_service
+    collection = get_knowledge_collection_service().update_collection(collection_id, body)
+    if not collection:
+        return JSONResponse({"ok": False, "error": "Could not update collection"}, status_code=500)
+    return JSONResponse({"ok": True, "collection": collection})
+
+
+@app.delete("/admin/api/knowledge-collections/{collection_id}")
+async def api_delete_knowledge_collection(request: Request, collection_id: str):
+    if (r := auth(request)): return r
+    from services.knowledge_collection_service import get_knowledge_collection_service
+    result = get_knowledge_collection_service().delete_collection(collection_id)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.post("/admin/api/knowledge-collections/{collection_id}/set-default")
+async def api_set_default_knowledge_collection(request: Request, collection_id: str):
+    if (r := auth(request)): return r
+    from services.knowledge_collection_service import get_knowledge_collection_service
+    ok = get_knowledge_collection_service().set_default(collection_id)
+    return JSONResponse({"ok": ok})
+
+
+@app.get("/admin/api/knowledge-collections/files")
+async def api_list_files_with_collection(request: Request):
+    if (r := auth(request)): return r
+    from services.knowledge_collection_service import get_knowledge_collection_service
+    return JSONResponse({"ok": True, "files": get_knowledge_collection_service().list_files_with_collection()})
+
+
+@app.post("/admin/api/knowledge-collections/assign-file")
+async def api_assign_file_to_collection(request: Request):
+    if (r := auth(request)): return r
+    body = await request.json()
+    file_id, collection_id = body.get("file_id"), body.get("collection_id")
+    if not file_id or not collection_id:
+        return JSONResponse({"ok": False, "error": "file_id and collection_id are required"}, status_code=400)
+    from services.knowledge_collection_service import get_knowledge_collection_service
+    ok = get_knowledge_collection_service().assign_file(file_id, collection_id)
+    return JSONResponse({"ok": ok})
+
+
 @app.get("/admin/file-library", response_class=HTMLResponse)
 async def file_library(request: Request):
     if (r := auth(request)): return r
@@ -3123,6 +3320,40 @@ async def api_update_assignment(request: Request, assignment_id: str):
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 
+@app.get("/admin/api/ai/prompt-tier-assignments")
+async def api_list_tier_assignments(request: Request):
+    if (r := auth(request)): return r
+    from services.prompt_studio_service import get_prompt_studio_service, TIERS
+    svc = get_prompt_studio_service()
+    assignments = svc.list_tier_assignments()
+    by_tier = {a["tier"]: a for a in assignments}
+    # Every tier always appears, even if unassigned — mirrors
+    # api_list_assignments' "show every channel" behavior above. Unassigned
+    # is a normal, common state here (tier prompts are opt-in).
+    rows = [by_tier.get(t, {"tier": t, "prompt_template_id": None, "ai_prompt_templates": None}) for t in TIERS]
+    return JSONResponse({"ok": True, "assignments": rows})
+
+
+@app.post("/admin/api/ai/prompt-tier-assignments")
+async def api_create_tier_assignment(request: Request):
+    if (r := auth(request)): return r
+    body = await request.json()
+    tier, prompt_template_id = body.get("tier"), body.get("prompt_template_id")
+    if not tier or not prompt_template_id:
+        return JSONResponse({"ok": False, "error": "tier and prompt_template_id are required"}, status_code=400)
+    from services.prompt_studio_service import get_prompt_studio_service
+    result = get_prompt_studio_service().assign_tier(tier, prompt_template_id)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.delete("/admin/api/ai/prompt-tier-assignments/{tier}")
+async def api_delete_tier_assignment(request: Request, tier: str):
+    if (r := auth(request)): return r
+    from services.prompt_studio_service import get_prompt_studio_service
+    result = get_prompt_studio_service().unassign_tier(tier)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
 @app.post("/admin/api/ai/prompts/test")
 async def api_test_prompt(request: Request):
     if (r := auth(request)): return r
@@ -3219,19 +3450,32 @@ async def api_set_default_policy(request: Request, policy_id: str):
 
 @app.post("/admin/api/hybrid-playground/ask")
 async def hybrid_playground_ask(request: Request):
-    """Hybrid Playground (2026-07-29 integration/wiring sprint) — wires
-    the EXISTING RAG orchestrator (services/playground_orchestrator.py::
+    """Hybrid Playground (2026-07-29 integration/wiring sprint; extended
+    2026-08-02 Hybrid Question Segmentation sprint) — wires the EXISTING
+    RAG orchestrator (services/playground_orchestrator.py::
     run_playground_turn, untouched) and the EXISTING ERP test harness
     (services/erp_test_harness.py::run_erp_test, untouched) onto one
     route with a mode selector. This route does NOT reimplement
     retrieval, prompting, or ERP execution — it only dispatches to the
-    two pre-existing entry points and, for mode=Auto/Hybrid, uses the
-    deliberately-naive helpers in services/hybrid_playground_router.py
-    (labeled placeholders, not a Business Action Matcher / Decision
-    Engine). Body: {question, mode: auto|rag|erp|hybrid, action_id
-    (ERP/Hybrid, optional for Auto), template_id, session_id, and the
-    same ERP conversation-state passthrough fields api_erp_test_run()
-    accepts (history, collected_params, awaiting_information_selection,
+    two pre-existing entry points.
+
+    Auto mode now uses services/hybrid_question_classifier.py — a
+    deterministic, Registry-driven classifier (RAG_ONLY / ERP_ONLY /
+    HYBRID / CLARIFICATION_REQUIRED / UNKNOWN) that can select Hybrid,
+    replacing the old binary-only naive_auto_route for Auto mode
+    specifically. For a HYBRID classification (Auto) or explicit Hybrid
+    mode, the question is SEGMENTED into an ERP sub-question and a RAG
+    sub-question before execution (never the full compound question sent
+    to both paths) and combined via
+    services/hybrid_playground_router.py::synthesize_hybrid_answer — an
+    explicit, structured, non-LLM combination, never intelligent
+    cross-domain reasoning. Still Playground-only: not the production
+    Decision Engine, not wired to the live LINE webhook.
+
+    Body: {question, mode: auto|rag|erp|hybrid, action_id (ERP/Hybrid,
+    optional for Auto), template_id, session_id, and the same ERP
+    conversation-state passthrough fields api_erp_test_run() accepts
+    (history, collected_params, awaiting_information_selection,
     available_response_options, last_normalized_result,
     conversation_state, confirmed, enforce_confirmation_gate)."""
     if (r := auth(request)): return r
@@ -3244,19 +3488,20 @@ async def hybrid_playground_ask(request: Request):
         return JSONResponse({"ok": False, "error": "Question is required"}, status_code=400)
 
     from services.playground_orchestrator import run_playground_turn
-    from services.erp_test_harness import run_erp_test, describe_action_for_selection
+    from services.erp_test_harness import run_erp_test
     from services.business_action_registry import get_registry as get_action_registry
-    from services.hybrid_playground_router import naive_auto_route, naive_merge_hybrid_answer
+    from services.hybrid_playground_router import synthesize_hybrid_answer
+    from services.hybrid_question_classifier import classify_question
     from dataclasses import asdict
     import traceback
 
     action_id = body.get("action_id")
     errors: List[str] = []
 
-    def _run_rag():
+    def _run_rag(override_message: Optional[str] = None):
         try:
             result = run_playground_turn(
-                question, template_id=body.get("template_id"),
+                override_message or question, template_id=body.get("template_id"),
                 top_k=int(body.get("top_k") or 3),
                 temperature=float(body.get("temperature") if body.get("temperature") is not None else 0.3),
                 max_tokens=int(body.get("max_tokens") or 500),
@@ -3267,12 +3512,12 @@ async def hybrid_playground_ask(request: Request):
             print(f"[HybridPlayground] RAG path failed: {e}")
             return None, str(e)
 
-    def _run_erp(resolved_action_id: Optional[str]):
+    def _run_erp(resolved_action_id: Optional[str], override_message: Optional[str] = None):
         if not resolved_action_id:
             return None, "no ERP action selected"
         try:
             result = run_erp_test(
-                sb=get_sb(), action_id=resolved_action_id, message=question,
+                sb=get_sb(), action_id=resolved_action_id, message=override_message or question,
                 mode=body.get("erp_mode") or "simulation",
                 history=body.get("history") or [], collected_params=body.get("collected_params") or {},
                 language=body.get("language") or "th",
@@ -3290,30 +3535,37 @@ async def hybrid_playground_ask(request: Request):
 
     route_decision = {"route": mode, "reason": f"explicit mode={mode}"}
     rag_result = erp_result = None
+    classification_out: Optional[Dict] = None
+    clarification_out: Optional[Dict] = None
+    is_hybrid_turn = False
+    rag_err = erp_err = None
 
     if mode == "auto":
-        # Naive keyword-heuristic router (services/hybrid_playground_
-        # router.py) — explicitly NOT a real intent classifier/Decision
-        # Engine. Falls back to RAG whenever no ERP action is matched.
-        try:
-            reg = get_action_registry(get_sb())
-            actions_summary = []
-            for a in reg.list():
-                if a.get("action_type") not in ("API", "WEBHOOK", "TOOL"):
-                    continue
-                full = reg.get_full(a["id"], mask_secrets=True)
-                if full:
-                    actions_summary.append(describe_action_for_selection(full, sb=get_sb()))
-        except Exception as e:
-            actions_summary = []
-            errors.append(f"auto-route action lookup failed: {e}")
-        route_decision = naive_auto_route(question, actions_summary)
-        if route_decision["route"] == "erp":
-            erp_result, err = _run_erp(route_decision["action_id"])
-            if err: errors.append(err)
-        else:
-            rag_result, err = _run_rag()
-            if err: errors.append(err)
+        reg = get_action_registry(get_sb())
+        classification = classify_question(question, reg)
+        classification_out = classification
+        cls = classification["classification"]
+        route_decision = {
+            "route": cls.lower(), "reason": "; ".join(classification["evidence"]),
+            "confidence": classification["confidence"], "classification": cls,
+        }
+        if cls == "CLARIFICATION_REQUIRED":
+            clarification_out = {
+                "message": "พบ Business Action ที่ตรงกับคำถามมากกว่าหนึ่งรายการ กรุณาระบุให้ชัดเจนขึ้น หรือเลือก Business Action เอง",
+                "candidate_action_ids": classification["candidate_action_ids"],
+            }
+        elif cls == "HYBRID":
+            is_hybrid_turn = True
+            erp_result, erp_err = _run_erp(classification["selected_action_id"], classification["erp_sub_question"])
+            rag_result, rag_err = _run_rag(classification["rag_sub_question"])
+            if erp_err: errors.append(erp_err)
+            if rag_err: errors.append(rag_err)
+        elif cls == "ERP_ONLY":
+            erp_result, erp_err = _run_erp(classification["selected_action_id"], classification.get("erp_sub_question"))
+            if erp_err: errors.append(erp_err)
+        else:  # RAG_ONLY / UNKNOWN — safe fallback, never leaves the customer with nothing
+            rag_result, rag_err = _run_rag(classification.get("rag_sub_question"))
+            if rag_err: errors.append(rag_err)
     elif mode == "rag":
         rag_result, err = _run_rag()
         if err: errors.append(err)
@@ -3321,14 +3573,19 @@ async def hybrid_playground_ask(request: Request):
         erp_result, err = _run_erp(action_id)
         if err: errors.append(err)
     elif mode == "hybrid":
-        # Both existing entry points run independently; the merge below
-        # is a labeled, naive concatenation — NOT an intelligent
-        # hybrid-answer-synthesis algorithm.
-        rag_result, err1 = _run_rag()
-        erp_result, err2 = _run_erp(action_id)
-        if err1: errors.append(err1)
-        if err2: errors.append(err2)
-        route_decision = {"route": "hybrid", "reason": "explicit mode=hybrid — both RAG and ERP executed"}
+        is_hybrid_turn = True
+        reg = get_action_registry(get_sb())
+        classification = classify_question(question, reg, forced_action_id=action_id) if action_id else classify_question(question, reg)
+        classification_out = classification
+        erp_action_id = action_id or classification.get("selected_action_id")
+        erp_sub_q = classification.get("erp_sub_question") or question
+        rag_sub_q = classification.get("rag_sub_question") or question
+        rag_result, rag_err = _run_rag(rag_sub_q)
+        erp_result, erp_err = _run_erp(erp_action_id, erp_sub_q)
+        if rag_err: errors.append(rag_err)
+        if erp_err: errors.append(erp_err)
+        route_decision = {"route": "hybrid", "reason": "explicit mode=hybrid — both RAG and ERP executed",
+                           "classification": classification.get("classification")}
 
     rag_out = None
     if rag_result is not None:
@@ -3343,8 +3600,30 @@ async def hybrid_playground_ask(request: Request):
                 "raw_vector_similarity": c.get("raw_vector_similarity"), "cited": c.get("cited", False),
             } for c in rag_result.chunks],
             "prompt": {
+                # Prompt Studio integration (2026-08-02 Phase 3) — bring
+                # this route's prompt detail to parity with
+                # /admin/playground/ask, which already exposed all of
+                # this from the SAME BuiltPrompt object
+                # (services/prompt_builder.py) — no new field is computed
+                # here, only copied through.
                 "template_id": rag_result.prompt.template.id,
+                "template_name": rag_result.prompt.template.name,
+                "template_version": rag_result.prompt.template.version,
+                "system_prompt": rag_result.prompt.template.system_prompt,
+                "user_prompt": rag_result.prompt.messages[1]["content"] if len(rag_result.prompt.messages) > 1 else None,
                 "final_prompt": rag_result.prompt.final_prompt_text,
+            },
+            "temperature": rag_result.temperature,
+            # AI Policies (services/policy_engine.py) — likewise already
+            # computed on rag_result.policy/policy_set_name but never
+            # exposed by this route; same PolicyResult shape
+            # /admin/playground/ask already returns.
+            "policy": {
+                "escalate": rag_result.policy.escalate,
+                "active_count": rag_result.policy.active_count,
+                "verdicts": [asdict(v) for v in rag_result.policy.verdicts],
+                "notes": rag_result.policy.notes,
+                "policy_set_name": rag_result.policy_set_name,
             },
             "confidence": rag_result.confidence, "confidence_label": rag_result.confidence_label,
             "answerability": rag_result.answerability,
@@ -3353,6 +3632,17 @@ async def hybrid_playground_ask(request: Request):
             "embedding_dimensions": rag_result.embedding_dimensions,
             "input_tokens": rag_result.input_tokens, "output_tokens": rag_result.output_tokens,
             "pipeline": [asdict(s) for s in rag_result.stages],
+            # AI Playground redesign (2026-08-02 Phase 2) — these were
+            # already computed on `rag_result` (PlaygroundResult, see
+            # services/playground_orchestrator.py) but never copied into
+            # this route's response; the Unified Pipeline view's
+            # Intent/Entities/LLM stages need them for Auto/ERP/Hybrid
+            # mode the same way /admin/playground/ask already exposes
+            # them for plain RAG mode. Purely additive keys, no behavior
+            # change for any existing consumer of this response.
+            "model": rag_result.model,
+            "broad_intent": rag_result.broad_intent, "actionable_intent": rag_result.actionable_intent,
+            "intent_confidence": rag_result.intent_confidence, "intent_entities": rag_result.intent_entities,
         }
 
     erp_out = None
@@ -3373,24 +3663,37 @@ async def hybrid_playground_ask(request: Request):
         }
 
     hybrid_out = None
-    if mode == "hybrid":
-        merged = naive_merge_hybrid_answer(
-            rag_result.answer if rag_result else None,
-            (erp_out.get("answer") if erp_out else None) or (erp_out.get("clarification_question") if erp_out else None),
+    if is_hybrid_turn:
+        # Hybrid Question Segmentation sprint (2026-08-02) — explicit,
+        # structured synthesis (services/hybrid_playground_router.py::
+        # synthesize_hybrid_answer): each section reflects ONLY its own
+        # sub-question's result; citations are attached to the RAG
+        # section only; a path that errored gets an honest unavailability
+        # note instead of a silently-missing section.
+        rag_citations = [c["citation"] for c in (rag_out.get("chunks") or []) if c.get("cited") and c.get("citation")] if rag_out else []
+        erp_answer_for_synthesis = (erp_out.get("answer") or erp_out.get("clarification_question")) if erp_out else None
+        synthesis = synthesize_hybrid_answer(
+            erp_answer=erp_answer_for_synthesis, erp_error=erp_err,
+            rag_answer=rag_out.get("answer") if rag_out else None, rag_error=rag_err,
+            rag_citations=rag_citations,
         )
         hybrid_out = {
             "route": ["rag", "erp"],
-            "erp_contribution": (erp_out.get("answer") or erp_out.get("clarification_question")) if erp_out
-                                 else "ERP found nothing relevant (no action selected or execution failed).",
-            "rag_contribution": rag_result.answer if rag_result else "RAG produced no answer.",
-            "merged_answer": merged,
-            "merge_strategy": "naive concatenation — ERP section first (if present), then Knowledge Base section; "
-                               "NOT an intelligent merge/synthesis algorithm.",
+            "erp_contribution": synthesis["erp_section"],
+            "rag_contribution": synthesis["rag_section"],
+            "merged_answer": synthesis["merged_answer"],
+            "merge_strategy": synthesis["strategy"],
         }
 
     return JSONResponse({
         "ok": True, "mode": mode, "route_decision": route_decision,
         "rag": rag_out, "erp": erp_out, "hybrid": hybrid_out,
+        # Hybrid Question Segmentation sprint (2026-08-02) — the
+        # classifier's own output (classification/confidence/evidence/
+        # selected action/sub-questions), so Developer Mode can show
+        # exactly what decided Auto/Hybrid routing this turn, and the
+        # ambiguity-clarification payload when 2+ Business Actions matched.
+        "classification": classification_out, "clarification": clarification_out,
         "errors": errors,
     })
 
@@ -3596,6 +3899,10 @@ async def playground_ask(request: Request):
             "template_name": result.prompt.template.name,
             "template_version": result.prompt.template.version,
             "system_prompt": result.prompt.template.system_prompt,
+            # Prompt Studio integration (2026-08-02 Phase 3) — the user-half
+            # of BuiltPrompt.messages (services/prompt_builder.py) was
+            # already computed, just never copied into this response.
+            "user_prompt": result.prompt.messages[1]["content"] if len(result.prompt.messages) > 1 else None,
             "final_prompt": result.prompt.final_prompt_text,
         },
         "policy": {
@@ -5333,6 +5640,20 @@ async def api_ai_auto_setup_save(request: Request):
         }, status_code=400)
 
 
+@app.get("/admin/credentials", response_class=HTMLResponse)
+async def credential_store_page(request: Request):
+    """Credential Store UX (2026-08-02) — self-service page so an admin
+    never needs a script or Claude to create a new credential or repair
+    one whose encrypted value can't be decrypted under the current
+    CREDENTIAL_ENCRYPTION_KEY (e.g. after moving to a new machine). Pure
+    presentation — every action on this page calls the pre-existing,
+    already-tested /admin/api/credentials/* routes below; no new backend
+    logic."""
+    if (r := auth(request)): return r
+    if (r := require_developer_feature(request, "credential_store")): return r
+    return render("credential_store.html", {"request": request, "active": "credential_store"})
+
+
 @app.get("/admin/api/credentials")
 async def api_list_credentials(request: Request):
     """Metadata-only list — never encrypted_value/plaintext. Tenant is
@@ -5728,9 +6049,23 @@ async def list_sessions(request: Request):
     sessions = get_session_service().list_sessions(
         search=q.get("search") or None, date_filter=q.get("date_filter") or None,
         model=q.get("model") or None, status=q.get("status") or None,
-        confidence=q.get("confidence") or None,
+        confidence=q.get("confidence") or None, channel=q.get("channel") or None,
     )
     return JSONResponse({"ok": True, "sessions": sessions})
+
+
+@app.get("/admin/api/conversations/stats")
+async def api_conversation_stats(request: Request):
+    if (r := auth(request)): return r
+    from services.session_service import get_session_service
+    stats = get_session_service().get_conversation_stats(channel=request.query_params.get("channel") or None)
+    return JSONResponse({"ok": True, "stats": stats})
+
+
+@app.get("/admin/conversations", response_class=HTMLResponse)
+async def conversations_page(request: Request):
+    if (r := auth(request)): return r
+    return render("conversations.html", {"request": request, "active": "conversations"})
 
 
 @app.get("/admin/playground/sessions/{session_id}")

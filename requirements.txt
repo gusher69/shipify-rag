@@ -4,9 +4,20 @@ tiktoken>=0.5.0
 
 # Supabase (vector DB + user profiles)
 supabase>=2.4.0
+# Direct Postgres connection for services/embedding_service.py::get_expected_db_vector_dimension()
+# — reads knowledge_chunks.embedding's real pg_attribute width via SUPABASE_DB_URL, independent
+# of the supabase-py client above. Was imported but never declared here (2026-08-01 dependency
+# audit) — silently made the startup/pre-ingestion dimension check a no-op on any fresh machine.
+psycopg2-binary>=2.9.0
 
 # Web / API
 fastapi>=0.109.0
+# Pinned below fastapi's own floor (starlette>=0.46.0) but strictly <1.0.0:
+# Starlette 1.0.0 removed the deprecated Jinja2Templates.TemplateResponse(name, context)
+# positional-call shim in favor of TemplateResponse(request, name, context). This app's
+# admin/routes.py still uses the old 2-arg call (2026-08-01 dependency audit) — pin here
+# rather than rewrite every call site to work around a fresh-install version resolution.
+starlette==0.52.1
 uvicorn>=0.27.0
 jinja2>=3.1.0
 python-multipart>=0.0.6

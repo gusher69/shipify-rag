@@ -1,5 +1,22 @@
 # HANDOVER.md
 
+## 2026-08-10 update — Deployment Freeze pass
+
+Everything below this section is the ORIGINAL 2026-07-30 handover — still accurate for the history it describes, but the working tree has moved on substantially since (ERP endpoints completed, Decision Engine wired to live LINE traffic, Hybrid routing implemented, a generic confirmation-gate + LINE Confirmation Flow built for SendLineNotiCS, a Knowledge Base cleanup audited). **See `PROJECT_STATE.md`'s "Current Sprint (2026-08-10)" section for the authoritative current state** — this file is not being fully rewritten to avoid drift between two copies of the same fast-moving detail.
+
+Quick orientation for anyone picking this up fresh:
+- All 8 ERP Business Actions are configured; 7 enabled/production-ready, 1 (`SearchDataTracking`) disabled for a confirmed external API defect.
+- `SendLineNotiCS` is enabled but gated behind a real confirmation flow (`services/pending_confirmation_service.py`, `migrations/036_pending_confirmations.sql`) — no real notification has ever been sent.
+- `line_bot/webhook.py` routes real LINE traffic through `services/decision_engine.py::DecisionEngine.decide()` (not the legacy `intent.classify()` path) by default.
+- Database is a managed Supabase project — no self-hosting, no migration needed for a customer-server deploy; see `DEPLOYMENT_CHECKLIST.md`'s 2026-08-10 section.
+- A Knowledge Base cleanup (15 of 17 active files were unrelated vendor/demo content) has been approved, applied, and verified — only the 2 genuine Shipify FAQ files remain active. See `docs/NEXT_STEPS.md` item H.
+- Regression suite: 1726/1726 passing as of this pass (re-confirmed after the Knowledge Base cleanup).
+- Nothing from this pass has been committed or pushed.
+
+---
+
+# HANDOVER.md (original, 2026-07-30)
+
 _Written 2026-07-30 as part of a git-prep/handover pass. This describes exactly what is in the working tree at the moment of writing — cross-check against `git log`/`git status` before trusting it if time has passed since._
 
 ## Summary

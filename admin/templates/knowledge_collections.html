@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% set active = "knowledge-collections" %}
+{% block title %}Knowledge Collections — Shipify Admin{% endblock %}
+{% block topbar_title %}Knowledge Collections{% endblock %}
+
+{% block extra_head %}
+<style>
+.kc-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media (max-width:1000px){.kc-layout{grid-template-columns:1fr}}
+.kc-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:16px}
+.kc-panel-title{font-size:14px;font-weight:700;color:#e8edf5;margin-bottom:4px}
+.kc-panel-sub{font-size:11.5px;color:rgba(232,237,245,.45);margin-bottom:14px}
+.kc-row{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:8px;
+  background:rgba(255,255,255,.03);margin-bottom:6px;font-size:12.5px}
+.kc-row-name{display:flex;align-items:center;gap:8px;color:#e8edf5;font-weight:600}
+.kc-badge{font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;background:rgba(251,191,36,.15);color:#fbbf24}
+.kc-count{font-size:10.5px;color:rgba(232,237,245,.4)}
+.kc-btn{font-size:11px;padding:5px 10px;border-radius:7px;cursor:pointer;border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.05);color:rgba(232,237,245,.8)}
+.kc-btn:hover{background:rgba(255,255,255,.1)}
+.kc-btn-primary{background:rgba(245,166,35,.18);color:#F5A623;border-color:rgba(245,166,35,.4)}
+.kc-input{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;border-radius:8px;
+  padding:7px 10px;font-size:12.5px;outline:none;width:100%;box-sizing:border-box;margin-bottom:8px}
+.kc-select{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;border-radius:6px;
+  padding:4px 6px;font-size:11.5px}
+.kc-file-row{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;font-size:11.5px;
+  border-bottom:1px solid rgba(255,255,255,.04)}
+.kc-file-name{color:rgba(232,237,245,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+.kc-file-list{max-height:420px;overflow-y:auto}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Knowledge Collections</div>
+    <div class="page-sub">Group knowledge files so retrieval only searches the collection(s) it should — prevents unrelated projects (e.g. a vendor demo file) from leaking into customer-facing answers.</div>
+  </div>
+</div>
+
+<div class="kc-layout">
+  <div class="kc-panel">
+    <div class="kc-panel-title">Collections</div>
+    <div class="kc-panel-sub">The Default collection is what LINE OA and the AI Playground search unless a specific collection is picked.</div>
+    <input class="kc-input" id="kc-new-name" placeholder="New collection name…">
+    <button class="kc-btn kc-btn-primary" style="width:100%;margin-bottom:12px" onclick="createCollection()">+ New Collection</button>
+    <div id="kc-collections-list"><div style="padding:10px;color:rgba(232,237,245,.3);font-size:12px">Loading…</div></div>
+  </div>
+
+  <div class="kc-panel">
+    <div class="kc-panel-title">Files</div>
+    <div class="kc-panel-sub">Reassign a file's collection — takes effect on the very next retrieval call, no restart needed.</div>
+    <div class="kc-file-list" id="kc-files-list"><div style="padding:10px;color:rgba(232,237,245,.3);font-size:12px">Loading…</div></div>
+  </div>
+</div>
+
+<div class="ps-toast-stack" id="ps-toast-stack"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var _kcCollections = [];
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){
+  return {'&':'&lt;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+}); }
+
+function showToast(message){
+  var stack = document.getElementById('ps-toast-stack');
+  if (!stack) { return; }
+  var el = document.createElement('div');
+  el.className = 'ps-toast show';
+  el.style.cssText = 'background:#0f1e38;border:1px solid rgba(52,211,153,.4);color:#e8edf5;padding:10px 16px;border-radius:8px;margin-top:8px;font-size:12.5px';
+  el.textContent = message;
+  stack.appendChild(el);
+  setTimeout(function(){ el.remove(); }, 2600);
+}
+
+function loadCollections(){
+  fetch('/admin/api/knowledge-collections').then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) return;
+    _kcCollections = d.collections || [];
+    renderCollections();
+    renderFiles(); // file dropdown options depend on _kcCollections
+  });
+}
+
+function renderCollections(){
+  var el = document.getElementById('kc-collections-list');
+  el.innerHTML = _kcCollections.map(function(c){
+    return '<div class="kc-row"><div class="kc-row-name">' + esc(c.name) +
+      (c.is_default ? ' <span class="kc-badge">DEFAULT</span>' : '') +
+      ' <span class="kc-count">(' + (c.file_count || 0) + ' files)</span></div>' +
+      '<div style="display:flex;gap:5px">' +
+      (!c.is_default ? '<button class="kc-btn" onclick="setDefaultCollection(\'' + c.id + '\')">Set Default</button>' : '') +
+      (!c.is_default ? '<button class="kc-btn" onclick="deleteCollection(\'' + c.id + '\')">Delete</button>' : '') +
+      '</div></div>';
+  }).join('') || '<div style="padding:10px;color:rgba(232,237,245,.3);font-size:12px">No collections yet.</div>';
+}
+
+function createCollection(){
+  var input = document.getElementById('kc-new-name');
+  var name = input.value.trim();
+  if (!name) return;
+  fetch('/admin/api/knowledge-collections', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name}),
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if (d.ok) { input.value = ''; showToast('Collection created'); loadCollections(); }
+    else alert(d.error || 'Could not create collection');
+  });
+}
+
+function setDefaultCollection(id){
+  fetch('/admin/api/knowledge-collections/' + id + '/set-default', {method: 'POST'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (d.ok) { showToast('Default collection updated'); loadCollections(); }
+    });
+}
+
+function deleteCollection(id){
+  fetch('/admin/api/knowledge-collections/' + id, {method: 'DELETE'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (d.ok) { showToast('Collection deleted'); loadCollections(); }
+      else alert(d.error || 'Could not delete collection');
+    });
+}
+
+function loadFiles(){
+  fetch('/admin/api/knowledge-collections/files').then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) return;
+    window._kcFiles = d.files || [];
+    renderFiles();
+  });
+}
+
+function renderFiles(){
+  var el = document.getElementById('kc-files-list');
+  var files = window._kcFiles || [];
+  if (!_kcCollections.length) return;
+  el.innerHTML = files.map(function(f){
+    var options = _kcCollections.map(function(c){
+      return '<option value="' + c.id + '"' + (c.id === f.collection_id ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+    }).join('');
+    return '<div class="kc-file-row"><span class="kc-file-name" title="' + esc(f.filename) + '">' + esc(f.filename) + '</span>' +
+      '<select class="kc-select" onchange="assignFile(\'' + f.id + '\', this.value)">' + options + '</select></div>';
+  }).join('') || '<div style="padding:10px;color:rgba(232,237,245,.3);font-size:12px">No files yet.</div>';
+}
+
+function assignFile(fileId, collectionId){
+  fetch('/admin/api/knowledge-collections/assign-file', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({file_id: fileId, collection_id: collectionId}),
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if (d.ok) { showToast('File reassigned'); loadCollections(); }
+  });
+}
+
+loadCollections();
+loadFiles();
+</script>
+{% endblock %}

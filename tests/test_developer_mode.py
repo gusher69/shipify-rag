@@ -52,7 +52,7 @@ class TestNormalMenusUnaffected(unittest.TestCase):
 
     def test_only_developer_only_features_are_governed(self):
         for key, feature in FEATURE_DEFINITIONS.items():
-            if key in ("business_action_center", "erp_conversation_tester"):
+            if key in ("business_action_center", "erp_conversation_tester", "credential_store"):
                 self.assertFalse(feature["developer_only"], msg=key)
                 continue
             self.assertTrue(feature["developer_only"], msg=key)
@@ -70,6 +70,13 @@ class TestNormalMenusUnaffected(unittest.TestCase):
                 self.assertEqual(get_feature_state("erp_conversation_tester"), FEATURE_STATE_VISIBLE,
                                   msg=f"dev_mode={dev_mode}")
                 self.assertTrue(is_feature_route_accessible("erp_conversation_tester"), msg=f"dev_mode={dev_mode}")
+
+    def test_credential_store_always_visible_regardless_of_developer_mode(self):
+        for dev_mode in ("true", "false"):
+            with patch.dict(os.environ, _no_env(DEVELOPER_MODE=dev_mode), clear=True):
+                self.assertEqual(get_feature_state("credential_store"), FEATURE_STATE_VISIBLE,
+                                  msg=f"dev_mode={dev_mode}")
+                self.assertTrue(is_feature_route_accessible("credential_store"), msg=f"dev_mode={dev_mode}")
 
 
 class TestCompletedDeveloperMenus(unittest.TestCase):
@@ -111,13 +118,13 @@ class TestComingSoonDeveloperMenus(unittest.TestCase):
             for key in ("excel_engine", "attachment_manager", "storage",
                         "user_profiles", "line_analytics"):
                 self.assertEqual(get_feature_state(key), FEATURE_STATE_HIDDEN, msg=key)
-            # business_action_center (ERP Integration) and
-            # erp_conversation_tester (ERP Conversation Tester) are both
-            # Category C — always VISIBLE, the only items
+            # business_action_center (ERP Integration), erp_conversation_tester
+            # (ERP Conversation Tester), and credential_store (Credential
+            # Store) are all Category C — always VISIBLE, the only items
             # build_developer_menu_items() still returns with Developer
             # Mode off.
             remaining_keys = {i["feature_key"] for i in build_developer_menu_items()}
-            self.assertEqual(remaining_keys, {"business_action_center", "erp_conversation_tester"})
+            self.assertEqual(remaining_keys, {"business_action_center", "erp_conversation_tester", "credential_store"})
 
     def test_coming_soon_never_accessible_as_a_route(self):
         for feature in FEATURE_DEFINITIONS.values():
@@ -264,7 +271,11 @@ class TestSidebarIntegration(unittest.TestCase):
                 from admin.sidebar_config import get_sidebar
                 ai_group = next(e for e in get_sidebar() if e["key"] == "ai")
                 child_keys = {c["key"] for c in ai_group["children"]}
-                self.assertEqual(child_keys, {"preview", "prompt-studio", "ai-policies"}, msg=f"dev_mode={dev_mode}")
+                # "conversations" (Conversation History, Phase 3.7, 2026-08-05)
+                # is a normal, always-visible AI-group item, same as the
+                # three that predate it — not developer-mode-gated.
+                self.assertEqual(child_keys, {"preview", "prompt-studio", "ai-policies", "conversations"},
+                                  msg=f"dev_mode={dev_mode}")
 
     def test_developer_tools_group_present_only_when_on(self):
         with patch.dict(os.environ, _no_env(DEVELOPER_MODE="true"), clear=True):

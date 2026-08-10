@@ -62,7 +62,15 @@ def _resolve_param_value(param: Dict, context: Dict, secret_values: Dict[str, Op
     if source in ("secret_configuration", "credential_store"):
         return secret_values.get(name)
     if source == "customer_message":
-        return (context.get("collected_slots") or {}).get(name)
+        # Explicit customer value takes precedence; a non-required
+        # customer_message parameter (e.g. Latest) may still carry a
+        # configured example_value as its safe default for the turns
+        # where the customer didn't say anything — this does not apply
+        # to fixed_configuration params, which are never customer-set.
+        value = (context.get("collected_slots") or {}).get(name)
+        if value is not None:
+            return value
+        return param.get("example_value") if not param.get("required") else None
     if source == "customer_profile":
         return (context.get("customer_context") or {}).get(name)
     if source == "conversation_context":
@@ -160,7 +168,12 @@ def run_rest_call(execution: Dict, request_values: Dict[str, str], headers: Dict
                     path = m["json_path"].lstrip("$.")
                     value = response_body
                     for part in path.split("."):
-                        value = value.get(part) if isinstance(value, dict) else None
+                        if isinstance(value, dict):
+                            value = value.get(part)
+                        elif isinstance(value, list) and part.isdigit() and int(part) < len(value):
+                            value = value[int(part)]
+                        else:
+                            value = None
                     mapped[m["mapped_label"]] = sanitize_for_preview(value) if isinstance(value, str) else value
 
             friendly_error = None

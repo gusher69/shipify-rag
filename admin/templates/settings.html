@@ -2,6 +2,33 @@
 {% block title %}Settings — Shipify Admin{% endblock %}
 {% block topbar_title %}Settings{% endblock %}
 
+{% block extra_head %}
+<style>
+.settings-badge {
+  display:inline-block; font-size:10.5px; font-weight:600; letter-spacing:.02em;
+  padding:1px 7px; border-radius:10px; margin-left:8px; vertical-align:middle;
+  text-transform:uppercase;
+}
+.settings-badge-live    { background:rgba(52,199,89,.12);  color:#2E9E4E; border:1px solid rgba(52,199,89,.3); }
+.settings-badge-restart { background:rgba(245,166,35,.12); color:#B5790A; border:1px solid rgba(245,166,35,.3); }
+.settings-badge-secret  { background:rgba(220,53,69,.10);  color:#C0293D; border:1px solid rgba(220,53,69,.3); }
+.settings-overview-group { margin-bottom:16px; }
+.settings-overview-group:last-child { margin-bottom:0; }
+.settings-overview-group-title { font-size:12.5px; font-weight:700; margin-bottom:6px; }
+.settings-overview-row {
+  display:flex; align-items:baseline; gap:10px; padding:5px 0;
+  border-bottom:1px solid var(--border, rgba(128,128,128,.15));
+  font-size:12.5px;
+}
+.settings-overview-row:last-child { border-bottom:none; }
+.settings-overview-key { font-family:'SF Mono','Fira Code',monospace; font-size:11.5px; color:var(--text-muted); min-width:220px; }
+.settings-overview-status { margin-left:auto; font-size:11px; white-space:nowrap; }
+.settings-overview-status.is-set { color:#2E9E4E; }
+.settings-overview-status.not-set { color:var(--text-muted); }
+.settings-overview-note { color:var(--text-muted); font-size:11.5px; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
   <div class="page-title">Settings</div>
@@ -12,13 +39,50 @@
 <div class="alert alert-{{ msg_type or 'success' }}" id="settings-msg">{{ msg }}</div>
 {% endif %}
 
+<!-- ── Configuration Overview (2026-08-01 hardening pass) ──
+     Read-only reference grouping EVERY editable setting below into the
+     three categories that matter operationally: does it take effect
+     immediately, does it need a restart, or is it a secret that should
+     never be handled casually. Driven entirely by SETTINGS_FIELD_METADATA
+     in admin/routes.py — never a second hardcoded copy — so this can't
+     silently drift out of sync with the badges on the actual fields
+     below. Never shows a real value, only whether one is currently set. -->
+<div class="card">
+  <div class="card-title">🗂️ Configuration Overview</div>
+  <div class="form-hint" style="margin-bottom:12px">
+    Every setting below, grouped by how it behaves when changed. See the matching badge next to
+    each field further down this page for the same classification in context.
+  </div>
+  {% for g in settings_groups %}
+  <div class="settings-overview-group">
+    <div class="settings-overview-group-title">
+      <span class="settings-badge settings-badge-{{ g.group }}">{{ g.group.upper() if g.group != 'restart' else 'RESTART REQUIRED' }}</span>
+      {{ g.title }}
+    </div>
+    {% for f in g.fields %}
+    <div class="settings-overview-row">
+      <span class="settings-overview-key">{{ f.key }}</span>
+      <span>{{ f.label }}{% if f.restart_too and g.group == 'secret' %} <span class="settings-badge settings-badge-restart">+ Restart</span>{% endif %}</span>
+      <span class="settings-overview-status {{ 'is-set' if f.configured else 'not-set' }}">{{ 'Configured' if f.configured else 'Not set' }}</span>
+    </div>
+    <div class="settings-overview-note">{{ f.note }}</div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+{% macro badge(key) -%}
+{%- set m = field_meta.get(key) -%}
+{%- if m %}<span class="settings-badge settings-badge-{{ m.group }}">{{ 'Live' if m.group == 'live' else ('Secret' if m.group == 'secret' else 'Restart Required') }}</span>{% endif -%}
+{%- endmacro %}
+
 <!-- ── OpenAI ── -->
 <div class="card">
   <div class="card-title">🤖 OpenAI</div>
   <form method="POST" action="/admin/settings">
     <input type="hidden" name="section" value="ai">
     <div class="form-group">
-      <label class="form-label">OpenAI API Key</label>
+      <label class="form-label">OpenAI API Key{{ badge('OPENAI_API_KEY') }}</label>
       <div style="position:relative">
         <input type="password" name="OPENAI_API_KEY" class="form-input"
                id="key-openai"
@@ -33,14 +97,14 @@
     </div>
     <div class="grid-2">
       <div class="form-group">
-        <label class="form-label">Chat Model</label>
+        <label class="form-label">Chat Model{{ badge('OPENAI_CHAT_MODEL') }}</label>
         <input type="text" name="OPENAI_CHAT_MODEL" class="form-input"
                value="{{ env.OPENAI_CHAT_MODEL or 'gpt-4o' }}"
                placeholder="gpt-4o">
         <div class="form-hint">e.g. gpt-4o, gpt-4o-mini</div>
       </div>
       <div class="form-group">
-        <label class="form-label">Embedding Model</label>
+        <label class="form-label">Embedding Model{{ badge('OPENAI_EMBEDDING_MODEL') }}</label>
         <input type="text" name="OPENAI_EMBEDDING_MODEL" class="form-input"
                value="{{ env.OPENAI_EMBEDDING_MODEL or 'text-embedding-3-large' }}"
                placeholder="text-embedding-3-large">
@@ -62,14 +126,14 @@
   <form method="POST" action="/admin/settings">
     <input type="hidden" name="section" value="supabase">
     <div class="form-group">
-      <label class="form-label">Supabase URL</label>
+      <label class="form-label">Supabase URL{{ badge('SUPABASE_URL') }}</label>
       <input type="text" name="SUPABASE_URL" class="form-input"
              value="{{ env.SUPABASE_URL or '' }}"
              placeholder="https://xxxx.supabase.co">
     </div>
     <div class="grid-2">
       <div class="form-group">
-        <label class="form-label">Anon Key</label>
+        <label class="form-label">Anon Key{{ badge('SUPABASE_ANON_KEY') }}</label>
         <div style="position:relative">
           <input type="password" name="SUPABASE_ANON_KEY" class="form-input"
                  id="key-anon"
@@ -81,7 +145,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Service Key</label>
+        <label class="form-label">Service Key{{ badge('SUPABASE_SERVICE_KEY') }}</label>
         <div style="position:relative">
           <input type="password" name="SUPABASE_SERVICE_KEY" class="form-input"
                  id="key-service"
@@ -104,7 +168,7 @@
     <input type="hidden" name="section" value="line">
     <div class="grid-2">
       <div class="form-group">
-        <label class="form-label">Channel Secret</label>
+        <label class="form-label">Channel Secret{{ badge('LINE_CHANNEL_SECRET') }}</label>
         <div style="position:relative">
           <input type="password" name="LINE_CHANNEL_SECRET" class="form-input"
                  id="key-line-secret"
@@ -117,11 +181,11 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Channel Access Token</label>
+        <label class="form-label">Channel Access Token{{ badge('LINE_CHANNEL_TOKEN') }}</label>
         <div style="position:relative">
-          <input type="password" name="LINE_CHANNEL_ACCESS_TOKEN" class="form-input"
+          <input type="password" name="LINE_CHANNEL_TOKEN" class="form-input"
                  id="key-line-token"
-                 value="{{ env.LINE_CHANNEL_ACCESS_TOKEN or '' }}"
+                 value="{{ env.LINE_CHANNEL_TOKEN or '' }}"
                  placeholder="รอลูกค้าให้"
                  style="padding-right:44px; font-family:'SF Mono','Fira Code',monospace; font-size:13px">
           <button type="button" onclick="toggleShow('key-line-token')"
@@ -140,7 +204,7 @@
      prompt settings. Backed by services/retrieval_settings.py /
      rag_retrieval_settings (DB, falls back to config defaults). -->
 <div class="card">
-  <div class="card-title">🔍 Retrieval Settings</div>
+  <div class="card-title">🔍 Retrieval Settings<span class="settings-badge settings-badge-live">Live</span></div>
   <div class="form-hint" style="margin-bottom:12px">
     Controls how the Search/Retrieval Engine finds and ranks knowledge chunks — separate from Prompt Studio,
     which only controls the LLM's system prompt/persona/tone.
@@ -268,12 +332,12 @@
     <input type="hidden" name="section" value="admin">
     <div class="grid-2">
       <div class="form-group">
-        <label class="form-label">Username</label>
+        <label class="form-label">Username{{ badge('ADMIN_USERNAME') }}</label>
         <input type="text" name="ADMIN_USERNAME" class="form-input"
                value="{{ env.ADMIN_USERNAME or '' }}">
       </div>
       <div class="form-group">
-        <label class="form-label">Password</label>
+        <label class="form-label">Password{{ badge('ADMIN_PASSWORD') }}</label>
         <div style="position:relative">
           <input type="password" name="ADMIN_PASSWORD" class="form-input"
                  id="key-admin-pass"
@@ -300,7 +364,7 @@
   <form method="POST" action="/admin/settings" onsubmit="return confirmDevModeToggle(this)">
     <input type="hidden" name="section" value="developer">
     <div class="form-group">
-      <label class="form-label">Developer Mode</label>
+      <label class="form-label">Developer Mode{{ badge('DEVELOPER_MODE') }}</label>
       <div class="form-hint" style="margin-bottom:8px">
         Show advanced development, testing, validation, and integration tools. Intended for administrators and developers only.
       </div>

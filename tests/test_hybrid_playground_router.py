@@ -1,0 +1,91 @@
+"""Tests for services/hybrid_playground_router.py — the Playground-only
+Auto-mode router and Hybrid-mode synthesis (Hybrid Question Segmentation
+sprint, 2026-08-02). Pure functions, no DB/network/LLM involved.
+"""
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from services.hybrid_playground_router import naive_auto_route, synthesize_hybrid_answer
+
+
+class TestNaiveAutoRoute(unittest.TestCase):
+    """Pre-existing behavior, unchanged by this sprint — kept for
+    anything still calling it directly (Auto mode itself now uses
+    services/hybrid_question_classifier.py instead)."""
+
+    def test_matches_erp_action_token(self):
+        actions = [{"id": "a1", "name": "ดึงข้อมูลลูกค้า", "action_key": "get_customer", "enabled": True}]
+        result = naive_auto_route("ดึงข้อมูลลูกค้ารหัส C00001", actions)
+        self.assertEqual(result["route"], "erp")
+        self.assertEqual(result["action_id"], "a1")
+
+    def test_defaults_to_rag_when_nothing_matches(self):
+        result = naive_auto_route("ขอทราบนโยบายการคืนสินค้า", [])
+        self.assertEqual(result["route"], "rag")
+
+
+class TestSynthesizeHybridAnswer(unittest.TestCase):
+    def test_both_sections_present_and_labeled(self):
+        result = synthesize_hybrid_answer(
+            erp_answer="ลูกค้า C00001 มีคูปอง 2 ใบ", rag_answer="คูปองใช้งานได้ที่หน้าชำระเงินค่ะ",
+            rag_citations=["FAQ.xlsx, page 3"],
+        )
+        self.assertIn("ลูกค้า C00001 มีคูปอง 2 ใบ", result["erp_section"])
+        self.assertIn("คูปองใช้งานได้ที่หน้าชำระเงินค่ะ", result["rag_section"])
+        self.assertIn("ข้อมูลเฉพาะลูกค้า", result["merged_answer"])
+        self.assertIn("ความรู้ทั่วไป", result["merged_answer"])
+
+    def test_citation_never_attached_to_erp_section(self):
+        result = synthesize_hybrid_answer(
+            erp_answer="ลูกค้า C00001 มีคูปอง 2 ใบ", rag_answer="คูปองใช้งานได้ที่หน้าชำระเงินค่ะ",
+            rag_citations=["FAQ.xlsx, page 3"],
+        )
+        self.assertNotIn("FAQ.xlsx", result["erp_section"])
+        # Citations are woven into the merged answer's RAG block only —
+        # never into erp_section, and never appear anywhere near the ERP
+        # block's own text.
+        merged = result["merged_answer"]
+        self.assertIn("FAQ.xlsx", merged)
+        erp_block_start = merged.index("ข้อมูลเฉพาะลูกค้า")
+        rag_block_start = merged.index("ความรู้ทั่วไป")
+        citation_pos = merged.index("FAQ.xlsx")
+        self.assertGreater(citation_pos, rag_block_start)
+        self.assertLess(erp_block_start, rag_block_start)
+
+    def test_no_citations_means_no_source_block(self):
+        result = synthesize_hybrid_answer(erp_answer="A", rag_answer="B", rag_citations=[])
+        self.assertNotIn("แหล่งที่มา", result["merged_answer"])
+
+    def test_erp_failure_shown_honestly_not_fabricated(self):
+        result = synthesize_hybrid_answer(erp_error="API ตอบกลับด้วยสถานะ 400", rag_answer="คำตอบจาก KB")
+        self.assertIn("ไม่สามารถดึงข้อมูลลูกค้าได้", result["erp_section"])
+        self.assertIn("API ตอบกลับด้วยสถานะ 400", result["erp_section"])
+        self.assertIn("คำตอบจาก KB", result["rag_section"])
+
+    def test_rag_failure_shown_honestly(self):
+        result = synthesize_hybrid_answer(erp_answer="ข้อมูลลูกค้า", rag_error="embedding provider unreachable")
+        self.assertIn("ไม่สามารถค้นหาข้อมูลจากฐานความรู้ได้", result["rag_section"])
+        self.assertIn("embedding provider unreachable", result["rag_section"])
+
+    def test_path_that_did_not_run_produces_no_fabricated_section(self):
+        result = synthesize_hybrid_answer(erp_answer="ข้อมูลลูกค้า C00001", rag_answer=None)
+        self.assertIsNone(result["rag_section"])
+        self.assertNotIn("ความรู้ทั่วไป", result["merged_answer"])
+
+    def test_neither_path_produced_anything(self):
+        result = synthesize_hybrid_answer()
+        self.assertIsNone(result["erp_section"])
+        self.assertIsNone(result["rag_section"])
+        self.assertIn("ไม่พบคำตอบ", result["merged_answer"])
+
+    def test_strategy_is_always_labeled_explicit_not_intelligent(self):
+        result = synthesize_hybrid_answer(erp_answer="A", rag_answer="B")
+        self.assertIn("explicit synthesis", result["strategy"])
+        self.assertIn("no LLM rewrite", result["strategy"])
+
+
+if __name__ == "__main__":
+    unittest.main()

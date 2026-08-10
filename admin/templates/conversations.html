@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% set active = "conversations" %}
+{% block title %}Conversation History — Shipify Admin{% endblock %}
+{% block topbar_title %}Conversation History{% endblock %}
+
+{% block extra_head %}
+<style>
+.cv-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px}
+.cv-stat-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px 14px}
+.cv-stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:rgba(232,237,245,.4);margin-bottom:4px}
+.cv-stat-value{font-size:20px;font-weight:700;color:#e8edf5}
+.cv-stat-breakdown{font-size:10.5px;color:rgba(232,237,245,.5);margin-top:4px;line-height:1.5}
+.cv-layout{display:grid;grid-template-columns:1fr;gap:16px}
+.cv-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:16px}
+.cv-toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.cv-input,.cv-select{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;
+  border-radius:8px;padding:7px 10px;font-size:12.5px;outline:none}
+.cv-table{width:100%;border-collapse:collapse;font-size:12px}
+.cv-table th{text-align:left;padding:8px 10px;color:rgba(232,237,245,.4);font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.03em;border-bottom:1px solid rgba(255,255,255,.08)}
+.cv-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.04);color:#e8edf5;cursor:pointer}
+.cv-table tr:hover td{background:rgba(255,255,255,.03)}
+.cv-badge{font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700}
+.cv-badge-line{background:rgba(52,211,153,.15);color:#34d399}
+.cv-badge-playground{background:rgba(167,139,250,.15);color:#c4b5fd}
+.cv-badge-tier-hot{background:rgba(239,68,68,.15);color:#fca5a5}
+.cv-badge-tier-warm{background:rgba(251,191,36,.15);color:#fbbf24}
+.cv-badge-tier-cold{background:rgba(147,197,253,.15);color:#93c5fd}
+.cv-badge-tier-negative{background:rgba(239,68,68,.25);color:#f87171}
+
+.cv-detail-ov{display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);align-items:flex-start;
+  justify-content:center;overflow-y:auto;padding:30px 16px}
+.cv-detail-ov.open{display:flex}
+.cv-detail-box{background:#0f1e38;border:1px solid rgba(27,79,155,.4);border-radius:16px;padding:22px 26px;
+  width:820px;max-width:96vw;margin-bottom:30px}
+.cv-detail-close{float:right;background:none;border:none;color:rgba(232,237,245,.4);cursor:pointer;font-size:18px}
+.cv-turn{border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+.cv-turn-role{font-size:10.5px;font-weight:700;text-transform:uppercase;color:rgba(232,237,245,.4);margin-bottom:4px}
+.cv-turn-content{font-size:12.5px;color:#e8edf5;white-space:pre-wrap;margin-bottom:8px}
+.cv-turn-meta{font-size:10.5px;color:rgba(232,237,245,.45);display:flex;gap:10px;flex-wrap:wrap}
+.cv-chunk{font-size:11px;color:rgba(232,237,245,.6);padding:4px 0;border-top:1px dashed rgba(255,255,255,.06)}
+.cv-json{font-size:10.5px;font-family:'SF Mono','Fira Code',monospace;background:rgba(0,0,0,.2);border-radius:6px;
+  padding:8px;max-height:180px;overflow:auto;color:rgba(232,237,245,.6);white-space:pre-wrap}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Conversation History</div>
+    <div class="page-sub">Every LINE OA and AI Playground turn, with the full Decision Engine trace — click a row for Session Replay / Developer Debug.</div>
+  </div>
+</div>
+
+<div class="cv-stats" id="cv-stats"><div style="padding:10px;color:rgba(232,237,245,.3);font-size:12px">Loading stats…</div></div>
+
+<div class="cv-layout">
+  <div class="cv-panel">
+    <div class="cv-toolbar">
+      <select class="cv-select" id="cv-channel-filter" onchange="loadConversations()">
+        <option value="">All channels</option>
+        <option value="line">LINE OA</option>
+        <option value="playground">AI Playground</option>
+      </select>
+      <input class="cv-input" id="cv-search" placeholder="Search question/answer…" style="flex:1;min-width:200px" oninput="debouncedLoad()">
+    </div>
+    <table class="cv-table">
+      <thead><tr><th>Channel</th><th>Name / Last Question</th><th>Turns</th><th>Last Confidence</th><th>Tier</th><th>Updated</th></tr></thead>
+      <tbody id="cv-table-body"><tr><td colspan="6" style="color:rgba(232,237,245,.3)">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="cv-detail-ov" id="cv-detail-ov" onclick="if(event.target===this)closeDetail()">
+  <div class="cv-detail-box">
+    <button class="cv-detail-close" onclick="closeDetail()">✕</button>
+    <div id="cv-detail-content">Loading…</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var _cvSearchDebounce = null;
+var _cvTierSnapshot = {}; // line_user_id isn't on the row list; tier comes from ai_sessions.conversation_tier snapshot
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){
+  return {'&':'&lt;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+}); }
+
+function debouncedLoad(){ clearTimeout(_cvSearchDebounce); _cvSearchDebounce = setTimeout(loadConversations, 250); }
+
+function loadStats(){
+  var channel = document.getElementById('cv-channel-filter') ? document.getElementById('cv-channel-filter').value : '';
+  fetch('/admin/api/conversations/stats' + (channel ? '?channel=' + channel : ''))
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (!d.ok) return;
+      var s = d.stats;
+      var el = document.getElementById('cv-stats');
+      var routingStr = Object.keys(s.routing_distribution).map(function(k){ return k + ': ' + s.routing_distribution[k]; }).join(' · ');
+      var tierStr = Object.keys(s.tier_distribution).map(function(k){ return k + ': ' + s.tier_distribution[k]; }).join(' · ');
+      var confStr = 'High ' + s.confidence_distribution.high + ' · Med ' + s.confidence_distribution.medium +
+        ' · Low ' + s.confidence_distribution.low + ' · N/A ' + s.confidence_distribution.unknown;
+      el.innerHTML =
+        '<div class="cv-stat-card"><div class="cv-stat-label">Total Turns</div><div class="cv-stat-value">' + s.total_turns + '</div></div>' +
+        '<div class="cv-stat-card"><div class="cv-stat-label">Escalation Rate</div><div class="cv-stat-value">' + (s.escalation_rate * 100).toFixed(1) + '%</div>' +
+        '<div class="cv-stat-breakdown">' + s.escalation_count + ' escalated</div></div>' +
+        '<div class="cv-stat-card"><div class="cv-stat-label">Routing</div><div class="cv-stat-breakdown">' + esc(routingStr || 'No data yet') + '</div></div>' +
+        '<div class="cv-stat-card"><div class="cv-stat-label">Confidence</div><div class="cv-stat-breakdown">' + esc(confStr) + '</div></div>' +
+        '<div class="cv-stat-card"><div class="cv-stat-label">Customer Tier Distribution</div><div class="cv-stat-breakdown">' + esc(tierStr || 'No data yet') + '</div></div>';
+    });
+}
+
+function tierBadge(tier){
+  if (!tier) return '';
+  return '<span class="cv-badge cv-badge-tier-' + tier + '">' + tier.toUpperCase() + '</span>';
+}
+
+function loadConversations(){
+  loadStats();
+  var channel = document.getElementById('cv-channel-filter').value;
+  var search = document.getElementById('cv-search').value.trim();
+  var params = new URLSearchParams();
+  if (channel) params.set('channel', channel);
+  if (search) params.set('search', search);
+  fetch('/admin/playground/sessions?' + params.toString())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      var tbody = document.getElementById('cv-table-body');
+      var sessions = d.sessions || [];
+      tbody.innerHTML = sessions.map(function(s){
+        var badge = s.channel === 'line'
+          ? '<span class="cv-badge cv-badge-line">LINE</span>'
+          : '<span class="cv-badge cv-badge-playground">PLAYGROUND</span>';
+        var name = s.channel === 'line' ? ('LINE: ' + esc((s.line_user_id || '').slice(0, 10)) + '…') : esc(s.name);
+        var lastQ = s.last_question ? esc(s.last_question.slice(0, 60)) : '';
+        return '<tr onclick="openDetail(\'' + s.id + '\')">' +
+          '<td>' + badge + '</td>' +
+          '<td>' + name + '<div style="color:rgba(232,237,245,.4);font-size:11px">' + lastQ + '</div></td>' +
+          '<td>' + (s.message_count || 0) + '</td>' +
+          '<td>' + (s.last_confidence != null ? (s.last_confidence * 100).toFixed(0) + '%' : '—') + '</td>' +
+          '<td>' + tierBadge(s.conversation_tier) + '</td>' +
+          '<td style="color:rgba(232,237,245,.4);font-size:11px">' + (s.updated_at ? s.updated_at.slice(0, 16).replace('T', ' ') : '') + '</td>' +
+          '</tr>';
+      }).join('') || '<tr><td colspan="6" style="color:rgba(232,237,245,.3)">No conversations yet.</td></tr>';
+    });
+}
+
+function openDetail(sessionId){
+  var ov = document.getElementById('cv-detail-ov');
+  var content = document.getElementById('cv-detail-content');
+  content.innerHTML = 'Loading…';
+  ov.classList.add('open');
+  fetch('/admin/playground/sessions/' + sessionId).then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) { content.innerHTML = 'Could not load conversation.'; return; }
+    var session = d.session;
+    var html = '<div style="font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:2px">' + esc(session.name) + '</div>';
+    html += '<div style="font-size:11px;color:rgba(232,237,245,.4);margin-bottom:16px">Channel: ' + esc(session.channel || 'playground') +
+      (session.line_user_id ? ' · LINE User: ' + esc(session.line_user_id.slice(0, 12)) + '…' : '') + '</div>';
+
+    (session.messages || []).forEach(function(m){
+      html += '<div class="cv-turn"><div class="cv-turn-role">' + m.role + ' · turn ' + m.turn_index + '</div>';
+      html += '<div class="cv-turn-content">' + esc(m.content) + '</div>';
+      var meta = [];
+      if (m.routing_type) meta.push('Routing: ' + m.routing_type);
+      if (m.broad_intent) meta.push('Broad Intent: ' + m.broad_intent);
+      if (m.actionable_intent) meta.push('Actionable Intent: ' + m.actionable_intent);
+      if (m.selected_business_action) meta.push('Business Action: ' + m.selected_business_action);
+      if (m.confidence != null) meta.push('Confidence: ' + (m.confidence * 100).toFixed(0) + '%');
+      if (m.latency_ms != null) meta.push('Latency: ' + Math.round(m.latency_ms) + 'ms');
+      if (m.escalated) meta.push('ESCALATED: ' + (m.escalation_reason || ''));
+      if (meta.length) html += '<div class="cv-turn-meta">' + meta.map(esc).join(' &nbsp;·&nbsp; ') + '</div>';
+
+      if (m.trace) {
+        var t = m.trace;
+        if (t.chunks && t.chunks.length) {
+          html += '<div style="margin-top:8px;font-size:10.5px;color:rgba(232,237,245,.4);text-transform:uppercase">Retrieved Chunks (' + t.chunks.length + ')</div>';
+          t.chunks.forEach(function(c){
+            html += '<div class="cv-chunk">' + esc(c.file_name || c.source || 'unknown') + ' — score: ' + (c.score != null ? c.score.toFixed(3) : (c.hybrid_score != null ? c.hybrid_score.toFixed(3) : 'n/a')) + '</div>';
+          });
+        }
+        if (t.prompt && (t.prompt.template_name || t.prompt.template_id)) {
+          html += '<div style="margin-top:8px;font-size:10.5px;color:rgba(232,237,245,.4)">Prompt: ' + esc(t.prompt.template_name || '') + ' (v' + esc(String(t.prompt.template_version || '')) + ')</div>';
+        }
+        if (t.policy && (t.policy.policy_set_name || t.policy.merge_strategy)) {
+          html += '<div style="font-size:10.5px;color:rgba(232,237,245,.4)">Policy: ' + esc(t.policy.policy_set_name || '') + (t.policy.merge_strategy ? ' · ' + esc(t.policy.merge_strategy) : '') + '</div>';
+        }
+        if (t.erp_request && Object.keys(t.erp_request).length) {
+          html += '<div style="margin-top:8px;font-size:10.5px;color:rgba(232,237,245,.4);text-transform:uppercase">ERP Request (masked)</div><div class="cv-json">' + esc(JSON.stringify(t.erp_request, null, 2)) + '</div>';
+        }
+        if (t.erp_response && Object.keys(t.erp_response).length) {
+          html += '<div style="margin-top:6px;font-size:10.5px;color:rgba(232,237,245,.4);text-transform:uppercase">ERP Response</div><div class="cv-json">' + esc(JSON.stringify(t.erp_response, null, 2)) + '</div>';
+        }
+      }
+      html += '</div>';
+    });
+    content.innerHTML = html;
+  });
+}
+
+function closeDetail(){ document.getElementById('cv-detail-ov').classList.remove('open'); }
+
+loadConversations();
+</script>
+{% endblock %}

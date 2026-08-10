@@ -102,6 +102,19 @@ FEATURE_DEFINITIONS: Dict[str, Dict] = {
         "developer_only": False, "implementation_status": "complete",
         "env_override": "SHOW_BUSINESS_ACTION_CENTER", "navigation_group": "integrations",
     },
+    # Credential Store UX (2026-08-02) — the encrypted secret storage
+    # backend (services/credential_store.py) already had a full API
+    # surface (list/create/rotate/test/disable/enable/revoke) but no
+    # dedicated admin page; an admin could only reference an EXISTING
+    # credential by key from inside a Business Action's parameter editor,
+    # never see/repair one directly. Same always-on visibility as the
+    # other two Integrations items — managing/repairing a credential is a
+    # normal, everyday Admin task, not an advanced/unfinished tool.
+    "credential_store": {
+        "title": "Credential Store", "route": "/admin/credentials", "icon": "key",
+        "developer_only": False, "implementation_status": "complete",
+        "env_override": "SHOW_BUSINESS_ACTION_CENTER", "navigation_group": "integrations",
+    },
     "excel_engine": {
         "title": "Excel Engine", "route": None, "icon": "table",
         "developer_only": True, "implementation_status": "coming_soon", "env_override": None,

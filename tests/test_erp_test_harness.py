@@ -413,6 +413,32 @@ class TestRunErpTestScenarios(unittest.TestCase):
         full_trace_text = str(result["trace"])
         self.assertNotIn("REAL-SECRET", full_trace_text)
 
+    def test_live_mode_passes_system_generated_values_to_executor(self):
+        """Confirmed defect fix (2026-08-09, Postman 8-endpoint onboarding)
+        — live mode's exec_context never included "system_values" at all,
+        so a parameter sourced from input_source='system_generated' (e.g.
+        a URL extracted from the raw message — see services/
+        decision_engine.py::_extract_system_values, GetUrlProductDetail's
+        real integration) could never resolve through this harness even
+        though the exact same Business Action worked through the real
+        Decision Engine path. Reuses _extract_system_values() — never a
+        second extractor — so this only asserts the harness now passes
+        the SAME values through, not that URL extraction itself changed."""
+        fake_executor = MagicMock()
+        fake_executor.execute.return_value = {
+            "status": "success", "result": {"status_code": 200, "request": {}, "mapped_fields": {}},
+            "metadata": {}, "latency_ms": 10.0, "error": None, "logs": [],
+        }
+        with patch("services.erp_test_harness.get_registry", return_value=self.reg), \
+             patch.object(self.reg, "resolve_secret_parameters", return_value={"SecretCode": "resolved-value"}), \
+             patch("services.erp_test_harness.ActionExecutor", return_value=fake_executor):
+            harness.run_erp_test(sb=self.reg._sb, action_id=self.action_id,
+                                  message="C00001 ลิงก์นี้ค่ะ https://detail.1688.com/offer/123456.html", mode="live")
+        passed_context = fake_executor.execute.call_args.kwargs.get("context")
+        self.assertIsNotNone(passed_context)
+        self.assertIn("system_values", passed_context)
+        self.assertEqual(passed_context["system_values"].get("URL"), "https://detail.1688.com/offer/123456.html")
+
 
 def _fake_llm_echoing_fields():
     """A fake LLM whose reply just lists whichever field labels/values

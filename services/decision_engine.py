@@ -39,6 +39,37 @@ from services.slot_filling_engine import (
 )
 from services.business_action_registry import get_registry, sanitize_for_preview
 from services.action_executor import ActionExecutor, get_action_executor
+# Action Selection Primitives (2026-08-02 Production Integration Sprint,
+# Phase 1 Step A) — moved out of this module, verbatim, so services/
+# hybrid_question_classifier.py can import them WITHOUT importing this
+# module (this module needs to import the classifier for Hybrid routing
+# — the two can no longer import each other). Re-imported and re-exported
+# here under the SAME names so every existing external import (e.g.
+# services/erp_test_harness.py's `from services.decision_engine import
+# _askable_parameters_by_name, ...`) keeps working unchanged.
+from services.action_selection_primitives import (
+    _PARAMETER_VALIDATORS,
+    _EMAIL_CANDIDATE_RE,
+    _extract_candidates_for_binding,
+    _resolve_parameter_validator,
+    _bind_candidate_to_parameter,
+    _NON_ASKABLE_INPUT_SOURCES,
+    _askable_parameters_by_name,
+    _keyword_score,
+    select_requested_mapped_fields,
+)
+# Hybrid Question Classifier (2026-08-02 Production Integration Sprint,
+# Phase 1 Step C) — the SAME classifier the AI Playground's Auto mode
+# already uses (services/hybrid_question_classifier.py), never a second
+# implementation. Safe to import here (no cycle) because that module now
+# depends only on services/action_selection_primitives.py, not on this
+# module.
+from services.hybrid_question_classifier import classify_question
+# Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
+# 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
+# mode already uses (services/hybrid_runtime_service.py); this module
+# never imports services/hybrid_playground_router.py (Playground-only).
+from services.hybrid_runtime_service import synthesize_hybrid_answer
 
 # ── Dynamic, Business-Action-driven Information Collection ────────────────
 #
@@ -61,36 +92,6 @@ from services.action_executor import ActionExecutor, get_action_executor
 # no longer discover a missing required parameter this engine believed
 # was already complete.
 
-# validation_type -> validator, reusing the SAME primitives Contextual
-# Slot Binding already defines (never redefined here) wherever the
-# meaning overlaps (a phone number is a phone number either way); a
-# Business Action parameter with no specific validation_type configured
-# gets the shared generic-identifier shape, exactly like every ERP slot
-# that isn't a phone number.
-_PARAMETER_VALIDATORS = {
-    "phone_number": _validate_phone_number,
-    "email": lambda c: bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", c)),
-    "non_empty": lambda c: bool(c and c.strip()),
-}
-
-# extract_candidates() (services/slot_filling_engine.py) requires a digit
-# in every candidate token by design (tracking/order/invoice-style IDs
-# always have one) — an email address often has none, so it would never
-# surface as a candidate at all. Rather than modify that frozen function,
-# this is a small, additive extension scoped to THIS module: any
-# email-shaped substring is also offered as a candidate, on top of
-# whatever extract_candidates() already found.
-_EMAIL_CANDIDATE_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
-
-
-def _extract_candidates_for_binding(message: str) -> List[str]:
-    candidates = list(extract_candidates(message))
-    for m in _EMAIL_CANDIDATE_RE.finditer(message or ""):
-        token = m.group(0)
-        if token not in candidates:
-            candidates.append(token)
-    return candidates
-
 
 def _generate_parameter_question(param: Dict) -> str:
     """Auto-generates a natural Thai follow-up question from a Business
@@ -106,70 +107,15 @@ def _generate_parameter_question(param: Dict) -> str:
     return f"กรุณาแจ้ง{display}ค่ะ"
 
 
-def _resolve_parameter_validator(param: Dict):
-    """Builds the validator for THIS parameter. A configured
-    `validation_pattern` (AI Auto Setup / admin-authored regex, e.g.
-    `^C\\d{5}$` for CustCode vs `^PO\\d{6,}$` for OrderCode) always wins —
-    this is exactly what lets the Decision Engine distinguish two
-    same-shaped required parameters instead of relying on parameter
-    order, per the platform's own validation-inference requirement.
-    Falls back to the fixed `_PARAMETER_VALIDATORS` table, then to the
-    shared generic-identifier shape, unchanged from before."""
-    pattern = param.get("validation_pattern")
-    base = _PARAMETER_VALIDATORS.get(param.get("validation_type"), _validate_generic_identifier)
-    min_len, max_len = param.get("min_length"), param.get("max_length")
-
-    def validator(candidate: str) -> bool:
-        if pattern:
-            try:
-                if not re.fullmatch(pattern, candidate):
-                    return False
-            except re.error:
-                return False
-        elif not base(candidate):
-            return False
-        if min_len is not None and len(candidate) < min_len:
-            return False
-        if max_len is not None and len(candidate) > max_len:
-            return False
-        return True
-
-    return validator
-
-
-def _bind_candidate_to_parameter(candidates: List[str], param: Dict) -> Dict:
-    """The Business-Action-parameter equivalent of services/
-    slot_filling_engine.py::bind_candidate_to_slot() — same three-way
-    contract (bound/ambiguous/none_valid), same reused validator
-    primitives, but keyed by the parameter's own `validation_type`
-    (Registry-driven) instead of a fixed, closed slot-name table. This
-    does not modify or replace bind_candidate_to_slot() — the two now
-    coexist: the legacy path still uses the original for its own six
-    fixed ERP slot names; this one drives arbitrary, admin-configured
-    parameter names."""
-    validator = _resolve_parameter_validator(param)
-    if not candidates:
-        return {"status": "none_valid", "value": None, "valid_candidates": []}
-    valid = [c for c in candidates if validator(c)]
-    if len(valid) == 1:
-        return {"status": "bound", "value": valid[0], "valid_candidates": valid}
-    if len(valid) > 1:
-        return {"status": "ambiguous", "value": None, "valid_candidates": valid}
-    return {"status": "none_valid", "value": None, "valid_candidates": []}
-
-
-_NON_ASKABLE_INPUT_SOURCES = ("secret_configuration", "credential_store")
-
-
-def _askable_parameters_by_name(action: Dict) -> Dict[str, Dict]:
-    """Every parameter the customer could actually be ASKED for —
-    excludes secret-configuration and credential_store parameters
-    (never requested from the customer, per the Business Action
-    Center's own security rule)."""
-    return {
-        p["name"]: p for p in (action.get("parameters") or [])
-        if p.get("input_source", "customer_message") not in _NON_ASKABLE_INPUT_SOURCES
-    }
+def _generate_confirmation_question(action: Dict) -> str:
+    """The exact text asked when a COMMAND-type action (see
+    _requires_confirmation) has all its parameters collected but hasn't
+    been confirmed yet. Factored out to a single function — used both to
+    BUILD the question (_execute_selected_action) and to RECOGNIZE a
+    reply to it on the next turn (_resolve_continuation_action) — so the
+    two can never silently drift apart."""
+    action_label = action.get("display_name") or action.get("name") or "การดำเนินการนี้"
+    return f"ยืนยันการดำเนินการ '{action_label}' หรือไม่คะ? กรุณาตอบ 'ยืนยัน' เพื่อดำเนินการต่อ"
 
 
 def _next_expected_parameter(action: Dict, registry, collected: Dict) -> Optional[Dict]:
@@ -192,6 +138,49 @@ def _next_expected_parameter(action: Dict, registry, collected: Dict) -> Optiona
             if name not in collected and name in askable:
                 return askable[name]
     return None  # nothing left to ask (e.g. only a secret is missing)
+
+
+def _is_execution_ready(validation: Dict, next_after: Optional[Dict], ambiguous_candidates) -> bool:
+    """Confirmed defect fix (2026-08-02, Local Production Pipeline
+    Verification), shared by _handle_dynamic_collection and
+    _handle_hybrid_turn so the fix lives in exactly one place —
+    validation["ok"] alone conflates "the customer hasn't provided a
+    required CUSTOMER-facing value yet" with "a credential_store/
+    secret_configuration-sourced required parameter isn't in `collected`"
+    (it NEVER will be — those are resolved separately, at execution time,
+    by the Action Executor's own Credential Store resolution, see
+    services/action_executor.py). Before this fix, ANY Business Action
+    with a credential-sourced required parameter (i.e. essentially every
+    real ERP action) could never actually execute: validation["ok"] was
+    always False, looping forever on a generic "need more info" reply
+    even after the customer supplied everything askable. Ready to execute
+    now means: nothing is missing at all, OR the only remaining gap is
+    non-askable (next_after is None, computed via _next_expected_parameter
+    above) with no ambiguity left to resolve."""
+    if validation["ok"]:
+        return True
+    if ambiguous_candidates:
+        return False
+    return next_after is None
+
+
+def _requires_confirmation(action: Dict) -> bool:
+    """Generic, metadata-driven confirmation gate (2026-08-09, SendLineNotiCS
+    enablement) — ANY Business Action whose operation type is a COMMAND-type
+    real-world side effect (NOTIFICATION/NOTIFY/WORKFLOW today; extensible to
+    CREATE/UPDATE/CANCEL/DELETE later, never a per-action special case) must
+    never reach the Action Executor without an explicit confirmation for
+    THIS turn. Reuses services/erp_test_harness.py's existing, already-tested
+    operation-type inference (infer_operation_type — reads
+    action.setup_metadata.operation_type first, confidence 0.95) and its
+    conversation-defaults table (get_conversation_behavior_defaults) — the
+    SAME rule the AI Playground / ERP Conversation Tester's own confirmation
+    gate already uses, not a second, divergent copy of it. Imported inline
+    to avoid a circular import (erp_test_harness imports FROM decision_engine
+    at module level)."""
+    from services.erp_test_harness import infer_operation_type, get_conversation_behavior_defaults
+    operation_type = infer_operation_type(action)
+    return bool(get_conversation_behavior_defaults(operation_type).get("require_confirmation_before_execute"))
 
 
 def _bind_message_to_action(action: Dict, registry, collected: Dict, message: str,
@@ -265,6 +254,21 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
     consumed, until a turn makes no further progress. Returns
     {"collected": updated dict (new copy), "ambiguous_candidates": [...]}."""
     working = dict(collected)
+
+    # Semantic Parameter Inference (2026-08-09) — runs FIRST, separately
+    # from the required-parameter binding loop below, because it targets
+    # OPTIONAL filter parameters (Latest, BillStatus, POStatus, date
+    # ranges) that _bind_message_to_action would never touch at all (it
+    # only ever tries to satisfy MISSING REQUIRED parameters/groups).
+    # Entirely metadata-driven (services/semantic_parameter_inference.py
+    # reads each parameter's own field_metadata) — no action-specific
+    # code here or there. Never overwrites a value collected from an
+    # earlier turn; only fills in parameters still absent.
+    from services.semantic_parameter_inference import infer_semantic_parameters
+    semantic_matches = infer_semantic_parameters(action.get("parameters") or [], message)
+    for name, value in semantic_matches.items():
+        working.setdefault(name, value)
+
     used_values = set()
     ambiguous_candidates: List[str] = []
     while True:
@@ -293,7 +297,19 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     ordered parameters instead of one fixed schema question."""
     collected: Dict[str, str] = {}
     for i, turn in enumerate(history):
-        if turn.get("role") != "user" or i == 0:
+        if turn.get("role") != "user":
+            continue
+        if i == 0:
+            # The very first user turn in the conversation is always
+            # processed fresh — nothing precedes it to match a question
+            # against — mirroring exactly how _handle_dynamic_collection
+            # binds a brand-new conversation's first message. Without
+            # this, a first message that fully satisfies every parameter
+            # in one shot (e.g. SendLineNotiCS's free-text Message) would
+            # replay as if NOTHING had been collected, breaking
+            # continuation detection for whatever question comes next.
+            result = _bind_all_from_message(action, registry, collected, turn.get("content") or "")
+            collected = result["collected"]
             continue
         preceding = history[i - 1]
         if preceding.get("role") != "assistant":
@@ -351,6 +367,13 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
         next_param = _next_expected_parameter(full_action, registry, collected_so_far)
         if next_param and _generate_parameter_question(next_param) == last_text:
             matches.append(full_action)
+        elif (next_param is None and _requires_confirmation(full_action)
+              and _generate_confirmation_question(full_action) == last_text):
+            # The last assistant turn was THIS action's confirmation-gate
+            # question (2026-08-09, SendLineNotiCS enablement) — the
+            # customer's reply this turn (e.g. "ยืนยัน"/"ยกเลิก") is an
+            # answer to it, not a fresh, independently-routable message.
+            matches.append(full_action)
 
     if not matches:
         return None
@@ -373,7 +396,11 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
 _COMPLAINT_RE = re.compile(r"ร้องเรียน|แย่มาก|ไม่พอใจ|บริการแย่|เลวมาก|ผิดหวังมาก", re.IGNORECASE)
 _LEGAL_THREAT_RE = re.compile(r"ทนายความ|ฟ้องร้อง|แจ้งความ|ดำเนินคดี|สคบ", re.IGNORECASE)
 
-_ROUTING_TYPES = ("RAG", "API", "TOOL", "WORKFLOW", "NOTIFICATION", "HUMAN_HANDOFF", "WEBHOOK", "SAFE_FALLBACK")
+# "HYBRID" added 2026-08-02 (Production Integration Sprint, Phase 1 Step
+# C) — a genuinely new routing outcome (ERP + RAG combined via services/
+# hybrid_runtime_service.py::synthesize_hybrid_answer), never previously
+# representable; additive only, every existing type is unchanged.
+_ROUTING_TYPES = ("RAG", "API", "TOOL", "WORKFLOW", "NOTIFICATION", "HUMAN_HANDOFF", "WEBHOOK", "SAFE_FALLBACK", "HYBRID")
 
 _URL_RE = re.compile(r"https?://\S+")
 
@@ -382,9 +409,67 @@ def _extract_system_values(message: str) -> Dict:
     """Generic, action-agnostic values derived from the raw message that
     any Business Action's parameters may read via input_source
     'system_generated' — currently just the first URL, if any. Never
-    tied to a specific action (e.g. not "if url_converter")."""
+    tied to a specific action (e.g. not "if url_converter").
+
+    system_generated resolution (services/action_executor.py::
+    _resolve_param_value) looks this dict up by the parameter's own exact
+    `name` — which is the real API's wire field name, not something this
+    generic extractor controls. Since a URL-consuming API's field is
+    equally likely to be named "url", "URL", or "Url" depending on the
+    third party, the value is exposed under all three common castings
+    here rather than forcing every such Business Action to rename its
+    real wire parameter to match one fixed casing."""
     match = _URL_RE.search(message or "")
-    return {"url": match.group(0)} if match else {}
+    if not match:
+        return {}
+    url = match.group(0)
+    return {"url": url, "URL": url, "Url": url}
+
+
+def _extract_reply_attachments(chunks: List[Dict]) -> "tuple[List[str], List[Dict]]":
+    """Production Integration Sprint (2026-08-02) — the ONE place that
+    classifies retrieved-chunk attachments into image URLs vs. other-file
+    metadata, so every channel adapter (LINE, future channels) receives
+    the SAME generic reply.images/reply.files lists instead of each
+    re-deriving its own classification. Respects the admin-configured
+    Attachment Rules (services/policy_studio_service.py) — a toggle
+    disabled there means that attachment type is never even offered to a
+    channel adapter, not just hidden by convention.
+
+    Each chunk's own `attachments` field already comes from the frozen
+    RAG pipeline (services/rag_service.py) — never re-derived here, only
+    read and classified."""
+    try:
+        from services.policy_studio_service import get_default_policy_set
+        att_rules = (get_default_policy_set().get("config") or {}).get("attachment_rules", {})
+    except Exception:
+        att_rules = {}
+    send_images = att_rules.get("send_image_if_available", True)
+    send_files = att_rules.get("send_file_link_if_available", True)
+
+    images: List[str] = []
+    files: List[Dict] = []
+    seen_urls: set = set()
+    for chunk in chunks or []:
+        for att in (chunk.get("attachments") or []):
+            pub_url = att.get("public_url")
+            if not pub_url or pub_url in seen_urls:
+                continue
+            atype = (att.get("attachment_type") or "").lower()
+            mime = att.get("mime_type") or ""
+            is_image = atype == "image" or (
+                not atype and (mime.startswith("image/") or
+                               pub_url.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))))
+            if is_image and send_images:
+                seen_urls.add(pub_url)
+                images.append(pub_url)
+            elif not is_image and send_files:
+                seen_urls.add(pub_url)
+                files.append({
+                    "filename": att.get("filename") or att.get("original_filename") or "file",
+                    "url": pub_url, "attachment_type": atype or None,
+                })
+    return images, files
 
 
 def _safe_fallback_response(reason: str) -> Dict:
@@ -430,21 +515,6 @@ def _embedding_score(action: Dict, message: str) -> float:
     (services/business_action_registry.py::prepare_embedding_source) but
     no vector is computed or compared yet. Always returns 0.0 today."""
     return 0.0
-
-
-def _keyword_score(action: Dict, message: str) -> float:
-    message_l = (message or "").lower()
-    score = 0.0
-    for kw in action.get("search_keywords") or []:
-        if kw and str(kw).lower() in message_l:
-            score += 1.0
-    for ex in (action.get("_examples_text") or []):
-        if ex and str(ex).lower() in message_l:
-            score += 0.5
-    ai_desc = (action.get("ai_description") or "").lower()
-    if ai_desc and any(word in ai_desc for word in message_l.split() if len(word) > 2):
-        score += 0.25
-    return score
 
 
 def _parameter_availability_score(action: Dict, collected_slots: Dict) -> float:
@@ -563,6 +633,24 @@ class DecisionEngine:
                 candidates = [selected]
                 developer_trace["selection_source"] = "conversation_continuation"
             else:
+                # Hybrid Question Classifier (2026-08-02 Production
+                # Integration Sprint, Phase 1 Step C) — only consulted on
+                # a FRESH turn (a continuation in progress always takes
+                # precedence, unchanged). Its role here is narrow: detect
+                # a genuinely Hybrid or ambiguous question. For every
+                # other classification (RAG_ONLY/ERP_ONLY/UNKNOWN), this
+                # result is NOT used to select an action — the existing,
+                # unchanged search below still does that; no duplicate
+                # routing decision is made.
+                classification = classify_question(message, self.registry)
+                developer_trace["classification"] = classification
+                if classification["classification"] == "HYBRID":
+                    return self._handle_hybrid_turn(classification, message, history, context,
+                                                      developer_trace, start, workflow=workflow_hint)
+                if classification["classification"] == "CLARIFICATION_REQUIRED":
+                    return self._route_clarification(classification, message, context,
+                                                        developer_trace, start, workflow=workflow_hint)
+
                 candidates = search_candidate_actions(self.registry, workflow=workflow_hint, message=message,
                                                         collected_slots={})
                 selected = select_best_action(candidates, minimum_score=1.0 if not workflow_hint else 0.5)
@@ -633,8 +721,8 @@ class DecisionEngine:
         ambiguous_candidates = result["ambiguous_candidates"]
 
         validation = self.registry.validate_can_execute(action_id, collected)
-        is_complete = validation["ok"]
-        next_after = None if is_complete else _next_expected_parameter(full_action, self.registry, collected)
+        next_after = None if validation["ok"] else _next_expected_parameter(full_action, self.registry, collected)
+        is_complete = _is_execution_ready(validation, next_after, ambiguous_candidates)
 
         collection_status = {
             "source": "business_action_registry",
@@ -744,22 +832,53 @@ class DecisionEngine:
                                   history: List[Dict], context: Dict, developer_trace: Dict, start: float,
                                   *, workflow: Optional[str], intent: Optional[str], collected_slots: Dict) -> Dict:
         alert = _detect_alert(message, context)
-        exec_context = {
-            "question": message, "collected_slots": collected_slots, "workflow": workflow, "intent": intent,
-            "conversation_context": context.get("conversation_context") or {},
-            "customer_context": context.get("customer_context") or {},
-            "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
-            # Generic system-derived values ANY tool/action may read (e.g.
-            # a URL-handling tool) — never a per-action special case.
-            "system_values": _extract_system_values(message),
-        }
-        exec_start = time.time()
-        try:
-            exec_result = self.executor.execute(selected["id"], exec_context)
-        except Exception as e:
-            exec_result = {"status": "error", "result": {}, "metadata": {}, "latency_ms": 0.0,
-                            "error": sanitize_for_preview(str(e)), "logs": []}
-        exec_latency = round((time.time() - exec_start) * 1000, 2)
+        routing_type = selected.get("action_type") or "SAFE_FALLBACK"
+
+        if routing_type == "RAG":
+            # Production Integration Sprint (2026-08-02), Phase 1 Step C —
+            # the ONE production RAG execution path (services/
+            # decision_engine.py::_run_rag_pipeline, wrapping services/
+            # playground_orchestrator.py::run_playground_turn) — never
+            # the Action Executor's thinner _execute_rag. One shared
+            # pipeline for AI Playground, LINE OA, and future channels.
+            exec_result, exec_latency = self._run_rag_pipeline(message, history, context)
+        elif _requires_confirmation(selected) and not context.get("confirmed"):
+            # Confirmation gate (2026-08-09, SendLineNotiCS enablement) —
+            # a COMMAND-type action (real external side effect) never
+            # reaches the Action Executor on the strength of parameter
+            # collection alone. All required parameters may already be
+            # collected here; execution still waits for the caller
+            # (webhook/admin) to re-invoke decide() with
+            # context={"confirmed": True} once the customer/admin
+            # explicitly confirms. SecretCode is never resolved on this
+            # path — Credential Store lookup only happens inside the
+            # Action Executor, which this branch never reaches.
+            developer_trace["confirmation_gate"] = {
+                "required": True, "confirmed": False,
+                "action_id": selected.get("id"), "action_key": selected.get("action_key"),
+                "reason": "This action performs a real external side effect and requires "
+                          "explicit confirmation before execution.",
+            }
+            reply = _build_response(text=_generate_confirmation_question(selected))
+            return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow,
+                                   developer_trace=developer_trace, context=context, start=start, alert=alert)
+        else:
+            exec_context = {
+                "question": message, "collected_slots": collected_slots, "workflow": workflow, "intent": intent,
+                "conversation_context": context.get("conversation_context") or {},
+                "customer_context": context.get("customer_context") or {},
+                "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
+                # Generic system-derived values ANY tool/action may read
+                # (e.g. a URL-handling tool) — never a per-action special case.
+                "system_values": _extract_system_values(message),
+            }
+            exec_start = time.time()
+            try:
+                exec_result = self.executor.execute(selected["id"], exec_context)
+            except Exception as e:
+                exec_result = {"status": "error", "result": {}, "metadata": {}, "latency_ms": 0.0,
+                                "error": sanitize_for_preview(str(e)), "logs": []}
+            exec_latency = round((time.time() - exec_start) * 1000, 2)
         developer_trace["executor_type"] = selected.get("action_type")
         developer_trace["execution_result"] = exec_result
         developer_trace["candidate_business_actions"] = [
@@ -769,7 +888,6 @@ class DecisionEngine:
         developer_trace["selected_business_action"] = selected.get("action_key")
         developer_trace["selection_reason"] = selected.get("_reasons")
 
-        routing_type = selected.get("action_type") or "SAFE_FALLBACK"
         status = exec_result.get("status")
 
         if status == "handoff_prepared":
@@ -791,14 +909,49 @@ class DecisionEngine:
 
         # status == "success"
         result_payload = exec_result.get("result") or {}
+        # Surface whatever confidence the executor itself already computed
+        # (e.g. the RAG Executor's retrieval-score confidence) into the
+        # trace instead of silently discarding it — generic across any
+        # executor type that returns one, never RAG-specific.
+        if isinstance(result_payload, dict) and result_payload.get("confidence") is not None:
+            developer_trace["confidence"] = result_payload["confidence"]
         if routing_type == "RAG":
+            # AI Policies' own escalation verdict (already computed inside
+            # the shared pipeline, surfaced by _run_rag_pipeline above) —
+            # the SAME signal the AI Playground already reflects. Checked
+            # here, once, so no channel adapter has to re-derive its own,
+            # second escalation decision — "no duplicate routing logic."
+            if result_payload.get("policy_escalate"):
+                reply = _build_response(text=result_payload.get("policy_escalation_message")
+                                         or "กำลังโอนสายให้เจ้าหน้าที่ดูแลต่อค่ะ")
+                return self._finalize(reply=reply, routing_type="HUMAN_HANDOFF", workflow=workflow,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert,
+                                       handoff_payload={"reason": "ai_policy_escalation",
+                                                         "escalation_message": result_payload.get("policy_escalation_message")})
+
             answer = result_payload.get("answer") or ""
             if not answer.strip():
-                return self._route_safe_fallback(message, history, context, developer_trace, start,
-                                                   reason="rag_no_grounded_answer")
-            reply = _build_response(text=answer)
+                # The shared RAG pipeline already ran (above) and produced
+                # nothing — re-running it via _route_safe_fallback would
+                # just repeat the identical, already-failed call. Build
+                # the canned fallback directly instead.
+                reply, _ = _safe_fallback_response("rag_no_grounded_answer")
+                developer_trace["fallback_reason"] = "rag_no_grounded_answer"
+                return self._finalize(reply=reply, routing_type="SAFE_FALLBACK", workflow=workflow,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert)
+            # Attachments — generic, channel-agnostic classification (image
+            # vs. other file) read from each cited chunk's own already-
+            # computed `attachments` field (services/rag_service.py, RAG
+            # internals, untouched); respects the SAME admin-configured
+            # Attachment Rules (services/policy_studio_service.py) every
+            # channel is expected to honor, computed once here rather than
+            # re-implemented per channel adapter.
+            images, files = _extract_reply_attachments(result_payload.get("chunks") or [])
+            reply = _build_response(text=answer, images=images, files=files)
         else:
             mapped = result_payload.get("mapped_fields")
+            if mapped:
+                mapped = select_requested_mapped_fields(message, mapped, selected.get("response_mapping"))
             text = self._summarize_action_result(mapped if mapped else result_payload)
             reply = _build_response(text=text)
 
@@ -848,31 +1001,22 @@ class DecisionEngine:
 
     def _route_safe_fallback(self, message: str, history: List[Dict], context: Dict, developer_trace: Dict,
                               start: float, *, reason: str) -> Dict:
+        # Production Integration Sprint (2026-08-02), Phase 1 Step C — the
+        # true "Safe Fallback" tries the ONE shared production RAG
+        # pipeline directly (no more searching for a specific RAG-type
+        # Business Action row, no more separate raw rag_service call —
+        # run_playground_turn() needs neither) before giving up with the
+        # canned fallback message.
         alert = _detect_alert(message, context)
-        rag_candidates = search_candidate_actions(self.registry, workflow=None, message=message,
-                                                    action_types=["RAG"])
-        rag_action = select_best_action(rag_candidates, minimum_score=0.0)
-        answer_text = None
-        if rag_action:
-            exec_context = {"question": message, "developer_mode": bool(context.get("developer_mode"))}
-            exec_result = self.executor.execute(rag_action["id"], exec_context)
-            developer_trace["execution_result"] = exec_result
-            if exec_result.get("status") == "success":
-                answer_text = (exec_result.get("result") or {}).get("answer")
-        else:
-            # No RAG-type Business Action is registered yet — the true
-            # "Safe Fallback" per spec still tries the existing RAG
-            # service directly (read-only reuse, never modified here)
-            # before giving up with the canned fallback message.
-            try:
-                from services.rag_service import get_rag_service
-                rag = get_rag_service()
-                chunks = rag.retrieve(message, top_k=3)
-                answer_text = rag.build_context(chunks) if chunks else ""
-                developer_trace["execution_result"] = {"status": "success" if answer_text else "no_chunks",
-                                                        "result": {"chunk_count": len(chunks)}}
-            except Exception as e:
-                developer_trace["execution_result"] = {"status": "error", "error": sanitize_for_preview(str(e))}
+        exec_result, _ = self._run_rag_pipeline(message, history, context)
+        developer_trace["execution_result"] = exec_result
+        result_payload = exec_result.get("result") or {}
+        answer_text = result_payload.get("answer") if exec_result.get("status") == "success" else None
+        # Same confidence-surfacing fix as _execute_selected_action's RAG
+        # branch — the pipeline already computed it, this path used to
+        # silently discard it here too.
+        if result_payload.get("confidence") is not None:
+            developer_trace["confidence"] = result_payload["confidence"]
 
         if answer_text and answer_text.strip():
             reply = _build_response(text=answer_text)
@@ -882,6 +1026,199 @@ class DecisionEngine:
         reply, _ = _safe_fallback_response(reason)
         developer_trace["fallback_reason"] = reason
         return self._finalize(reply=reply, routing_type="SAFE_FALLBACK", workflow=None,
+                               developer_trace=developer_trace, context=context, start=start, alert=alert)
+
+    # ── Production RAG Pipeline (Production Integration Sprint, 2026-08-02) ──
+
+    def _run_rag_pipeline(self, message: str, history: List[Dict], context: Dict) -> "tuple[Dict, float]":
+        """The ONE production RAG execution path. Wraps services/
+        playground_orchestrator.py::run_playground_turn() — the exact
+        same full pipeline (Prompt Builder -> AI Policies -> LLM ->
+        Grounding -> Citations) the AI Playground already uses — never a
+        second implementation. services/action_executor.py's own
+        `_execute_rag` (thinner: retrieval + raw context concatenation,
+        no LLM) remains defined for any OTHER caller, but the Decision
+        Engine itself no longer uses it for its own RAG execution.
+
+        Returns an (exec_result, latency_ms) pair shaped exactly like
+        ActionExecutor.execute()'s own contract
+        (status/result/metadata/latency_ms/error/logs), so every existing
+        caller in this module keeps working against the same shape
+        regardless of which execution path produced it.
+
+        `context.get("channel")`, if present, resolves that channel's own
+        assigned Prompt Studio template (services/prompt_builder.py::
+        get_active_prompt_for_channel) — generic and configuration-driven,
+        never a hardcoded channel name; falls back to the global default
+        template (identical to the AI Playground's own behavior) when no
+        channel is given."""
+        from services.playground_orchestrator import run_playground_turn
+        from services.prompt_builder import get_active_prompt
+
+        # Phase 3.4 (2026-08-05) — Customer Tier Prompt takes priority over
+        # the channel's own assignment (services/prompt_builder.py::
+        # get_active_prompt's own chain); customer_context.conversation_tier
+        # is read-only here, set by services/customer_tier_service.py after
+        # each turn — the customer/channel adapter never picks a prompt
+        # directly (no manual per-conversation override, per spec).
+        template_id = None
+        channel = context.get("channel")
+        tier = (context.get("customer_context") or {}).get("conversation_tier")
+        if channel or tier:
+            try:
+                template_id = get_active_prompt(channel=channel, tier=tier).id
+            except Exception:
+                template_id = None
+
+        pg_history = [{"role": t.get("role"), "content": t.get("content")} for t in (history or [])]
+        t0 = time.time()
+        try:
+            result = run_playground_turn(message, template_id=template_id, history=pg_history)
+            latency_ms = round((time.time() - t0) * 1000, 2)
+            cited = [c.get("citation") for c in (result.chunks or []) if c.get("cited") and c.get("citation")]
+            exec_result = {
+                "status": "success",
+                "result": {
+                    "answer": result.answer, "citations": cited, "confidence": result.confidence,
+                    "chunk_count": len(result.chunks or []),
+                    # Phase 3 Conversation History (2026-08-05) — already
+                    # computed by run_playground_turn(), just not
+                    # previously surfaced here; needed so a persisted
+                    # Conversation Turn can record real token counts
+                    # instead of leaving them blank.
+                    "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+                    # Raw chunks (already computed by the frozen RAG
+                    # pipeline, including each chunk's own `attachments`)
+                    # — surfaced so a channel adapter (e.g. line_bot/
+                    # webhook.py) can render images/file-links without
+                    # Decision Engine re-deriving retrieval data itself.
+                    "chunks": result.chunks,
+                    # AI Policies' own escalation verdict (services/
+                    # policy_engine.py::evaluate, already computed inside
+                    # run_playground_turn — never re-evaluated here) —
+                    # exposed so callers escalate on the SAME signal the
+                    # AI Playground already reflects, instead of a second,
+                    # independently-derived escalation check.
+                    "policy_escalate": result.policy.escalate,
+                    "policy_escalation_message": result.policy.escalation_message,
+                    # Prompt Studio / AI Policies identity — already
+                    # resolved inside run_playground_turn (services/
+                    # prompt_builder.py::get_template /
+                    # services/policy_studio_service.py), surfaced here
+                    # (not re-derived) so Developer Mode can show exactly
+                    # which prompt version/template and which policy set
+                    # produced this answer, in production the same way
+                    # the AI Playground already displays them.
+                    "prompt_template_id": result.prompt.template.id,
+                    "prompt_template_name": result.prompt.template.name,
+                    "prompt_template_version": result.prompt.template.version,
+                    "policy_set_name": result.policy_set_name,
+                },
+                "metadata": {"model": result.model, "confidence_label": result.confidence_label},
+                "latency_ms": latency_ms, "error": None, "logs": [],
+            }
+            return exec_result, latency_ms
+        except Exception as e:
+            latency_ms = round((time.time() - t0) * 1000, 2)
+            return {"status": "error", "result": {}, "metadata": {}, "latency_ms": latency_ms,
+                    "error": sanitize_for_preview(str(e)), "logs": []}, latency_ms
+
+    # ── Hybrid Routing (Production Integration Sprint, 2026-08-02, Phase 1 Step C) ──
+
+    def _handle_hybrid_turn(self, classification: Dict, message: str, history: List[Dict], context: Dict,
+                             developer_trace: Dict, start: float, *, workflow: Optional[str]) -> Dict:
+        """Runs the ERP sub-question once and the RAG sub-question once
+        (services/hybrid_question_classifier.py already segmented them —
+        never re-segmented here), then combines them via services/
+        hybrid_runtime_service.py::synthesize_hybrid_answer() — the SAME
+        classifier and synthesis the AI Playground's Hybrid mode already
+        uses. ERP execution reuses the existing, unchanged parameter-
+        binding machinery (`_bind_all_from_message`) and the Generic
+        Action Executor; RAG execution reuses `_run_rag_pipeline` above.
+        Never a duplicate implementation of either."""
+        alert = _detect_alert(message, context)
+        action_id = classification.get("selected_action_id")
+        erp_sub_question = classification.get("erp_sub_question") or message
+        rag_sub_question = classification.get("rag_sub_question") or message
+
+        full_action = self.registry.get_full(action_id, mask_secrets=False) if action_id else None
+        erp_answer = None
+        erp_error = None
+        if full_action:
+            bind_result = _bind_all_from_message(full_action, self.registry, {}, erp_sub_question)
+            collected = bind_result["collected"]
+            ambiguous = bind_result["ambiguous_candidates"]
+            validation = self.registry.validate_can_execute(action_id, collected)
+            next_after = None if validation["ok"] else _next_expected_parameter(full_action, self.registry, collected)
+            if _is_execution_ready(validation, next_after, ambiguous) and _requires_confirmation(full_action) \
+                    and not context.get("confirmed"):
+                # Same confirmation gate as _execute_selected_action, applied
+                # here too so a COMMAND-type action can never be reached via
+                # the Hybrid sub-question path either.
+                erp_error = "awaiting_confirmation — this action requires explicit confirmation before execution"
+            elif _is_execution_ready(validation, next_after, ambiguous):
+                exec_context = {
+                    "question": erp_sub_question, "collected_slots": collected, "workflow": workflow,
+                    "intent": classification["classification"],
+                    "conversation_context": context.get("conversation_context") or {},
+                    "customer_context": context.get("customer_context") or {},
+                    "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
+                    "system_values": _extract_system_values(erp_sub_question),
+                }
+                try:
+                    erp_exec_result = self.executor.execute(action_id, exec_context)
+                except Exception as e:
+                    erp_exec_result = {"status": "error", "error": sanitize_for_preview(str(e))}
+                developer_trace["erp_execution_result"] = erp_exec_result
+                if erp_exec_result.get("status") == "success":
+                    mapped = (erp_exec_result.get("result") or {}).get("mapped_fields")
+                    if mapped:
+                        mapped = select_requested_mapped_fields(erp_sub_question, mapped, full_action.get("response_mapping"))
+                    erp_answer = self._summarize_action_result(mapped if mapped else erp_exec_result.get("result"))
+                else:
+                    erp_error = erp_exec_result.get("error") or "unknown ERP error"
+            elif ambiguous:
+                erp_error = "ambiguous identifier value — could not determine which one to use"
+            else:
+                # Rare — classify_question() already confirmed a bindable
+                # parameter value exists before classifying HYBRID at all;
+                # the Registry's own group-rule evaluation is the final
+                # authority and could still disagree at the margins.
+                # Honest unavailability, never a fabricated ERP answer.
+                erp_error = "required parameter(s) missing"
+        else:
+            erp_error = "selected Business Action not found"
+
+        rag_exec_result, _ = self._run_rag_pipeline(rag_sub_question, history, context)
+        developer_trace["rag_execution_result"] = rag_exec_result
+        rag_answer = rag_error = None
+        rag_citations: List[str] = []
+        if rag_exec_result.get("status") == "success":
+            rag_answer = (rag_exec_result.get("result") or {}).get("answer")
+            rag_citations = (rag_exec_result.get("result") or {}).get("citations") or []
+        else:
+            rag_error = rag_exec_result.get("error") or "unknown RAG error"
+
+        synthesis = synthesize_hybrid_answer(erp_answer=erp_answer, erp_error=erp_error,
+                                              rag_answer=rag_answer, rag_error=rag_error,
+                                              rag_citations=rag_citations)
+        developer_trace["merge_strategy"] = synthesis["strategy"]
+        developer_trace["selected_business_action"] = full_action.get("action_key") if full_action else None
+
+        reply = _build_response(text=synthesis["merged_answer"])
+        return self._finalize(reply=reply, routing_type="HYBRID", workflow=workflow,
+                               developer_trace=developer_trace, context=context, start=start, alert=alert)
+
+    def _route_clarification(self, classification: Dict, message: str, context: Dict,
+                              developer_trace: Dict, start: float, *, workflow: Optional[str]) -> Dict:
+        """2+ Business Actions matched the message with comparably strong
+        evidence (services/hybrid_question_classifier.py) — genuinely
+        ambiguous which one the customer means. No execution of either
+        candidate; asks the customer to be more specific, same as the AI
+        Playground's Auto mode does for this classification."""
+        alert = _detect_alert(message, context)
+        reply = _build_response(text="พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการค่ะ รบกวนระบุให้ชัดเจนขึ้นอีกนิดนะคะ")
+        return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow,
                                developer_trace=developer_trace, context=context, start=start, alert=alert)
 
     # ── Response Builder ──────────────────────────────────────────────────

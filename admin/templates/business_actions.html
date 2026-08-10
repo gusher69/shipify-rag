@@ -36,6 +36,26 @@
 .ba-modal-overlay.open{display:flex}
 .ba-modal{background:#0f1a30;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:20px;max-width:820px;width:94%;max-height:88vh;overflow-y:auto}
 textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:#e8edf5;padding:7px 9px;font-size:12.5px;margin-bottom:8px}
+/* Native <select> renders its closed control AND open dropdown list with
+   browser/OS chrome by default (white background) even though the rest of
+   this page is dark-themed — same fix already proven in ai_policies.html's
+   .pl-select, reused here rather than a new pattern: appearance:none + a
+   custom arrow fixes the closed control, color-scheme:dark + explicit
+   <option> colors fix the open list too (Chrome/Edge/Firefox all honor
+   both). #0f1a30 matches this page's own .ba-modal background exactly. */
+select.ba-input{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  color-scheme:dark;
+  background-color:rgba(255,255,255,.04);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%235b9dff' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat;
+  background-position:right 10px center;
+  padding-right:26px;
+  cursor:pointer;
+}
+select.ba-input:hover{border-color:rgba(91,157,255,.35)}
+select.ba-input:focus{border-color:rgba(91,157,255,.5);outline:none}
+select.ba-input option{background:#0f1a30;color:#e8edf5}
 .ba-row{display:flex;gap:8px}
 .ba-row>div{flex:1}
 .ba-list-item{display:flex;gap:8px;align-items:center;margin-bottom:6px}
@@ -54,6 +74,14 @@ textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(25
 .ba-ai-loading-dots span{
   width:4px;height:4px;border-radius:50%;background:#5b9dff;display:inline-block;
   animation:dot-pulse 1.2s ease-in-out infinite;
+}
+/* Save-button loading state — same ba-ai-spin keyframe as above, sized for
+   inline use inside a button. currentColor so it matches whatever text
+   color the button already has (white on .btn-primary, light gray on .btn). */
+.ba-btn-spinner{
+  width:12px;height:12px;border-radius:50%;flex-shrink:0;display:inline-block;
+  border:2px solid currentColor;border-top-color:transparent;opacity:.85;
+  animation:ba-ai-spin .7s linear infinite;vertical-align:-2px;margin-right:6px;
 }
 .ba-ai-loading-dots span:nth-child(2){animation-delay:.15s}
 .ba-ai-loading-dots span:nth-child(3){animation-delay:.3s}
@@ -199,7 +227,7 @@ textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(25
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="baWizardOpenAdvanced()">Advanced Settings →</button>
         <button class="btn" id="ba-w-next" onclick="baWizardNext()">Next →</button>
-        <button class="btn btn-primary" id="ba-w-save" style="display:none" onclick="baWizardSaveAndEnable()">Save and Enable</button>
+        <button class="btn btn-primary" id="ba-w-save" style="display:none" onclick="baWizardSaveAndEnable(this)">Save and Enable</button>
       </div>
     </div>
   </div>
@@ -275,7 +303,7 @@ textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(25
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="baQuestionsOpen()">Manage Questions</button>
         <button class="btn" onclick="baAiOpenPreviewModal()">▶ Preview Flow</button>
-        <button class="btn btn-primary" onclick="baAiAcceptSummary()">✓ Save &amp; Continue</button>
+        <button class="btn btn-primary" onclick="baAiAcceptSummary(this)">✓ Save &amp; Continue</button>
       </div>
     </div>
   </div>
@@ -361,11 +389,6 @@ textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(25
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:14px">
       <button class="btn" id="ba-summary-simulate-btn" style="font-size:12.5px">Simulate Conversation</button>
       <button class="btn btn-primary" id="ba-summary-edit-btn" style="font-size:12.5px">Edit</button>
-    </div>
-    <div id="ba-summary-simulate" style="display:none;margin-top:10px">
-      <input class="ba-input" id="ba-summary-simulate-input" placeholder="Type a customer message to simulate...">
-      <button class="btn" id="ba-summary-simulate-send-btn">Send</button>
-      <pre id="ba-summary-simulate-result" style="white-space:pre-wrap;background:rgba(255,255,255,.03);padding:10px;border-radius:6px;font-size:12px;margin-top:8px;max-height:200px;overflow-y:auto"></pre>
     </div>
   </div>
 </div>
@@ -559,7 +582,7 @@ textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(25
 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
       <button class="btn" onclick="baCloseModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="baSaveAction()">Save</button>
+      <button class="btn btn-primary" onclick="baSaveAction(this)">Save</button>
     </div>
   </div>
 </div>
@@ -570,6 +593,27 @@ textarea.ba-input, input.ba-input, select.ba-input{width:100%;background:rgba(25
 var _baActions = [], _baCurrentId = null, _baParams = [], _baMapping = [], _baValidation = [];
 var _baCurrentSetupMetadata = {};
 var _baModalDirty = false;
+
+// ── Save-button loading state — generic, reused by every Save action in
+// this page (Advanced Editor Save, AI Setup Save & Continue, Wizard Save
+// and Enable) so a slow request never LOOKS hung — the button visibly
+// disables and shows a spinner + "Saving…" until the request settles,
+// success or failure. Always pair a baSetButtonLoading() with exactly one
+// baClearButtonLoading() on every exit path (success, error, and catch).
+function baSetButtonLoading(btn, loadingText) {
+  if (!btn || btn.dataset.baLoading === '1') return;
+  btn.dataset.baLoading = '1';
+  btn.dataset.baOriginalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="ba-btn-spinner"></span>' + esc(loadingText || 'Saving…');
+}
+function baClearButtonLoading(btn) {
+  if (!btn || btn.dataset.baLoading !== '1') return;
+  btn.disabled = false;
+  btn.innerHTML = btn.dataset.baOriginalHtml;
+  delete btn.dataset.baLoading;
+  delete btn.dataset.baOriginalHtml;
+}
 
 function baModalMarkDirty() { _baModalDirty = true; }
 function baModalMarkClean() { _baModalDirty = false; }
@@ -704,7 +748,10 @@ function baRenderAuthCredentialSummary() {
   var rows = _collectRows('ba-params-list', ['name', 'display_name', 'input_source', 'credential_ref']);
   var credRows = rows.filter(function(r){ return r.input_source === 'credential_store' || r.input_source === 'secret_configuration'; });
   if (!credRows.length) { el.innerHTML = ''; return; }
-  el.innerHTML = '<b style="font-size:12px">Credential Summary</b>' +
+  el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<b style="font-size:12px">Credential Summary</b>' +
+      '<a href="/admin/credentials" style="font-size:11.5px;color:#5b9dff;text-decoration:none">Manage Credentials →</a>' +
+    '</div>' +
     credRows.map(function(r) {
       return '<div class="ba-card" style="margin-top:6px;font-size:12.5px">' +
         '<div><span style="color:rgba(232,237,245,.5)">Secret Location</span> Form Body</div>' +
@@ -987,28 +1034,17 @@ function baEditAction(id) {
       '<div class="ba-card" style="font-size:12.5px"><b style="font-size:13px">Required before calling this API</b><div style="margin-top:4px">' + esc(reqSummary) + '</div></div>' +
       '<div class="ba-card" style="font-size:12.5px"><b style="font-size:13px">Example messages that should trigger this API</b><div style="margin-top:4px">' + esc((a.examples||[]).map(function(e){return e.example_text;}).join(', ') || '—') + '</div></div>';
     document.getElementById('ba-summary-edit-btn').onclick = function() { document.getElementById('ba-summary').classList.remove('open'); baOpenAdvancedEditor(a.id); };
-    document.getElementById('ba-summary-simulate').style.display = 'none';
-    document.getElementById('ba-summary-simulate-result').textContent = '';
+    // Simulate Conversation now hands off to the full ERP Conversation
+    // Tester (real Decision Engine + Conversation Strategy Engine flow)
+    // instead of the old inline widget's direct-Execution-only test — that
+    // widget's own note said as much ("full simulation... will be
+    // available once a Channel Adapter is connected"); the Conversation
+    // Tester already IS that fuller simulation. ?action_id= is read by
+    // erp_conversation_tester.html on load to auto-select this action.
     document.getElementById('ba-summary-simulate-btn').onclick = function() {
-      var box = document.getElementById('ba-summary-simulate');
-      box.style.display = box.style.display === 'none' ? '' : 'none';
+      window.location.href = '/admin/erp/conversation-tester?action_id=' + encodeURIComponent(a.id);
     };
-    document.getElementById('ba-summary-simulate-send-btn').onclick = function() { baSimulateConversation(a.id); };
     document.getElementById('ba-summary').classList.add('open');
-  });
-}
-
-function baSimulateConversation(actionId) {
-  var msg = document.getElementById('ba-summary-simulate-input').value.trim();
-  if (!msg) return;
-  var params = {};
-  document.getElementById('ba-summary-simulate-result').textContent = 'Simulating…';
-  fetch('/admin/api/business-actions/' + actionId + '/test', {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({parameters: params}),
-  }).then(function(r){ return r.json(); }).then(function(d) {
-    document.getElementById('ba-summary-simulate-result').textContent =
-      'Note: full simulation (via the Decision Engine) will be available once a Channel Adapter is connected — this result is a direct Execution test:\n' +
-      JSON.stringify(d.ok ? d.result : {error: d.error}, null, 2);
   });
 }
 
@@ -1190,8 +1226,9 @@ function baPersistParamCredentials() {
   return Promise.all(promises);
 }
 
-function baSaveAction() {
+function baSaveAction(btn) {
   if (baValidateDraft().length) return;
+  baSetButtonLoading(btn, 'Saving…');
   var id = document.getElementById('ba-id').value;
   var payload = {
     action_key: document.getElementById('ba-action-key').value,
@@ -1217,6 +1254,7 @@ function baSaveAction() {
   fetch(url, {method: id ? 'PATCH' : 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
     .then(function(r){return r.json();}).then(function(d){
       if (!d.ok) {
+        baClearButtonLoading(btn);
         if (d.error_type === 'duplicate_action') { baHandleDuplicateAction(d, payload); return; }
         alert(d.error || 'Save failed');
         return;
@@ -1266,10 +1304,14 @@ function baSaveAction() {
       if (Object.keys(authConfig).length) execPayload.auth_config = authConfig;
       fetch('/admin/api/business-actions/' + actionId + '/execution', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(execPayload)})
         .then(function(){
+          baClearButtonLoading(btn);
           baModalMarkClean();
           document.getElementById('ba-modal').classList.remove('open');
           baLoadActions();
         });
+    }).catch(function() {
+      baClearButtonLoading(btn);
+      alert('Save failed — please check your connection and try again.');
     });
 }
 
@@ -1646,9 +1688,11 @@ function baWizardNext() {
   Promise.resolve(fn ? fn() : null).then(function(){ baWizardShowStep(_baWizStep + 1); }).catch(function(){});
 }
 
-function baWizardSaveAndEnable() {
+function baWizardSaveAndEnable(btn) {
+  baSetButtonLoading(btn, 'Saving…');
   fetch('/admin/api/business-actions/' + _baWizActionId + '/enabled', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({enabled: true})})
-    .then(function(){ baCloseWizard(); baLoadActions(); });
+    .then(function(){ baClearButtonLoading(btn); baCloseWizard(); baLoadActions(); })
+    .catch(function(){ baClearButtonLoading(btn); alert('Unable to save. Please try again.'); });
 }
 
 function baWizardOpenAdvanced() {
@@ -3031,15 +3075,16 @@ function baRenderRoutingExplain() {
 // succeeded; duplicate errors route to the friendly modal instead of a
 // generic toast; anything else unexpected shows one generic message,
 // never the raw backend error (Part 5D).
-function baAiAcceptSummary() {
+function baAiAcceptSummary(btn) {
   if (!_baAiProposal || !(_baAiProposal.action_id || '').trim()) {
     alert('Missing Action ID — please go back and try analyzing again.');
     return;
   }
-  baAiSaveProposal({});
+  baAiSaveProposal({}, btn);
 }
 
-function baAiSaveProposal(resolveDuplicate) {
+function baAiSaveProposal(resolveDuplicate, btn) {
+  baSetButtonLoading(btn, 'Saving…');
   // "Do not save now" (skip) leaves credential_ref set but sends no
   // value — the admin can configure it later from the Advanced Editor.
   // "existing"/"save" both flow through normally: credential_ref may
@@ -3063,6 +3108,7 @@ function baAiSaveProposal(resolveDuplicate) {
   fetch('/admin/api/business-actions/ai-auto-setup/save', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
   }).then(function(r){ return r.json(); }).then(function(d) {
+    baClearButtonLoading(btn);
     if (!d.ok) {
       if (d.error_type === 'duplicate_action') { baAiHandleDuplicateAction(d); return; }
       alert(d.error || 'Unable to save the Business Action. Please try again or review the configuration.');
@@ -3074,6 +3120,7 @@ function baAiSaveProposal(resolveDuplicate) {
     baLoadActions();
     baShowSaveComplete(_baAiProposal, d.action);
   }).catch(function() {
+    baClearButtonLoading(btn);
     alert('Unable to save the Business Action. Please try again or review the configuration.');
   });
 }

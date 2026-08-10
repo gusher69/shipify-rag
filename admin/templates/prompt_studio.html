@@ -140,6 +140,22 @@
   </div>
 </div>
 
+<!-- Customer Tier Prompt (Phase 3.4, 2026-08-05) — the system automatically
+     picks the prompt below based on the customer's conversation_tier
+     (services/customer_tier_service.py); there is no per-conversation
+     manual override, only per-tier admin configuration here. -->
+<div class="ps-panel" style="margin-top:16px;padding:18px 20px">
+  <div style="font-size:14px;font-weight:700;color:#e8edf5;margin-bottom:2px">Customer Tier Prompt</div>
+  <div style="font-size:11.5px;color:rgba(232,237,245,.45);margin-bottom:14px">
+    The Decision Engine automatically injects the prompt below for a LINE conversation once the customer's tier
+    (Cold / Warm / Hot / Negative) is known — takes priority over the channel's own assignment. Leave a tier
+    "Not assigned" to fall back to the LINE OA / Global Default prompt instead.
+  </div>
+  <div id="ps-tier-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+    <div style="padding:16px;color:rgba(232,237,245,.3);font-size:12px">Loading…</div>
+  </div>
+</div>
+
 <!-- Version History Modal -->
 <div class="ps-modal-ov" id="ps-version-modal" onclick="if(event.target===this)closeVersionModal()">
   <div class="ps-modal-box">
@@ -306,6 +322,7 @@ function loadPrompts(){
       _prompts = _sortPrompts(d.prompts || []);
       renderPromptList();
       renderCurrentActive();
+      renderTierList(); // Phase 3.4 — dropdown options depend on _prompts being populated
 
       if (!_isCreatingNew && !_promptId) {
         if (_prompts.length) {
@@ -719,5 +736,73 @@ function restoreVersion(currentId, targetVersionId){
 }
 
 loadPrompts();
+
+// ────────────────────────────────────────────
+// Customer Tier Prompt (Phase 3.4, 2026-08-05)
+// ────────────────────────────────────────────
+var TIER_LABELS = {cold: 'Cold', warm: 'Warm', hot: 'Hot', negative: 'Negative'};
+var TIER_ORDER = ['cold', 'warm', 'hot', 'negative'];
+var _tierAssignments = [];
+var _tierPromptOptions = []; // populated from loadPrompts()'s _prompts once available
+
+function loadTierAssignments(){
+  fetch('/admin/api/ai/prompt-tier-assignments')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) return;
+      _tierAssignments = d.assignments || [];
+      renderTierList();
+    });
+}
+
+function renderTierList(){
+  var el = document.getElementById('ps-tier-list');
+  if (!el) return;
+  var byTier = {};
+  _tierAssignments.forEach(function(a){ byTier[a.tier] = a; });
+  var promptOptions = (_prompts && _prompts.length ? _prompts : []);
+
+  el.innerHTML = TIER_ORDER.map(function(tier){
+    var a = byTier[tier] || {};
+    var currentId = a.prompt_template_id || '';
+    var currentName = a.ai_prompt_templates ? a.ai_prompt_templates.name : null;
+    var options = '<option value="">Not assigned (falls back to Global/Channel Default)</option>' +
+      promptOptions.map(function(p){
+        return '<option value="' + esc(p.id) + '"' + (p.id === currentId ? ' selected' : '') + '>' + esc(p.name) + '</option>';
+      }).join('');
+    return '<div style="border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px">' +
+      '<div style="font-size:12px;font-weight:700;color:#e8edf5;margin-bottom:6px">' + TIER_LABELS[tier] + '</div>' +
+      '<select class="ps-input" id="ps-tier-select-' + tier + '" style="margin-bottom:8px;font-size:12px;padding:6px 8px">' + options + '</select>' +
+      '<div style="display:flex;gap:6px">' +
+      '<button class="ps-btn ps-btn-primary" style="flex:1" onclick="saveTierAssignment(\'' + tier + '\')">Save</button>' +
+      (currentId ? '<button class="ps-btn ps-btn-danger" onclick="clearTierAssignment(\'' + tier + '\')">Clear</button>' : '') +
+      '</div>' +
+      (currentName ? '<div style="font-size:10px;color:rgba(52,211,153,.8);margin-top:6px">Currently: ' + esc(currentName) + '</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+function saveTierAssignment(tier){
+  var select = document.getElementById('ps-tier-select-' + tier);
+  var promptTemplateId = select ? select.value : '';
+  if (!promptTemplateId) { clearTierAssignment(tier); return; }
+  fetch('/admin/api/ai/prompt-tier-assignments', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({tier: tier, prompt_template_id: promptTemplateId}),
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if (d.ok) { showToast(TIER_LABELS[tier] + ' tier prompt updated'); loadTierAssignments(); }
+    else showErrorToast(d.error || 'Could not update tier prompt');
+  });
+}
+
+function clearTierAssignment(tier){
+  fetch('/admin/api/ai/prompt-tier-assignments/' + tier, {method: 'DELETE'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (d.ok) { showToast(TIER_LABELS[tier] + ' tier prompt cleared'); loadTierAssignments(); }
+      else showErrorToast(d.error || 'Could not clear tier prompt');
+    });
+}
+
+loadTierAssignments();
 </script>
 {% endblock %}

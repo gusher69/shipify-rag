@@ -125,6 +125,12 @@ ICONS: Dict[str, str] = {
         '<path d="M4.5 6h7v2.5a3.5 3.5 0 0 1-3.5 3.5v0a3.5 3.5 0 0 1-3.5-3.5V6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>'
         '<path d="M8 12v2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
     ),
+    # Credential Store menu item — a key reads clearly as "secret/access".
+    "key": (
+        '<circle cx="5.2" cy="10.8" r="2.7" stroke="currentColor" stroke-width="1.3"/>'
+        '<path d="M7.1 8.9L13 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
+        '<path d="M10.5 5.5l1.6 1.6M12.3 3.7l1.6 1.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>'
+    ),
 }
 
 
@@ -203,7 +209,13 @@ SIDEBAR_CONFIG: List[dict] = [
     _group("knowledge", "Knowledge", "Manage all knowledge sources and synchronization.", "book", [
         _leaf("documents", "Knowledge Base", "/admin/documents", "database"),
         _leaf("file-library", "File Library", "/admin/file-library", "folder"),
-        _leaf("sync-activity", "Sync Activity", "/admin/sync-activity", "refresh"),
+        _leaf("knowledge-collections", "Knowledge Collections", "/admin/knowledge-collections", "folder"),
+        # Hidden for the customer UAT deployment (2026-08-10) — internal
+        # dev/sync-history noise, not something the customer should see.
+        # The route itself (/admin/sync-activity) stays fully functional;
+        # this only removes it from the nav (CLAUDE.md's existing
+        # "Admin sidebar navigation visibility" convention).
+        _leaf("sync-activity", "Sync Activity", "/admin/sync-activity", "refresh", visible=False),
     ]),
 
     _dynamic_slot("integrations"),
@@ -216,6 +228,7 @@ SIDEBAR_CONFIG: List[dict] = [
         _leaf("preview", "AI Playground", "/admin/preview", "search"),
         _leaf("prompt-studio", "Prompt Studio", "/admin/ai/prompts", "edit"),
         _leaf("ai-policies", "AI Policies", "/admin/ai/policies", "shield"),
+        _leaf("conversations", "Conversation History", "/admin/conversations", "table"),
     ]),
 
     _dynamic_slot("developer_tools"),

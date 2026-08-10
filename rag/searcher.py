@@ -27,6 +27,55 @@ def _get_supabase():
     return _supabase
 
 
+_allowed_file_ids_cache: Dict[str, "tuple[float, set]"] = {}
+_ALLOWED_FILE_IDS_CACHE_TTL_SECONDS = 30.0
+
+
+def _resolve_allowed_file_ids(collection_ids: Optional[List[str]]) -> Optional[set]:
+    """Knowledge Collections (Phase 3.5, 2026-08-05) — returns the set of
+    knowledge_files.id values retrieval is allowed to draw from, or None
+    to mean "no restriction" (only ever returned if Collections aren't
+    configured at all, e.g. migration 035 hasn't been applied yet).
+
+    `collection_ids=None` (every existing caller, unchanged) resolves to
+    the DEFAULT collection (knowledge_collections.is_default=True) — this
+    is deliberately NOT "no filtering": before Collections existed, every
+    uploaded file was searchable together regardless of source project,
+    which is exactly the confirmed contamination this feature exists to
+    fix (a ZWIZ.AI vendor demo file was reproducibly retrieved for
+    Shipify customer questions — see the 2026-08-05 incident trace).
+    Passing an explicit collection_ids list (e.g. from the AI Playground's
+    collection picker) scopes to exactly those collections instead.
+
+    Cached briefly (30s) since this runs on every retrieval call and the
+    file->collection mapping changes rarely."""
+    import time as _time
+    cache_key = ",".join(sorted(collection_ids)) if collection_ids else "__default__"
+    cached = _allowed_file_ids_cache.get(cache_key)
+    if cached and (_time.time() - cached[0]) < _ALLOWED_FILE_IDS_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    sb = _get_supabase()
+    try:
+        if collection_ids:
+            ids = collection_ids
+        else:
+            default_res = sb.table("knowledge_collections").select("id").eq("is_default", True) \
+                .is_("deleted_at", "null").limit(1).execute()
+            if not default_res.data:
+                return None  # Collections not configured — no restriction (pre-migration-035 behavior)
+            ids = [default_res.data[0]["id"]]
+
+        files_res = sb.table("knowledge_files").select("id").in_("collection_id", ids).execute()
+        allowed = {f["id"] for f in (files_res.data or [])}
+    except Exception as e:
+        print(f"[searcher] _resolve_allowed_file_ids failed, no restriction applied: {e}")
+        return None
+
+    _allowed_file_ids_cache[cache_key] = (_time.time(), allowed)
+    return allowed
+
+
 # ── Analytical query detection ────────────────────────────────
 
 _ANALYTICAL_PATTERN = re.compile(
@@ -233,7 +282,8 @@ def _trace_stage(trace, name, status, t0, detail=""):
 def search(question: str, top_k: int = TOP_K, trace: Optional[list] = None,
            excluded_terms: Optional[List[str]] = None,
            actionable_intent: Optional[str] = None,
-           original_question: Optional[str] = None) -> List[Dict]:
+           original_question: Optional[str] = None,
+           collection_ids: Optional[List[str]] = None) -> List[Dict]:
     """Search knowledge base. Analytical questions also query structured Excel data.
 
     Each result may include an 'attachments' key: list of {filename, public_url, mime_type}.
@@ -456,6 +506,11 @@ def search(question: str, top_k: int = TOP_K, trace: Optional[list] = None,
             "match_count":     raw_candidate_count,
         }).execute()
 
+        # Knowledge Collections (Phase 3.5) — resolved once per call, not
+        # per-row; None means "no restriction" (Collections not
+        # configured), a real set means "only these file_ids may surface".
+        allowed_file_ids = _resolve_allowed_file_ids(collection_ids)
+
         for r in result.data:
             if r.get("is_active") is False:
                 continue
@@ -463,6 +518,9 @@ def search(question: str, top_k: int = TOP_K, trace: Optional[list] = None,
             meta = r.get("metadata") or {}
             chunk_id = r.get("id") or meta.get("chunk_id")
             file_id  = r.get("file_id") or meta.get("file_id")
+
+            if allowed_file_ids is not None and file_id not in allowed_file_ids:
+                continue
 
             parts = [meta.get("file_name") or r.get("source") or "unknown"]
             if meta.get("page_number"):
@@ -547,6 +605,15 @@ def search(question: str, top_k: int = TOP_K, trace: Optional[list] = None,
         lexical_candidates = lexical_search(query_variants, limit=raw_candidate_count)
         merged_in = 0
         for lc in lexical_candidates:
+            # Same Knowledge Collections restriction as the vector-search
+            # loop above — lexical search is a fully separate retrieval
+            # path over the same knowledge_chunks table, so a file
+            # excluded from the vector loop would otherwise leak back in
+            # here (confirmed live: this exact path is what surfaced the
+            # ZWIZ.AI vendor file for "แพ็กเกจ"-containing questions before
+            # this filter was added).
+            if allowed_file_ids is not None and lc.get("file_id") not in allowed_file_ids:
+                continue
             if lc.get("chunk_id") and lc["chunk_id"] not in existing_ids:
                 chunks.append(lc)
                 existing_ids.add(lc["chunk_id"])

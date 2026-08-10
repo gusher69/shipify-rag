@@ -6,6 +6,24 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "uvicorn", "admin.preview_server:app", "--port", "8001"],
       "port": 8001
+    },
+    {
+      "name": "shipify-admin-real",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "admin.routes:app", "--port", "8010"],
+      "port": 8010
+    },
+    {
+      "name": "line-webhook",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "line_bot.webhook:app", "--host", "0.0.0.0", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "ai-virtual-fitting-mirror",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:/Users/Gudz/ai/project/ai-virtual-fitting-mirror", "run", "dev"],
+      "port": 3000
     }
   ]
 }

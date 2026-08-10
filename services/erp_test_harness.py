@@ -85,6 +85,22 @@ def _trace_step(name: str, status: str, *, input_summary=None, output_summary=No
     }
 
 
+def _generated_answer_output_summary(answer_result: Dict) -> Dict:
+    """Conversation Tester redesign (2026-08-02) — one place building the
+    generated_answer trace step's output_summary, reused at all 3 call
+    sites so the LLM metadata keys (model/latency/tokens) can never drift
+    out of sync between them. `.get()` on a missing key (e.g. the
+    no-LLM-was-called "no record found" path) yields None, which the UI
+    treats as "not applicable" — never a fabricated value."""
+    return {
+        "answer": answer_result.get("answer"),
+        "llm_model": answer_result.get("llm_model"),
+        "llm_latency_ms": answer_result.get("llm_latency_ms"),
+        "llm_input_tokens": answer_result.get("llm_input_tokens"),
+        "llm_output_tokens": answer_result.get("llm_output_tokens"),
+    }
+
+
 # ── Semantic classification (Part 1/5/8) ────────────────────────────────
 # A self-contained Python port of the SAME deterministic heuristic
 # admin/templates/business_actions.html already uses client-side
@@ -1228,7 +1244,14 @@ def generate_grounded_answer(question: str, action: Dict, normalized_result: Dic
     try:
         llm = get_llm_service()
         response = llm.generate(messages, model=OPENAI_CHAT_MODEL, temperature=0.1, max_tokens=150)
-        return {"answer": response.text.strip(), "grounded": True, "used_llm": True}
+        # Conversation Tester redesign (2026-08-02) — surfaces metadata the
+        # LLMResponse object already carries (services/llm_service.py) but
+        # this function previously discarded. No new LLM call, no prompt
+        # change — purely capturing fields already computed by the SAME
+        # response object above.
+        return {"answer": response.text.strip(), "grounded": True, "used_llm": True,
+                "llm_model": response.model, "llm_latency_ms": round(response.latency_ms, 2),
+                "llm_input_tokens": response.input_tokens, "llm_output_tokens": response.output_tokens}
     except Exception as e:
         return {"answer": None, "grounded": False, "used_llm": False,
                 "error": f"Answer generation failed: {sanitize_for_preview(str(e))}"}
@@ -1568,7 +1591,8 @@ def run_erp_test(*, sb, action_id: str, message: str, mode: str,
                                                    "excluded_normalized_fields": [c for c in last_normalized_result if c not in filtered]},
                                   explanation="Only the customer-requested field(s) are passed to the answer generator (Part 7)."))
         trace.append(_trace_step("generated_answer", "ok" if answer_result.get("answer") else "warning",
-                                  output_summary={"answer": answer_result.get("answer")}, latency_ms=(time.time() - t0) * 1000,
+                                  output_summary=_generated_answer_output_summary(answer_result),
+                                  latency_ms=(time.time() - t0) * 1000,
                                   error=answer_result.get("error")))
         return _harness_result(True, action_id, mode, trace, t_start,
                                 extra={"collected_params": collected_params, "missing_parameters": [],
@@ -1621,8 +1645,18 @@ def run_erp_test(*, sb, action_id: str, message: str, mode: str,
     else:  # live
         executor = ActionExecutor(sb)
         try:
+            # system_values (Decision Engine's generic system_generated
+            # source, e.g. a URL found in the raw message — see
+            # services/decision_engine.py::_extract_system_values) was
+            # missing here entirely, so any parameter sourced from
+            # system_generated could never resolve through this harness
+            # even though the same Business Action worked fine through
+            # the real Decision Engine path. Reuses the SAME function,
+            # never a second extractor.
+            from services.decision_engine import _extract_system_values
             execution_result = executor.execute(action_id, context={
                 "collected_slots": collected_params, "action_params": collected_params, "developer_mode": True,
+                "system_values": _extract_system_values(message),
             })
         except Exception as e:
             trace.append(_trace_step("erp_execution", "error", latency_ms=(time.time() - t0) * 1000,
@@ -1680,7 +1714,7 @@ def run_erp_test(*, sb, action_id: str, message: str, mode: str,
     if not normalized:
         t0 = time.time()
         answer_result = generate_grounded_answer(message, action, normalized, history, language)
-        trace.append(_trace_step("generated_answer", "warning", output_summary={"answer": answer_result.get("answer")},
+        trace.append(_trace_step("generated_answer", "warning", output_summary=_generated_answer_output_summary(answer_result),
                                   latency_ms=(time.time() - t0) * 1000,
                                   explanation="No matching record — a fixed message is used instead of letting the LLM invent one."))
         return _harness_result(True, action_id, mode, trace, t_start,
@@ -1775,7 +1809,7 @@ def run_erp_test(*, sb, action_id: str, message: str, mode: str,
         "prompt_builder", "ok" if answer_result.get("used_llm") is not False or not filtered else "skipped",
         latency_ms=0.0, explanation="Grounded strictly in the normalized result above — the raw ERP response is never sent to the LLM."))
     step_status = "ok" if answer_result.get("answer") and not answer_result.get("error") else ("warning" if not filtered else "error")
-    trace.append(_trace_step("generated_answer", step_status, output_summary={"answer": answer_result.get("answer")},
+    trace.append(_trace_step("generated_answer", step_status, output_summary=_generated_answer_output_summary(answer_result),
                               latency_ms=(time.time() - t0) * 1000, error=answer_result.get("error"),
                               explanation="No matching record — a fixed message is used instead of letting the LLM invent one." if not filtered else ""))
 

@@ -103,13 +103,66 @@ class LLMReranker(RerankerProvider):
         )
 
 
+_cross_encoder_model = None
+_CROSS_ENCODER_MODEL_NAME = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+
+
+def _get_cross_encoder_model():
+    """Lazily loads the cross-encoder model on first actual use — never
+    at import time, so a deployment that never selects this reranker pays
+    zero extra startup cost/dependency-download risk. A MULTILINGUAL
+    model (mMARCO-trained) is used deliberately, not an English-only one
+    (e.g. ms-marco-MiniLM), since this platform is Thai-first (per
+    CLAUDE.md) — an English-only cross-encoder would silently
+    mis-score Thai query/chunk pairs."""
+    global _cross_encoder_model
+    if _cross_encoder_model is None:
+        from sentence_transformers import CrossEncoder
+        _cross_encoder_model = CrossEncoder(_CROSS_ENCODER_MODEL_NAME)
+    return _cross_encoder_model
+
+
 class CrossEncoderReranker(RerankerProvider):
-    """Not implemented — would require a new model dependency. Select
-    explicitly (reranker_provider='cross_encoder') only once available."""
+    """Phase 3.6 (2026-08-05) — "Cross-Encoder Re-ranking (if available)"
+    per spec. Runs a real cross-encoder model (sentence-transformers) over
+    (query, chunk_content) pairs and re-sorts by its relevance score,
+    WITHIN the same tier ordering hybrid_scoring.py already established
+    (same convention as HeuristicReranker.rerank — never lets a lower
+    evidence tier jump ahead of a higher one just because the model liked
+    its wording better).
+
+    Genuinely optional, per spec's "(if available)": if the
+    sentence-transformers package or model can't be loaded (not
+    installed, no network to download the model on first use, etc.), this
+    raises a clear, actionable error — exactly like LLMReranker's stub
+    already did — rather than silently falling back to a different
+    reranker (that would hide a real configuration problem from whoever
+    turned this on). Never selected by default (get_reranker's default
+    stays 'heuristic'); an admin must explicitly opt in via
+    services/retrieval_settings.py, after confirming the added latency
+    (a real model inference call per candidate) is acceptable."""
+
     def rerank(self, query: str, candidates: List[Dict], top_n: int) -> List[Dict]:
-        raise NotImplementedError(
-            "CrossEncoderReranker is not implemented yet — select 'heuristic' (default) or 'none'."
-        )
+        if not candidates:
+            return []
+        try:
+            model = _get_cross_encoder_model()
+        except Exception as e:
+            raise RuntimeError(
+                f"CrossEncoderReranker could not load model '{_CROSS_ENCODER_MODEL_NAME}' "
+                f"(sentence-transformers installed? network access to download it on first use?): {e}"
+            ) from e
+
+        pairs = [(query, (c.get("content") or c.get("text") or "")[:2000]) for c in candidates]
+        scores = model.predict(pairs)
+        for c, score in zip(candidates, scores):
+            c["rerank_score"] = round(float(score), 4)
+
+        # Same tier-preserving sort as HeuristicReranker — the
+        # cross-encoder score only breaks ties WITHIN a tier.
+        candidates = sorted(candidates, key=lambda c: (purpose_adjusted_tier(c),
+                                                        -c.get("rerank_score", 0.0)))
+        return candidates[:top_n]
 
 
 _PROVIDERS = {

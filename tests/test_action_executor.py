@@ -286,6 +286,58 @@ class TestUnsupportedActionType(unittest.TestCase):
         self.assertIn("Unsupported action_type", result["error"])
 
 
+class TestCustomerMessageFallbackDefault(unittest.TestCase):
+    """Regression for the confirmed Latest=5 bug: a customer_message
+    parameter with example_value="5" must use the customer's explicit
+    value when given, but still fall back to that configured default on
+    turns where the customer said nothing — without being
+    fixed_configuration (which can never be overridden)."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.executor = ActionExecutor(self.reg._sb)
+        self.executor.registry = self.reg
+
+    def _make_action_with_latest(self):
+        action = self.reg.create({"action_key": "list_action", "name": "List", "action_type": "API"})
+        action_id = action["id"]
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "required": True, "input_source": "customer_message"},
+            {"name": "Latest", "required": False, "input_source": "customer_message", "example_value": "5"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/api", "http_method": "POST"})
+        return action_id
+
+    def test_explicit_customer_value_overrides_default(self):
+        action_id = self._make_action_with_latest()
+        with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"ok": True})) as mock_req:
+            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014", "Latest": "3"}})
+        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
+        self.assertEqual(sent_body.get("Latest"), "3")
+
+    def test_falls_back_to_example_value_when_not_specified(self):
+        action_id = self._make_action_with_latest()
+        with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"ok": True})) as mock_req:
+            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014"}})
+        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
+        self.assertEqual(sent_body.get("Latest"), "5")
+
+    def test_required_customer_message_param_has_no_silent_fallback(self):
+        # A REQUIRED customer_message parameter must not silently pull in
+        # its example_value — that would defeat "required" validation by
+        # making a missing required slot look satisfied.
+        action = self.reg.create({"action_key": "required_no_fallback", "name": "R", "action_type": "API"})
+        action_id = action["id"]
+        self.reg.replace_parameters(action_id, [
+            {"name": "OrderCode", "required": True, "input_source": "customer_message", "example_value": "PO000"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/api", "http_method": "POST"})
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.executor.execute(action_id, {"collected_slots": {}})
+        mock_req.assert_not_called()
+        self.assertEqual(result["status"], "error")
+
+
 class TestRegistryUnaffectedByExecutor(unittest.TestCase):
     """Regression: this task must not have modified the Registry's own
     behavior — only added a new consumer module."""

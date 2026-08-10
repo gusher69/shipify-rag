@@ -8,7 +8,14 @@ load_dotenv(Path(__file__).parent / ".env")
 # OpenAI
 OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY")
 OPENAI_CHAT_MODEL    = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
-OPENAI_EMBED_MODEL   = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+# NOTE: there is no top-level OPENAI_EMBED_MODEL constant here on purpose.
+# The legacy OPENAI_EMBED_MODEL env var is still honored, but ONLY as a
+# fallback inside OPENAI_EMBEDDING_MODEL's own precedence expression below
+# — see the Embedding section. A prior version of this file defined a
+# second, disconnected OPENAI_EMBED_MODEL constant here that defaulted to
+# text-embedding-3-small; nothing imported it, but its mere existence was
+# a landmine (2026-08-01 .env.example audit) — removed rather than left
+# as a trap for a future accidental import.
 
 # Supabase
 SUPABASE_URL         = os.getenv("SUPABASE_URL")
@@ -21,8 +28,10 @@ LINE_CHANNEL_TOKEN   = os.getenv("LINE_CHANNEL_TOKEN")
 LINE_NOTIFY_TOKEN    = os.getenv("LINE_NOTIFY_TOKEN")
 
 # Google Drive
+# NOTE: GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID was removed here (2026-08-01 final
+# config cleanup) — confirmed zero importers anywhere in the codebase. See
+# LEGACY_ENV.md.
 GOOGLE_DRIVE_FOLDER_ID            = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
-GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID = os.getenv("GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID", os.getenv("GOOGLE_DRIVE_FOLDER_ID"))
 GOOGLE_SERVICE_ACCOUNT_JSON       = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "credentials.json")
 
 # Attachments
@@ -61,8 +70,30 @@ S3_ACCESS_KEY_ID     = os.getenv("S3_ACCESS_KEY_ID")
 S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY")
 
 # App
+# NOTE: AUTO_MODE was removed here (2026-08-01 final config cleanup) — was
+# imported by line_bot/webhook.py but never referenced again anywhere; a
+# "Full Auto Mode" flag from the platform's original design docs that was
+# never implemented. See LEGACY_ENV.md.
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.75"))
-AUTO_MODE            = os.getenv("AUTO_MODE", "false").lower() == "true"
+
+# Production Integration Sprint (2026-08-02), Phase 1 Step D — temporary
+# rollout flag for line_bot/webhook.py. Defaulted to true (2026-08-02,
+# Local Production Pipeline Verification phase) — we are no longer
+# validating the architecture, we are validating the production pipeline
+# itself, so the Decision Engine path is now the default for local/
+# Cloudflare Tunnel work. The legacy adapter (line_bot/intent.py
+# classify() + hardcoded dispatch) remains available ONLY as a temporary
+# fallback (set this env var to "false" explicitly to use it) — after
+# LINE OA UAT passes, the legacy adapter and this flag are both removed
+# entirely in a separate cleanup step, per the sprint's explicit plan.
+DECISION_ENGINE_LIVE_ROUTING = os.getenv("DECISION_ENGINE_LIVE_ROUTING", "true").strip().lower() == "true"
+
+# LINE Confirmation Flow (2026-08-10) — how long a pending confirmation
+# (services/pending_confirmation_service.py) stays valid before a reply
+# like "ยืนยัน" is treated as expired and must be re-requested. Applies to
+# ANY COMMAND-type Business Action gated by
+# services/decision_engine.py::_requires_confirmation, not just SendLineNotiCS.
+PENDING_CONFIRMATION_TIMEOUT_SECONDS = int(os.getenv("PENDING_CONFIRMATION_TIMEOUT_SECONDS", "300"))
 
 # Full Auto Import — no Import Preview / manual confirmation step. Every
 # upload always runs the full AI Knowledge Analyzer + Knowledge Graph
@@ -125,23 +156,18 @@ TOP_K           = 3
 # weak vector similarity but strong lexical/heading evidence still gets a
 # chance to be scored) vs. how many make it into the final LLM prompt.
 RAG_RAW_CANDIDATE_COUNT = int(os.getenv("RAG_RAW_CANDIDATE_COUNT", "30"))
-RAG_FINAL_TOP_K         = int(os.getenv("RAG_FINAL_TOP_K", str(TOP_K)))
 
 # Widened final context size for broad "summarize/overview" questions
 # (rag/searcher.py::is_broad_summary_query) — lets the LLM merge several
 # FAQ/company chunks into one summary instead of only the top-3 default.
 RAG_SUMMARY_TOP_K       = int(os.getenv("RAG_SUMMARY_TOP_K", "12"))
 
-# ── Hybrid retrieval (rag/hybrid_scoring.py) ────────────────────────
-# Generic, entity/domain-agnostic scoring weights — never hardcode a
-# specific document/topic here. See rag/hybrid_scoring.py for the actual
-# formula: hybrid_score = vector*W_VECTOR + keyword*W_KEYWORD + heading*W_HEADING.
-# NOT re-validated against a new embedding model yet — re-run
-# rag/evaluation.py after any embedding-model change before trusting
-# these defaults.
-RAG_VECTOR_WEIGHT  = float(os.getenv("RAG_VECTOR_WEIGHT", "0.5"))
-RAG_KEYWORD_WEIGHT = float(os.getenv("RAG_KEYWORD_WEIGHT", "0.3"))
-RAG_HEADING_WEIGHT = float(os.getenv("RAG_HEADING_WEIGHT", "0.2"))
+# NOTE: RAG_VECTOR_WEIGHT / RAG_KEYWORD_WEIGHT / RAG_HEADING_WEIGHT (hybrid
+# retrieval scoring weights) and RAG_FINAL_TOP_K were removed here (2026-08-01
+# final config cleanup) — confirmed never imported by any module. Superseded
+# by services/retrieval_settings.py's RAG_SEMANTIC_WEIGHT / RAG_KEYWORD_WEIGHT_V2
+# / RAG_HEADING_WEIGHT_V2 / RAG_FINAL_CONTEXT_TOP_K (DB-backed, live-reload —
+# see the Admin UI's Settings -> Retrieval Settings card). See LEGACY_ENV.md.
 
 # ── Multilingual query expansion (rag/query_expansion.py) ───────────
 # Level 2 (LLM query rewrite) is OFF by default — the pipeline must work
@@ -179,14 +205,10 @@ CREDENTIAL_ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
 # is scoped under this tenant_id by default.
 DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "default")
 
-# ── Admin sidebar navigation feature flags ────────────────────────────
-# Temporarily hides these menu items during the RAG customer demo phase
-# (the demo focuses only on Knowledge Base upload + AI Playground chat
-# testing) — routes, templates, services, and permissions are all
-# untouched, only sidebar visibility is affected (see
-# admin/sidebar_config.py). Direct URLs keep working either way. Flip
-# any of these back to "true" (or unset — all default to visible) to
-# restore the menu item once the demo phase ends.
-SHOW_AI_EVALUATION        = os.getenv("SHOW_AI_EVALUATION", "true").strip().lower() == "true"
-SHOW_PRODUCTION_VALIDATION = os.getenv("SHOW_PRODUCTION_VALIDATION", "true").strip().lower() == "true"
-SHOW_BUSINESS_ACTION_CENTER = os.getenv("SHOW_BUSINESS_ACTION_CENTER", "true").strip().lower() == "true"
+# NOTE: SHOW_AI_EVALUATION / SHOW_PRODUCTION_VALIDATION /
+# SHOW_BUSINESS_ACTION_CENTER precomputed constants were removed here
+# (2026-08-01 final config cleanup) — confirmed nothing ever imported them.
+# The env var NAMES themselves are still fully live and functional (this is
+# NOT a behavior change): services/developer_mode.py's _env_hard_disabled()
+# reads each one directly via os.getenv(env_override, "true") at call time,
+# completely independent of this file. See LEGACY_ENV.md.
