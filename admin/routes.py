@@ -480,6 +480,20 @@ def get_synced_sources() -> dict:
 
 # ── Login / Logout ────────────────────────────────────────────
 
+@app.get("/")
+async def root(request: Request):
+    """The Admin app has no content of its own at `/` — only `/admin/*`
+    routes exist. Without this, a bare domain hit (e.g. the public site
+    root) 404s with a raw {"detail":"Not Found"}. Redirects a session
+    that's already authenticated straight to the dashboard (the same
+    landing page login() itself redirects to); anyone else goes to the
+    login page, same as auth()'s own redirect target for every other
+    protected route."""
+    if _verify(request.cookies.get("session_token", "")):
+        return RedirectResponse(url="/admin/dashboard", status_code=302)
+    return RedirectResponse(url="/admin/login", status_code=302)
+
+
 @app.get("/admin/check-auth")
 async def check_auth_api(request: Request):
     token = request.cookies.get("session_token", "")
