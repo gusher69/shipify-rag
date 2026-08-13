@@ -130,15 +130,27 @@ class TestDecisionEngineAdapter(unittest.TestCase):
             else self.mock_line_bot_api.reply_message.call_args.args[0].messages
         self.assertTrue(any("คำตอบค่ะ" in m.text for m in sent_messages if hasattr(m, "text")))
 
-    def test_human_handoff_routing_sends_line_notify(self):
+    def test_human_handoff_routing_calls_send_handoff_notification(self):
+        """Human Handoff sprint (2026-08-13) — routing_type=="HUMAN_HANDOFF"
+        on the live Decision-Engine path now notifies CS through the real,
+        Credential-Store-backed SendLineNotiCS Business Action (services/
+        human_handoff_service.py), never the legacy LINE Notify token
+        (send_line_notify, kept only for the deprecated legacy adapter).
+        See TestHumanHandoffNotification below for the full end-to-end
+        chain down to the mocked HTTP boundary."""
+        self.mock_session_service.get_handoff_status.return_value = "NONE"
         with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
-             patch.object(webhook_module, "send_line_notify") as mock_notify:
+             patch.object(webhook_module, "send_line_notify") as mock_legacy_notify, \
+             patch("services.human_handoff_service.send_handoff_notification",
+                   return_value={"sent": True, "action_key": "sendlinenotics", "error": None}) as mock_notify:
             mock_engine_cls.return_value.decide.return_value = self._decide_result(
                 text="กำลังโอนสายให้เจ้าหน้าที่ค่ะ", routing_type="HUMAN_HANDOFF",
                 handoff_payload={"reason": "ai_policy_escalation"})
             webhook_module._handle_message_via_decision_engine(_fake_event("ร้องเรียนบริการ"))
         mock_notify.assert_called_once()
-        self.assertIn("ai_policy_escalation", mock_notify.call_args.args[0])
+        self.assertEqual(mock_notify.call_args.kwargs["reason"], "ai_policy_escalation")
+        mock_legacy_notify.assert_not_called()
+        self.mock_session_service.set_handoff_status.assert_any_call("fake-session-id", "NOTIFIED", reason="ai_policy_escalation")
 
     def test_images_converted_to_image_messages(self):
         with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
@@ -164,8 +176,11 @@ class TestDecisionEngineAdapter(unittest.TestCase):
         self.assertIn("https://example.test/manual.pdf", combined_text)
 
     def test_handoff_suppresses_attachments(self):
+        self.mock_session_service.get_handoff_status.return_value = "NONE"
         with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
-             patch.object(webhook_module, "send_line_notify"):
+             patch.object(webhook_module, "send_line_notify"), \
+             patch("services.human_handoff_service.send_handoff_notification",
+                   return_value={"sent": True, "action_key": "sendlinenotics", "error": None}):
             mock_engine_cls.return_value.decide.return_value = self._decide_result(
                 routing_type="HUMAN_HANDOFF", images=["https://example.test/a.jpg"],
                 handoff_payload={"reason": "user_requested_human"})
@@ -387,6 +402,215 @@ class TestLineConfirmationFlow(unittest.TestCase):
     def _decide_result_plain(text):
         return {"reply": {"text": text, "images": [], "files": []}, "routing": {"type": "RAG"},
                 "handoff_payload": None, "alert": None, "error": None, "developer": {}}
+
+
+class TestHumanHandoffNotification(unittest.TestCase):
+    """Human Handoff sprint (2026-08-13), Phase 6 — scenarios A-H, end to
+    end at the webhook adapter layer through the REAL
+    human_handoff_service -> ActionExecutor chain (a real
+    BusinessActionRegistry backed by _FakeSupabase, never a real DB),
+    with ONLY the actual network boundary
+    (services.action_executor.requests.request) mocked — proves the
+    whole pipeline works, not just that a service function was called
+    with the right arguments. DecisionEngine.decide() itself is mocked
+    at its call site (same convention as every other class in this
+    file) so these tests exercise the ADAPTER's reaction to a given
+    decide() result, not decide()'s own routing logic (covered in
+    tests/test_decision_engine.py). Never calls the real SendLineNotiCS
+    endpoint."""
+
+    def setUp(self):
+        from tests.test_business_action_registry import _FakeSupabase
+        from tests.test_decision_engine import _seed_action
+        from services.business_action_registry import BusinessActionRegistry
+        from services.action_executor import ActionExecutor
+
+        self.fake_sb = _FakeSupabase()
+        self.reg = BusinessActionRegistry(self.fake_sb)
+        action_id = _seed_action(self.reg, key="sendlinenotics", action_type="API",
+                                  category="notification", keywords=["แจ้งเตือน"])
+        self.reg.update(action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"}})
+        self.reg.replace_parameters(action_id, [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/notify", "http_method": "POST"})
+        self.action_id = action_id
+        self.executor = ActionExecutor(self.fake_sb)
+
+        # human_handoff_service resolves get_registry()/get_action_executor()
+        # with no args when the caller (webhook.py) doesn't inject them —
+        # point both at THIS test's fake registry/executor so the whole
+        # chain (webhook -> human_handoff_service -> ActionExecutor ->
+        # requests.request) is real except the actual network call.
+        self.registry_patcher = patch("services.human_handoff_service.get_registry", return_value=self.reg)
+        self.executor_patcher = patch("services.human_handoff_service.get_action_executor", return_value=self.executor)
+        self.registry_patcher.start()
+        self.executor_patcher.start()
+
+        self.profile_patcher = patch.object(webhook_module, "get_profile", return_value={"display_name": "Test"})
+        self.upsert_patcher = patch.object(webhook_module, "upsert_profile")
+        self.reply_patcher = patch.object(webhook_module, "MessagingApi")
+        self.profile_patcher.start()
+        self.upsert_patcher.start()
+        self.mock_messaging_api_cls = self.reply_patcher.start()
+        self.mock_line_bot_api = MagicMock()
+        self.mock_messaging_api_cls.return_value = self.mock_line_bot_api
+
+        self.update_profile_patcher = patch.object(webhook_module, "update_profile_from_turn")
+        self.update_tier_patcher = patch.object(webhook_module, "update_tier_for_profile")
+        self.update_profile_patcher.start()
+        self.update_tier_patcher.start()
+
+        # Per-test in-memory conversation/handoff-state store standing in
+        # for ai_sessions — SessionService itself isn't under test here,
+        # only that webhook.py correctly consults/updates handoff state
+        # THROUGH it (real dedup semantics, not a rubber-stamp mock).
+        self._conversations: dict = {}
+        self._handoff_status: dict = {}
+
+        def _get_or_create(user_id, **kwargs):
+            if user_id not in self._conversations:
+                self._conversations[user_id] = {"id": f"conv-{user_id}", "message_count": 0}
+                self._handoff_status[f"conv-{user_id}"] = "NONE"
+            return self._conversations[user_id]
+
+        def _get_status(conversation_id):
+            return self._handoff_status.get(conversation_id, "NONE")
+
+        def _set_status(conversation_id, status, reason=None):
+            self._handoff_status[conversation_id] = status
+
+        self.mock_session_service = MagicMock()
+        self.mock_session_service.get_or_create_active_conversation.side_effect = _get_or_create
+        self.mock_session_service.get_handoff_status.side_effect = _get_status
+        self.mock_session_service.set_handoff_status.side_effect = _set_status
+        self.session_service_patcher = patch.object(webhook_module, "get_session_service",
+                                                       return_value=self.mock_session_service)
+        self.session_service_patcher.start()
+
+    def tearDown(self):
+        self.registry_patcher.stop()
+        self.executor_patcher.stop()
+        self.profile_patcher.stop()
+        self.upsert_patcher.stop()
+        self.reply_patcher.stop()
+        self.update_profile_patcher.stop()
+        self.update_tier_patcher.stop()
+        self.session_service_patcher.stop()
+
+    @staticmethod
+    def _handoff_decide_result(reason="user_requested_human", collected=None):
+        return {
+            "reply": {"text": "ได้เลยค่ะ เดี๋ยวแจ้งเจ้าหน้าที่ให้ติดต่อกลับนะคะ", "images": [], "files": []},
+            "routing": {"type": "HUMAN_HANDOFF"},
+            "handoff_payload": {"reason": reason},
+            "alert": None, "error": None,
+            "developer": {"information_collection_status": {"collected_parameters": collected or {}}},
+        }
+
+    @staticmethod
+    def _normal_decide_result(text, routing_type):
+        return {
+            "reply": {"text": text, "images": [], "files": []},
+            "routing": {"type": routing_type}, "handoff_payload": None, "alert": None, "error": None,
+            "developer": None,
+        }
+
+    def _mock_http_success(self):
+        return patch("services.action_executor.requests.request",
+                      return_value=MagicMock(status_code=200, json=lambda: {"status": "success"}))
+
+    def _mock_credential(self, value="REAL-SECRET-abc123"):
+        return patch("services.credential_store.CredentialStore.resolve",
+                      return_value={"ok": True, "value": value, "error": None})
+
+    # A ─────────────────────────────────────────────────────────────
+    def test_A_explicit_human_request_sends_exactly_one_mocked_notification(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             self._mock_http_success() as mock_req, self._mock_credential():
+            mock_engine_cls.return_value.decide.return_value = self._handoff_decide_result()
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอคุยกับเจ้าหน้าที่", user_id="UA"))
+        mock_req.assert_called_once()
+        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
+        self.assertIn("Message", sent_body)
+        self.assertEqual(self._handoff_status["conv-UA"], "NOTIFIED")
+
+    # B ─────────────────────────────────────────────────────────────
+    def test_B_cs_callback_request_sends_exactly_one_mocked_notification(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             self._mock_http_success() as mock_req, self._mock_credential():
+            mock_engine_cls.return_value.decide.return_value = self._handoff_decide_result()
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอให้ CS ติดต่อกลับ", user_id="UB"))
+        mock_req.assert_called_once()
+        self.assertEqual(self._handoff_status["conv-UB"], "NOTIFIED")
+
+    # C ─────────────────────────────────────────────────────────────
+    def test_C_normal_rag_question_sends_zero_notifications(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             patch("services.action_executor.requests.request") as mock_req:
+            mock_engine_cls.return_value.decide.return_value = self._normal_decide_result("คำตอบค่ะ", "RAG")
+            webhook_module._handle_message_via_decision_engine(_fake_event("นำเข้าสินค้าทำอย่างไร", user_id="UC"))
+        mock_req.assert_not_called()
+
+    # D ─────────────────────────────────────────────────────────────
+    def test_D_rag_no_answer_sends_zero_notifications(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             patch("services.action_executor.requests.request") as mock_req:
+            mock_engine_cls.return_value.decide.return_value = self._normal_decide_result(
+                "ขอโทษด้วยค่ะ ตอนนี้ยังไม่พบคำตอบที่ชัดเจนสำหรับคำถามนี้", "SAFE_FALLBACK")
+            webhook_module._handle_message_via_decision_engine(_fake_event("คำถามที่ไม่มีคำตอบ", user_id="UD"))
+        mock_req.assert_not_called()
+
+    # E ─────────────────────────────────────────────────────────────
+    def test_E_normal_erp_request_sends_zero_notifications(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             patch("services.action_executor.requests.request") as mock_req:
+            mock_engine_cls.return_value.decide.return_value = self._normal_decide_result(
+                "รหัสลูกค้า: SP1014", "API")
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอดูข้อมูลลูกค้า SP1014", user_id="UE"))
+        mock_req.assert_not_called()
+
+    # F ─────────────────────────────────────────────────────────────
+    def test_F_repeated_handoff_request_sends_only_one_notification(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             self._mock_http_success() as mock_req, self._mock_credential():
+            mock_engine_cls.return_value.decide.return_value = self._handoff_decide_result()
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอคุยกับเจ้าหน้าที่", user_id="UF"))
+            webhook_module._handle_message_via_decision_engine(_fake_event("มีใครอยู่ไหม", user_id="UF"))
+            webhook_module._handle_message_via_decision_engine(_fake_event("ช่วยตอบหน่อย", user_id="UF"))
+        mock_req.assert_called_once()
+        self.assertEqual(self._handoff_status["conv-UF"], "NOTIFIED")
+
+    # G ─────────────────────────────────────────────────────────────
+    def test_G_different_users_get_independent_handoff_state(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             self._mock_http_success() as mock_req, self._mock_credential():
+            mock_engine_cls.return_value.decide.return_value = self._handoff_decide_result()
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอคุยกับเจ้าหน้าที่", user_id="UG1"))
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอคุยกับเจ้าหน้าที่", user_id="UG2"))
+        self.assertEqual(mock_req.call_count, 2)
+        self.assertEqual(self._handoff_status["conv-UG1"], "NOTIFIED")
+        self.assertEqual(self._handoff_status["conv-UG2"], "NOTIFIED")
+
+    # H ─────────────────────────────────────────────────────────────
+    def test_H_secret_code_resolved_via_credential_store_and_never_leaked_to_customer(self):
+        real_secret = "REAL-SECRET-abc123"
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             self._mock_http_success() as mock_req, self._mock_credential(real_secret) as mock_resolve:
+            mock_engine_cls.return_value.decide.return_value = self._handoff_decide_result()
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอคุยกับเจ้าหน้าที่", user_id="UH"))
+        mock_resolve.assert_called_once()
+        # Resolved via Credential Store and sent on the real outbound
+        # call (expected — that's what authenticates the request)...
+        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
+        self.assertEqual(sent_body.get("SecretCode"), real_secret)
+        # ...but never appears in what the customer actually receives back.
+        sent_messages = self.mock_line_bot_api.reply_message.call_args.args[0].messages
+        combined_reply_text = " ".join(m.text for m in sent_messages if hasattr(m, "text"))
+        self.assertNotIn(real_secret, combined_reply_text)
 
 
 if __name__ == "__main__":

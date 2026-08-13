@@ -513,6 +513,38 @@ class SessionService:
             print(f"[SessionService] get_or_create_active_conversation create failed: {e}")
             return None
 
+    # ── Human Handoff state (2026-08-13) ─────────────────────────────
+    # Reuses the SAME ai_sessions row as the conversation object (see
+    # get_or_create_active_conversation above) rather than a new table —
+    # migrations/037_handoff_state.sql adds handoff_status/handoff_reason/
+    # handoff_notified_at columns. NONE (default) -> PENDING (a trigger
+    # fired this turn, notification in flight) -> NOTIFIED (CS already
+    # notified for this active conversation — the duplicate-protection
+    # check every caller must consult before sending another real
+    # notification) -> RESOLVED (reserved for a future admin/CS action).
+
+    def get_handoff_status(self, conversation_id: str) -> str:
+        try:
+            res = _get_sb().table("ai_sessions").select("handoff_status") \
+                .eq("id", conversation_id).single().execute()
+            return (res.data or {}).get("handoff_status") or "NONE"
+        except Exception as e:
+            print(f"[SessionService] get_handoff_status failed (treating as NONE): {e}")
+            return "NONE"
+
+    def set_handoff_status(self, conversation_id: str, status: str, *, reason: Optional[str] = None) -> None:
+        if status not in ("NONE", "PENDING", "NOTIFIED", "RESOLVED"):
+            raise ValueError(f"invalid handoff status: {status}")
+        update = {"handoff_status": status}
+        if reason is not None:
+            update["handoff_reason"] = reason
+        if status == "NOTIFIED":
+            update["handoff_notified_at"] = _now_iso()
+        try:
+            _get_sb().table("ai_sessions").update(update).eq("id", conversation_id).execute()
+        except Exception as e:
+            print(f"[SessionService] set_handoff_status failed (non-fatal): {e}")
+
     def record_conversation_turn(self, session_id: Optional[str], question: str, decide_result: Dict,
                                   *, line_user_id: Optional[str] = None, conversation_tier: Optional[str] = None) -> Optional[Dict]:
         """The Decision Engine / LINE OA equivalent of record_turn() above.

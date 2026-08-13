@@ -281,7 +281,33 @@ INTENT_SCHEMAS: Dict[str, Dict] = {
 # narrowly-scoped vocabulary owned by THIS module (never imports rag/
 # query_understanding.py's own _HUMAN_AGENT_RE — that file is frozen
 # and this workflow layer must not depend on its internals changing).
-_HUMAN_REQUEST_RE = re.compile(r"คุยกับเจ้าหน้าที่|ขอเจ้าหน้าที่|ติดต่อคน|ขอสายเจ้าหน้าที่|ไม่คุยกับบอท")
+#
+# Broadened 2026-08-13 (Human Handoff sprint) to cover more explicit
+# phrasings a customer might use to ask for a person instead of the bot —
+# not just the narrower "คุยกับ.../ขอ...เจ้าหน้าที่" phrasing this pattern
+# originally covered. IGNORECASE only affects the Latin-script
+# alternatives (Thai script has no case).
+#
+# Deliberately NOT bare "พนักงาน" or bare "CS"/"ติดต่อกลับ" — both are
+# genuinely ambiguous words this codebase already uses for OTHER,
+# unrelated, protected meanings: "พนักงาน" alone also means "employee" in
+# an HR/employee-data lookup (see tests/test_decision_engine.py's
+# "ขอข้อมูลพนักงานหน่อย" fixture), and a message that explicitly asks the
+# AI to relay something TO CS ("ช่วยแจ้ง CS ให้หน่อยว่า...ติดต่อกลับ") is a
+# DIFFERENT, already-built, already-tested mechanism — the SendLineNotiCS
+# confirmation gate (services/decision_engine.py::_requires_confirmation,
+# 2026-08-09/10 sprints) — not a request to escalate to a human right
+# now. Scoping "พนักงาน" to when it's paired with "ช่วย" (staff HELP), and
+# "CS" to when it's immediately followed by "ติดต่อกลับ" (CS calls BACK,
+# the exact phrasing in the spec's own example), keeps both new triggers
+# specific to "customer wants a person" without stealing traffic from
+# either of those other, unrelated features.
+_HUMAN_REQUEST_RE = re.compile(
+    r"คุยกับเจ้าหน้าที่|ขอเจ้าหน้าที่|ติดต่อคน|ขอสายเจ้าหน้าที่|ไม่คุยกับบอท"
+    r"|พนักงาน\s*ช่วย|ขอคุยกับคน"
+    r"|CS\s{0,3}ติดต่อกลับ|\bhuman agent\b|\bcustomer service\b",
+    re.IGNORECASE,
+)
 _REFUSAL_RE = re.compile(r"ไม่มี|ไม่สะดวกให้|ไม่บอก|ไม่อยากให้|หาไม่เจอ|ไม่รู้เลขที่")
 
 

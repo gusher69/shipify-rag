@@ -342,14 +342,55 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         except Exception as e:
             print(f"[webhook] failed to persist pending confirmation (non-fatal): {e}")
 
-    # Smart Handoff — the escalation DECISION already happened inside
-    # decide() (explicit human request, refusal, max-retry, or AI
-    # Policies' own escalation verdict surfaced through the RAG pipeline)
-    # — this adapter only reacts to it, never re-derives its own trigger.
+    # Human Handoff (2026-08-13) — the escalation DECISION already
+    # happened inside decide() (explicit human request, refusal, max-
+    # retry, or AI Policies' own escalation verdict surfaced through the
+    # RAG pipeline) — this adapter only reacts to it, never re-derives
+    # its own trigger. Notifies CS through whichever real,
+    # Credential-Store-backed NOTIFY/NOTIFICATION Business Action is
+    # configured (e.g. SendLineNotiCS — services/human_handoff_service.py
+    # resolves it generically, never hardcoded to that one action_key)
+    # instead of the legacy LINE Notify token (send_line_notify, kept
+    # only for the deprecated _handle_message_legacy path below).
+    #
+    # Duplicate-send protection reuses the SAME ai_sessions row every
+    # other Conversation History write already targets (see
+    # services/session_service.py's handoff-state helpers,
+    # migrations/037_handoff_state.sql) — a repeated "ขอคุยกับเจ้าหน้าที่"
+    # within the same active (24h) conversation notifies CS at most once,
+    # mirroring the exact pattern pending_confirmations already uses for
+    # conversation-scoped state.
+    conversation = None
     if is_handoff:
         handoff_payload = result.get("handoff_payload") or {}
         reason = handoff_payload.get("reason", "handoff")
-        send_line_notify(f"🚨 Smart Handoff\nUser: {user_id}\nคำถาม: {question}\nReason: {reason}")
+        session_service = get_session_service()
+        conversation = session_service.get_or_create_active_conversation(user_id)
+        handoff_status = session_service.get_handoff_status(conversation["id"]) if conversation else "NONE"
+        if handoff_status in ("NOTIFIED", "PENDING"):
+            print(f"[webhook] Human Handoff already {handoff_status} for this conversation — skipping duplicate notification")
+        else:
+            if conversation:
+                session_service.set_handoff_status(conversation["id"], "PENDING", reason=reason)
+            from services.human_handoff_service import send_handoff_notification
+            collected = (dev.get("information_collection_status") or {}).get("collected_parameters") or {}
+            send_result = send_handoff_notification(
+                reason=reason,
+                customer_name=(profile or {}).get("display_name") or None,
+                cust_code=collected.get("CustCode"),
+                line_user_id=user_id,
+                customer_message=question,
+            )
+            if conversation:
+                if send_result.get("sent"):
+                    session_service.set_handoff_status(conversation["id"], "NOTIFIED", reason=reason)
+                else:
+                    # Never claim success the customer already saw a
+                    # confirming reply for if the real call failed — reset
+                    # to NONE so the next handoff-triggering message can
+                    # retry instead of being silently swallowed forever.
+                    session_service.set_handoff_status(conversation["id"], "NONE", reason=reason)
+                    print(f"[webhook] Human Handoff notification failed (non-fatal, will retry next trigger): {send_result.get('error')}")
 
     # Attachments — decide() already classified images vs. other files
     # and applied the Attachment Rules toggle (services/decision_engine.py
@@ -394,7 +435,10 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # must never delay or break the customer-facing reply above.
     try:
         session_service = get_session_service()
-        conversation = session_service.get_or_create_active_conversation(user_id)
+        # Reuse the conversation row already fetched above for the
+        # Human Handoff dedup check when this turn was a handoff — avoids
+        # a redundant lookup; a non-handoff turn fetches it fresh here.
+        conversation = conversation or session_service.get_or_create_active_conversation(user_id)
         is_new_conversation = bool(conversation) and (conversation.get("message_count") or 0) == 0
         conversation_fields = None
         if conversation:

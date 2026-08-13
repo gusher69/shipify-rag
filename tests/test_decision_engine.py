@@ -295,6 +295,29 @@ class TestHumanHandoffTriggers(unittest.TestCase):
         result = self.engine.decide("ขอคุยกับเจ้าหน้าที่หน่อย", history=[])
         self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
 
+    def test_explicit_human_request_uses_natural_reply_not_technical_confirmation(self):
+        """Human Handoff sprint (2026-08-13), Phase 4 — an explicit
+        customer request must never surface an awkward technical
+        confirmation prompt like 'ยืนยันการเรียก SendLineNotiCS หรือไม่'."""
+        result = self.engine.decide("ขอคุยกับเจ้าหน้าที่หน่อย", history=[])
+        reply_text = result["reply"]["text"]
+        self.assertNotIn("ยืนยัน", reply_text)
+        self.assertNotIn("SendLineNotiCS", reply_text)
+        self.assertEqual(reply_text, "ได้เลยค่ะ เดี๋ยวแจ้งเจ้าหน้าที่ให้ติดต่อกลับนะคะ")
+
+    def test_cs_request_english_word_routes_to_handoff(self):
+        """Human Handoff sprint (2026-08-13), Phase 2 item 1 — 'ขอให้ CS
+        ติดต่อกลับ' previously fell through to normal RAG/API routing;
+        the broadened _HUMAN_REQUEST_RE now recognizes it."""
+        result = self.engine.decide("ขอให้ CS ติดต่อกลับ", history=[])
+        self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_staff_word_routes_to_handoff(self):
+        """Human Handoff sprint (2026-08-13), Phase 2 item 1 — 'พนักงาน'
+        (staff) was not previously recognized at all."""
+        result = self.engine.decide("ต้องการให้พนักงานช่วยเรื่องนี้", history=[])
+        self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
     def test_escalation_after_max_retry_routes_to_handoff(self):
         follow_up = "รบกวนแจ้งเลขพัสดุ หรือเลขออเดอร์ เพื่อให้ตรวจสอบสถานะสินค้าได้ค่ะ"
         history = [

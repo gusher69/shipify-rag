@@ -992,7 +992,19 @@ class DecisionEngine:
         else:
             handoff_payload = {"reason": reason, "workflow": workflow, "collected_slots": {}}
 
-        reply = _build_response(text=message_override or "กำลังโอนสายให้เจ้าหน้าที่ดูแลต่อค่ะ")
+        # Natural, non-technical wording for an explicit customer request
+        # (Human Handoff sprint, 2026-08-13, Phase 4) — never an awkward
+        # "ยืนยันการเรียก SendLineNotiCS หรือไม่" confirmation prompt. Any
+        # other reason (AI Policy escalation, refusal, max-retry) keeps
+        # its own existing message_override / generic fallback text,
+        # unchanged from before this sprint.
+        if message_override:
+            reply_text = message_override
+        elif reason == "user_requested_human":
+            reply_text = "ได้เลยค่ะ เดี๋ยวแจ้งเจ้าหน้าที่ให้ติดต่อกลับนะคะ"
+        else:
+            reply_text = "กำลังโอนสายให้เจ้าหน้าที่ดูแลต่อค่ะ"
+        reply = _build_response(text=reply_text)
         return self._finalize(reply=reply, routing_type="HUMAN_HANDOFF", workflow=workflow,
                                developer_trace=developer_trace, context=context, start=start,
                                alert=alert, handoff_payload=handoff_payload)
