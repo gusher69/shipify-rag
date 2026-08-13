@@ -59,27 +59,58 @@ _LIMIT_KEYWORD = "ล่าสุด"
 _LIMIT_WINDOW = 15  # chars of lookaround around the keyword to search for a count
 _LIMIT_LEADING_RE = re.compile(r"(?:ขอ|เอา)\s*(\d+)\s*(?:รายการ|อัน|ชิ้น)")
 
+# A STANDALONE digit run only — not preceded/followed by a letter (Thai or
+# Latin). Confirmed live bug (2026-08-13, Customer Server UAT): a bare
+# `\d+` search in the window around "ล่าสุด" was matching digits embedded
+# INSIDE an adjacent customer/order code (e.g. "SP1014" in "ขอดู PO
+# ล่าสุดของ SP1014" was misread as Latest=1014) — the exact case the
+# module's own docstring already promised never to do.
+#
+# A single regex with lookaround isn't enough on its own: `\d+` is greedy,
+# but the engine still tries alternate START positions if the greedy match
+# fails its lookaround — e.g. for "SP1014", starting at the leading "1" is
+# correctly rejected (preceded by letter "P"), but the engine then retries
+# from "0", which IS preceded by a digit ("1"), satisfies a same-character
+# lookbehind, and matches "014". Checking the boundary of each FULL `\d+`
+# match's start/end against the ORIGINAL string (not letting the engine
+# choose the start position at all) is what actually prevents this.
+_DIGIT_RUN_RE = re.compile(r"\d+")
+_WORD_CHAR_RE = re.compile(r"[^\W\d_]", re.UNICODE)  # any letter, Thai or Latin (not digit/underscore/punct)
+
+
+def _standalone_digit_runs(text: str) -> List[str]:
+    runs = []
+    for m in _DIGIT_RUN_RE.finditer(text):
+        before_char = text[m.start() - 1] if m.start() > 0 else ""
+        after_char = text[m.end()] if m.end() < len(text) else ""
+        if _WORD_CHAR_RE.match(before_char) or _WORD_CHAR_RE.match(after_char):
+            continue  # part of a larger alphanumeric token (e.g. "SP1014") — skip
+        runs.append(m.group(0))
+    return runs
+
 
 def _extract_limit_digit(message: str) -> Optional[str]:
     """Finds the customer-stated count for a "how many" request. Thai has
     no mandatory spacing between a noun and a following/preceding
     keyword (e.g. "3 พัสดุล่าสุด" glues "พัสดุ" directly onto "ล่าสุด" with
     no separator, so a strict adjacency regex misses it) — so instead of
-    matching an exact token sequence, this looks for the nearest digit
-    within a small window on either side of the "ล่าสุด" keyword itself,
-    which is robust to whatever noun/item-name sits in between. Falls
-    back to the "ขอ/เอา N รายการ" phrasing when "ล่าสุด" isn't present at
-    all. Never matches a bare digit with no limit-indicating keyword
-    nearby — a raw number elsewhere in the message (e.g. inside a
-    customer/order code) is not treated as a limit."""
+    matching an exact token sequence, this looks for the nearest STANDALONE
+    digit within a small window on either side of the "ล่าสุด" keyword
+    itself, which is robust to whatever noun/item-name sits in between.
+    Falls back to the "ขอ/เอา N รายการ" phrasing when "ล่าสุด" isn't present
+    at all. Never matches a bare digit with no limit-indicating keyword
+    nearby, and never matches a digit run that's part of a larger
+    alphanumeric token — a raw number elsewhere in the message (e.g.
+    inside a customer/order code like "SP1014") is not treated as a
+    limit."""
     idx = message.find(_LIMIT_KEYWORD)
     if idx != -1:
         before = message[max(0, idx - _LIMIT_WINDOW):idx]
         after = message[idx + len(_LIMIT_KEYWORD): idx + len(_LIMIT_KEYWORD) + _LIMIT_WINDOW]
-        nums_before = re.findall(r"\d+", before)
+        nums_before = _standalone_digit_runs(before)
         if nums_before:
             return nums_before[-1]  # nearest number before the keyword
-        nums_after = re.findall(r"\d+", after)
+        nums_after = _standalone_digit_runs(after)
         if nums_after:
             return nums_after[0]  # nearest number after the keyword
     m = _LIMIT_LEADING_RE.search(message)

@@ -104,6 +104,19 @@ class TestNumericLimitExtraction(unittest.TestCase):
         result = infer_numeric_limit_parameters([LATEST_PARAM], "ขอดูพัสดุของ SP1014")
         self.assertNotIn("Latest", result)
 
+    def test_digit_inside_customer_code_adjacent_to_keyword_is_not_a_limit(self):
+        """Confirmed live bug (2026-08-13, Customer Server UAT) — unlike
+        the case above, "ล่าสุด" IS present here and sits right next to the
+        customer code with no stated count anywhere, which used to make
+        the window-based digit search read "SP1014"'s own digits as
+        Latest=1014 (then, in one live case, =014 after a first attempted
+        fix). Both of the customer's own example phrasings are covered
+        here verbatim."""
+        result = infer_numeric_limit_parameters([LATEST_PARAM], "ขอดู PO ล่าสุดของ SP1014")
+        self.assertNotIn("Latest", result)
+        result = infer_numeric_limit_parameters([LATEST_PARAM], "ขอดูพัสดุล่าสุดของ SP1014")
+        self.assertNotIn("Latest", result)
+
     def test_parameter_without_numeric_limit_metadata_is_ignored(self):
         plain_param = {"name": "CustCode", "field_metadata": {}}
         result = infer_numeric_limit_parameters([plain_param], "3 รายการล่าสุด")
