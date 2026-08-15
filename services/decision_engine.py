@@ -478,7 +478,17 @@ def _resolve_conversation_reference(registry, message: str, customer_context: Di
             field_match = True
             break
     marker_match = bool(_REFERENCE_MARKER_RE.search(message or ""))
-    if not (field_match or marker_match):
+    # Pure Identifier Guard extended to continuation: a message that IS,
+    # in its entirety, a bare identifier-shaped token ("FT3182") carries
+    # no field/marker signal of its own, but it must still fill the
+    # ACTIVE conversation's pending slot rather than fall through to a
+    # fresh, identifier-memory-boosted search where it could just as
+    # easily pattern-match a widely-shared parameter (e.g. CustCode) on
+    # some unrelated same-category action. Never invents which parameter
+    # it binds to — _handle_dynamic_collection's own extraction decides
+    # that against the REMEMBERED action's actual configured parameters.
+    bare_identifier_match = bool((message or "").strip()) and _validate_generic_identifier((message or "").strip())
+    if not (field_match or marker_match or bare_identifier_match):
         return None
 
     if _DETAIL_INTENT_RE.search(message or ""):
@@ -1063,7 +1073,22 @@ class DecisionEngine:
                 # can never manufacture that evidence on their own).
                 referenced = _resolve_conversation_reference(self.registry, message, customer_context)
                 fresh_topic_beats_reference = False
-                if referenced:
+                # Pure Identifier Guard applied to continuation too: a
+                # message that IS, in its entirety, a bare identifier-
+                # shaped token (e.g. "FT3182") carries no real topical
+                # signal — it just happens to pattern-match whichever
+                # parameter (often a widely-shared one like CustCode)
+                # every candidate action requires. Letting THAT alone
+                # win against an active conversation reintroduces the
+                # exact "entity steal" failure this reordering exists to
+                # prevent, just via the message's own pattern match
+                # instead of remembered identifiers. A bare code always
+                # fills the ACTIVE action's pending slot; only a message
+                # with real topical content (a keyword, a domain word)
+                # may switch domains.
+                is_bare_identifier_message = bool((message or "").strip()) \
+                    and _validate_generic_identifier((message or "").strip())
+                if referenced and not is_bare_identifier_message:
                     topic_only_candidates = search_candidate_actions(
                         self.registry, workflow=workflow_hint, message=message, collected_slots={})
                     if topic_only_candidates and topic_only_candidates[0]["id"] != referenced["id"] \

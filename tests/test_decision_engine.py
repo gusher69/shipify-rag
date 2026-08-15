@@ -442,6 +442,41 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         self.assertIn("คูปอง", text)
         self.assertIn("2", text)
 
+    def test_bare_identifier_reply_fills_active_conversation_not_a_pattern_matching_sibling(self):
+        """Confirmed live bug (2026-08-15) — a bare identifier-shaped
+        reply ("FT3182") during an active tracking conversation was
+        hijacked by an unrelated same-category action (a shipment
+        lookup) purely because BOTH actions require CustCode and the
+        bare code pattern-matches that shared param regardless of which
+        action it belongs to. A bare identifier carries no real topical
+        signal of its own (Pure Identifier Guard) — it must fill the
+        ACTIVE conversation's pending slot, never be treated as decisive
+        evidence for switching to a different action."""
+        tracking_id = _seed_action(self.reg, key="search_tracking_bare", action_type="API",
+                                    category="tracking", keywords=["tracking"])
+        self.reg.replace_parameters(tracking_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "Tracking", "display_name": "เลข Tracking", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(tracking_id, {"endpoint": "https://example.test/tracking", "http_method": "GET"})
+
+        shipment_id = _seed_action(self.reg, key="search_shipment_bare", action_type="API", category="tracking")
+        self.reg.replace_parameters(shipment_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(shipment_id, {"endpoint": "https://example.test/shipment", "http_method": "GET"})
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {}})):
+            result = self.engine.decide(
+                "FT3182", history=[], context={"developer_mode": True,
+                "customer_context": {"last_business_action": "search_tracking_bare",
+                                      "last_tracking": "TRACK1", "last_shipment_code": "FT999"}})
+        dev = result.get("developer") or {}
+        info = dev.get("information_collection_status") or {}
+        self.assertEqual(info.get("selected_business_action"), "search_tracking_bare")
+
     def test_composer_never_shows_raw_list_when_requested_field_filter_narrows_to_only_the_umbrella_field(self):
         """Confirmed live bug (2026-08-15) — a tracking search's response_
         mapping has both an umbrella "all shipment records" row (raw list,
