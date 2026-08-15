@@ -1463,7 +1463,8 @@ class DecisionEngine:
             mapped = full_mapped
             if mapped:
                 mapped = select_requested_mapped_fields(message, mapped, selected.get("response_mapping"))
-            text = self._compose_natural_reply(mapped if mapped else result_payload, selected.get("response_mapping"))
+            text = self._compose_natural_reply(mapped if mapped else result_payload, selected.get("response_mapping"),
+                                                fallback_payload=full_mapped)
             reply = _build_response(text=text)
 
         return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
@@ -1472,12 +1473,25 @@ class DecisionEngine:
     @staticmethod
     def _summarize_action_result(payload) -> str:
         if isinstance(payload, dict) and payload:
-            parts = [f"{k}: {v}" for k, v in list(payload.items())[:6]]
-            return " / ".join(parts)
+            parts = []
+            for k, v in list(payload.items())[:6]:
+                if isinstance(v, dict):
+                    continue
+                if isinstance(v, list):
+                    if v and isinstance(v[0], dict):
+                        v = f"{len(v)} รายการ"
+                    else:
+                        v = ", ".join(str(item) for item in v) if v else None
+                if v in (None, ""):
+                    continue
+                parts.append(f"{k}: {v}")
+            if parts:
+                return " / ".join(parts)
         return "ดำเนินการเรียบร้อยค่ะ"
 
     @staticmethod
-    def _compose_natural_reply(payload, response_mapping: Optional[List[Dict]]) -> str:
+    def _compose_natural_reply(payload, response_mapping: Optional[List[Dict]], *,
+                                fallback_payload: Optional[Dict] = None) -> str:
         """ERP Response Composer (2026-08-15, Issue 5) — a customer-facing
         Thai sentence per fact instead of a raw Python/JSON dump or a
         single " / "-joined line. Config-driven (never a hardcoded field
@@ -1536,6 +1550,14 @@ class DecisionEngine:
         if not lines:
             if unflattened_list_lines:
                 return "\n".join(unflattened_list_lines)
+            if fallback_payload and fallback_payload is not payload:
+                # Requested-Field Filtering narrowed the reply down to a
+                # field that turned out to be a redundant raw list (its
+                # own flattening siblings exist but weren't part of this
+                # narrowed set) — retry against the FULL, unfiltered
+                # mapped_fields so the customer still gets the real,
+                # composed answer instead of a bare list dump.
+                return DecisionEngine._compose_natural_reply(fallback_payload, response_mapping)
             return DecisionEngine._summarize_action_result(payload)
         lines.extend(unflattened_list_lines)
         text = "\n".join(lines)

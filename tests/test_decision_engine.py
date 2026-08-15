@@ -442,6 +442,46 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         self.assertIn("คูปอง", text)
         self.assertIn("2", text)
 
+    def test_composer_never_shows_raw_list_when_requested_field_filter_narrows_to_only_the_umbrella_field(self):
+        """Confirmed live bug (2026-08-15) — a tracking search's response_
+        mapping has both an umbrella "all shipment records" row (raw list,
+        matches keyword "tracking") and flattened per-field siblings
+        (Code/Status, matching different keywords like "เลขบิล"/"สถานะ").
+        A message like "เช็ก tracking X" matches ONLY the umbrella field's
+        keyword, so Requested-Field Filtering narrows mapped_fields down to
+        just that one (redundant) list — the composer correctly refuses to
+        print it raw, but must NOT collapse to a bare summarizer dump of
+        that same narrowed, list-only payload; it must fall back to the
+        FULL mapped_fields so the customer still gets the real, composed
+        answer instead of a raw Python list."""
+        action_id = _seed_action(self.reg, key="search_tracking", action_type="API",
+                                  category="tracking", keywords=["tracking"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "Tracking", "display_name": "เลข Tracking", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.replace_response_mapping(action_id, [
+            {"json_path": "$.data.Shipment", "mapped_label": "รายการพัสดุที่พบ",
+             "field_metadata": {"keywords": ["รายการ", "tracking", "แทรค"]}},
+            {"json_path": "$.data.Shipment.0.Code", "mapped_label": "เลขที่บิลขนส่ง",
+             "field_metadata": {"keywords": ["เลขบิล"]}},
+            {"json_path": "$.data.Shipment.0.Status", "mapped_label": "สถานะบิลขนส่ง",
+             "field_metadata": {"keywords": ["สถานะ"]}},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/tracking", "http_method": "GET"})
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "data": {"Shipment": [{"Code": "FT999", "Status": "รับเข้าที่จีน"}]}})):
+            result = self.engine.decide("ช่วยเช็ก tracking หน่อย", history=[],
+                                         context={"customer_context": {"cust_code": "SP1014",
+                                                                        "last_tracking": "ABC123"}})
+        text = result["reply"]["text"]
+        self.assertNotIn("{", text)
+        self.assertNotIn("[", text)
+        self.assertIn("เลขที่บิลขนส่ง", text)
+        self.assertIn("FT999", text)
+
     def _seed_order_list_and_detail(self):
         list_id = _seed_action(self.reg, key="order_list", action_type="API", category="order", keywords=["order"])
         self.reg.replace_parameters(list_id, [
