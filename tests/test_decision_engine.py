@@ -101,6 +101,38 @@ class TestBusinessActionSearchAndSelection(unittest.TestCase):
         self.assertEqual(candidates, [])
 
 
+class TestIdentifierPatternScoring(unittest.TestCase):
+    """Generic regression coverage for _identifier_pattern_score()'s effect
+    on search_candidate_actions() — deliberately uses fabricated action
+    keys/patterns with no relation to any real customer's identifier
+    shape, proving the tie-break signal is driven entirely by each
+    action's own configured validation_pattern, never a hardcoded field
+    name or sample value (see the ERP order-routing-precision fix)."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        _seed_action(self.reg, key="widget_detail", action_type="API", category="widget_workflow",
+                     keywords=["widget"],
+                     params=[{"name": "WidgetCode", "required": True, "validation_pattern": r"^WGT\d+$"}])
+        _seed_action(self.reg, key="widget_list", action_type="API", category="widget_workflow",
+                     keywords=["widget", "list"],
+                     params=[{"name": "OwnerCode", "required": True}])
+
+    def test_specific_identifier_breaks_keyword_tie_toward_detail_action(self):
+        candidates = search_candidate_actions(self.reg, workflow=None, message="widget detail WGT123456")
+        self.assertEqual(candidates[0]["action_key"], "widget_detail")
+
+    def test_list_intent_without_identifier_still_favors_list_action(self):
+        candidates = search_candidate_actions(self.reg, workflow=None, message="list all widgets for OWNER1")
+        self.assertEqual(candidates[0]["action_key"], "widget_list")
+
+    def test_identifier_pattern_score_requires_a_full_token_match(self):
+        from services.decision_engine import _identifier_pattern_score, _IDENTIFIER_PATTERN_WEIGHT
+        action = self.reg.get_full(self.reg.get_by_key("widget_detail")["id"])
+        self.assertEqual(_identifier_pattern_score(self.reg, action, "WGT (no digits here)"), 0.0)
+        self.assertEqual(_identifier_pattern_score(self.reg, action, "here is WGT789"), _IDENTIFIER_PATTERN_WEIGHT)
+
+
 class TestConversationContinuationAndMissingParameters(unittest.TestCase):
     def setUp(self):
         self.reg = BusinessActionRegistry(_FakeSupabase())
@@ -1181,6 +1213,132 @@ class TestRequestedFieldFilteringEndToEnd(unittest.TestCase):
         mock_erp.assert_called_once()
         self.assertIn("คูปอง", result["reply"]["text"])
         self.assertNotIn("ชื่อลูกค้า", result["reply"]["text"])
+
+
+def _seed_order_shipment_tracking_actions(reg):
+    """Mirrors production's real category / search_keywords / parameter
+    config for these 6 Business Actions (confirmed via a live, read-only
+    Supabase check against the shared managed project on 2026-08-15) plus
+    the OrderCode/ShipmentCode validation_pattern values planned for that
+    same production config (not yet applied there as of this test) — so
+    this proves the routing-precision fix against realistic, non-
+    fabricated conditions, not just the isolated primitive covered by
+    TestIdentifierPatternScoring above."""
+    cust_pattern = r"^[A-Za-z]{2}\d+$"
+    _seed_action(reg, key="searchdataorder", action_type="API", category="Customer Order Retrieval",
+                 keywords=["เลขคำสั่งซื้อ", "PO เดียว", "order detail", "รายละเอียดคำสั่งซื้อ"],
+                 params=[
+                     {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "OrderCode", "required": True, "validation_pattern": r"^POS\d+$"},
+                 ])
+    _seed_action(reg, key="searchdataorderlist", action_type="API", category="Customer Order Retrieval",
+                 keywords=["คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "order list", "PO"],
+                 params=[{"name": "CustCode", "required": True, "validation_pattern": cust_pattern}])
+    _seed_action(reg, key="searchdatashipment", action_type="API", category="Customer Shipment Retrieval",
+                 keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"],
+                 params=[
+                     {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "ShipmentCode", "required": True, "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+                 ])
+    _seed_action(reg, key="searchdatashipmentlist", action_type="API", category="Customer Shipment Retrieval",
+                 keywords=["บิลขนส่ง", "พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ"],
+                 params=[{"name": "CustCode", "required": True, "validation_pattern": cust_pattern}])
+    _seed_action(reg, key="searchdatatracking", action_type="API", category="Customer Shipment Retrieval",
+                 priority=1,
+                 keywords=["tracking จีน", "เลข tracking", "tracking", "ค้นหาด้วยเลข tracking", "เลข tracking จีน"],
+                 params=[
+                     {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "Tracking", "required": True},
+                 ])
+    _seed_action(reg, key="getdatacustomer", action_type="API", category="Customer Data Retrieval",
+                 keywords=["ข้อมูลลูกค้า", "Wallet", "คูปอง", "ยอดเงิน", "ข้อมูลทั้งหมด"],
+                 params=[{"name": "CustCode", "required": False, "validation_pattern": cust_pattern}])
+
+
+class TestOrderShipmentTrackingRoutingPrecision(unittest.TestCase):
+    """Reproduces the reported routing-precision bug (a specific PO-detail
+    question wrongly selecting SearchDataOrderList) and its analogues for
+    Shipment/Tracking/Customer, end-to-end through DecisionEngine.decide()
+    — not just the scoring primitive — so a regression here is caught
+    even if something upstream (classify_question's ambiguity gate,
+    workflow hint resolution) changes independently later. Real UAT-style
+    identifiers (POS100820260809001, SP1014, FT3182, ...) are used here
+    deliberately, mirroring the actual reported bug — the underlying fix
+    mechanism itself (TestIdentifierPatternScoring) stays fully generic."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        _seed_order_shipment_tracking_actions(self.reg)
+        self.engine = _engine_with_registry(self.reg)
+
+    def _decide(self, message):
+        with patch("services.action_executor.requests.request") as mock_req:
+            mock_req.return_value = MagicMock(status_code=200, json=lambda: {"status": "success"})
+            result = self.engine.decide(message, history=[], context={"developer_mode": True})
+        return result, mock_req
+
+    def _selected_action_key(self, message):
+        result, _ = self._decide(message)
+        dev = result.get("developer") or {}
+        classification = (dev.get("classification") or {}).get("classification")
+        self.assertNotEqual(classification, "CLARIFICATION_REQUIRED",
+                             f"unexpected clarification for: {message}")
+        selected = (dev.get("selected_business_action")
+                    or (dev.get("information_collection_status") or {}).get("selected_business_action"))
+        self.assertIsNotNone(selected, f"no Business Action selected for: {message}")
+        return selected
+
+    # -- Scenarios A/E/F: specific OrderCode -> SearchDataOrder --
+
+    def test_a_specific_po_detail_selects_order_detail(self):
+        self.assertEqual(self._selected_action_key("ขอรายละเอียด PO POS100820260809001"), "searchdataorder")
+
+    def test_e_specific_po_status_selects_order_detail(self):
+        self.assertEqual(self._selected_action_key("PO POS100820260809001 สถานะอะไร"), "searchdataorder")
+
+    def test_f_specific_po_info_selects_order_detail(self):
+        self.assertEqual(self._selected_action_key("ขอข้อมูลคำสั่งซื้อ POS100820260809001"), "searchdataorder")
+
+    # -- Scenarios B/C/D: CustCode + list intent -> SearchDataOrderList --
+
+    def test_b_latest_po_for_customer_selects_order_list(self):
+        self.assertEqual(self._selected_action_key("ขอดู PO ล่าสุดของ SP1014"), "searchdataorderlist")
+
+    def test_c_latest_n_po_for_customer_selects_order_list(self):
+        self.assertEqual(self._selected_action_key("ขอดู 3 PO ล่าสุดของ SP1014"), "searchdataorderlist")
+
+    def test_d_po_list_request_selects_order_list(self):
+        self.assertEqual(self._selected_action_key("ขอดูรายการ PO ของ SP1014"), "searchdataorderlist")
+
+    # -- G/H: analogous Shipment detail vs list --
+
+    def test_g_specific_shipment_code_selects_shipment_detail(self):
+        self.assertEqual(self._selected_action_key("shipment detail FT318220260726001"), "searchdatashipment")
+
+    def test_h_customer_shipment_list_request_selects_shipment_list(self):
+        self.assertEqual(self._selected_action_key("ขอดูพัสดุล่าสุดของ SP1014"), "searchdatashipmentlist")
+
+    # -- I: analogous specific Tracking --
+
+    def test_i_specific_tracking_number_selects_tracking(self):
+        self.assertEqual(self._selected_action_key("ค้นหาด้วยเลข tracking testlineOnNut007"),
+                          "searchdatatracking")
+
+    # -- J: GetDataCustomer must remain unaffected by the new scoring signal --
+
+    def test_j_customer_data_request_selects_get_customer(self):
+        self.assertEqual(self._selected_action_key("ขอดูข้อมูลลูกค้า SP1014"), "getdatacustomer")
+
+    # -- M: no identifier and no list intent -> asks a follow-up question,
+    # never fabricates a parameter value or silently executes --
+
+    def test_m_missing_identifier_asks_rather_than_invents(self):
+        result, mock_req = self._decide("ขอสอบถามเรื่อง PO")
+        dev = result.get("developer") or {}
+        collection = dev.get("information_collection_status") or {}
+        self.assertIn("CustCode", collection.get("missing_parameters") or [])
+        self.assertNotIn("CustCode", collection.get("collected_parameters") or {})
+        mock_req.assert_not_called()
 
 
 if __name__ == "__main__":

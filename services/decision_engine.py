@@ -528,16 +528,53 @@ def _parameter_availability_score(action: Dict, collected_slots: Dict) -> float:
     return float(len(names & set(collected_slots.keys())))
 
 
+# A whole message token (never a substring match, to avoid a short pattern
+# accidentally matching part of a longer, unrelated word) matching one of
+# this action's OWN configured parameter validation_pattern regexes is
+# strong, generic evidence the customer supplied that EXACT identifier —
+# e.g. a message naming a specific, well-formed OrderCode should strongly
+# favor the single-record lookup action that actually accepts that shape
+# over a same-category list/summary action that doesn't. Weighted higher
+# than a single keyword hit (which any nearby generic action can also
+# collect) so a genuine identifier match reliably decides a close
+# category-mate tie, without dominating category/keyword signals entirely.
+# Entirely driven by each parameter's own admin-configured
+# validation_pattern (services/business_action_registry.py) — no
+# hardcoded field name, action key, or sample value anywhere here.
+_IDENTIFIER_PATTERN_WEIGHT = 3.0
+_TOKEN_SPLIT_RE = re.compile(r"[\s,;]+")
+
+
+def _identifier_pattern_score(registry, action: Dict, message: str) -> float:
+    try:
+        params = registry.get_parameters(action["id"])
+    except Exception:
+        return 0.0
+    tokens = [t for t in _TOKEN_SPLIT_RE.split(message or "") if t]
+    score = 0.0
+    for p in params:
+        pattern = p.get("validation_pattern")
+        if not pattern:
+            continue
+        try:
+            regex = re.compile(pattern)
+        except re.error:
+            continue
+        if any(regex.match(tok) for tok in tokens):
+            score += _IDENTIFIER_PATTERN_WEIGHT
+    return score
+
+
 def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
                               collected_slots: Optional[Dict] = None,
                               action_types: Optional[List[str]] = None) -> List[Dict]:
     """Business Action Search — returns enabled candidates the Decision
     Engine may choose from, each annotated with a `_score`/`_reasons`.
     Considers: category (workflow match), keyword/example/ai_description
-    overlap, parameter availability, priority, and (currently inert)
-    future semantic/embedding scores. Never filters by a hardcoded
-    action_key — every action, current or future, competes on the same
-    generic signals."""
+    overlap, parameter identifier-pattern evidence, parameter availability,
+    priority, and (currently inert) future semantic/embedding scores.
+    Never filters by a hardcoded action_key — every action, current or
+    future, competes on the same generic signals."""
     try:
         candidates = registry.enabled_actions()
     except Exception:
@@ -557,6 +594,18 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
         if kw_score:
             score += kw_score
             reasons.append(f"keyword/example/AI-description overlap ({kw_score})")
+        # Checked for every candidate, independent of keyword score — the
+        # entire point is to decide cases where the specific-record action
+        # has LITTLE OR NO keyword overlap of its own (a customer naming a
+        # bare identifier rarely repeats the action's own vocabulary) while
+        # a same-category list/summary action's generic keyword happens to
+        # match instead. The registry call this costs is cheap relative to
+        # the rest of this loop and the action count here is small.
+        id_score = _identifier_pattern_score(registry, action, message)
+        if id_score:
+            score += id_score
+            reasons.append(f"message contains a value matching this action's own "
+                            f"parameter identifier pattern ({id_score})")
         param_score = _parameter_availability_score(action, collected_slots or {})
         if param_score:
             score += param_score
