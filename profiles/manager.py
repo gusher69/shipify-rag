@@ -120,6 +120,28 @@ def update_profile_from_turn(line_user_id: str, *, decide_result: Dict, conversa
         if not profile.get("first_seen"):
             row["first_seen"] = datetime.now(timezone.utc).isoformat()
 
+        # Customer Intelligence V1 (2026-08-15) -- identifier memory.
+        # `collected` values are the SAME customer_message-sourced,
+        # validated parameters services/decision_engine.py already bound
+        # this turn (see extract_conversation_fields), never a raw guess
+        # -- so a present value always overwrites; an ABSENT one is left
+        # untouched (never cleared) per "Do NOT erase known identifiers
+        # from vague later messages." Never includes SecretCode or any
+        # credential_store/secret_configuration-sourced value (those are
+        # never placed in collection_status.collected_parameters at all).
+        collected = conversation_fields.get("collected_parameters") or {}
+        for profile_field, param_name in (
+            ("cust_code", "CustCode"), ("last_order_code", "OrderCode"),
+            ("last_shipment_code", "ShipmentCode"), ("last_tracking", "Tracking"),
+        ):
+            value = collected.get(param_name)
+            if value:
+                row[profile_field] = value
+
+        primary_intent = conversation_fields.get("actionable_intent") or conversation_fields.get("broad_intent")
+        if primary_intent and primary_intent != "unknown":
+            row["primary_intent"] = primary_intent
+
         res = supabase.table(TABLE).update(row).eq("line_user_id", line_user_id).execute()
         return (res.data or [None])[0]
     except Exception as e:

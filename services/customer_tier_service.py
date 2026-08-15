@@ -18,7 +18,8 @@ Re-evaluated after every conversation turn, so a tier can move in either
 direction as behavior changes — it never needs a human to manually
 reclassify a customer.
 """
-from typing import Dict
+import re
+from typing import Dict, Optional
 
 TIERS = ("cold", "warm", "hot", "negative")
 
@@ -74,17 +75,145 @@ def compute_tier(profile: Dict) -> Dict:
     return {"tier": tier, "score": round(score, 2)}
 
 
-def update_tier_for_profile(line_user_id: str) -> Dict:
+def update_tier_for_profile(line_user_id: str, *, message: Optional[str] = None) -> Dict:
     """Re-computes and persists the tier for a LINE user, reading the
     freshest profile row (so it reflects stats update_profile_from_turn()
-    just wrote in the same request). Never raises."""
+    just wrote in the same request). Never raises.
+
+    Customer Intelligence V1 (2026-08-15) — when `message` (the CURRENT
+    turn's text) is supplied, also runs classify_message_stage() and
+    merges it with the existing aggregate compute_tier() above (see
+    _merge_stage for the exact rule), then persists stage_reason/
+    stage_confidence/handoff_recommended/handoff_reason alongside the
+    SAME conversation_tier/tier_score columns this function already
+    wrote — no new stage column, no second cold/warm/hot/negative axis."""
     from profiles.manager import get_profile, supabase, TABLE
     profile = get_profile(line_user_id) or {}
-    result = compute_tier(profile)
+    aggregate = compute_tier(profile)
+    result = dict(aggregate)
+    update = {"conversation_tier": aggregate["tier"], "tier_score": aggregate["score"]}
+
+    if message is not None:
+        message_stage = classify_message_stage(message)
+        merged = _merge_stage(aggregate["tier"], message_stage)
+        result = {"tier": merged["stage"], "score": aggregate["score"],
+                   "confidence": merged["confidence"], "reason": merged["reason"]}
+        handoff = compute_handoff_recommendation(merged["stage"], message)
+        update.update({
+            "conversation_tier": merged["stage"],
+            "stage_reason": merged["reason"], "stage_confidence": merged["confidence"],
+            "handoff_recommended": handoff["recommended"], "handoff_reason": handoff["reason"],
+        })
+
     try:
-        supabase.table(TABLE).update({
-            "conversation_tier": result["tier"], "tier_score": result["score"],
-        }).eq("line_user_id", line_user_id).execute()
+        supabase.table(TABLE).update(update).eq("line_user_id", line_user_id).execute()
     except Exception as e:
         print(f"[customer_tier_service] update_tier_for_profile failed: {e}")
     return result
+
+
+# ── Customer Intelligence V1 (2026-08-15), Phase 5/6 — per-message stage
+# classification + Handoff Recommendation metadata. Deterministic,
+# keyword-driven only (no AI model) — reuses the SAME complaint/legal-
+# threat/explicit-human-request signals services/decision_engine.py and
+# services/slot_filling_engine.py already use elsewhere in this codebase,
+# rather than maintaining a second copy of those keyword lists. ─────────
+
+_NEGATIVE_MILD_RE = re.compile(r"ยังไม่ถึง|ยังไม่ได้รับ|ไม่มาถึงสักที|ของช้า", re.IGNORECASE)
+_HOT_RE = re.compile(
+    r"สนใจ|อยากเริ่ม|อยากใช้บริการ|อยากเป็นลูกค้า|ขอราคา|ขอใบเสนอราคา|สมัครใช้บริการ",
+    re.IGNORECASE,
+)
+# A narrower sub-signal of _HOT_RE -- an explicit ask for someone to reach
+# back out, not just general interest -- used only by
+# compute_handoff_recommendation() below (see the spec's own worked
+# example: "สนใจมากครับ ขอรายละเอียดราคา" is HOT but handoff_recommended
+# stays false, while "...ขอให้เซลส์ติดต่อกลับ" is HOT AND recommended).
+_HOT_CONTACT_REQUEST_RE = re.compile(r"เซลส์.{0,4}ติดต่อ|ให้เซลส์|ติดต่อกลับ|นัดหมาย|โทรกลับ", re.IGNORECASE)
+_WARM_RE = re.compile(
+    r"ค่าบริการ|ค่าใช้จ่าย|คิดค่า|คิดราคา|ค่าขนส่ง|ระยะเวลา|ใช้เวลานาน"
+    r"|ขั้นตอน|วิธีการนำเข้า|นำเข้า.{0,10}ยังไง|นำเข้า.{0,10}อย่างไร",
+    re.IGNORECASE,
+)
+
+_STAGE_RANK = {"cold": 0, "warm": 1, "hot": 2, "negative": 3}
+
+
+def classify_message_stage(message: str) -> Dict:
+    """Customer Stage Analysis for the CURRENT message only (Phase 5) --
+    a SEPARATE, per-turn signal from compute_tier()'s whole-relationship
+    aggregate score above. Returns {"stage", "confidence", "reason"}.
+    Fixed rule order (never a probabilistic/AI classifier, so the reason
+    string is always exactly why this message got this stage):
+    legal threat / complaint / explicit human request -> negative
+    (strong); a shipment-not-arrived-yet concern with no complaint
+    wording -> negative (mild, does NOT imply handoff -- see
+    compute_handoff_recommendation); clear purchase/contact intent ->
+    hot; service-cost/process evaluation -> warm; anything else -> cold."""
+    message = message or ""
+    from services.decision_engine import _COMPLAINT_RE, _LEGAL_THREAT_RE
+    from services.slot_filling_engine import _HUMAN_REQUEST_RE
+
+    if _LEGAL_THREAT_RE.search(message) or _COMPLAINT_RE.search(message) or _HUMAN_REQUEST_RE.search(message):
+        return {"stage": "negative", "confidence": 0.9,
+                "reason": "complaint, dissatisfaction, or an explicit request to speak with a human agent"}
+    if _NEGATIVE_MILD_RE.search(message):
+        return {"stage": "negative", "confidence": 0.6,
+                "reason": "customer flagged a possible service issue (e.g. shipment not yet arrived) "
+                          "without an explicit complaint"}
+    if _HOT_RE.search(message):
+        return {"stage": "hot", "confidence": 0.85,
+                "reason": "clear purchase, sign-up, or contact intent"}
+    if _WARM_RE.search(message):
+        return {"stage": "warm", "confidence": 0.7,
+                "reason": "specific interest in service cost or process -- evaluating the service"}
+    return {"stage": "cold", "confidence": 0.5,
+            "reason": "general information question, no purchase or complaint signal detected"}
+
+
+def _merge_stage(aggregate_tier: str, message_result: Dict) -> Dict:
+    """Merges the whole-relationship aggregate tier with THIS message's
+    immediate stage. A decisive single-message signal (hot or negative)
+    always wins outright -- a brand-new customer's very first "สนใจใช้
+    บริการ ขอให้เซลส์ติดต่อกลับ" must read as hot immediately, it can't
+    wait for enough accumulated history to raise the aggregate score.
+    Otherwise (message is cold/warm) an already-earned higher aggregate
+    tier is never downgraded by one neutral follow-up message."""
+    stage = message_result["stage"]
+    if stage in ("hot", "negative"):
+        return message_result
+    if _STAGE_RANK.get(aggregate_tier, 0) > _STAGE_RANK.get(stage, 0):
+        return {"stage": aggregate_tier, "confidence": 0.5,
+                "reason": f"this message alone reads as {stage}, kept at the customer's existing "
+                          f"'{aggregate_tier}' relationship-level tier"}
+    return message_result
+
+
+def compute_handoff_recommendation(stage: str, message: str) -> Dict:
+    """Handoff Recommendation METADATA only (Phase 6) -- never sends a
+    real notification itself; services/human_handoff_service.py (via the
+    Decision Engine's own HUMAN_HANDOFF routing) still owns that. Customer
+    Stage != Human Handoff: hot does not automatically mean handoff, and
+    negative does not automatically mean handoff unless the message
+    itself complains strongly or explicitly asks for a person -- a
+    shipment-status question a Business Action can resolve is not
+    escalated just because its stage is negative."""
+    message = message or ""
+    from services.decision_engine import _COMPLAINT_RE, _LEGAL_THREAT_RE
+    from services.slot_filling_engine import _HUMAN_REQUEST_RE
+
+    if stage == "hot" and _HOT_CONTACT_REQUEST_RE.search(message):
+        return {"recommended": True,
+                "reason": "customer explicitly asked for a callback/contact while showing strong purchase intent"}
+    if stage == "negative" and (_HUMAN_REQUEST_RE.search(message) or _LEGAL_THREAT_RE.search(message)
+                                 or _COMPLAINT_RE.search(message)):
+        return {"recommended": True,
+                "reason": "complaint or explicit request to speak with a human agent"}
+    if stage == "negative":
+        return {"recommended": False,
+                "reason": "service concern that an ERP/Business Action lookup can likely resolve"}
+    if stage == "hot":
+        return {"recommended": False,
+                "reason": "strong interest but no explicit contact/callback request yet"}
+    return {"recommended": False,
+            "reason": "no purchase or complaint signal strong enough to warrant escalation"}

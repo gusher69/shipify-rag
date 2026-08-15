@@ -262,6 +262,17 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     channel = "line"
     decide_context = {"channel": channel, "customer_context": profile or {}, "developer_mode": True}
 
+    # Context Continuity (Customer Intelligence V1, 2026-08-15) -- a
+    # bounded recent-message window for THIS user's own active
+    # conversation only (SessionService.get_recent_history scopes
+    # strictly to one ai_sessions.id, itself one line_user_id -- another
+    # customer's history can never appear here). Fetched once and reused
+    # for both the Decision Engine call below and the Conversation
+    # History / profile-stats recording at the end of this function.
+    session_service = get_session_service()
+    conversation = session_service.get_or_create_active_conversation(user_id)
+    recent_history = session_service.get_recent_history(conversation["id"]) if conversation else []
+
     # LINE Confirmation Flow (2026-08-10) — a customer-typed reply like
     # "ยืนยัน"/"yes" only means anything in the context of a PENDING
     # confirmation for THIS exact tenant/channel/user (never another
@@ -302,7 +313,7 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             # below cancels it) and this message runs as a fresh turn,
             # reusing the SAME selection/collection/confirmation pipeline
             # — no per-action revision logic.
-            result = engine.decide(question, history=[], context=decide_context)
+            result = engine.decide(question, history=recent_history, context=decide_context)
     else:
         reply_kind_for_expired_check = classify_confirmation_reply(question)
         if reply_kind_for_expired_check in ("confirm", "cancel"):
@@ -316,7 +327,7 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             if most_recent and most_recent.get("status") == "expired":
                 result = _expired_result()
         if result is None:
-            result = engine.decide(question, history=[], context=decide_context)
+            result = engine.decide(question, history=recent_history, context=decide_context)
 
     reply = result.get("reply") or {}
     reply_text = reply.get("text") or ""
@@ -360,12 +371,9 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # within the same active (24h) conversation notifies CS at most once,
     # mirroring the exact pattern pending_confirmations already uses for
     # conversation-scoped state.
-    conversation = None
     if is_handoff:
         handoff_payload = result.get("handoff_payload") or {}
         reason = handoff_payload.get("reason", "handoff")
-        session_service = get_session_service()
-        conversation = session_service.get_or_create_active_conversation(user_id)
         handoff_status = session_service.get_handoff_status(conversation["id"]) if conversation else "NONE"
         if handoff_status in ("NOTIFIED", "PENDING"):
             print(f"[webhook] Human Handoff already {handoff_status} for this conversation — skipping duplicate notification")
@@ -434,11 +442,9 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # gracefully on its own (never raises) — analytics/tier persistence
     # must never delay or break the customer-facing reply above.
     try:
-        session_service = get_session_service()
-        # Reuse the conversation row already fetched above for the
-        # Human Handoff dedup check when this turn was a handoff — avoids
-        # a redundant lookup; a non-handoff turn fetches it fresh here.
-        conversation = conversation or session_service.get_or_create_active_conversation(user_id)
+        # `conversation` (and `session_service`) were already fetched at
+        # the top of this function for Context Continuity — reused here,
+        # not re-fetched.
         is_new_conversation = bool(conversation) and (conversation.get("message_count") or 0) == 0
         conversation_fields = None
         if conversation:
@@ -450,7 +456,7 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         if conversation_fields is not None:
             update_profile_from_turn(user_id, decide_result=result, conversation_fields=conversation_fields,
                                       is_new_conversation=is_new_conversation)
-            update_tier_for_profile(user_id)
+            update_tier_for_profile(user_id, message=question)
     except Exception as e:
         print(f"[webhook] Phase 3 conversation-intelligence recording failed (non-fatal): {e}")
 

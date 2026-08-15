@@ -19,6 +19,7 @@ class FakeQuery:
         self._filters = []
         self._pending_update = None
         self._limit = None
+        self._order = None
 
     def select(self, *a, **k): return self
     def is_(self, col, val):
@@ -34,7 +35,9 @@ class FakeQuery:
         needle = pattern.strip("%").lower()
         self._filters.append(lambda r: needle in (r.get(col) or "").lower())
         return self
-    def order(self, *a, **k): return self
+    def order(self, col, desc=False):
+        self._order = (col, desc)
+        return self
     def limit(self, n):
         self._limit = n
         return self
@@ -70,6 +73,9 @@ class FakeQuery:
         elif self._pending_update:
             for r in data:
                 r.update(self._pending_update)
+        if self._order:
+            col, desc = self._order
+            data = sorted(data, key=lambda r: r.get(col), reverse=desc)
         if self._limit:
             data = data[:self._limit]
         return MagicMock(data=data)
@@ -167,6 +173,54 @@ class TestSessionCRUD(unittest.TestCase):
         ids = [s["id"] for s in sessions]
         self.assertIn(s1["id"], ids)
         self.assertNotIn(s2["id"], ids)
+
+
+class TestGetRecentHistory(unittest.TestCase):
+    """Customer Intelligence V1 (2026-08-15), Phase 4 — Context Continuity.
+    get_recent_history() must return a bounded, oldest-first window scoped
+    to ONE conversation only."""
+
+    def setUp(self):
+        self.fake_sb = FakeSb()
+        patcher = patch("services.session_service._get_sb", return_value=self.fake_sb)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.svc = ss.SessionService()
+
+    def _seed_turns(self, session_id, turns):
+        rows = []
+        for i, (role, content) in enumerate(turns):
+            rows.append({"session_id": session_id, "turn_index": i, "role": role, "content": content})
+        self.fake_sb.store.setdefault("ai_session_messages", []).extend(rows)
+
+    def test_returns_oldest_first_within_bound(self):
+        self._seed_turns("conv-1", [
+            ("user", "turn1 user"), ("assistant", "turn1 assistant"),
+            ("user", "turn2 user"), ("assistant", "turn2 assistant"),
+            ("user", "turn3 user"), ("assistant", "turn3 assistant"),
+        ])
+        history = self.svc.get_recent_history("conv-1", max_turns=2)
+        self.assertEqual([h["content"] for h in history],
+                          ["turn2 user", "turn2 assistant", "turn3 user", "turn3 assistant"])
+        self.assertEqual([h["role"] for h in history], ["user", "assistant", "user", "assistant"])
+
+    def test_scoped_to_single_conversation_only(self):
+        self._seed_turns("conv-A", [("user", "A says SP1014"), ("assistant", "ok A")])
+        self._seed_turns("conv-B", [("user", "B says FT1004"), ("assistant", "ok B")])
+        history_a = self.svc.get_recent_history("conv-A")
+        contents = [h["content"] for h in history_a]
+        self.assertIn("A says SP1014", contents)
+        self.assertNotIn("B says FT1004", contents)
+        self.assertNotIn("ok B", contents)
+
+    def test_no_messages_returns_empty_list(self):
+        self.assertEqual(self.svc.get_recent_history("conv-empty"), [])
+
+    def test_query_failure_returns_empty_list_not_a_crash(self):
+        broken_sb = MagicMock()
+        broken_sb.table.side_effect = Exception("db down")
+        with patch("services.session_service._get_sb", return_value=broken_sb):
+            self.assertEqual(self.svc.get_recent_history("conv-1"), [])
 
 
 class TestRecordTurn(unittest.TestCase):

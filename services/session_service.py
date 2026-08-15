@@ -114,10 +114,18 @@ def extract_conversation_fields(decide_result: Dict) -> Dict:
         model = (rag_exec.get("metadata") or {}).get("model")
 
     escalated = routing_type == "HUMAN_HANDOFF"
+    collection_status = dev.get("information_collection_status") or {}
+    # A turn that's still mid-collection (asking the customer for one
+    # more parameter) never reaches _execute_selected_action, so the
+    # top-level dev["selected_business_action"] is never set for it --
+    # collection_status carries the SAME value in that case (Customer
+    # Intelligence V1, 2026-08-15; needed so identifier persistence below
+    # sees CustCode/OrderCode/etc. even on an incomplete turn).
+    selected_business_action = dev.get("selected_business_action") or collection_status.get("selected_business_action")
 
     return {
         "broad_intent": intent.get("broad_intent"), "actionable_intent": intent.get("actionable_intent"),
-        "routing_type": routing_type, "selected_business_action": dev.get("selected_business_action"),
+        "routing_type": routing_type, "selected_business_action": selected_business_action,
         "escalated": escalated, "escalation_reason": handoff_payload.get("reason") if escalated else None,
         "chunks": chunks, "prompt": prompt, "policy": policy,
         "erp_request": erp_request, "erp_response": erp_response,
@@ -125,6 +133,14 @@ def extract_conversation_fields(decide_result: Dict) -> Dict:
         "confidence": confidence, "model": model,
         "input_tokens": exec_inner.get("input_tokens"), "output_tokens": exec_inner.get("output_tokens"),
         "latency_ms": dev.get("latency_ms"),
+        # Customer Intelligence V1 (2026-08-15) -- the SAME customer-
+        # message-sourced parameter values decide() already collected
+        # this turn (never a credential/secret: collection_status only
+        # ever holds customer_message-sourced parameters, per
+        # services/decision_engine.py's own _handle_dynamic_collection).
+        # profiles/manager.py::update_profile_from_turn reads this to
+        # remember CustCode/OrderCode/ShipmentCode/Tracking across turns.
+        "collected_parameters": collection_status.get("collected_parameters") or {},
         "metadata": {"classification": (dev.get("classification") or {}).get("classification"),
                      "workflow": dev.get("workflow"), "alert": decide_result.get("alert"),
                      "error": decide_result.get("error")},
@@ -512,6 +528,30 @@ class SessionService:
         except Exception as e:
             print(f"[SessionService] get_or_create_active_conversation create failed: {e}")
             return None
+
+    # ── Context Continuity (Customer Intelligence V1, 2026-08-15) ────
+    # A bounded recent-message window for THIS conversation only, shaped
+    # exactly like the history list services/decision_engine.py::decide()
+    # already accepts elsewhere (e.g. line_bot/webhook.py's pending-
+    # confirmation replay) -- never a second history format. Scoped to a
+    # single ai_sessions.id, which is itself already scoped to a single
+    # line_user_id (get_or_create_active_conversation), so one user's
+    # history can never leak into another's: there is no code path here
+    # that reads across conversation_id/line_user_id boundaries.
+    def get_recent_history(self, conversation_id: str, *, max_turns: int = 3) -> List[Dict]:
+        """Returns up to `max_turns` user/assistant EXCHANGES (2 messages
+        each) as oldest-first [{"role", "content"}, ...] -- deliberately
+        bounded (never the full conversation) so the Decision Engine/LLM
+        never receives unlimited history."""
+        try:
+            res = _get_sb().table("ai_session_messages").select("role,content,turn_index") \
+                .eq("session_id", conversation_id).order("turn_index", desc=True) \
+                .limit(max_turns * 2).execute()
+            rows = list(reversed(res.data or []))
+            return [{"role": r["role"], "content": r.get("content") or ""} for r in rows]
+        except Exception as e:
+            print(f"[SessionService] get_recent_history failed (treating as no history): {e}")
+            return []
 
     # ── Human Handoff state (2026-08-13) ─────────────────────────────
     # Reuses the SAME ai_sessions row as the conversation object (see

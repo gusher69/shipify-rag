@@ -99,6 +99,7 @@ class TestDecisionEngineAdapter(unittest.TestCase):
         self.mock_update_tier_for_profile = self.update_tier_patcher.start()
         self.mock_session_service = MagicMock()
         self.mock_session_service.get_or_create_active_conversation.return_value = {"id": "fake-session-id", "message_count": 0}
+        self.mock_session_service.get_recent_history.return_value = []
         mock_get_session_service.return_value = self.mock_session_service
 
     def tearDown(self):
@@ -230,6 +231,7 @@ class TestLineConfirmationFlow(unittest.TestCase):
         self.update_tier_patcher.start()
         mock_session_service = MagicMock()
         mock_session_service.get_or_create_active_conversation.return_value = {"id": "fake-session-id", "message_count": 0}
+        mock_session_service.get_recent_history.return_value = []
         mock_get_session_service.return_value = mock_session_service
 
     def tearDown(self):
@@ -404,6 +406,87 @@ class TestLineConfirmationFlow(unittest.TestCase):
                 "handoff_payload": None, "alert": None, "error": None, "developer": {}}
 
 
+class TestContextContinuityAndIsolation(unittest.TestCase):
+    """Customer Intelligence V1 (2026-08-15), Phase 4/8 — scenarios F and
+    G, end to end at the webhook adapter layer through a REAL
+    SessionService backed by a fake in-memory Supabase (never a real DB).
+    DecisionEngine.decide() is mocked at its call site only; everything
+    else (Context Continuity's history window, Conversation History
+    persistence, per-user isolation) runs for real."""
+
+    def setUp(self):
+        from tests.test_session_service import FakeSb
+        import services.session_service as ss
+
+        self.fake_sb = FakeSb()
+        self.real_session_service = ss.SessionService()
+        self.sb_patcher = patch("services.session_service._get_sb", return_value=self.fake_sb)
+        self.sb_patcher.start()
+        self.addCleanup(self.sb_patcher.stop)
+
+        self.profile_patcher = patch.object(webhook_module, "get_profile", return_value={"display_name": "Test"})
+        self.upsert_patcher = patch.object(webhook_module, "upsert_profile")
+        self.reply_patcher = patch.object(webhook_module, "MessagingApi")
+        self.session_service_patcher = patch.object(webhook_module, "get_session_service",
+                                                       return_value=self.real_session_service)
+        self.update_profile_patcher = patch.object(webhook_module, "update_profile_from_turn")
+        self.update_tier_patcher = patch.object(webhook_module, "update_tier_for_profile")
+        self.profile_patcher.start()
+        self.upsert_patcher.start()
+        self.mock_messaging_api_cls = self.reply_patcher.start()
+        self.session_service_patcher.start()
+        self.update_profile_patcher.start()
+        self.update_tier_patcher.start()
+        self.mock_line_bot_api = MagicMock()
+        self.mock_messaging_api_cls.return_value = self.mock_line_bot_api
+
+    @staticmethod
+    def _plain_result(text="ok ค่ะ"):
+        return {"reply": {"text": text, "images": [], "files": []}, "routing": {"type": "RAG"},
+                "handoff_payload": None, "alert": None, "error": None, "developer": {}}
+
+    def _send(self, mock_engine_cls, text, user_id):
+        mock_engine_cls.return_value.decide.return_value = self._plain_result()
+        webhook_module._handle_message_via_decision_engine(_fake_event(text, user_id=user_id))
+        return mock_engine_cls.return_value.decide.call_args.kwargs
+
+    # F ─────────────────────────────────────────────────────────────
+    def test_f_turn_two_receives_turn_one_as_history(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            self._send(mock_engine_cls, "ผม SP1014 ขอดู PO ล่าสุด", user_id="U_F")
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls2:
+            call_kwargs = self._send(mock_engine_cls2, "แล้วส่งหรือยัง", user_id="U_F")
+
+        history = call_kwargs["history"]
+        contents = [h["content"] for h in history]
+        self.assertTrue(any("SP1014" in c for c in contents),
+                         f"turn 1's message should be in turn 2's history, got: {contents}")
+
+    def test_first_turn_of_a_conversation_gets_empty_history(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            call_kwargs = self._send(mock_engine_cls, "สวัสดีค่ะ", user_id="U_FIRST")
+        self.assertEqual(call_kwargs["history"], [])
+
+    # G ─────────────────────────────────────────────────────────────
+    def test_g_two_users_histories_never_cross(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls_a1:
+            self._send(mock_engine_cls_a1, "ผม SP1014 ขอดู PO ล่าสุด", user_id="U_A")
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls_b1:
+            self._send(mock_engine_cls_b1, "ผม FT1004 ขอดูพัสดุ", user_id="U_B")
+
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls_a2:
+            call_kwargs_a = self._send(mock_engine_cls_a2, "แล้วส่งหรือยัง", user_id="U_A")
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls_b2:
+            call_kwargs_b = self._send(mock_engine_cls_b2, "ของถึงหรือยัง", user_id="U_B")
+
+        contents_a = [h["content"] for h in call_kwargs_a["history"]]
+        contents_b = [h["content"] for h in call_kwargs_b["history"]]
+        self.assertTrue(any("SP1014" in c for c in contents_a))
+        self.assertFalse(any("FT1004" in c for c in contents_a))
+        self.assertTrue(any("FT1004" in c for c in contents_b))
+        self.assertFalse(any("SP1014" in c for c in contents_b))
+
+
 class TestHumanHandoffNotification(unittest.TestCase):
     """Human Handoff sprint (2026-08-13), Phase 6 — scenarios A-H, end to
     end at the webhook adapter layer through the REAL
@@ -487,6 +570,7 @@ class TestHumanHandoffNotification(unittest.TestCase):
         self.mock_session_service.get_or_create_active_conversation.side_effect = _get_or_create
         self.mock_session_service.get_handoff_status.side_effect = _get_status
         self.mock_session_service.set_handoff_status.side_effect = _set_status
+        self.mock_session_service.get_recent_history.return_value = []
         self.session_service_patcher = patch.object(webhook_module, "get_session_service",
                                                        return_value=self.mock_session_service)
         self.session_service_patcher.start()
