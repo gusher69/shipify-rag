@@ -3529,33 +3529,139 @@ async def hybrid_playground_ask(request: Request):
     clarification_out: Optional[Dict] = None
     is_hybrid_turn = False
     rag_err = erp_err = None
+    production_trace_out: Optional[Dict] = None
 
     if mode == "auto":
-        reg = get_action_registry(get_sb())
-        classification = classify_question(question, reg)
-        classification_out = classification
-        cls = classification["classification"]
+        # Playground Production Parity (2026-08-15) — Auto mode now runs
+        # the SAME services/decision_engine.py::DecisionEngine.decide()
+        # the LINE webhook calls (line_bot/webhook.py::
+        # _handle_message_via_decision_engine) instead of a separate
+        # classify_question()-only heuristic. That old path picked its
+        # ERP action straight from classify_question()'s keyword-only
+        # score, bypassing search_candidate_actions()/select_best_action()
+        # entirely — so it never benefited from e.g. the identifier-
+        # pattern routing-precision fix, Human Handoff triggers, or
+        # Customer Intelligence. This is the ONLY change: no new
+        # classifier, no re-implemented routing logic, just calling the
+        # existing, already-verified engine.
+        from services.decision_engine import DecisionEngine
+        from services.customer_tier_service import classify_message_stage, compute_handoff_recommendation
+
+        normalized_history = [{"role": h.get("role"), "content": h.get("content")}
+                               for h in (body.get("history") or []) if h.get("content")]
+        engine = DecisionEngine(get_sb())
+        decide_result = engine.decide(question, history=normalized_history,
+                                       context={"developer_mode": True, "channel": "playground"})
+        dev = decide_result.get("developer") or {}
+        routing_type = (decide_result.get("routing") or {}).get("type")
+        collection_status = dev.get("information_collection_status") or {}
+        exec_result = dev.get("execution_result") or {}
+        erp_exec = dev.get("erp_execution_result") or {}
+        rag_exec = dev.get("rag_execution_result") or {}
+        is_hybrid_turn = routing_type == "HYBRID"
+
         route_decision = {
-            "route": cls.lower(), "reason": "; ".join(classification["evidence"]),
-            "confidence": classification["confidence"], "classification": cls,
+            "route": routing_type.lower() if routing_type else "unknown",
+            "reason": f"Decision Engine routing_type={routing_type}"
+                      + (f", classification={(dev.get('classification') or {}).get('classification')}"
+                         if dev.get("classification") else ""),
+            "classification": (dev.get("classification") or {}).get("classification"),
         }
-        if cls == "CLARIFICATION_REQUIRED":
+        classification_out = dev.get("classification")
+        if (classification_out or {}).get("classification") == "CLARIFICATION_REQUIRED":
             clarification_out = {
-                "message": "พบ Business Action ที่ตรงกับคำถามมากกว่าหนึ่งรายการ กรุณาระบุให้ชัดเจนขึ้น หรือเลือก Business Action เอง",
-                "candidate_action_ids": classification["candidate_action_ids"],
+                "message": decide_result.get("reply", {}).get("text"),
+                "candidate_action_ids": classification_out.get("candidate_action_ids") or [],
             }
-        elif cls == "HYBRID":
-            is_hybrid_turn = True
-            erp_result, erp_err = _run_erp(classification["selected_action_id"], classification["erp_sub_question"])
-            rag_result, rag_err = _run_rag(classification["rag_sub_question"])
-            if erp_err: errors.append(erp_err)
-            if rag_err: errors.append(rag_err)
-        elif cls == "ERP_ONLY":
-            erp_result, erp_err = _run_erp(classification["selected_action_id"], classification.get("erp_sub_question"))
-            if erp_err: errors.append(erp_err)
-        else:  # RAG_ONLY / UNKNOWN — safe fallback, never leaves the customer with nothing
-            rag_result, rag_err = _run_rag(classification.get("rag_sub_question"))
-            if rag_err: errors.append(rag_err)
+
+        rag_inner = None
+        if routing_type == "RAG":
+            rag_inner, rag_meta = exec_result.get("result") or {}, exec_result.get("metadata") or {}
+        elif routing_type == "HYBRID":
+            rag_inner, rag_meta = rag_exec.get("result") or {}, rag_exec.get("metadata") or {}
+        else:
+            rag_meta = {}
+        if rag_inner:
+            rag_result = {
+                "answer": rag_inner.get("answer"), "chunks": rag_inner.get("chunks") or [],
+                "confidence": rag_inner.get("confidence"), "confidence_label": rag_meta.get("confidence_label"),
+                "model": rag_meta.get("model"),
+                "input_tokens": rag_inner.get("input_tokens"), "output_tokens": rag_inner.get("output_tokens"),
+                "prompt_template_id": rag_inner.get("prompt_template_id"),
+                "prompt_template_name": rag_inner.get("prompt_template_name"),
+                "prompt_template_version": rag_inner.get("prompt_template_version"),
+                "policy_escalate": rag_inner.get("policy_escalate"), "policy_set_name": rag_inner.get("policy_set_name"),
+                "latency_ms": dev.get("latency_ms"),
+            }
+
+        erp_inner = exec_result if routing_type in ("API", "WEBHOOK") else (erp_exec if routing_type == "HYBRID" else None)
+        selected_action_key = dev.get("selected_business_action") or collection_status.get("selected_business_action")
+        if erp_inner is not None or selected_action_key:
+            erp_body = (erp_inner or {}).get("result") or {}
+            erp_result = {
+                "ok": (erp_inner or {}).get("status") == "success",
+                "action_key": selected_action_key,
+                "status_code": erp_body.get("status_code"),
+                "mapped_fields": erp_body.get("mapped_fields"),
+                "error": (erp_inner or {}).get("error"),
+                "collected_params": collection_status.get("collected_parameters") or {},
+                "missing_parameters": collection_status.get("missing_parameters") or [],
+                "clarification_question": decide_result["reply"]["text"] if not collection_status.get("is_complete", True) else None,
+            }
+
+        # Phase 3 — sanitized Developer Trace. An explicit allow-list of
+        # fields (never the raw `dev` dict) so nothing internal (raw
+        # prompts, chain-of-thought, credentials — action_executor.py
+        # already masks SecretCode as "[MASKED]" before it ever reaches
+        # `dev`, same as every other caller of this trace) can leak here.
+        # Customer Stage / Handoff Recommended are computed read-only for
+        # DISPLAY only — the Playground is not a real conversation, so
+        # this never writes to any customer's actual profile.
+        stage_result = classify_message_stage(question)
+        handoff_result = compute_handoff_recommendation(stage_result["stage"], question)
+        production_trace_out = {
+            "mode": "auto (production Decision Engine)",
+            "routing_type": routing_type,
+            "selected_business_action": selected_action_key,
+            "collected_parameters": collection_status.get("collected_parameters") or {},
+            "rag_used": routing_type in ("RAG", "HYBRID"),
+            "erp_used": routing_type in ("API", "WEBHOOK", "HYBRID"),
+            "hybrid_used": routing_type == "HYBRID",
+            "customer_stage": stage_result["stage"],
+            "handoff_recommended": handoff_result["recommended"],
+            "handoff_reason": handoff_result["reason"] if handoff_result["recommended"] else None,
+            "latency_ms": dev.get("latency_ms"),
+            "erp_action_name": erp_result.get("action_key") if erp_result else None,
+            "erp_http_status": erp_result.get("status_code") if erp_result else None,
+        }
+        if decide_result.get("routing", {}).get("type") == "HUMAN_HANDOFF":
+            production_trace_out["handoff_reason"] = (decide_result.get("handoff_payload") or {}).get("reason")
+            production_trace_out["handoff_recommended"] = True
+
+        answer_text = decide_result.get("reply", {}).get("text")
+        if not rag_result and not erp_result:
+            # RAG_ONLY with no grounded answer, SAFE_FALLBACK, HUMAN_HANDOFF,
+            # WORKFLOW (legacy fallback), or a bare clarification/follow-up
+            # question — always surface the actual customer-facing reply
+            # text so the Playground never shows a blank answer.
+            rag_result = {"answer": answer_text, "chunks": []}
+        if erp_result is not None:
+            # This route's own synthesize_hybrid_answer() (below) expects
+            # an "answer" string for the ERP contribution — decide()
+            # itself never produces one separately (its own HYBRID
+            # synthesis, services/hybrid_runtime_service.py, already
+            # merged everything into decide_result["reply"]["text"]), so
+            # a readable fallback is built here purely for display: the
+            # mapped fields when the response_mapping produced any,
+            # otherwise a plain success/error confirmation.
+            if erp_result.get("mapped_fields"):
+                erp_result["answer"] = json.dumps(erp_result["mapped_fields"], ensure_ascii=False)
+            elif erp_result.get("clarification_question"):
+                erp_result["answer"] = erp_result["clarification_question"]
+            elif erp_result.get("ok"):
+                erp_result["answer"] = "ดำเนินการสำเร็จ (ดูรายละเอียดใน Response ด้านล่าง)"
+            else:
+                erp_result["answer"] = erp_result.get("error")
     elif mode == "rag":
         rag_result, err = _run_rag()
         if err: errors.append(err)
@@ -3578,7 +3684,23 @@ async def hybrid_playground_ask(request: Request):
                            "classification": classification.get("classification")}
 
     rag_out = None
-    if rag_result is not None:
+    if mode == "auto" and rag_result is not None:
+        # Auto mode's rag_result is already a plain dict (built directly
+        # from DecisionEngine.decide()'s own trace above), unlike every
+        # other mode's PlaygroundResult dataclass instance below — no
+        # attribute access here.
+        rag_out = {
+            "answer": rag_result.get("answer"), "chunks": rag_result.get("chunks") or [],
+            "confidence": rag_result.get("confidence"), "confidence_label": rag_result.get("confidence_label"),
+            "model": rag_result.get("model"),
+            "input_tokens": rag_result.get("input_tokens"), "output_tokens": rag_result.get("output_tokens"),
+            "prompt": {"template_id": rag_result.get("prompt_template_id"),
+                       "template_name": rag_result.get("prompt_template_name"),
+                       "template_version": rag_result.get("prompt_template_version")},
+            "policy": {"escalate": rag_result.get("policy_escalate"), "policy_set_name": rag_result.get("policy_set_name")},
+            "latency_ms": rag_result.get("latency_ms"),
+        }
+    elif mode != "auto" and rag_result is not None:
         rag_out = {
             "answer": rag_result.answer,
             "chunks": [{
@@ -3675,6 +3797,29 @@ async def hybrid_playground_ask(request: Request):
             "merge_strategy": synthesis["strategy"],
         }
 
+    if production_trace_out is None:
+        # Manual RAG/ERP/Hybrid modes (Phase 3 — "for every Playground
+        # answer") — no DecisionEngine.decide() call to read a trace from
+        # here, so this is a best-effort summary built from the SAME
+        # rag_out/erp_out data already computed above, never a second
+        # routing decision.
+        from services.customer_tier_service import classify_message_stage, compute_handoff_recommendation
+        stage_result = classify_message_stage(question)
+        handoff_result = compute_handoff_recommendation(stage_result["stage"], question)
+        production_trace_out = {
+            "mode": f"{mode} (manual)",
+            "routing_type": mode.upper(),
+            "selected_business_action": (erp_out or {}).get("action_key") or action_id,
+            "collected_parameters": (erp_out or {}).get("collected_params") or {},
+            "rag_used": rag_out is not None, "erp_used": erp_out is not None, "hybrid_used": is_hybrid_turn,
+            "customer_stage": stage_result["stage"],
+            "handoff_recommended": handoff_result["recommended"],
+            "handoff_reason": handoff_result["reason"] if handoff_result["recommended"] else None,
+            "latency_ms": (rag_out or {}).get("latency_ms"),
+            "erp_action_name": (erp_out or {}).get("action_key") or action_id if erp_out else None,
+            "erp_http_status": ((erp_out or {}).get("summary") or {}).get("http_status") if erp_out else None,
+        }
+
     return JSONResponse({
         "ok": True, "mode": mode, "route_decision": route_decision,
         "rag": rag_out, "erp": erp_out, "hybrid": hybrid_out,
@@ -3685,6 +3830,11 @@ async def hybrid_playground_ask(request: Request):
         # ambiguity-clarification payload when 2+ Business Actions matched.
         "classification": classification_out, "clarification": clarification_out,
         "errors": errors,
+        # Playground Production Parity (2026-08-15), Phase 3 — sanitized
+        # developer metadata for every answer, regardless of mode. Never
+        # SecretCode/credentials/raw headers/chain-of-thought (an explicit
+        # allow-list built above, never the raw Decision Engine trace).
+        "production_trace": production_trace_out,
     })
 
 

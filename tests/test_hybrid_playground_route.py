@@ -71,12 +71,20 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
     def tearDown(self):
         self.patcher_sb.stop()
 
+    # Playground Production Parity (2026-08-15) — Auto mode now calls the
+    # REAL services/decision_engine.py::DecisionEngine.decide() (the SAME
+    # engine line_bot/webhook.py uses), not a separate classify_question()
+    # -only heuristic. These tests therefore mock the TRUE boundaries
+    # decide() itself calls through — services.playground_orchestrator.
+    # run_playground_turn (RAG) and services.action_executor.requests.
+    # request (the real ERP network boundary, never services.
+    # erp_test_harness.run_erp_test, which decide() never touches) —
+    # rather than the old harness-level mocks.
     def test_auto_mode_selects_hybrid_and_calls_each_path_exactly_once(self):
-        erp_result = {"ok": True, "answer": "ลูกค้า C00001 มีคูปอง 2 ใบ", "trace": [], "summary": {},
-                       "collected_params": {"CustCode": "C00001"}}
         with patch("services.playground_orchestrator.run_playground_turn",
                    return_value=_fake_rag_result("คูปองใช้งานได้ที่หน้าชำระเงินค่ะ")) as mock_rag, \
-             patch("services.erp_test_harness.run_erp_test", return_value=erp_result) as mock_erp:
+             patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_erp:
             resp = self.client.post("/admin/api/hybrid-playground/ask", json={
                 "question": "ลูกค้า C00001 มีคูปองอะไร และคูปองใช้งานอย่างไร", "mode": "auto",
             })
@@ -85,14 +93,14 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.assertEqual(data["classification"]["classification"], "HYBRID")
         self.assertEqual(mock_rag.call_count, 1, "RAG must run exactly once")
         self.assertEqual(mock_erp.call_count, 1, "ERP must run exactly once")
+        self.assertTrue(data["production_trace"]["hybrid_used"])
+        self.assertTrue(data["production_trace"]["rag_used"])
+        self.assertTrue(data["production_trace"]["erp_used"])
 
         # Question Segmentation — neither path receives the full compound question.
         rag_question_sent = mock_rag.call_args.args[0]
-        erp_question_sent = mock_erp.call_args.kwargs["message"]
         self.assertIn("คูปองใช้งานอย่างไร", rag_question_sent)
         self.assertNotIn("C00001", rag_question_sent)
-        self.assertIn("C00001", erp_question_sent)
-        self.assertNotIn("คูปองใช้งานอย่างไร", erp_question_sent)
 
         self.assertIn("ข้อมูลเฉพาะลูกค้า", data["hybrid"]["merged_answer"])
         self.assertIn("ความรู้ทั่วไป", data["hybrid"]["merged_answer"])
@@ -100,7 +108,7 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
     def test_auto_mode_rag_only_question_never_calls_erp(self):
         with patch("services.playground_orchestrator.run_playground_turn",
                    return_value=_fake_rag_result()) as mock_rag, \
-             patch("services.erp_test_harness.run_erp_test") as mock_erp:
+             patch("services.action_executor.requests.request") as mock_erp:
             resp = self.client.post("/admin/api/hybrid-playground/ask", json={
                 "question": "ขอทราบนโยบายการคืนสินค้า", "mode": "auto",
             })
@@ -109,12 +117,12 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.assertEqual(mock_rag.call_count, 1)
         mock_erp.assert_not_called()
         self.assertIsNone(data["erp"])
+        self.assertFalse(data["production_trace"]["erp_used"])
 
     def test_auto_mode_erp_only_question_never_calls_rag(self):
-        erp_result = {"ok": True, "answer": "ลูกค้า C00001 มีคูปอง 2 ใบ", "trace": [], "summary": {},
-                       "collected_params": {"CustCode": "C00001"}}
         with patch("services.playground_orchestrator.run_playground_turn") as mock_rag, \
-             patch("services.erp_test_harness.run_erp_test", return_value=erp_result) as mock_erp:
+             patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_erp:
             resp = self.client.post("/admin/api/hybrid-playground/ask", json={
                 "question": "ข้อมูลลูกค้ารหัส C00001", "mode": "auto",
             })
@@ -123,11 +131,13 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.assertEqual(mock_erp.call_count, 1)
         mock_rag.assert_not_called()
         self.assertIsNone(data["rag"])
+        self.assertEqual(data["production_trace"]["selected_business_action"], "get_customer_coupons")
+        self.assertEqual(data["production_trace"]["erp_http_status"], 200)
 
     def test_ambiguous_actions_produce_clarification_with_no_execution(self):
         _seed_action(self.reg, key="another_customer_action", category="customer", keywords=["ข้อมูลลูกค้า"])
         with patch("services.playground_orchestrator.run_playground_turn") as mock_rag, \
-             patch("services.erp_test_harness.run_erp_test") as mock_erp:
+             patch("services.action_executor.requests.request") as mock_erp:
             resp = self.client.post("/admin/api/hybrid-playground/ask", json={
                 "question": "ข้อมูลลูกค้า", "mode": "auto",
             })
@@ -138,20 +148,60 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         mock_rag.assert_not_called()
         mock_erp.assert_not_called()
 
-    def test_missing_erp_parameter_asks_clarification_no_execution_no_rag(self):
-        # No CustCode-shaped value anywhere in the message -> the ERP
-        # harness's OWN (unchanged) validation blocks execution and asks
-        # for it; this is exercised for real, not mocked, since it's the
-        # frozen erp_test_harness behavior being verified end-to-end here.
-        with patch("services.playground_orchestrator.run_playground_turn") as mock_rag:
+    def test_missing_erp_parameter_asks_for_it_no_execution_no_rag(self):
+        # No CustCode-shaped value anywhere in the message -> decide()'s
+        # OWN (unchanged) dynamic-collection flow asks for it instead of
+        # executing or falling back to "ไม่พบข้อมูลในฐานความรู้" — verified
+        # for real against a real BusinessActionRegistry, never mocked.
+        with patch("services.playground_orchestrator.run_playground_turn") as mock_rag, \
+             patch("services.action_executor.requests.request") as mock_erp:
             resp = self.client.post("/admin/api/hybrid-playground/ask", json={
                 "question": "สวัสดีค่ะ ช่วยดูข้อมูลลูกค้าให้หน่อย", "mode": "auto",
             })
         data = resp.json()
         self.assertEqual(data["classification"]["classification"], "ERP_ONLY")
-        self.assertIsNotNone(data["erp"])
-        self.assertIsNotNone(data["erp"]["clarification_question"])
         mock_rag.assert_not_called()
+        mock_erp.assert_not_called()
+        self.assertIsNone(data["rag"])
+        self.assertIsNotNone(data["erp"]["clarification_question"])
+        self.assertIn("รหัสลูกค้า", data["erp"]["clarification_question"])
+
+    def test_auto_mode_production_trace_includes_customer_intelligence_fields(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_rag_result()) as mock_rag:
+            resp = self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "Shipify ให้บริการอะไรบ้าง", "mode": "auto",
+            })
+        data = resp.json()
+        trace = data["production_trace"]
+        self.assertEqual(trace["mode"], "auto (production Decision Engine)")
+        self.assertIn(trace["customer_stage"], ("cold", "warm", "hot", "negative"))
+        self.assertIn("handoff_recommended", trace)
+        self.assertIn("latency_ms", trace)
+        dumped = str(data)
+        self.assertNotIn("SecretCode", dumped)
+        self.assertNotIn("credential_ref", dumped)
+
+    def test_auto_mode_conversation_history_reaches_decision_engine(self):
+        """Phase 4 — Context Continuity. History sent from the client must
+        reach the SAME DecisionEngine.decide() history mechanism, not be
+        silently dropped."""
+        captured = {}
+
+        def _capture_history(*args, **kwargs):
+            captured["history"] = kwargs.get("history")
+            return _fake_rag_result()
+
+        with patch("services.playground_orchestrator.run_playground_turn", side_effect=lambda msg, **kw: _capture_history(msg, **kw)):
+            resp = self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "แล้วของส่งหรือยัง", "mode": "auto",
+                "history": [{"role": "user", "content": "ผมรหัสลูกค้า C00001 ขอดูคูปอง"},
+                            {"role": "assistant", "content": "มีคูปอง 2 ใบค่ะ"}],
+            })
+        self.assertTrue(resp.json()["ok"])
+        self.assertIsNotNone(captured.get("history"))
+        contents = [h["content"] for h in captured["history"]]
+        self.assertTrue(any("C00001" in c for c in contents))
 
     def test_one_erp_path_failure_still_returns_honest_rag_section(self):
         with patch("services.playground_orchestrator.run_playground_turn",

@@ -1859,11 +1859,13 @@ function renderExplain(d) {
 // Mode selector (Auto/RAG/ERP/Hybrid) wired onto this SAME AI Playground
 // page per the user's stated preference, rather than a brand new page.
 // RAG mode keeps using the pre-existing /admin/playground/ask flow
-// (session recording, chat history) completely unchanged; Auto/ERP/
-// Hybrid use the new /admin/api/hybrid-playground/ask route added in
-// admin/routes.py, which itself only dispatches to the two pre-existing
-// entry points (run_playground_turn / run_erp_test) — see that route's
-// docstring for the naive Auto-heuristic / Hybrid-merge disclaimers.
+// (session recording, chat history) completely unchanged; ERP/Hybrid
+// use /admin/api/hybrid-playground/ask, dispatching to the pre-existing
+// run_playground_turn / run_erp_test entry points for MANUAL testing of
+// one path at a time. Auto mode (Playground Production Parity,
+// 2026-08-15) calls the SAME production services/decision_engine.py::
+// DecisionEngine.decide() the LINE webhook uses — a reliable UAT console
+// for real routing behavior, not a separate heuristic.
 var _hpActions = [];
 var _lastHybridResp = null;
 
@@ -1873,7 +1875,7 @@ function hpModeChanged() {
   var hint = document.getElementById('hp-mode-hint');
   actionSel.style.display = (mode === 'erp' || mode === 'hybrid') ? '' : 'none';
   if (mode === 'auto') {
-    hint.textContent = 'Auto = naive keyword heuristic (not a real intent classifier) picks RAG or ERP.';
+    hint.textContent = 'Auto = runs the SAME production Decision Engine the LINE webhook uses (routing, Business Action selection, Human Handoff, Customer Intelligence).';
   } else if (mode === 'hybrid') {
     hint.textContent = 'Hybrid = runs RAG + ERP (selected action) and naively concatenates both answers.';
   } else if (mode === 'erp') {
@@ -1927,9 +1929,30 @@ function hpKV(pairs) {
   }).join('') + '</table>';
 }
 
+function renderProductionTrace(t) {
+  if (!t) return '';
+  var rows = [
+    ['Mode', t.mode],
+    ['Routing Type', t.routing_type],
+    ['Selected Business Action', t.selected_business_action],
+    ['Collected Parameters', t.collected_parameters && Object.keys(t.collected_parameters).length ? JSON.stringify(t.collected_parameters) : null],
+    ['RAG used', t.rag_used ? 'YES' : 'NO'],
+    ['ERP used', t.erp_used ? 'YES' : 'NO'],
+    ['Hybrid used', t.hybrid_used ? 'YES' : 'NO'],
+    ['Customer Stage', t.customer_stage ? t.customer_stage.toUpperCase() : null],
+    ['Handoff Recommended', t.handoff_recommended ? 'YES — ' + (t.handoff_reason || '') : 'NO'],
+    ['Latency (ms)', t.latency_ms != null ? Math.round(t.latency_ms) : null],
+  ];
+  if (t.erp_used) {
+    rows.push(['ERP Action', t.erp_action_name]);
+    rows.push(['ERP HTTP Status', t.erp_http_status]);
+  }
+  return hpSection('Production Decision Engine Trace', hpKV(rows));
+}
+
 function renderHybridTabs(d) {
   var mode = d.mode;
-  var html = '';
+  var html = renderProductionTrace(d.production_trace);
 
   if (d.rag) {
     var rag = d.rag;
@@ -1970,7 +1993,7 @@ function renderHybridTabs(d) {
     html += hpSection('ERP Trace', '<div style="color:rgba(232,237,245,.35)">ERP path did not run this turn (no action selected, or an error — see Errors below).</div>');
   }
 
-  html += hpSection('Route Decision (Auto mode heuristic)', hpKV([
+  html += hpSection('Route Decision', hpKV([
     ['Route', d.route_decision ? JSON.stringify(d.route_decision.route) : mode],
     ['Reason', d.route_decision ? d.route_decision.reason : null],
   ]));
@@ -2018,9 +2041,18 @@ function hybridAskQuestion(question, mode) {
 
   var actionId = document.getElementById('hp-action').value || null;
 
+  // Context Continuity (Playground Production Parity, 2026-08-15) — the
+  // SAME bounded recent-turn history services/decision_engine.py::
+  // decide() already accepts elsewhere (line_bot/webhook.py), built from
+  // this page's own chat log (already pushed above, MINUS the turn just
+  // added for the current question). Only sent for Auto mode today,
+  // since that's the only mode that reaches decide().
+  var hpHistory = _conversation.slice(0, -1).filter(function(m) { return m.role === 'user' || m.role === 'ai'; })
+    .map(function(m) { return {role: m.role === 'ai' ? 'assistant' : 'user', content: m.text}; });
+
   fetch('/admin/api/hybrid-playground/ask', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({question: question, mode: mode, action_id: actionId}),
+    body: JSON.stringify({question: question, mode: mode, action_id: actionId, history: hpHistory}),
   })
     .then(function(r){ return r.json(); })
     .then(function(d) {
