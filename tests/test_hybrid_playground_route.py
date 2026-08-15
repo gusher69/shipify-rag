@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from starlette.testclient import TestClient
 
 from tests.test_business_action_registry import _FakeSupabase
+from tests.test_session_service import FakeSb
 from services.business_action_registry import BusinessActionRegistry
 
 
@@ -68,8 +69,22 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.patcher_sb = patch("admin.routes.get_sb", return_value=self.fake_sb)
         self.patcher_sb.start()
 
+        # Real User Journey UAT (2026-08-15) -- Auto mode now persists a
+        # real session/profile via services/session_service.py and
+        # profiles/manager.py, backed by a SEPARATE fake (FakeSb, which
+        # supports select/insert/update/upsert/order/limit/single) since
+        # _FakeSupabase above only supports what the Business Action
+        # Registry needs.
+        self.pg_fake_sb = FakeSb()
+        self.patcher_session_sb = patch("services.session_service._get_sb", return_value=self.pg_fake_sb)
+        self.patcher_session_sb.start()
+        self.patcher_profiles_sb = patch("profiles.manager.supabase", self.pg_fake_sb)
+        self.patcher_profiles_sb.start()
+
     def tearDown(self):
         self.patcher_sb.stop()
+        self.patcher_session_sb.stop()
+        self.patcher_profiles_sb.stop()
 
     # Playground Production Parity (2026-08-15) — Auto mode now calls the
     # REAL services/decision_engine.py::DecisionEngine.decide() (the SAME
@@ -182,26 +197,96 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.assertNotIn("SecretCode", dumped)
         self.assertNotIn("credential_ref", dumped)
 
-    def test_auto_mode_conversation_history_reaches_decision_engine(self):
-        """Phase 4 — Context Continuity. History sent from the client must
-        reach the SAME DecisionEngine.decide() history mechanism, not be
-        silently dropped."""
+    def test_auto_mode_conversation_history_persists_and_reaches_decision_engine(self):
+        """Phase 4 — Context Continuity, via REAL session persistence
+        (Real User Journey UAT, 2026-08-15) — turn 2 must see turn 1's
+        message through the real ai_session_messages history, the SAME
+        mechanism line_bot/webhook.py itself uses, not client-supplied
+        JSON (which the route no longer even reads for Auto mode)."""
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_rag_result("ยินดีให้บริการค่ะ")):
+            resp1 = self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "รหัสของผมคือ C00001", "mode": "auto", "journey_label": "TEST-CONTEXT",
+            })
+        self.assertTrue(resp1.json()["ok"])
+        session_id_1 = resp1.json()["session_id"]
+        self.assertIsNotNone(session_id_1)
+
         captured = {}
 
-        def _capture_history(*args, **kwargs):
-            captured["history"] = kwargs.get("history")
+        def _capture(msg, **kw):
+            captured["history"] = kw.get("history")
             return _fake_rag_result()
 
-        with patch("services.playground_orchestrator.run_playground_turn", side_effect=lambda msg, **kw: _capture_history(msg, **kw)):
-            resp = self.client.post("/admin/api/hybrid-playground/ask", json={
-                "question": "แล้วของส่งหรือยัง", "mode": "auto",
-                "history": [{"role": "user", "content": "ผมรหัสลูกค้า C00001 ขอดูคูปอง"},
-                            {"role": "assistant", "content": "มีคูปอง 2 ใบค่ะ"}],
+        with patch("services.playground_orchestrator.run_playground_turn", side_effect=_capture):
+            resp2 = self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "แล้วของส่งหรือยัง", "mode": "auto", "journey_label": "TEST-CONTEXT",
             })
-        self.assertTrue(resp.json()["ok"])
-        self.assertIsNotNone(captured.get("history"))
-        contents = [h["content"] for h in captured["history"]]
+        self.assertTrue(resp2.json()["ok"])
+        self.assertEqual(resp2.json()["session_id"], session_id_1,
+                          "same journey_label must reuse the same persisted session")
+        contents = [h["content"] for h in (captured.get("history") or [])]
         self.assertTrue(any("C00001" in c for c in contents))
+
+    def test_multi_user_isolation_profiles_and_histories_never_cross(self):
+        """Phase 5 — two distinct journey_labels must never merge
+        sessions/profiles, mirroring real per-LINE-user isolation."""
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_rag_result("ok")):
+            resp_a = self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "รหัสของผมคือ C00001", "mode": "auto", "journey_label": "UAT-USER-A",
+            })
+            resp_b = self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "รหัสของผมคือ C00002", "mode": "auto", "journey_label": "UAT-USER-B",
+            })
+        self.assertNotEqual(resp_a.json()["session_id"], resp_b.json()["session_id"])
+        self.assertNotEqual(resp_a.json()["production_trace"]["playground_user_id"],
+                             resp_b.json()["production_trace"]["playground_user_id"])
+
+        captured = {}
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   side_effect=lambda msg, **kw: captured.setdefault("history", kw.get("history")) or _fake_rag_result()):
+            self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "แล้วไงต่อ", "mode": "auto", "journey_label": "UAT-USER-A",
+            })
+        contents = [h["content"] for h in (captured.get("history") or [])]
+        self.assertTrue(any("C00001" in c for c in contents))
+        self.assertFalse(any("C00002" in c for c in contents))
+
+    def test_same_journey_label_stable_playground_user_id_across_turns(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_rag_result("ok")):
+            r1 = self.client.post("/admin/api/hybrid-playground/ask",
+                                   json={"question": "hello", "mode": "auto", "journey_label": "UAT-STABLE"})
+            r2 = self.client.post("/admin/api/hybrid-playground/ask",
+                                   json={"question": "hello again", "mode": "auto", "journey_label": "UAT-STABLE"})
+        self.assertEqual(r1.json()["production_trace"]["playground_user_id"],
+                          r2.json()["production_trace"]["playground_user_id"])
+
+    def test_human_handoff_duplicate_protection_within_same_session(self):
+        """Journey 8 — a second handoff-triggering message within the
+        SAME active session must not re-simulate a notification send."""
+        r1 = self.client.post("/admin/api/hybrid-playground/ask", json={
+            "question": "ขอติดต่อเจ้าหน้าที่", "mode": "auto", "journey_label": "UAT-HANDOFF-DEDUP",
+        })
+        self.assertEqual(r1.json()["production_trace"]["routing_type"], "HUMAN_HANDOFF")
+        self.assertTrue(r1.json()["production_trace"]["handoff_notification"]["simulated_sent"])
+
+        r2 = self.client.post("/admin/api/hybrid-playground/ask", json={
+            "question": "ขอคุยกับเจ้าหน้าที่", "mode": "auto", "journey_label": "UAT-HANDOFF-DEDUP",
+        })
+        self.assertEqual(r2.json()["production_trace"]["routing_type"], "HUMAN_HANDOFF")
+        self.assertFalse(r2.json()["production_trace"]["handoff_notification"]["simulated_sent"])
+
+    def test_journey_label_names_the_persisted_session(self):
+        resp = self.client.post("/admin/api/hybrid-playground/ask", json={
+            "question": "Shipify ให้บริการอะไรบ้าง", "mode": "auto", "journey_label": "UAT-01-RAG",
+        })
+        session_id = resp.json()["session_id"]
+        self.assertIsNotNone(session_id)
+        saved = next(r for r in self.pg_fake_sb.store["ai_sessions"] if r["id"] == session_id)
+        self.assertEqual(saved["name"], "UAT-01-RAG")
+        self.assertEqual(saved["channel"], "playground")
 
     def test_one_erp_path_failure_still_returns_honest_rag_section(self):
         with patch("services.playground_orchestrator.run_playground_turn",

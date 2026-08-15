@@ -3449,23 +3449,29 @@ async def hybrid_playground_ask(request: Request):
     retrieval, prompting, or ERP execution — it only dispatches to the
     two pre-existing entry points.
 
-    Auto mode now uses services/hybrid_question_classifier.py — a
-    deterministic, Registry-driven classifier (RAG_ONLY / ERP_ONLY /
-    HYBRID / CLARIFICATION_REQUIRED / UNKNOWN) that can select Hybrid,
-    replacing the old binary-only naive_auto_route for Auto mode
-    specifically. For a HYBRID classification (Auto) or explicit Hybrid
-    mode, the question is SEGMENTED into an ERP sub-question and a RAG
-    sub-question before execution (never the full compound question sent
-    to both paths) and combined via
-    services/hybrid_playground_router.py::synthesize_hybrid_answer — an
-    explicit, structured, non-LLM combination, never intelligent
-    cross-domain reasoning. Still Playground-only: not the production
-    Decision Engine, not wired to the live LINE webhook.
+    Auto mode (Playground Production Parity, 2026-08-15) runs the SAME
+    services/decision_engine.py::DecisionEngine.decide() the LINE webhook
+    calls — including the real Session/Chat History -> User Profile ->
+    Customer Intelligence -> Decision Engine -> RAG/ERP/Hybrid/Human
+    Handoff -> persistence pipeline (services/session_service.py,
+    profiles/manager.py, services/customer_tier_service.py — the SAME
+    modules line_bot/webhook.py already uses, never a second
+    implementation). Each Auto-mode turn is scoped to a synthetic
+    "playground:<label>" line_user_id (never overlapping a real LINE
+    user's namespace) so its session/profile/Customer Intelligence state
+    persists exactly like a real conversation and stays visible for
+    manual inspection afterward — nothing is auto-deleted. ERP/Hybrid
+    manual modes are UNCHANGED: they still dispatch directly to
+    run_playground_turn/run_erp_test for testing one path in isolation,
+    with no session persistence of their own.
 
     Body: {question, mode: auto|rag|erp|hybrid, action_id (ERP/Hybrid,
-    optional for Auto), template_id, session_id, and the same ERP
-    conversation-state passthrough fields api_erp_test_run() accepts
-    (history, collected_params, awaiting_information_selection,
+    optional for Auto), template_id, session_id, journey_label
+    (Auto — a human-readable UAT Journey title, e.g. "UAT-01-RAG"),
+    playground_user_id (Auto — an explicit synthetic user id; derived
+    from journey_label when omitted), and the same ERP conversation-state
+    passthrough fields api_erp_test_run() accepts (history,
+    collected_params, awaiting_information_selection,
     available_response_options, last_normalized_result,
     conversation_state, confirmed, enforce_confirmation_gate)."""
     if (r := auth(request)): return r
@@ -3545,13 +3551,41 @@ async def hybrid_playground_ask(request: Request):
         # classifier, no re-implemented routing logic, just calling the
         # existing, already-verified engine.
         from services.decision_engine import DecisionEngine
-        from services.customer_tier_service import classify_message_stage, compute_handoff_recommendation
+        from services.customer_tier_service import classify_message_stage, compute_handoff_recommendation, update_tier_for_profile
+        from services.session_service import get_session_service, extract_conversation_fields
+        from profiles.manager import get_profile, upsert_profile, update_profile_from_turn
+        import re as re_pg
 
-        normalized_history = [{"role": h.get("role"), "content": h.get("content")}
-                               for h in (body.get("history") or []) if h.get("content")]
+        # Real Session / User Profile / Customer Intelligence persistence
+        # (Real User Journey UAT, 2026-08-15) — the SAME services
+        # line_bot/webhook.py's own turn-handling sequence already uses,
+        # scoped to a synthetic "playground:<label>" line_user_id so it
+        # can never collide with, merge into, or leak from a real LINE
+        # customer's profile/history. One journey (one journey_label /
+        # playground_user_id) == one isolated profile + conversation,
+        # exactly like one real LINE user == one profile + conversation.
+        journey_label = (body.get("journey_label") or "").strip()
+        playground_user_id = (body.get("playground_user_id") or "").strip()
+        if not playground_user_id:
+            basis = journey_label or body.get("session_id") or "default"
+            slug = re_pg.sub(r"[^A-Za-z0-9_-]+", "-", basis).strip("-").upper() or "DEFAULT"
+            playground_user_id = f"playground:{slug}"
+
+        pg_session_service = get_session_service()
+        profile = get_profile(playground_user_id)
+        upsert_profile(playground_user_id, {
+            "display_name": (profile or {}).get("display_name") or (journey_label or playground_user_id),
+            "order_count": (profile or {}).get("order_count", 0),
+            "total_spend": (profile or {}).get("total_spend", 0),
+        })
+        conversation = pg_session_service.get_or_create_active_conversation(
+            playground_user_id, channel="playground", name=journey_label or None)
+        normalized_history = pg_session_service.get_recent_history(conversation["id"]) if conversation else []
+
         engine = DecisionEngine(get_sb())
         decide_result = engine.decide(question, history=normalized_history,
-                                       context={"developer_mode": True, "channel": "playground"})
+                                       context={"developer_mode": True, "channel": "playground",
+                                                "customer_context": profile or {}})
         dev = decide_result.get("developer") or {}
         routing_type = (decide_result.get("routing") or {}).get("type")
         collection_status = dev.get("information_collection_status") or {}
@@ -3614,9 +3648,6 @@ async def hybrid_playground_ask(request: Request):
         # prompts, chain-of-thought, credentials — action_executor.py
         # already masks SecretCode as "[MASKED]" before it ever reaches
         # `dev`, same as every other caller of this trace) can leak here.
-        # Customer Stage / Handoff Recommended are computed read-only for
-        # DISPLAY only — the Playground is not a real conversation, so
-        # this never writes to any customer's actual profile.
         stage_result = classify_message_stage(question)
         handoff_result = compute_handoff_recommendation(stage_result["stage"], question)
         production_trace_out = {
@@ -3633,10 +3664,48 @@ async def hybrid_playground_ask(request: Request):
             "latency_ms": dev.get("latency_ms"),
             "erp_action_name": erp_result.get("action_key") if erp_result else None,
             "erp_http_status": erp_result.get("status_code") if erp_result else None,
+            "playground_user_id": playground_user_id, "journey_label": journey_label or None,
         }
         if decide_result.get("routing", {}).get("type") == "HUMAN_HANDOFF":
             production_trace_out["handoff_reason"] = (decide_result.get("handoff_payload") or {}).get("reason")
             production_trace_out["handoff_recommended"] = True
+
+        # Persist this turn -- SAME sequence line_bot/webhook.py runs
+        # after every real LINE turn: Conversation History, then
+        # incremental Profile stats, then re-scored Customer Tier. Never
+        # deleted by this route; the resulting ai_sessions row is exactly
+        # what /admin/conversations already lists and lets an admin open.
+        if conversation:
+            is_new_conversation = (conversation.get("message_count") or 0) == 0
+            pg_session_service.record_conversation_turn(
+                conversation["id"], question, decide_result, line_user_id=playground_user_id,
+                conversation_tier=(profile or {}).get("conversation_tier"))
+            conversation_fields = extract_conversation_fields(decide_result)
+            update_profile_from_turn(playground_user_id, decide_result=decide_result,
+                                      conversation_fields=conversation_fields,
+                                      is_new_conversation=is_new_conversation)
+            update_tier_for_profile(playground_user_id, message=question)
+            production_trace_out["session_id"] = conversation["id"]
+
+            # Human Handoff -- the SAME PENDING/NOTIFIED/NONE dedup state
+            # machine line_bot/webhook.py uses (services/session_service.py
+            # ::get_handoff_status/set_handoff_status), so duplicate-
+            # protection is genuinely observable here — but the actual
+            # notification send is ALWAYS simulated, never a real
+            # services/human_handoff_service.py::send_handoff_notification
+            # call, so this route can never trigger a real SendLineNotiCS
+            # message regardless of how many times it's invoked.
+            if routing_type == "HUMAN_HANDOFF":
+                h_reason = (decide_result.get("handoff_payload") or {}).get("reason", "handoff")
+                h_status = pg_session_service.get_handoff_status(conversation["id"])
+                if h_status in ("NOTIFIED", "PENDING"):
+                    production_trace_out["handoff_notification"] = {
+                        "simulated_sent": False, "reason": f"duplicate suppressed (status={h_status})"}
+                else:
+                    pg_session_service.set_handoff_status(conversation["id"], "NOTIFIED", reason=h_reason)
+                    production_trace_out["handoff_notification"] = {
+                        "simulated_sent": True, "reason": h_reason,
+                        "note": "SIMULATED ONLY -- no real SendLineNotiCS call was made"}
 
         answer_text = decide_result.get("reply", {}).get("text")
         if not rag_result and not erp_result:
@@ -3835,6 +3904,11 @@ async def hybrid_playground_ask(request: Request):
         # SecretCode/credentials/raw headers/chain-of-thought (an explicit
         # allow-list built above, never the raw Decision Engine trace).
         "production_trace": production_trace_out,
+        # Real User Journey UAT (2026-08-15) — the persisted ai_sessions
+        # row for this Auto-mode turn (None for manual RAG/ERP/Hybrid
+        # modes, which stay session-less), so the frontend can track it
+        # across a multi-turn Journey and link to /admin/conversations.
+        "session_id": (production_trace_out or {}).get("session_id"),
     })
 
 

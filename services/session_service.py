@@ -492,18 +492,30 @@ class SessionService:
     # exactly like the Conversation -> Turn -> Turn model already in
     # place. No new tables, no parallel logging system.
 
-    def get_or_create_active_conversation(self, line_user_id: str, *, inactivity_hours: float = 24.0) -> Optional[Dict]:
-        """Returns the LINE user's currently-active conversation (the most
-        recent non-deleted ai_sessions row for this line_user_id, if its
-        last activity was within `inactivity_hours`), or starts a new one.
-        A "conversation" is a burst of activity, same convention any real
-        chat platform uses — after the gap, the next message starts a new
-        Conversation ID/Session ID (both map to the same ai_sessions.id;
-        see ARCHITECTURE.md for why one row serves both concepts here)."""
+    def get_or_create_active_conversation(self, line_user_id: str, *, inactivity_hours: float = 24.0,
+                                           channel: str = "line", name: Optional[str] = None) -> Optional[Dict]:
+        """Returns this user's currently-active conversation (the most
+        recent non-deleted ai_sessions row for this line_user_id+channel,
+        if its last activity was within `inactivity_hours`), or starts a
+        new one. A "conversation" is a burst of activity, same convention
+        any real chat platform uses — after the gap, the next message
+        starts a new Conversation ID/Session ID (both map to the same
+        ai_sessions.id; see ARCHITECTURE.md for why one row serves both
+        concepts here).
+
+        `channel` defaults to "line" (every existing caller — line_bot/
+        webhook.py — is unaffected); the AI Playground (Real User Journey
+        UAT, 2026-08-15) passes channel="playground" so its own
+        synthetic-user sessions are scoped separately and never collide
+        with a real LINE user's conversation history/profile. `name`
+        lets a caller give the session a recognizable title (e.g. a UAT
+        Journey label) instead of the generic default — only applied
+        when a NEW session is created, never overwriting an existing
+        session's name on every turn."""
         sb = _get_sb()
         try:
             res = sb.table("ai_sessions").select("*").eq("line_user_id", line_user_id) \
-                .eq("channel", "line").is_("deleted_at", "null") \
+                .eq("channel", channel).is_("deleted_at", "null") \
                 .order("updated_at", desc=True).limit(1).execute()
             existing = (res.data or [None])[0]
         except Exception as e:
@@ -521,8 +533,8 @@ class SessionService:
                 return existing
 
         try:
-            row = {"name": f"LINE: {line_user_id[:12]}", "status": "completed",
-                   "channel": "line", "line_user_id": line_user_id}
+            row = {"name": name or f"{channel.upper()}: {line_user_id[:12]}", "status": "completed",
+                   "channel": channel, "line_user_id": line_user_id}
             res = sb.table("ai_sessions").insert(row).execute()
             return (res.data or [None])[0]
         except Exception as e:

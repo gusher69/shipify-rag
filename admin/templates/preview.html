@@ -312,6 +312,12 @@
         </select>
         <span id="hp-mode-hint" style="font-size:11px;color:rgba(232,237,245,.35)"></span>
       </div>
+      <div id="hp-journey-row" style="display:flex;gap:8px;width:100%;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <label style="font-size:12px;color:rgba(232,237,245,.6)" title="Auto mode only — gives this UAT conversation a recognizable title and its own isolated session/profile (Real User Journey UAT, 2026-08-15). Leave blank to keep chatting in the current journey.">Journey Label</label>
+        <input id="hp-journey-label" type="text" placeholder="e.g. UAT-01-RAG" style="background:#1b2230;color:#e8edf5;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 8px;font-size:12.5px;width:200px">
+        <button type="button" onclick="hpStartNewJourney()" style="background:#1b2230;color:#e8edf5;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer">New Journey</button>
+        <span id="hp-journey-status" style="font-size:11px;color:rgba(232,237,245,.35)"></span>
+      </div>
     </div>
     <div class="pg-input-row">
       <div class="pg-input-wrap">
@@ -1947,6 +1953,14 @@ function renderProductionTrace(t) {
     rows.push(['ERP Action', t.erp_action_name]);
     rows.push(['ERP HTTP Status', t.erp_http_status]);
   }
+  if (t.session_id) {
+    rows.push(['Saved Session', t.session_id]);
+    rows.push(['Journey', t.journey_label || t.playground_user_id]);
+  }
+  if (t.handoff_notification) {
+    rows.push(['Handoff Notification', t.handoff_notification.simulated_sent
+      ? 'SIMULATED SEND (no real SendLineNotiCS call)' : 'suppressed — ' + t.handoff_notification.reason]);
+  }
   return hpSection('Production Decision Engine Trace', hpKV(rows));
 }
 
@@ -2028,6 +2042,26 @@ function renderHybridTabs(d) {
   document.getElementById('hp-debug-content').innerHTML = dbg;
 }
 
+// Real User Journey UAT (2026-08-15) — Auto mode now persists a REAL
+// session/profile scoped to this journey (admin/routes.py::
+// hybrid_playground_ask), so history is loaded server-side from that
+// persisted conversation, not tracked/sent from this page. _hpPlaygroundUserId
+// only exists to keep asking within the SAME journey across page
+// actions; "New Journey" clears it so the next question starts a fresh,
+// isolated session/profile.
+var _hpPlaygroundUserId = null;
+
+function hpStartNewJourney() {
+  _hpPlaygroundUserId = null;
+  _conversation = [];
+  renderConversation();
+  document.getElementById('hp-journey-status').textContent = '';
+  var label = document.getElementById('hp-journey-label').value.trim();
+  if (label) {
+    document.getElementById('hp-journey-status').textContent = 'Ready — next question starts "' + label + '".';
+  }
+}
+
 function hybridAskQuestion(question, mode) {
   var input = document.getElementById('pg-question');
   input._lastQ = question;
@@ -2040,19 +2074,20 @@ function hybridAskQuestion(question, mode) {
   btn.disabled = true; btn.textContent = 'Thinking…';
 
   var actionId = document.getElementById('hp-action').value || null;
+  var journeyLabel = document.getElementById('hp-journey-label').value.trim();
 
-  // Context Continuity (Playground Production Parity, 2026-08-15) — the
-  // SAME bounded recent-turn history services/decision_engine.py::
-  // decide() already accepts elsewhere (line_bot/webhook.py), built from
-  // this page's own chat log (already pushed above, MINUS the turn just
-  // added for the current question). Only sent for Auto mode today,
-  // since that's the only mode that reaches decide().
+  // ERP/Hybrid manual modes still track their OWN client-side history
+  // (they never reach DecisionEngine.decide(), so there's no persisted
+  // session to load it from); Auto mode ignores this field entirely.
   var hpHistory = _conversation.slice(0, -1).filter(function(m) { return m.role === 'user' || m.role === 'ai'; })
     .map(function(m) { return {role: m.role === 'ai' ? 'assistant' : 'user', content: m.text}; });
 
   fetch('/admin/api/hybrid-playground/ask', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({question: question, mode: mode, action_id: actionId, history: hpHistory}),
+    body: JSON.stringify({
+      question: question, mode: mode, action_id: actionId, history: hpHistory,
+      journey_label: journeyLabel || undefined, playground_user_id: _hpPlaygroundUserId || undefined,
+    }),
   })
     .then(function(r){ return r.json(); })
     .then(function(d) {
@@ -2063,6 +2098,11 @@ function hybridAskQuestion(question, mode) {
         return;
       }
       _lastHybridResp = d;
+      if (d.production_trace && d.production_trace.playground_user_id) {
+        _hpPlaygroundUserId = d.production_trace.playground_user_id;
+        document.getElementById('hp-journey-status').textContent =
+          'Session: ' + (d.session_id || '—') + ' · ' + d.production_trace.playground_user_id;
+      }
       var displayAnswer = d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : (d.clarification ? d.clarification.message : '(no answer)')));
       _conversation.push({role: 'ai', text: displayAnswer, meta: 'mode=' + d.mode + (d.route_decision ? ' · route=' + d.route_decision.route : '')});
       renderConversation();

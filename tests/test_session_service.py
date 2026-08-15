@@ -20,6 +20,7 @@ class FakeQuery:
         self._pending_update = None
         self._limit = None
         self._order = None
+        self._single = False
 
     def select(self, *a, **k): return self
     def is_(self, col, val):
@@ -41,6 +42,9 @@ class FakeQuery:
     def limit(self, n):
         self._limit = n
         return self
+    def single(self):
+        self._single = True
+        return self
 
     def insert(self, rows):
         rows = rows if isinstance(rows, list) else [rows]
@@ -51,6 +55,25 @@ class FakeQuery:
             self.store.setdefault(self.name, []).append(row)
             inserted.append(row)
         self._result = inserted
+        return self
+
+    def upsert(self, payload, on_conflict=None):
+        rows = payload if isinstance(payload, list) else [payload]
+        key = on_conflict
+        out = []
+        for row in rows:
+            row = dict(row)
+            existing = None
+            if key:
+                existing = next((r for r in self.store.get(self.name, []) if r.get(key) == row.get(key)), None)
+            if existing:
+                existing.update(row)
+                out.append(existing)
+            else:
+                row.setdefault("id", str(uuid.uuid4()))
+                self.store.setdefault(self.name, []).append(row)
+                out.append(row)
+        self._result = out
         return self
 
     def update(self, fields):
@@ -78,6 +101,10 @@ class FakeQuery:
             data = sorted(data, key=lambda r: r.get(col), reverse=desc)
         if self._limit:
             data = data[:self._limit]
+        if self._single:
+            if len(data) != 1:
+                raise Exception(f"single() expected exactly one row, got {len(data)}")
+            return MagicMock(data=data[0])
         return MagicMock(data=data)
 
 
