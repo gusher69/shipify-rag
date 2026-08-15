@@ -350,6 +350,21 @@ class TestHumanHandoffTriggers(unittest.TestCase):
         result = self.engine.decide("ต้องการให้พนักงานช่วยเรื่องนี้", history=[])
         self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
 
+    def test_contact_staff_phrasing_routes_to_handoff(self):
+        """Playground Production Parity UAT (2026-08-15), scenario J —
+        'ขอติดต่อเจ้าหน้าที่' (contact staff) fell through to normal RAG
+        routing because it matches neither 'คุยกับเจ้าหน้าที่' nor
+        'ขอเจ้าหน้าที่' (the word 'ติดต่อ' breaks both substrings)."""
+        result = self.engine.decide("ขอติดต่อเจ้าหน้าที่", history=[])
+        self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_sendlinenotics_notify_trigger_still_not_hijacked_as_human_request(self):
+        """The SendLineNotiCS notify-action trigger phrase ('...ต้องการให้
+        ติดต่อกลับ', contact the CUSTOMER back) must never match the NEW
+        'ติดต่อเจ้าหน้าที่' alternative -- it never mentions เจ้าหน้าที่."""
+        from services.slot_filling_engine import _HUMAN_REQUEST_RE
+        self.assertIsNone(_HUMAN_REQUEST_RE.search("ช่วยแจ้ง CS ให้หน่อยว่าลูกค้าต้องการให้ติดต่อกลับ"))
+
     def test_escalation_after_max_retry_routes_to_handoff(self):
         follow_up = "รบกวนแจ้งเลขพัสดุ หรือเลขออเดอร์ เพื่อให้ตรวจสอบสถานะสินค้าได้ค่ะ"
         history = [

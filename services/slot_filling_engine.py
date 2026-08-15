@@ -305,6 +305,12 @@ INTENT_SCHEMAS: Dict[str, Dict] = {
 _HUMAN_REQUEST_RE = re.compile(
     r"คุยกับเจ้าหน้าที่|ขอเจ้าหน้าที่|ติดต่อคน|ขอสายเจ้าหน้าที่|ไม่คุยกับบอท"
     r"|พนักงาน\s*ช่วย|ขอคุยกับคน"
+    # "ติดต่อเจ้าหน้าที่" (contact STAFF) — distinct from the SendLineNotiCS
+    # notify-action trigger's own "...ติดต่อกลับ" (contact the CUSTOMER
+    # back), which never mentions "เจ้าหน้าที่" — so this stays specific to
+    # "customer wants a person" (Playground Production Parity UAT,
+    # 2026-08-15, scenario J: "ขอติดต่อเจ้าหน้าที่").
+    r"|ติดต่อเจ้าหน้าที่"
     r"|CS\s{0,3}ติดต่อกลับ|\bhuman agent\b|\bcustomer service\b",
     re.IGNORECASE,
 )
