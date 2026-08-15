@@ -119,17 +119,31 @@ def update_tier_for_profile(line_user_id: str, *, message: Optional[str] = None)
 # services/slot_filling_engine.py already use elsewhere in this codebase,
 # rather than maintaining a second copy of those keyword lists. ─────────
 
+# Complaint/distress phrasing not already covered by decision_engine.py's
+# own _COMPLAINT_RE/_LEGAL_THREAT_RE (which this module deliberately
+# reuses rather than duplicating -- see classify_message_stage below).
+# Checked ALONGSIDE those, before the HOT check, so e.g. "ของหายค่ะ
+# รบกวนติดต่อกลับด้วย" (item lost, please call back) is never
+# misclassified as hot just because it also asks for a callback.
+_NEGATIVE_STRONG_EXTRA_RE = re.compile(
+    r"ของหาย|พัสดุหาย|สินค้าหาย|ติดต่อใครไม่ได้|ติดต่อไม่ได้เลย|ไม่มีใครรับสาย|ไม่มีใครตอบ",
+    re.IGNORECASE,
+)
 _NEGATIVE_MILD_RE = re.compile(r"ยังไม่ถึง|ยังไม่ได้รับ|ไม่มาถึงสักที|ของช้า", re.IGNORECASE)
 _HOT_RE = re.compile(
     r"สนใจ|อยากเริ่ม|อยากใช้บริการ|อยากเป็นลูกค้า|ขอราคา|ขอใบเสนอราคา|สมัครใช้บริการ",
     re.IGNORECASE,
 )
-# A narrower sub-signal of _HOT_RE -- an explicit ask for someone to reach
-# back out, not just general interest -- used only by
-# compute_handoff_recommendation() below (see the spec's own worked
-# example: "สนใจมากครับ ขอรายละเอียดราคา" is HOT but handoff_recommended
-# stays false, while "...ขอให้เซลส์ติดต่อกลับ" is HOT AND recommended).
-_HOT_CONTACT_REQUEST_RE = re.compile(r"เซลส์.{0,4}ติดต่อ|ให้เซลส์|ติดต่อกลับ|นัดหมาย|โทรกลับ", re.IGNORECASE)
+# A narrower sub-signal of _HOT_RE -- an explicit ask for a SALES
+# callback specifically, not just general interest and not just any
+# mention of "contact/call back" (a bare "ติดต่อกลับ"/"โทรกลับ" also
+# appears in unrelated contexts, e.g. an agent explicitly invoking the
+# SendLineNotiCS Business Action itself -- "ช่วยแจ้ง CS ว่าลูกค้าต้องการ
+# ให้ติดต่อกลับ" -- which must NOT be hijacked into a Customer
+# Intelligence handoff before ever reaching that action's own
+# confirmation-gate flow). Requiring "เซลส์" keeps this specific to the
+# spec's own worked examples ("ให้เซลส์โทรกลับ", "ขอให้เซลส์ติดต่อกลับ").
+_HOT_CONTACT_REQUEST_RE = re.compile(r"เซลส์.{0,4}ติดต่อ|ให้เซลส์", re.IGNORECASE)
 _WARM_RE = re.compile(
     r"ค่าบริการ|ค่าใช้จ่าย|คิดค่า|คิดราคา|ค่าขนส่ง|ระยะเวลา|ใช้เวลานาน"
     r"|ขั้นตอน|วิธีการนำเข้า|นำเข้า.{0,10}ยังไง|นำเข้า.{0,10}อย่างไร",
@@ -154,14 +168,15 @@ def classify_message_stage(message: str) -> Dict:
     from services.decision_engine import _COMPLAINT_RE, _LEGAL_THREAT_RE
     from services.slot_filling_engine import _HUMAN_REQUEST_RE
 
-    if _LEGAL_THREAT_RE.search(message) or _COMPLAINT_RE.search(message) or _HUMAN_REQUEST_RE.search(message):
+    if _LEGAL_THREAT_RE.search(message) or _COMPLAINT_RE.search(message) or _HUMAN_REQUEST_RE.search(message) \
+       or _NEGATIVE_STRONG_EXTRA_RE.search(message):
         return {"stage": "negative", "confidence": 0.9,
                 "reason": "complaint, dissatisfaction, or an explicit request to speak with a human agent"}
     if _NEGATIVE_MILD_RE.search(message):
         return {"stage": "negative", "confidence": 0.6,
                 "reason": "customer flagged a possible service issue (e.g. shipment not yet arrived) "
                           "without an explicit complaint"}
-    if _HOT_RE.search(message):
+    if _HOT_RE.search(message) or _HOT_CONTACT_REQUEST_RE.search(message):
         return {"stage": "hot", "confidence": 0.85,
                 "reason": "clear purchase, sign-up, or contact intent"}
     if _WARM_RE.search(message):
@@ -206,7 +221,7 @@ def compute_handoff_recommendation(stage: str, message: str) -> Dict:
         return {"recommended": True,
                 "reason": "customer explicitly asked for a callback/contact while showing strong purchase intent"}
     if stage == "negative" and (_HUMAN_REQUEST_RE.search(message) or _LEGAL_THREAT_RE.search(message)
-                                 or _COMPLAINT_RE.search(message)):
+                                 or _COMPLAINT_RE.search(message) or _NEGATIVE_STRONG_EXTRA_RE.search(message)):
         return {"recommended": True,
                 "reason": "complaint or explicit request to speak with a human agent"}
     if stage == "negative":

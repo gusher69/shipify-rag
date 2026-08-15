@@ -696,6 +696,37 @@ class TestHumanHandoffNotification(unittest.TestCase):
         combined_reply_text = " ".join(m.text for m in sent_messages if hasattr(m, "text"))
         self.assertNotIn(real_secret, combined_reply_text)
 
+    # Context Package ───────────────────────────────────────────────
+    def test_handoff_notification_carries_customer_intelligence_context(self):
+        """Human Handoff V1 (2026-08-15), Phase 3 -- the notification
+        must include the Customer Intelligence profile's remembered
+        stage/identifiers even when THIS turn's own message didn't
+        mention them (a bare "ขอคุยกับเจ้าหน้าที่" with SP1014 established
+        two turns ago)."""
+        rich_profile = {
+            "display_name": "สมชาย", "conversation_tier": "negative",
+            "primary_intent": "complaint", "cust_code": "SP1014",
+            "last_order_code": "POS100820260809001", "last_shipment_code": "FT318220260726001",
+            "last_tracking": "testlineOnNut007",
+        }
+        with patch.object(webhook_module, "get_profile", return_value=rich_profile), \
+             patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             self._mock_http_success() as mock_req, self._mock_credential():
+            mock_engine_cls.return_value.decide.return_value = self._handoff_decide_result()
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอคุยกับเจ้าหน้าที่", user_id="UCTX"))
+
+        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
+        message = sent_body.get("Message") or ""
+        self.assertIn("SP1014", message)
+        self.assertIn("POS100820260809001", message)
+        self.assertIn("FT318220260726001", message)
+        self.assertIn("testlineOnNut007", message)
+        self.assertIn("Customer Stage:", message)
+        self.assertIn("Recommended Action:", message)
+        # Still never a credential value, even with the full context
+        # package populated.
+        self.assertNotIn("REAL-SECRET", message)
+
 
 if __name__ == "__main__":
     unittest.main()

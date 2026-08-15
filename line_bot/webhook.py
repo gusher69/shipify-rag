@@ -381,13 +381,34 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             if conversation:
                 session_service.set_handoff_status(conversation["id"], "PENDING", reason=reason)
             from services.human_handoff_service import send_handoff_notification
+            from services.customer_tier_service import classify_message_stage
             collected = (dev.get("information_collection_status") or {}).get("collected_parameters") or {}
+            # Handoff Context Package (Human Handoff V1, 2026-08-15) --
+            # prefers THIS turn's own collected parameters (freshest),
+            # falls back to the Customer Intelligence profile (what was
+            # remembered from earlier turns) so a bare "ขอคุยกับเจ้าหน้าที่"
+            # with no identifier of its own still gives CS useful context.
+            # Never a credential: `profile` only ever carries the
+            # customer_message-sourced identifier fields Customer
+            # Intelligence V1 persists (cust_code/last_order_code/
+            # last_shipment_code/last_tracking), never SecretCode.
+            stage_now = classify_message_stage(question).get("stage")
+            recent_summary = " | ".join(
+                f"{h['role']}: {h['content']}" for h in (recent_history or []) if h.get("content")
+            ) or None
             send_result = send_handoff_notification(
                 reason=reason,
                 customer_name=(profile or {}).get("display_name") or None,
-                cust_code=collected.get("CustCode"),
+                cust_code=collected.get("CustCode") or (profile or {}).get("cust_code"),
                 line_user_id=user_id,
                 customer_message=question,
+                conversation_summary=recent_summary,
+                customer_stage=stage_now or (profile or {}).get("conversation_tier"),
+                primary_intent=(dev.get("intent") or {}).get("actionable_intent") or (profile or {}).get("primary_intent"),
+                current_topic=(dev.get("intent") or {}).get("actionable_intent"),
+                last_order_code=collected.get("OrderCode") or (profile or {}).get("last_order_code"),
+                last_shipment_code=collected.get("ShipmentCode") or (profile or {}).get("last_shipment_code"),
+                last_tracking=collected.get("Tracking") or (profile or {}).get("last_tracking"),
             )
             if conversation:
                 if send_result.get("sent"):

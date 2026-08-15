@@ -362,6 +362,53 @@ class TestHumanHandoffTriggers(unittest.TestCase):
         self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
 
 
+class TestCustomerIntelligenceHandoffTrigger(unittest.TestCase):
+    """Human Handoff V1 (2026-08-15), Trigger C — Customer Intelligence's
+    per-message stage/handoff signal (services/customer_tier_service.py)
+    escalating THIS turn, end to end through decide(). Gated to a HOT
+    customer with an explicit sales-callback request only — see
+    decide()'s own inline comment for why the analogous NEGATIVE+bare-
+    complaint case must NOT short-circuit here (it needs to reach the RAG
+    pipeline / AI Policy escalation, Trigger B, first)."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+
+    def test_hot_with_callback_request_routes_to_handoff(self):
+        result = self.engine.decide("ขอให้เซลส์ติดต่อกลับ", history=[], context={"developer_mode": True})
+        self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+        self.assertEqual(result["handoff_payload"]["reason"], "customer_intelligence_recommended")
+
+    def test_hot_without_callback_request_never_escalates(self):
+        result = self.engine.decide("สนใจมากครับ ขอรายละเอียดราคา", history=[])
+        self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_negative_bare_complaint_without_explicit_ask_reaches_rag_not_preempted(self):
+        """The exact regression this trigger must never reintroduce: a
+        complaint-shaped message with no explicit "talk to a human"
+        phrase must still reach the RAG pipeline (and AI Policy's own
+        escalation verdict), never get short-circuited here first."""
+        _seed_action(self.reg, key="kb", action_type="RAG", keywords=["ร้องเรียน"])
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="ขอโทษด้วยค่ะ กำลังตรวจสอบให้", policy_escalate=False)):
+            result = self.engine.decide("ร้องเรียนบริการ", history=[])
+        self.assertEqual(result["routing"]["type"], "RAG")
+
+    def test_erp_resolvable_negative_never_escalates(self):
+        result = self.engine.decide("ของยังไม่ถึง ช่วยเช็กให้หน่อย", history=[])
+        self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_agent_style_cs_notify_message_is_not_hijacked(self):
+        """The message a customer/agent uses to directly invoke the
+        SendLineNotiCS Business Action itself (mentions "ติดต่อกลับ" but
+        no "เซลส์") must reach normal action search/selection, never get
+        intercepted here first."""
+        result = self.engine.decide("ช่วยแจ้ง CS ให้หน่อยว่าลูกค้าต้องการให้ติดต่อกลับ", history=[])
+        self.assertNotEqual(result["handoff_payload"].get("reason") if result.get("handoff_payload") else None,
+                             "customer_intelligence_recommended")
+
+
 class TestDeveloperMode(unittest.TestCase):
     def setUp(self):
         self.reg = BusinessActionRegistry(_FakeSupabase())

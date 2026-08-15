@@ -85,7 +85,7 @@ class TestBuildHandoffMessage(unittest.TestCase):
         self.assertIn("CustCode: SP1014", msg)
         self.assertIn("LINE User: U123", msg)
         self.assertIn("ขอคุยกับเจ้าหน้าที่", msg)
-        self.assertIn("เหตุผล:", msg)
+        self.assertIn("Handoff Reason:", msg)
 
     def test_unknown_fields_render_as_unknown_not_blank(self):
         msg = build_handoff_message(
@@ -100,6 +100,57 @@ class TestBuildHandoffMessage(unittest.TestCase):
         msg = build_handoff_message(
             reason="user_requested_human", customer_name="X", cust_code="SP1014",
             line_user_id="U1", customer_message="ขอคุยกับเจ้าหน้าที่",
+        )
+        self.assertNotIn("SecretCode", msg)
+        self.assertNotIn("Token", msg)
+
+
+class TestHandoffContextPackage(unittest.TestCase):
+    """Human Handoff V1 (2026-08-15), Phase 3 -- the notification must
+    carry useful Customer Intelligence context, not just a generic
+    "contact customer" line."""
+
+    def test_includes_stage_intent_and_identifiers_when_known(self):
+        msg = build_handoff_message(
+            reason="user_requested_human", customer_name="สมชาย", cust_code="SP1014",
+            line_user_id="U123", customer_message="ขอคุยกับเจ้าหน้าที่",
+            customer_stage="hot", primary_intent="order_status", current_topic="order_status",
+            last_order_code="POS100820260809001", last_shipment_code="FT318220260726001",
+            last_tracking="testlineOnNut007", conversation_summary="user: SP1014 | assistant: ok",
+        )
+        self.assertIn("Customer Stage: HOT", msg)
+        self.assertIn("Primary Intent: order_status", msg)
+        self.assertIn("Last Order: POS100820260809001", msg)
+        self.assertIn("Last Shipment: FT318220260726001", msg)
+        self.assertIn("Last Tracking: testlineOnNut007", msg)
+        self.assertIn("Recent Conversation:", msg)
+        self.assertIn("Recommended Action:", msg)
+
+    def test_missing_context_renders_as_placeholder_not_blank_or_none(self):
+        msg = build_handoff_message(
+            reason="user_requested_human", customer_name=None, cust_code=None,
+            line_user_id=None, customer_message="ขอคุยกับเจ้าหน้าที่",
+        )
+        self.assertNotIn("None", msg)
+        self.assertIn("Customer Stage: UNKNOWN", msg)
+        self.assertIn("Last Order: -", msg)
+
+    def test_recommended_action_differs_by_stage(self):
+        hot_msg = build_handoff_message(reason="customer_intelligence_recommended", customer_name=None,
+                                         cust_code=None, line_user_id=None, customer_message="x",
+                                         customer_stage="hot")
+        negative_msg = build_handoff_message(reason="customer_intelligence_recommended", customer_name=None,
+                                              cust_code=None, line_user_id=None, customer_message="x",
+                                              customer_stage="negative")
+        self.assertIn("ปิดการขาย", hot_msg)
+        self.assertIn("complaint follow-up", negative_msg)
+
+    def test_never_contains_a_secret_looking_key_with_full_context(self):
+        msg = build_handoff_message(
+            reason="user_requested_human", customer_name="X", cust_code="SP1014",
+            line_user_id="U1", customer_message="ขอคุยกับเจ้าหน้าที่",
+            customer_stage="negative", primary_intent="complaint",
+            conversation_summary="user: ของหาย | assistant: ขอโทษด้วยค่ะ",
         )
         self.assertNotIn("SecretCode", msg)
         self.assertNotIn("Token", msg)

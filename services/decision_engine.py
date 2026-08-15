@@ -670,6 +670,39 @@ class DecisionEngine:
                     message, history, context, developer_trace, start,
                     reason="user_requested_human", workflow=workflow_hint)
 
+            # Customer Intelligence Handoff Recommendation (Human Handoff
+            # V1, 2026-08-15) — Trigger C. A deterministic, per-message
+            # signal (services/customer_tier_service.py, the SAME function
+            # Customer Intelligence V1 already uses to persist
+            # handoff_recommended onto the profile) computed HERE, on this
+            # turn's own message, so a genuinely decisive signal (e.g. "ขอ
+            # ให้เซลส์ติดต่อกลับ") can escalate THIS turn — not just get
+            # recorded for next time.
+            #
+            # Deliberately gated to stage=="hot" ONLY, even though
+            # compute_handoff_recommendation() also returns True for a
+            # NEGATIVE + complaint message with no explicit human-request
+            # phrase. That negative case must NOT short-circuit here: it
+            # needs to reach the RAG pipeline first so AI Policies' own
+            # escalation verdict (Trigger B, below) gets a real chance to
+            # answer or produce its own, more specific escalation message
+            # — short-circuiting on a bare complaint keyword would deny
+            # every complaint-shaped RAG question an actual answer. A
+            # negative message WITH an explicit human-request phrase is
+            # already caught by the _HUMAN_REQUEST_RE check just above
+            # (Trigger A), so nothing is lost. The hot+callback-request
+            # case has no such pipeline to defer to (there is no RAG
+            # answer for "please have sales call me"), so it escalates
+            # immediately, same as an explicit request would.
+            from services.customer_tier_service import classify_message_stage, compute_handoff_recommendation
+            ci_stage = classify_message_stage(message)
+            if ci_stage["stage"] == "hot":
+                ci_handoff = compute_handoff_recommendation(ci_stage["stage"], message)
+                if ci_handoff["recommended"]:
+                    return self._route_human_handoff(
+                        message, history, context, developer_trace, start,
+                        reason="customer_intelligence_recommended", workflow=workflow_hint)
+
             # New execution order: Search Candidate Business Actions ->
             # Select Best Business Action -> Read Business Action
             # Parameters -> Information Collection -> Execute. Selection

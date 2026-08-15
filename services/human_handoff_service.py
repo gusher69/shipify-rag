@@ -40,6 +40,13 @@ _REASON_LABELS = {
     "ai_policy_escalation": "AI Policy ตัดสินใจส่งต่อให้เจ้าหน้าที่ (ความมั่นใจต่ำ/ตรวจพบความไม่พอใจ)",
     "user_refused_to_provide_information": "ลูกค้าปฏิเสธที่จะให้ข้อมูลที่จำเป็น",
     "max_retry_exceeded": "ถามข้อมูลที่จำเป็นซ้ำครบจำนวนครั้งที่กำหนดแล้ว",
+    # Human Handoff V1 (2026-08-15), Trigger C — services/decision_engine.py
+    # ::decide() only reaches this reason for a HOT customer with an
+    # explicit callback/contact request, or a NEGATIVE customer with a
+    # complaint/legal-threat/unreachable-contact signal (services/
+    # customer_tier_service.py::compute_handoff_recommendation) — never a
+    # bare HOT or NEGATIVE stage alone.
+    "customer_intelligence_recommended": "ระบบวิเคราะห์บทสนทนาแนะนำให้ส่งต่อเจ้าหน้าที่ (ความสนใจสูง/ไม่พอใจ ตามเงื่อนไขที่กำหนด)",
 }
 
 
@@ -58,34 +65,69 @@ def find_notification_action(registry=None) -> Optional[Dict]:
     return None
 
 
+_RECOMMENDED_ACTIONS = {
+    ("hot", None): "ติดต่อลูกค้ากลับเพื่อนำเสนอบริการ/ปิดการขาย",
+    ("negative", None): "ตรวจสอบปัญหาและติดต่อกลับลูกค้าโดยเร็ว (complaint follow-up)",
+    ("warm", None): "ติดต่อลูกค้ากลับเพื่อให้ข้อมูลเพิ่มเติม",
+    ("cold", None): "ติดต่อลูกค้ากลับ",
+}
+
+
+def _recommend_action(reason: str, customer_stage: Optional[str]) -> str:
+    """Deterministic Recommended Action label for the CS-facing package
+    (Phase 3) — a plain lookup over (reason, stage), never an LLM call.
+    `ai_policy_escalation` always means the AI genuinely could not answer,
+    regardless of stage, so it's checked first."""
+    if reason == "ai_policy_escalation":
+        return "ตรวจสอบคำถามที่ AI ไม่สามารถตอบได้ และติดต่อกลับลูกค้า (investigate + contact customer)"
+    return _RECOMMENDED_ACTIONS.get((customer_stage, None), "ติดต่อลูกค้ากลับ")
+
+
 def build_handoff_message(*, reason: str, customer_name: Optional[str], cust_code: Optional[str],
                            line_user_id: Optional[str], customer_message: str,
-                           conversation_summary: Optional[str] = None) -> str:
-    """Builds the CS-facing notification text. Deterministic string
-    formatting only — never includes SecretCode, tokens, or any other
-    credential (this function is never given one in the first place; only
-    customer-facing/conversational context reaches it)."""
+                           conversation_summary: Optional[str] = None,
+                           customer_stage: Optional[str] = None, primary_intent: Optional[str] = None,
+                           current_topic: Optional[str] = None,
+                           last_order_code: Optional[str] = None, last_shipment_code: Optional[str] = None,
+                           last_tracking: Optional[str] = None) -> str:
+    """Builds the CS-facing notification text (Human Handoff V1, Phase 3
+    Context Package). Deterministic string formatting only, over data the
+    caller already resolved — never includes SecretCode, tokens, any
+    other credential, developer trace, or hidden reasoning (this function
+    is never given any of those in the first place; only customer-facing/
+    conversational context and the Customer Intelligence profile fields
+    reach it)."""
     reason_label = _REASON_LABELS.get(reason, reason or "ต้องการความช่วยเหลือจากเจ้าหน้าที่")
     lines = [
         "[AI HANDOFF]",
         "ลูกค้าต้องการติดต่อเจ้าหน้าที่",
         "",
         f"Customer: {customer_name or 'Unknown'}",
-        f"CustCode: {cust_code or 'Unknown'}",
         f"LINE User: {line_user_id or 'Unknown'}",
+        f"CustCode: {cust_code or 'Unknown'}",
         "",
-        f"คำถามล่าสุด: {customer_message or '-'}",
+        f"Customer Stage: {(customer_stage or 'unknown').upper()}",
+        f"Primary Intent: {primary_intent or '-'}",
+        f"Handoff Reason: {reason_label}",
+        f"Current Topic: {current_topic or customer_message or '-'}",
         "",
-        f"เหตุผล: {reason_label}",
+        f"Last Order: {last_order_code or '-'}",
+        f"Last Shipment: {last_shipment_code or '-'}",
+        f"Last Tracking: {last_tracking or '-'}",
     ]
     if conversation_summary:
-        lines += ["", f"Conversation: {conversation_summary}"]
+        lines += ["", f"Recent Conversation: {conversation_summary}"]
+    lines += ["", f"Recommended Action: {_recommend_action(reason, customer_stage)}"]
     return "\n".join(lines)
 
 
 def send_handoff_notification(*, reason: str, customer_name: Optional[str] = None,
                                cust_code: Optional[str] = None, line_user_id: Optional[str] = None,
                                customer_message: str = "", conversation_summary: Optional[str] = None,
+                               customer_stage: Optional[str] = None, primary_intent: Optional[str] = None,
+                               current_topic: Optional[str] = None,
+                               last_order_code: Optional[str] = None, last_shipment_code: Optional[str] = None,
+                               last_tracking: Optional[str] = None,
                                registry=None, executor=None) -> Dict:
     """Sends a real Human Handoff notification through whichever
     NOTIFY/NOTIFICATION Business Action is configured (e.g. SendLineNotiCS)
@@ -100,7 +142,9 @@ def send_handoff_notification(*, reason: str, customer_name: Optional[str] = Non
     message = build_handoff_message(
         reason=reason, customer_name=customer_name, cust_code=cust_code,
         line_user_id=line_user_id, customer_message=customer_message,
-        conversation_summary=conversation_summary,
+        conversation_summary=conversation_summary, customer_stage=customer_stage,
+        primary_intent=primary_intent, current_topic=current_topic,
+        last_order_code=last_order_code, last_shipment_code=last_shipment_code, last_tracking=last_tracking,
     )
     exec_ = executor or get_action_executor()
     result = exec_.execute(action["id"], context={"collected_slots": {"Message": message}})
