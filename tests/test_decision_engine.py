@@ -511,6 +511,52 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         dev = result.get("developer") or {}
         self.assertNotEqual(dev.get("selection_source"), "conversation_reference_detail")
 
+    def test_active_conversation_never_stolen_by_an_unrelated_action_incidentally_satisfiable_from_memory(self):
+        """Confirmed live bug (2026-08-15) — a tracking search response
+        incidentally teaches the record's own ShipmentCode too (Issue 2).
+        Once CustCode+ShipmentCode are BOTH in memory, an unrelated
+        same-domain action requiring exactly those two (here: a
+        "shipment detail" lookup by code) could score high enough via
+        identifier-memory-boosted fresh-search to steal the turn from an
+        ACTIVE tracking conversation — even though the customer's
+        follow-up ("ตอนนี้อยู่ไหนแล้ว") never asked for anything but the
+        tracking status. Entity Continuation must keep the conversation
+        on the action actually in use unless the message carries its own
+        real topical evidence for the other one."""
+        tracking_id = _seed_action(self.reg, key="search_tracking_full", action_type="API",
+                                    category="tracking", keywords=["tracking"])
+        self.reg.replace_parameters(tracking_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "Tracking", "display_name": "เลข Tracking", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.replace_response_mapping(tracking_id, [
+            {"json_path": "$.data.Code", "mapped_label": "เลขที่บิลขนส่ง",
+             "field_metadata": {"keywords": ["เลขบิล"], "identity_concept": "ShipmentCode"}},
+            {"json_path": "$.data.Status", "mapped_label": "สถานะ", "field_metadata": {"keywords": ["สถานะ"]}},
+        ])
+        self.reg.upsert_execution(tracking_id, {"endpoint": "https://example.test/tracking", "http_method": "GET"})
+
+        # An UNRELATED action, same category, that only happens to need
+        # exactly the two identifiers a tracking search incidentally
+        # teaches — must NOT steal a plain, topic-free follow-up.
+        shipment_id = _seed_action(self.reg, key="search_shipment_by_code", action_type="API", category="tracking")
+        self.reg.replace_parameters(shipment_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(shipment_id, {"endpoint": "https://example.test/shipment", "http_method": "GET"})
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "data": {"Code": "FT999", "Status": "รับเข้าที่จีน"}})):
+            result = self.engine.decide(
+                "ตอนนี้อยู่ไหนแล้ว", history=[], context={"developer_mode": True,
+                "customer_context": {"last_business_action": "search_tracking_full", "cust_code": "FT3182",
+                                      "last_tracking": "TRACK1", "last_shipment_code": "FT999"}})
+        dev = result.get("developer") or {}
+        info = dev.get("information_collection_status") or {}
+        self.assertEqual(info.get("selected_business_action"), "search_tracking_full")
+
 
 class TestBusinessActionExecutionByType(unittest.TestCase):
     def setUp(self):

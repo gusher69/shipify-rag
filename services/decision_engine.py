@@ -1043,37 +1043,62 @@ class DecisionEngine:
                     return self._route_clarification(classification, message, context,
                                                         developer_trace, start, workflow=workflow_hint)
 
-                # Identifier Memory (2026-08-15) — a remembered CustCode/
-                # OrderCode/ShipmentCode/Tracking from earlier THIS
-                # conversation also counts as evidence an identifier-
-                # requiring action is relevant, exactly like a slot this
-                # turn's own message bound (_parameter_availability_score
-                # doesn't care which turn supplied the value).
-                identifier_memory_slots = {
-                    param_name: customer_context[profile_field]
-                    for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS
-                    if customer_context.get(profile_field)
-                } if customer_context else {}
-                candidates = search_candidate_actions(self.registry, workflow=workflow_hint, message=message,
-                                                        collected_slots=identifier_memory_slots)
-                selected = select_best_action(candidates, minimum_score=1.0 if not workflow_hint else 0.5)
-                developer_trace["selection_source"] = "fresh_search"
+                # Entity Continuation (Final Conversation State Engine,
+                # 2026-08-15) — checked BEFORE identifier-memory-boosted
+                # fresh-search, not merely as its fallback. Reason: once
+                # several identifiers have accumulated in memory (e.g. a
+                # tracking search incidentally also teaches the record's
+                # own ShipmentCode — see _capture_response_derived_
+                # identifiers), a DIFFERENT same-domain action whose own
+                # required parameters ALL happen to be satisfiable from
+                # that memory can otherwise score high enough to steal
+                # the turn from an ACTIVE conversation purely by
+                # coincidence — not because the customer's message ever
+                # asked for it. A message that reads as a follow-up
+                # reference to the action just used (_resolve_
+                # conversation_reference: field/marker evidence) is
+                # preferred UNLESS the message ALSO carries its own
+                # decisive topical evidence for a genuinely different
+                # action (checked memory-FREE, so remembered identifiers
+                # can never manufacture that evidence on their own).
+                referenced = _resolve_conversation_reference(self.registry, message, customer_context)
+                fresh_topic_beats_reference = False
+                if referenced:
+                    topic_only_candidates = search_candidate_actions(
+                        self.registry, workflow=workflow_hint, message=message, collected_slots={})
+                    if topic_only_candidates and topic_only_candidates[0]["id"] != referenced["id"] \
+                            and topic_only_candidates[0]["_score"] >= (1.0 if not workflow_hint else 0.5):
+                        fresh_topic_beats_reference = True
 
-                if not selected:
-                    # Conversation Resolver (Final Conversational
-                    # Correctness, 2026-08-15) — a last resort BEFORE
-                    # falling to RAG/safe-fallback: a message with no
-                    # Business-Action-selecting signal of its own, but
-                    # that reads as a generic follow-up reference (see
-                    # _REFERENCE_MARKER_RE) while the profile remembers
-                    # which action the customer was just using, resumes
-                    # that SAME action instead of guessing via RAG. Never
-                    # invents an identifier — Identifier Memory fill (or
-                    # a genuine follow-up question) happens exactly like
-                    # any other selection, via _handle_dynamic_collection
-                    # below.
-                    referenced = _resolve_conversation_reference(self.registry, message, customer_context)
-                    if referenced:
+                if referenced and not fresh_topic_beats_reference:
+                    selected = referenced
+                    candidates = [selected]
+                    developer_trace["selection_source"] = "conversation_reference"
+                else:
+                    # Identifier Memory (2026-08-15) — a remembered
+                    # CustCode/OrderCode/ShipmentCode/Tracking from
+                    # earlier THIS conversation also counts as evidence
+                    # an identifier-requiring action is relevant, exactly
+                    # like a slot this turn's own message bound
+                    # (_parameter_availability_score doesn't care which
+                    # turn supplied the value).
+                    identifier_memory_slots = {
+                        param_name: customer_context[profile_field]
+                        for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS
+                        if customer_context.get(profile_field)
+                    } if customer_context else {}
+                    candidates = search_candidate_actions(self.registry, workflow=workflow_hint, message=message,
+                                                            collected_slots=identifier_memory_slots)
+                    selected = select_best_action(candidates, minimum_score=1.0 if not workflow_hint else 0.5)
+                    developer_trace["selection_source"] = "fresh_search"
+
+                    if not selected and referenced:
+                        # The memory-boosted search still found nothing
+                        # (fresh_topic_beats_reference was True only
+                        # because of a WEAKER, sub-threshold memory-free
+                        # score that never actually got selected here) —
+                        # fall back to the reference after all, exactly
+                        # as before this reordering.
                         selected = referenced
                         candidates = [selected]
                         developer_trace["selection_source"] = "conversation_reference"
