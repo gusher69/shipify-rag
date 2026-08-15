@@ -402,14 +402,22 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
 # Conversation Resolver (Final Conversational Correctness, 2026-08-15) —
 # a SMALL, fixed set of generic Thai referring-expression patterns that
 # mean "continue talking about whatever we were just discussing" rather
-# than a fresh topic (e.g. "แล้ว order ล่าสุดล่ะ", "ของผม", "อันนี้",
-# "ตอนนี้สถานะอะไร", "แล้วของถึงหรือยัง"). Deliberately narrow and
-# idiomatic — see _resolve_conversation_reference's own docstring for why
-# this can only ever engage as a last resort, never pre-empting a real
-# keyword/pattern match.
+# than a fresh topic, used ONLY as a fallback signal when the message
+# names no specific field of its own (see _resolve_conversation_reference
+# — field-keyword evidence, config-driven and unbounded, always wins
+# first). Deliberately narrow and idiomatic — see that function's own
+# docstring for why this can only ever engage as a last resort, never
+# pre-empting a real keyword/pattern match.
 _REFERENCE_MARKER_RE = re.compile(
     r"ล่าสุด|ของผม|ของฉัน|ของดิฉัน|อันนี้|รายการนี้|ตอนนี้|แล้ว.*ล่ะ|ถึงหรือยัง|สถานะ",
     re.IGNORECASE)
+
+# A generic "I want the SPECIFIC record, not the list" signal — see the
+# LIST -> DETAIL sibling preference in _resolve_conversation_reference.
+# Deliberately just this one word; it is never used to invent an action,
+# only to prefer a same-category sibling that ALSO already matches every
+# other selection signal.
+_DETAIL_INTENT_RE = re.compile(r"รายละเอียด", re.IGNORECASE)
 
 
 def _resolve_conversation_reference(registry, message: str, customer_context: Dict) -> Optional[Dict]:
@@ -417,16 +425,39 @@ def _resolve_conversation_reference(registry, message: str, customer_context: Di
     Business-Action-selecting signal of its own (no keyword/pattern
     match — this is only ever called from decide() after a normal fresh
     search already came up empty) but the conversation clearly isn't
-    over: it matches a generic referring-expression pattern AND the
-    profile remembers which Business Action the customer was last using
-    (profiles/manager.py's own Identifier Memory persistence, extended to
-    also remember `last_business_action`). Never invents an identifier —
-    this only decides WHICH action to try again; Identifier Memory fill
-    (and, if still incomplete, a genuine follow-up question) happens
-    exactly like any other selection, via _handle_dynamic_collection."""
+    over — the profile remembers which Business Action the customer was
+    last using (profiles/manager.py's own Identifier Memory persistence,
+    extended to also remember `last_business_action`), and EITHER:
+
+    (a) the message names a specific FIELD that action's own response
+    mapping is configured to return (Requested Field Filtering's own
+    field_metadata.keywords vocabulary, reused here as evidence of
+    "still talking about the same record" — e.g. "มีคูปองไหม" /
+    "เบอร์โทรอะไร" after GetDataCustomer. Fully config-driven: ANY field
+    any action's response_mapping names works automatically, never a
+    fixed sentence list), or
+
+    (b) it matches a generic topic-free referring-expression marker (see
+    _REFERENCE_MARKER_RE, e.g. "แล้วของถึงหรือยัง").
+
+    LIST -> DETAIL sibling preference (Issue 3): if the remembered action
+    is a LIST-shaped action (its own response_mapping returns a raw
+    list/array field) and a same-category sibling action exists whose
+    required parameters are a strict SUPERSET of the list action's own
+    (i.e. "the same thing, plus one more specific identifier") AND that
+    extra identifier is now available via Identifier Memory (Issue 2's
+    response-derived capture, or a customer-supplied value) AND the
+    message signals wanting the specific record (_DETAIL_INTENT_RE) —
+    the more specific sibling is preferred. Never invents the extra
+    identifier; if it isn't actually available yet, the list action (or
+    whatever WAS matched) is still returned, and normal collection asks
+    for it like any other missing parameter.
+
+    Never invents any identifier — this only decides WHICH action to try;
+    Identifier Memory fill (and, if still incomplete, a genuine follow-up
+    question) happens exactly like any other selection, via
+    _handle_dynamic_collection."""
     if not customer_context:
-        return None
-    if not _REFERENCE_MARKER_RE.search(message or ""):
         return None
     last_action_key = customer_context.get("last_business_action")
     if not last_action_key:
@@ -437,7 +468,97 @@ def _resolve_conversation_reference(registry, message: str, customer_context: Di
         return None
     if not action or not action.get("enabled") or action.get("action_type") not in ("API", "WEBHOOK"):
         return None
-    return registry.get_full(action["id"], mask_secrets=False)
+    full = registry.get_full(action["id"], mask_secrets=False)
+
+    message_l = (message or "").lower()
+    field_match = False
+    for row in (full.get("response_mapping") or []):
+        keywords = (row.get("field_metadata") or {}).get("keywords") or [row.get("mapped_label")]
+        if any(kw and str(kw).lower() in message_l for kw in keywords):
+            field_match = True
+            break
+    marker_match = bool(_REFERENCE_MARKER_RE.search(message or ""))
+    if not (field_match or marker_match):
+        return None
+
+    if _DETAIL_INTENT_RE.search(message or ""):
+        detail_sibling = _find_detail_sibling(registry, full, customer_context)
+        if detail_sibling:
+            return detail_sibling
+    return full
+
+
+def _find_detail_sibling(registry, list_action: Dict, customer_context: Dict) -> Optional[Dict]:
+    """See _resolve_conversation_reference's own docstring (LIST -> DETAIL
+    sibling preference). Only ever returns a sibling that is ALREADY
+    fully satisfiable from Identifier Memory alone — never a guess.
+
+    A same-category action can have more than one identifier-requiring
+    sibling (e.g. a shipment list's category also contains a Tracking
+    lookup, which incidentally also only needs one extra remembered
+    value) — among every candidate that qualifies, the one whose extra
+    required parameter matches the LIST action's own PRIMARY identity
+    concept (Issue 2's identity_concept tagging: the record's own code,
+    e.g. ShipmentCode for a shipment list) is preferred, so "the detail
+    of THIS record type" is chosen over an unrelated same-category
+    action that merely happens to also be satisfiable right now."""
+    category = list_action.get("category")
+    if not category:
+        return None
+    list_required = {p["name"] for p in (list_action.get("parameters") or []) if p.get("required")}
+    primary_concept = next(
+        (row.get("field_metadata", {}).get("identity_concept")
+         for row in (list_action.get("response_mapping") or [])
+         if row.get("field_metadata", {}).get("identity_concept")), None)
+    try:
+        siblings = [a for a in registry.enabled_actions()
+                    if a.get("category") == category and a["id"] != list_action["id"]
+                    and a.get("action_type") in ("API", "WEBHOOK")]
+    except Exception:
+        return None
+    remembered = {n: customer_context[pf] for pf, n in IDENTIFIER_MEMORY_FIELDS if customer_context.get(pf)}
+    qualifying = []
+    for sibling in siblings:
+        try:
+            sibling_params = registry.get_parameters(sibling["id"])
+        except Exception:
+            continue
+        sibling_required = {p["name"] for p in sibling_params if p.get("required")}
+        extra = sibling_required - list_required
+        if not (list_required < sibling_required and extra):
+            continue
+        askable = {p["name"]: p for p in sibling_params
+                   if p.get("input_source", "customer_message") not in _NON_ASKABLE_INPUT_SOURCES}
+        if all(name in askable and name in remembered for name in extra):
+            qualifying.append((sibling, extra))
+    if not qualifying:
+        return None
+    if primary_concept:
+        preferred = [s for s, extra in qualifying if primary_concept in extra]
+        if preferred:
+            return registry.get_full(preferred[0]["id"], mask_secrets=False)
+    return registry.get_full(qualifying[0][0]["id"], mask_secrets=False)
+
+
+def _capture_response_derived_identifiers(response_mapping: Optional[List[Dict]], mapped_fields: Dict) -> Dict[str, str]:
+    """Issue 2 — a successful list/search execution often names the
+    record's OWN identifier in its response. A response_mapping row
+    tagged `field_metadata.identity_concept` (config-driven — see
+    migrations/tools that set it; never a hardcoded field name here)
+    identifies which mapped value represents which IDENTIFIER_MEMORY_
+    FIELDS concept (CustCode/OrderCode/ShipmentCode/Tracking)."""
+    captured: Dict[str, str] = {}
+    if not response_mapping or not mapped_fields:
+        return captured
+    concept_names = {n for _, n in IDENTIFIER_MEMORY_FIELDS}
+    for row in response_mapping:
+        concept = (row.get("field_metadata") or {}).get("identity_concept")
+        if concept not in concept_names or concept in captured:
+            continue
+        value = mapped_fields.get(row.get("mapped_label"))
+        if value:
+            captured[concept] = value
+    return captured
 
 
 def _opportunistic_identifier_capture(registry, message: str) -> Dict[str, str]:
@@ -874,10 +995,35 @@ class DecisionEngine:
             # own parameter definitions — not a separate intent-keyed
             # schema — drive what gets asked.
             continuation_action = _resolve_continuation_action(self.registry, history, workflow_hint)
+            detail_sibling_action = None
+            if not continuation_action and customer_context.get("last_business_action") \
+                    and _DETAIL_INTENT_RE.search(message or ""):
+                # LIST -> DETAIL sibling preference (Issue 3) — deliberately
+                # runs BEFORE generic fresh-search scoring below: that
+                # scoring has no way to prefer "the detail sibling of the
+                # action just used" over some OTHER same-category action
+                # that also happens to be satisfiable from Identifier
+                # Memory right now (e.g. a shipment list's category also
+                # contains a Tracking lookup — both can look equally
+                # "available," but only one is actually the shipment's
+                # OWN detail record). See _find_detail_sibling's own
+                # docstring for the tie-break logic.
+                try:
+                    last_action = self.registry.get_by_key(customer_context["last_business_action"])
+                    if last_action and last_action.get("enabled"):
+                        last_full = self.registry.get_full(last_action["id"], mask_secrets=False)
+                        detail_sibling_action = _find_detail_sibling(self.registry, last_full, customer_context)
+                except Exception:
+                    detail_sibling_action = None
+
             if continuation_action:
                 selected = continuation_action
                 candidates = [selected]
                 developer_trace["selection_source"] = "conversation_continuation"
+            elif detail_sibling_action:
+                selected = detail_sibling_action
+                candidates = [selected]
+                developer_trace["selection_source"] = "conversation_reference_detail"
             else:
                 # Hybrid Question Classifier (2026-08-02 Production
                 # Integration Sprint, Phase 1 Step C) — only consulted on
@@ -1272,10 +1418,27 @@ class DecisionEngine:
             images, files = _extract_reply_attachments(result_payload.get("chunks") or [])
             reply = _build_response(text=answer, images=images, files=files)
         else:
-            mapped = result_payload.get("mapped_fields")
+            full_mapped = result_payload.get("mapped_fields")
+            # Response-Derived Identifier Memory (2026-08-15, Issue 2) —
+            # a successful list/search execution often names the record's
+            # OWN identifier in its response (response_mapping rows tagged
+            # field_metadata.identity_concept, config-driven, never a
+            # hardcoded field name here). Captured into the SAME
+            # collected_parameters dict input-bound slots already flow
+            # through, so profiles/manager.py's existing persistence
+            # remembers it exactly like a customer-supplied value would —
+            # the platform LEARNS an identifier from what the ERP just
+            # told it, not only from what the customer typed.
+            if full_mapped:
+                captured = _capture_response_derived_identifiers(selected.get("response_mapping"), full_mapped)
+                if captured:
+                    info_status = developer_trace.setdefault("information_collection_status", {})
+                    info_status["collected_parameters"] = {
+                        **(info_status.get("collected_parameters") or {}), **captured}
+            mapped = full_mapped
             if mapped:
                 mapped = select_requested_mapped_fields(message, mapped, selected.get("response_mapping"))
-            text = self._summarize_action_result(mapped if mapped else result_payload)
+            text = self._compose_natural_reply(mapped if mapped else result_payload, selected.get("response_mapping"))
             reply = _build_response(text=text)
 
         return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
@@ -1287,6 +1450,73 @@ class DecisionEngine:
             parts = [f"{k}: {v}" for k, v in list(payload.items())[:6]]
             return " / ".join(parts)
         return "ดำเนินการเรียบร้อยค่ะ"
+
+    @staticmethod
+    def _compose_natural_reply(payload, response_mapping: Optional[List[Dict]]) -> str:
+        """ERP Response Composer (2026-08-15, Issue 5) — a customer-facing
+        Thai sentence per fact instead of a raw Python/JSON dump or a
+        single " / "-joined line. Config-driven (never a hardcoded field
+        name): a response_mapping row's own field_metadata.keywords are
+        checked for a currency-shaped concept (ยอดเงิน/ราคา/total/ค่าขนส่ง)
+        to decide whether a numeric value gets "... บาทค่ะ" formatting;
+        every other field falls back to "{label}: {value}". A raw list/
+        dict value is skipped here — its OWN "latest record" scalar
+        sibling rows (e.g. "เลขที่คำสั่งซื้อล่าสุด") already surface the
+        same information in flattened, natural form; showing the raw
+        array on top of them would just reintroduce the JSON dump this
+        composer exists to remove. Falls back to the plain summarizer
+        only if nothing at all was usable."""
+        if not isinstance(payload, dict) or not payload:
+            return "ดำเนินการเรียบร้อยค่ะ"
+        rows = response_mapping or []
+        metadata_by_label = {r.get("mapped_label"): (r.get("field_metadata") or {}) for r in rows}
+        json_path_by_label = {r.get("mapped_label"): (r.get("json_path") or "") for r in rows}
+        currency_keywords = ("ยอดเงิน", "ราคา", "ค่าขนส่ง", "total", "บาท")
+        lines = []
+        unflattened_list_lines = []
+        for label, value in payload.items():
+            if value in (None, ""):
+                continue
+            if isinstance(value, dict):
+                continue
+            if isinstance(value, list):
+                if value and isinstance(value[0], dict):
+                    # A list of RECORDS (dicts) MAY be the raw nested
+                    # structure a sibling "latest record" row (e.g.
+                    # "เลขที่คำสั่งซื้อล่าสุด") already flattens elsewhere
+                    # in this SAME payload — in which case showing the
+                    # raw array too would just reintroduce the JSON dump
+                    # this composer exists to remove, so it's skipped.
+                    # But a list with no such sibling (e.g. GetDataCustomer's
+                    # "คูปอง" — a real array with nothing else covering it)
+                    # would otherwise vanish silently; that's reported as
+                    # a labeled count using the field's own name instead.
+                    this_path = json_path_by_label.get(label) or ""
+                    has_sibling = this_path and any(
+                        other_label != label and (other_path or "").startswith(this_path + ".")
+                        for other_label, other_path in json_path_by_label.items())
+                    if not has_sibling:
+                        unflattened_list_lines.append(f"พบ{label} {len(value)} รายการค่ะ")
+                    continue
+                value = ", ".join(str(v) for v in value) if value else None
+                if not value:
+                    continue
+            keywords = [str(k).lower() for k in (metadata_by_label.get(label, {}).get("keywords") or [])]
+            is_currency = isinstance(value, (int, float)) and any(
+                ck in " ".join(keywords) or ck in str(label).lower() for ck in currency_keywords)
+            if is_currency:
+                lines.append(f"{label} {value:,.2f} บาทค่ะ")
+            else:
+                lines.append(f"{label}: {value}")
+        if not lines:
+            if unflattened_list_lines:
+                return "\n".join(unflattened_list_lines)
+            return DecisionEngine._summarize_action_result(payload)
+        lines.extend(unflattened_list_lines)
+        text = "\n".join(lines)
+        if not text.rstrip().endswith(("ค่ะ", "คะ", "ครับ")):
+            text += "ค่ะ"
+        return text
 
     # ── Human Handoff ──────────────────────────────────────────────────────
 

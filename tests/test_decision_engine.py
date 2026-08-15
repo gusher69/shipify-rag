@@ -377,6 +377,141 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
         self.assertNotIn("CustPhone", sent_params)
 
 
+class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
+    """User instruction (2026-08-15, continuation of Final Conversational
+    Correctness): marker-less field-shaped follow-ups ("มีคูปองไหม"),
+    response-derived identifier memory, and generic LIST -> DETAIL
+    sibling resolution."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+
+    def _seed_customer_lookup_with_coupon_field(self):
+        action_id = _seed_action(self.reg, key="get_customer_full", action_type="API",
+                                  category="customer", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.replace_response_mapping(action_id, [
+            {"json_path": "$.data.Wallet", "mapped_label": "ยอดเงิน Wallet",
+             "field_metadata": {"keywords": ["wallet", "ยอดเงิน", "เงิน"]}},
+            {"json_path": "$.data.Coupon", "mapped_label": "คูปอง",
+             "field_metadata": {"keywords": ["คูปอง", "coupon"]}},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+        return action_id
+
+    def test_field_keyword_follow_up_resumes_remembered_action_without_a_marker(self):
+        """"มีคูปองไหม" carries none of the generic reference markers
+        (no "ล่าสุด"/"ของผม"/etc) but DOES name a field the remembered
+        action's own response_mapping is configured to return — that
+        alone must be enough to resume it. A second, unrelated action is
+        also seeded so a shared CustCode in memory can't ALSO decide this
+        via ordinary fresh-search scoring alone (mirrors the real,
+        multi-action production registry) — proving the resolver, not a
+        lucky fresh-search tie, is what selects it."""
+        self._seed_customer_lookup_with_coupon_field()
+        _seed_action(self.reg, key="unrelated_order_lookup", action_type="API", category="order")
+        self.reg.replace_parameters(self.reg.get_by_key("unrelated_order_lookup")["id"], [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200,
+                                           json=lambda: {"data": {"Wallet": 100, "Coupon": ["A10"]}})) as mock_req:
+            result = self.engine.decide("มีคูปองไหม", history=[],
+                                         context={"developer_mode": True,
+                                                   "customer_context": {"last_business_action": "get_customer_full",
+                                                                         "cust_code": "SP1014"}})
+        self.assertEqual(result["routing"]["type"], "API")
+        mock_req.assert_called_once()
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("CustCode"), "SP1014")
+        dev = result.get("developer") or {}
+        self.assertEqual(dev.get("selection_source"), "conversation_reference")
+
+    def test_composer_never_shows_raw_json_and_labels_unflattened_list(self):
+        self._seed_customer_lookup_with_coupon_field()
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200,
+                                           json=lambda: {"data": {"Wallet": 100, "Coupon": ["A10", "B20"]}})):
+            result = self.engine.decide("ข้อมูลลูกค้า SP1014", history=[])
+        text = result["reply"]["text"]
+        self.assertNotIn("{", text)
+        self.assertNotIn("[", text)
+        self.assertIn("คูปอง", text)
+        self.assertIn("2", text)
+
+    def _seed_order_list_and_detail(self):
+        list_id = _seed_action(self.reg, key="order_list", action_type="API", category="order", keywords=["order"])
+        self.reg.replace_parameters(list_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.replace_response_mapping(list_id, [
+            {"json_path": "$.data", "mapped_label": "รายการทั้งหมด", "field_metadata": {"keywords": ["รายการ"]}},
+            {"json_path": "$.data.0.Code", "mapped_label": "เลขที่ล่าสุด",
+             "field_metadata": {"keywords": ["เลขที่"], "identity_concept": "OrderCode"}},
+            {"json_path": "$.data.0.Status", "mapped_label": "สถานะล่าสุด", "field_metadata": {"keywords": ["สถานะ"]}},
+        ])
+        self.reg.upsert_execution(list_id, {"endpoint": "https://example.test/order/list", "http_method": "GET"})
+
+        detail_id = _seed_action(self.reg, key="order_detail", action_type="API", category="order",
+                                  keywords=["รายละเอียดคำสั่งซื้อ"])
+        self.reg.replace_parameters(detail_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "OrderCode", "display_name": "เลขที่คำสั่งซื้อ", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.replace_response_mapping(detail_id, [
+            {"json_path": "$.data.Code", "mapped_label": "เลขที่", "field_metadata": {"keywords": ["เลขที่"]}},
+            {"json_path": "$.data.Status", "mapped_label": "สถานะ", "field_metadata": {"keywords": ["สถานะ"]}},
+        ])
+        self.reg.upsert_execution(detail_id, {"endpoint": "https://example.test/order/detail", "http_method": "GET"})
+        return list_id, detail_id
+
+    def test_list_response_teaches_the_record_code_generically(self):
+        """Issue 2 — a successful LIST execution learns the record's own
+        code from the response (field_metadata.identity_concept), not
+        only from what the customer typed."""
+        list_id, _ = self._seed_order_list_and_detail()
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "data": [{"Code": "PO999", "Status": "ยกเลิก"}]})):
+            result = self.engine.decide("order ล่าสุด SP1014", history=[], context={"developer_mode": True})
+        dev = result.get("developer") or {}
+        collected = (dev.get("information_collection_status") or {}).get("collected_parameters") or {}
+        self.assertEqual(collected.get("OrderCode"), "PO999")
+
+    def test_detail_intent_after_list_selects_the_detail_sibling_not_the_list_again(self):
+        """Issue 3 — "ขอรายละเอียดอันล่าสุด" after a list execution
+        resolves the SAME-category DETAIL sibling (using the OrderCode
+        just learned from the list response), not the list action again."""
+        list_id, detail_id = self._seed_order_list_and_detail()
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "data": [{"Code": "PO999", "Status": "ยกเลิก"}]})) as mock_req:
+            result = self.engine.decide(
+                "ขอรายละเอียดอันล่าสุด", history=[], context={"developer_mode": True,
+                "customer_context": {"last_business_action": "order_list", "cust_code": "SP1014",
+                                      "last_order_code": "PO999"}})
+        dev = result.get("developer") or {}
+        self.assertEqual(dev.get("selection_source"), "conversation_reference_detail")
+        info = dev.get("information_collection_status") or {}
+        self.assertEqual(info.get("selected_business_action"), "order_detail")
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("OrderCode"), "PO999")
+        self.assertEqual(sent_params.get("CustCode"), "SP1014")
+
+    def test_detail_sibling_never_selected_without_the_extra_identifier_in_memory(self):
+        """Never invents the extra identifier — if OrderCode was never
+        learned/given, the detail sibling must NOT be selected."""
+        self._seed_order_list_and_detail()
+        result = self.engine.decide(
+            "ขอรายละเอียดอันล่าสุด", history=[], context={"developer_mode": True,
+            "customer_context": {"last_business_action": "order_list", "cust_code": "SP1014"}})
+        dev = result.get("developer") or {}
+        self.assertNotEqual(dev.get("selection_source"), "conversation_reference_detail")
+
+
 class TestBusinessActionExecutionByType(unittest.TestCase):
     def setUp(self):
         self.reg = BusinessActionRegistry(_FakeSupabase())
