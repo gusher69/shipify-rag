@@ -209,7 +209,11 @@ SIDEBAR_CONFIG: List[dict] = [
     _group("knowledge", "Knowledge", "Manage all knowledge sources and synchronization.", "book", [
         _leaf("documents", "Knowledge Base", "/admin/documents", "database"),
         _leaf("file-library", "File Library", "/admin/file-library", "folder"),
-        _leaf("knowledge-collections", "Knowledge Collections", "/admin/knowledge-collections", "folder"),
+        # Hidden 2026-08-13 per request — the route itself
+        # (/admin/knowledge-collections) stays fully functional; this
+        # only removes it from the nav (same convention as Sync Activity
+        # below).
+        _leaf("knowledge-collections", "Knowledge Collections", "/admin/knowledge-collections", "folder", visible=False),
         # Hidden for the customer UAT deployment (2026-08-10) — internal
         # dev/sync-history noise, not something the customer should see.
         # The route itself (/admin/sync-activity) stays fully functional;
