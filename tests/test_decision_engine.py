@@ -1402,6 +1402,22 @@ class TestOrderShipmentTrackingRoutingPrecision(unittest.TestCase):
         self.assertNotIn("CustCode", collection.get("collected_parameters") or {})
         mock_req.assert_not_called()
 
+    def test_bare_cust_code_alone_never_picks_a_wrong_action_by_priority_alone(self):
+        """AI Playground Real User Journey UAT (2026-08-15) — a bare
+        CustCode-shaped message with NO other keyword/context (no active
+        continuation to inherit either) ties every CustCode-having action
+        via _identifier_pattern_score. Before the discriminating-power
+        fix, searchdatatracking's higher configured priority (1, vs 0 for
+        every other action here) silently won that tie and asked for a
+        Tracking number -- even though nothing about "just a customer
+        code" ever implied tracking. It must now fall back safely
+        (never confidently execute the wrong action) instead."""
+        result = self.engine.decide("SP1014", history=[])
+        self.assertNotEqual(
+            (result.get("developer") or {}).get("selected_business_action"), "searchdatatracking")
+        collection = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(collection.get("selected_business_action"), "searchdatatracking")
+
 
 if __name__ == "__main__":
     unittest.main()

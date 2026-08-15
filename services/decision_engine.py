@@ -545,7 +545,27 @@ _IDENTIFIER_PATTERN_WEIGHT = 3.0
 _TOKEN_SPLIT_RE = re.compile(r"[\s,;]+")
 
 
-def _identifier_pattern_score(registry, action: Dict, message: str) -> float:
+def _identifier_pattern_score(registry, action: Dict, message: str, *,
+                               pattern_action_counts: Optional[Dict[str, int]] = None) -> float:
+    """`pattern_action_counts` (built once per search_candidate_actions()
+    call, see there) maps each validation_pattern string to how many of
+    THIS TURN'S candidate actions configure that same pattern. A pattern
+    genuinely unique to one action (e.g. OrderCode's `^POS\\d+$`) is
+    strong, discriminating evidence and keeps the full weight. A pattern
+    shared by many candidates (e.g. CustCode, configured near-identically
+    on most ERP actions) matches ALL of them equally, so it can never
+    actually discriminate between them — full weight there would let a
+    bare customer code alone tip the choice via nothing more meaningful
+    than each action's own priority tiebreaker (confirmed live, 2026-08-15
+    AI Playground Real User Journey UAT: a bare CustCode-shaped message
+    with no other context was winning on SearchDataTracking purely
+    because it happened to have priority=1 while five other equally-
+    matching actions sat at priority=0 — not because tracking was ever
+    actually implied). Dividing by the sharer count makes a fully-shared
+    pattern contribute a small, non-decisive amount instead — the same
+    "shared evidence is weak evidence for any ONE candidate" principle
+    services/hybrid_question_classifier.py's own ambiguity-ratio check
+    already applies to keyword scoring."""
     try:
         params = registry.get_parameters(action["id"])
     except Exception:
@@ -561,7 +581,8 @@ def _identifier_pattern_score(registry, action: Dict, message: str) -> float:
         except re.error:
             continue
         if any(regex.match(tok) for tok in tokens):
-            score += _IDENTIFIER_PATTERN_WEIGHT
+            sharers = (pattern_action_counts or {}).get(pattern, 1)
+            score += _IDENTIFIER_PATTERN_WEIGHT / max(sharers, 1)
     return score
 
 
@@ -583,6 +604,20 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
     if action_types:
         candidates = [a for a in candidates if a.get("action_type") in action_types]
 
+    # Pre-pass for _identifier_pattern_score's discriminating-power
+    # weighting (see that function's own docstring) — how many of THIS
+    # turn's candidates configure each validation_pattern string. Costs
+    # one extra get_parameters() call per candidate, same "small action
+    # count" tradeoff already accepted for the per-candidate calls below.
+    pattern_action_counts: Dict[str, int] = {}
+    for action in candidates:
+        try:
+            action_params = registry.get_parameters(action["id"])
+        except Exception:
+            action_params = []
+        for pattern in {p.get("validation_pattern") for p in action_params if p.get("validation_pattern")}:
+            pattern_action_counts[pattern] = pattern_action_counts.get(pattern, 0) + 1
+
     scored = []
     for action in candidates:
         reasons = []
@@ -601,7 +636,7 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
         # a same-category list/summary action's generic keyword happens to
         # match instead. The registry call this costs is cheap relative to
         # the rest of this loop and the action count here is small.
-        id_score = _identifier_pattern_score(registry, action, message)
+        id_score = _identifier_pattern_score(registry, action, message, pattern_action_counts=pattern_action_counts)
         if id_score:
             score += id_score
             reasons.append(f"message contains a value matching this action's own "
