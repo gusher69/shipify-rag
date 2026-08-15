@@ -120,6 +120,39 @@ class TestClassifyQuestion(unittest.TestCase):
         self.assertEqual(result["erp_sub_question"], "ลูกค้า C00001 มีคูปองอะไร")
         self.assertEqual(result["rag_sub_question"], "คูปองใช้งานอย่างไร")
 
+    def _seed_tracking_vs_shipment_list(self):
+        tracking_id = _seed_action(self.reg, key="search_tracking", category="shipment", keywords=["tracking"])
+        self.reg.replace_parameters(tracking_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^C\d+$"},
+            {"name": "Tracking", "display_name": "เลข Tracking", "required": True,
+             "input_source": "customer_message"},
+        ])
+        list_id = _seed_action(self.reg, key="search_shipment_list", category="shipment", keywords=["tracking"])
+        self.reg.replace_parameters(list_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^C\d+$"},
+        ])
+        return tracking_id, list_id
+
+    def test_decisive_parameter_evidence_breaks_a_keyword_tie(self):
+        """Final Conversational Correctness (2026-08-15) — a specific
+        Tracking-shaped value decisively selects the tracking action even
+        though both candidates tie on the bare "tracking" keyword."""
+        tracking_id, list_id = self._seed_tracking_vs_shipment_list()
+        result = classify_question("เช็ก tracking TRACK123456 ของลูกค้า C00001", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], tracking_id)
+
+    def test_shared_identifier_alone_still_requires_clarification(self):
+        """A bare CustCode both tied actions require identically is never
+        discriminating on its own — must still ask for clarification, not
+        guess based on which action happens to have a keyword edge."""
+        self._seed_tracking_vs_shipment_list()
+        result = classify_question("ขอดู tracking ของผม C00001", self.reg)
+        self.assertEqual(result["classification"], "CLARIFICATION_REQUIRED")
+        self.assertEqual(len(result["candidate_action_ids"]), 2)
+
     def test_registry_failure_falls_back_to_rag_only(self):
         class _BrokenRegistry:
             def enabled_actions(self):

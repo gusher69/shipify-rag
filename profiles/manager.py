@@ -129,14 +129,24 @@ def update_profile_from_turn(line_user_id: str, *, decide_result: Dict, conversa
         # from vague later messages." Never includes SecretCode or any
         # credential_store/secret_configuration-sourced value (those are
         # never placed in collection_status.collected_parameters at all).
+        from services.action_selection_primitives import IDENTIFIER_MEMORY_FIELDS
         collected = conversation_fields.get("collected_parameters") or {}
-        for profile_field, param_name in (
-            ("cust_code", "CustCode"), ("last_order_code", "OrderCode"),
-            ("last_shipment_code", "ShipmentCode"), ("last_tracking", "Tracking"),
-        ):
+        for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
             value = collected.get(param_name)
             if value:
                 row[profile_field] = value
+
+        # Conversation Resolver (Final Conversational Correctness,
+        # 2026-08-15; migration 039) -- remembers which Business Action
+        # the customer was last genuinely using, so a topic-word-free
+        # follow-up reference ("แล้วของถึงหรือยัง") can resume it (see
+        # services/decision_engine.py::_resolve_conversation_reference).
+        # Only a real ERP execution counts -- never overwritten by a RAG
+        # answer or a WORKFLOW clarification question, and, like every
+        # other identifier-memory field, never cleared just because this
+        # turn didn't execute one.
+        if conversation_fields.get("routing_type") in ("API", "WEBHOOK") and conversation_fields.get("selected_business_action"):
+            row["last_business_action"] = conversation_fields["selected_business_action"]
 
         primary_intent = conversation_fields.get("actionable_intent") or conversation_fields.get("broad_intent")
         if primary_intent and primary_intent != "unknown":

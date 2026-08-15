@@ -51,11 +51,13 @@ from services.action_selection_primitives import (
     _PARAMETER_VALIDATORS,
     _EMAIL_CANDIDATE_RE,
     _extract_candidates_for_binding,
+    _extract_structural_candidates,
     _resolve_parameter_validator,
     _bind_candidate_to_parameter,
     _NON_ASKABLE_INPUT_SOURCES,
     _askable_parameters_by_name,
     _keyword_score,
+    IDENTIFIER_MEMORY_FIELDS,
     select_requested_mapped_fields,
 )
 # Hybrid Question Classifier (2026-08-02 Production Integration Sprint,
@@ -203,6 +205,14 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
         return {"bound": None, "ambiguous_candidates": []}
     askable = _askable_parameters_by_name(action)
     candidates = [c for c in _extract_candidates_for_binding(message) if c not in (exclude_values or set())]
+    # Group members deliberately use STRUCTURAL candidates only — never
+    # the whole-message free-text fallback _extract_candidates_for_binding
+    # offers (see that function's own docstring). A parameter GROUP (e.g.
+    # GetDataCustomer's customer_identifier AT_LEAST_ONE) exists to
+    # require ONE genuine identifying value; letting a permissive
+    # non_empty member swallow an entire unrelated sentence would satisfy
+    # the group with zero real identifying information.
+    group_candidates = [c for c in _extract_structural_candidates(message) if c not in (exclude_values or set())]
 
     # Try the MORE SPECIFIC validators first (a configured
     # validation_pattern, or a non-generic validation_type like email/
@@ -236,7 +246,7 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
         members.sort(key=lambda name: askable[name].get("validation_type") in (None, "non_empty")
                      and not askable[name].get("validation_pattern"))
         for name in members:
-            binding = _bind_candidate_to_parameter(candidates, askable[name])
+            binding = _bind_candidate_to_parameter(group_candidates, askable[name])
             if binding["status"] == "bound":
                 return {"bound": (name, binding["value"]), "ambiguous_candidates": []}
             if binding["status"] == "ambiguous":
@@ -388,6 +398,48 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
     trigger_message = next((t.get("content") or "" for t in history if t.get("role") == "user"), "")
     return max(matches, key=lambda a: _keyword_score(a, trigger_message))
 
+
+# Conversation Resolver (Final Conversational Correctness, 2026-08-15) —
+# a SMALL, fixed set of generic Thai referring-expression patterns that
+# mean "continue talking about whatever we were just discussing" rather
+# than a fresh topic (e.g. "แล้ว order ล่าสุดล่ะ", "ของผม", "อันนี้",
+# "ตอนนี้สถานะอะไร", "แล้วของถึงหรือยัง"). Deliberately narrow and
+# idiomatic — see _resolve_conversation_reference's own docstring for why
+# this can only ever engage as a last resort, never pre-empting a real
+# keyword/pattern match.
+_REFERENCE_MARKER_RE = re.compile(
+    r"ล่าสุด|ของผม|ของฉัน|ของดิฉัน|อันนี้|รายการนี้|ตอนนี้|แล้ว.*ล่ะ|ถึงหรือยัง|สถานะ",
+    re.IGNORECASE)
+
+
+def _resolve_conversation_reference(registry, message: str, customer_context: Dict) -> Optional[Dict]:
+    """Last-resort resolution for a follow-up message that carries NO
+    Business-Action-selecting signal of its own (no keyword/pattern
+    match — this is only ever called from decide() after a normal fresh
+    search already came up empty) but the conversation clearly isn't
+    over: it matches a generic referring-expression pattern AND the
+    profile remembers which Business Action the customer was last using
+    (profiles/manager.py's own Identifier Memory persistence, extended to
+    also remember `last_business_action`). Never invents an identifier —
+    this only decides WHICH action to try again; Identifier Memory fill
+    (and, if still incomplete, a genuine follow-up question) happens
+    exactly like any other selection, via _handle_dynamic_collection."""
+    if not customer_context:
+        return None
+    if not _REFERENCE_MARKER_RE.search(message or ""):
+        return None
+    last_action_key = customer_context.get("last_business_action")
+    if not last_action_key:
+        return None
+    try:
+        action = registry.get_by_key(last_action_key)
+    except Exception:
+        return None
+    if not action or not action.get("enabled") or action.get("action_type") not in ("API", "WEBHOOK"):
+        return None
+    return registry.get_full(action["id"], mask_secrets=False)
+
+
 # ── Alert vocabulary — deliberately small, generic, deterministic (no
 # LLM call, consistent with every other conversation-intelligence module
 # in this codebase). Detects a SIGNAL worth flagging; it never decides
@@ -517,15 +569,41 @@ def _embedding_score(action: Dict, message: str) -> float:
     return 0.0
 
 
-def _parameter_availability_score(action: Dict, collected_slots: Dict) -> float:
+def _parameter_availability_score(params: List[Dict], collected_slots: Dict, *,
+                                   param_action_counts: Optional[Dict[str, int]] = None) -> float:
     """Rewards an action whose configured parameter names are already
     (partly) satisfiable from what's been collected this turn — makes
     e.g. a customer-lookup action outrank an unrelated action once the
-    caller already has CustCode/CustEmail/etc. in hand."""
+    caller already has CustCode/CustEmail/etc. in hand. `params` is the
+    action's own real parameter rows (registry.get_parameters()) —
+    passed in explicitly by the caller, which already has them on hand
+    from its own pre-pass, rather than expecting them pre-attached to
+    `action` under a private key (a bare `enabled_actions()` row never
+    carries its parameters, so that used to always score 0).
+
+    2026-08-15 (Final Conversational Correctness) — `collected_slots`
+    now includes Identifier Memory values (see IDENTIFIER_MEMORY_FIELDS)
+    alongside this turn's own bound slots, so a remembered CustCode/
+    OrderCode/etc. from earlier in the conversation also counts here.
+    `param_action_counts` (built once per search_candidate_actions()
+    call, mirroring _identifier_pattern_score's own sharer-weighting)
+    divides each matched name's contribution by how many of THIS turn's
+    candidates configure that same parameter name — a name unique to one
+    action (OrderCode) stays fully decisive; a name nearly every ERP
+    action shares (CustCode) can no longer single-handedly out-score
+    every other candidate just because Identifier Memory happens to
+    remember it, which would otherwise let raw priority silently pick
+    the "winner" again exactly like the bug _identifier_pattern_score's
+    own weighting already fixed for structural pattern matches."""
     if not collected_slots:
         return 0.0
-    names = {p.get("name") for p in action.get("_parameters") or []}
-    return float(len(names & set(collected_slots.keys())))
+    names = {p.get("name") for p in params or []}
+    matched = names & set(collected_slots.keys())
+    if not matched:
+        return 0.0
+    if param_action_counts:
+        return sum(1.0 / max(param_action_counts.get(n, 1), 1) for n in matched)
+    return float(len(matched))
 
 
 # A whole message token (never a substring match, to avoid a short pattern
@@ -610,13 +688,18 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
     # one extra get_parameters() call per candidate, same "small action
     # count" tradeoff already accepted for the per-candidate calls below.
     pattern_action_counts: Dict[str, int] = {}
+    param_action_counts: Dict[str, int] = {}
+    params_by_action_id: Dict[str, List[Dict]] = {}
     for action in candidates:
         try:
             action_params = registry.get_parameters(action["id"])
         except Exception:
             action_params = []
+        params_by_action_id[action["id"]] = action_params
         for pattern in {p.get("validation_pattern") for p in action_params if p.get("validation_pattern")}:
             pattern_action_counts[pattern] = pattern_action_counts.get(pattern, 0) + 1
+        for name in {p.get("name") for p in action_params if p.get("name")}:
+            param_action_counts[name] = param_action_counts.get(name, 0) + 1
 
     scored = []
     for action in candidates:
@@ -641,7 +724,8 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
             score += id_score
             reasons.append(f"message contains a value matching this action's own "
                             f"parameter identifier pattern ({id_score})")
-        param_score = _parameter_availability_score(action, collected_slots or {})
+        param_score = _parameter_availability_score(params_by_action_id.get(action["id"], []), collected_slots or {},
+                                                      param_action_counts=param_action_counts)
         if param_score:
             score += param_score
             reasons.append(f"{int(param_score)} collected slot(s) match this action's parameters")
@@ -680,6 +764,7 @@ class DecisionEngine:
     def decide(self, message: str, history: Optional[List[Dict]] = None, context: Optional[Dict] = None) -> Dict:
         history = history or []
         context = dict(context or {})
+        customer_context = context.get("customer_context") or {}
         start = time.time()
         developer_trace: Dict = {}
 
@@ -768,10 +853,40 @@ class DecisionEngine:
                     return self._route_clarification(classification, message, context,
                                                         developer_trace, start, workflow=workflow_hint)
 
+                # Identifier Memory (2026-08-15) — a remembered CustCode/
+                # OrderCode/ShipmentCode/Tracking from earlier THIS
+                # conversation also counts as evidence an identifier-
+                # requiring action is relevant, exactly like a slot this
+                # turn's own message bound (_parameter_availability_score
+                # doesn't care which turn supplied the value).
+                identifier_memory_slots = {
+                    param_name: customer_context[profile_field]
+                    for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS
+                    if customer_context.get(profile_field)
+                } if customer_context else {}
                 candidates = search_candidate_actions(self.registry, workflow=workflow_hint, message=message,
-                                                        collected_slots={})
+                                                        collected_slots=identifier_memory_slots)
                 selected = select_best_action(candidates, minimum_score=1.0 if not workflow_hint else 0.5)
                 developer_trace["selection_source"] = "fresh_search"
+
+                if not selected:
+                    # Conversation Resolver (Final Conversational
+                    # Correctness, 2026-08-15) — a last resort BEFORE
+                    # falling to RAG/safe-fallback: a message with no
+                    # Business-Action-selecting signal of its own, but
+                    # that reads as a generic follow-up reference (see
+                    # _REFERENCE_MARKER_RE) while the profile remembers
+                    # which action the customer was just using, resumes
+                    # that SAME action instead of guessing via RAG. Never
+                    # invents an identifier — Identifier Memory fill (or
+                    # a genuine follow-up question) happens exactly like
+                    # any other selection, via _handle_dynamic_collection
+                    # below.
+                    referenced = _resolve_conversation_reference(self.registry, message, customer_context)
+                    if referenced:
+                        selected = referenced
+                        candidates = [selected]
+                        developer_trace["selection_source"] = "conversation_reference"
 
             if not selected:
                 if workflow_hint:
@@ -781,6 +896,24 @@ class DecisionEngine:
                     return self._handle_legacy_workflow(
                         workflow_hint, message, history, context, developer_trace, start,
                         reason="no_business_action_for_workflow")
+                # RAG Guard (Final Conversational Correctness, 2026-08-15)
+                # — a message that IS, in its entirety, a bare
+                # identifier-shaped token (never a substring match — the
+                # WHOLE stripped message) with no pending slot, no
+                # remembered action to resume, and no Business Action
+                # match of its own is customer-service-shaped, not a
+                # knowledge-base question. Asking what to check it
+                # against is honest; running semantic search against
+                # documentation for a bare code and reporting "not found"
+                # is not — the customer never asked a knowledge question
+                # in the first place.
+                bare_value = (message or "").strip()
+                if bare_value and _validate_generic_identifier(bare_value):
+                    reply = _build_response(
+                        text=f"ได้ค่ะ ต้องการตรวจสอบข้อมูลอะไรของ {bare_value} คะ เช่น ข้อมูลลูกค้า คำสั่งซื้อ หรือพัสดุ")
+                    return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
+                                           developer_trace=developer_trace, context=context, start=start,
+                                           alert=_detect_alert(message, context))
                 return self._route_safe_fallback(message, history, context, developer_trace, start,
                                                   reason="no_matching_business_action")
 
@@ -836,6 +969,26 @@ class DecisionEngine:
         result = _bind_all_from_message(full_action, self.registry, collected, message)
         collected = result["collected"]
         ambiguous_candidates = result["ambiguous_candidates"]
+
+        # Identifier Memory (Customer Intelligence V1; generalized for
+        # Final Conversational Correctness, 2026-08-15) — a customer
+        # identifier already established earlier THIS conversation
+        # (persisted onto the profile by profiles/manager.py::
+        # update_profile_from_turn, using the SAME IDENTIFIER_MEMORY_FIELDS
+        # mapping) auto-fills a still-missing parameter of the same
+        # concept name, so the customer is never asked to repeat an
+        # identifier they already gave two turns ago. Never overrides a
+        # value THIS turn's own message (or history replay) already
+        # bound — an explicit, fresher value always wins.
+        customer_context = context.get("customer_context") or {}
+        if customer_context:
+            askable = _askable_parameters_by_name(full_action)
+            for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
+                if param_name in collected or param_name not in askable:
+                    continue
+                remembered = customer_context.get(profile_field)
+                if remembered:
+                    collected[param_name] = remembered
 
         validation = self.registry.validate_can_execute(action_id, collected)
         next_after = None if validation["ok"] else _next_expected_parameter(full_action, self.registry, collected)

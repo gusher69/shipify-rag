@@ -322,6 +322,35 @@ class TestCustomerMessageFallbackDefault(unittest.TestCase):
         sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
         self.assertEqual(sent_body.get("Latest"), "5")
 
+    def test_grouped_member_never_falls_back_to_example_value(self):
+        """Final Conversational Correctness (2026-08-15) — a parameter
+        that is a member of a parameter GROUP (e.g. GetDataCustomer's
+        customer_identifier AT_LEAST_ONE: CustCode/CustEmail/CustName/
+        CustPhone) must NEVER receive its example_value fallback, even
+        though it's individually non-required. example_value holds
+        documentation/Test-Action placeholder data (e.g.
+        "customer@example.com") — sending it to the real ERP whenever the
+        customer only supplied ONE sibling identifier (e.g. CustCode)
+        would fabricate identity data the customer never gave. Confirmed
+        live: a request with only CustCode collected was still sending a
+        fake CustEmail/CustName/CustPhone alongside it."""
+        action = self.reg.create({"action_key": "customer_lookup", "name": "C", "action_type": "API"})
+        action_id = action["id"]
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "required": False, "input_source": "customer_message", "example_value": "C00001"},
+            {"name": "CustEmail", "required": False, "input_source": "customer_message",
+             "example_value": "customer@example.com"},
+        ])
+        self.reg.set_parameter_groups(action_id, [
+            {"name": "identifier_group", "rule": "AT_LEAST_ONE", "members": ["CustCode", "CustEmail"]},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/api", "http_method": "POST"})
+        with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"ok": True})) as mock_req:
+            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014"}})
+        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
+        self.assertEqual(sent_body.get("CustCode"), "SP1014")
+        self.assertNotIn("CustEmail", sent_body)
+
     def test_required_customer_message_param_has_no_silent_fallback(self):
         # A REQUIRED customer_message parameter must not silently pull in
         # its example_value — that would defeat "required" validation by

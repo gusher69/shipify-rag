@@ -56,20 +56,38 @@ def _mask_text(text: str, secret_values: Dict[str, Optional[str]]) -> str:
 #   conversation_context, customer_context, collected_slots, workflow,
 #   intent, developer_mode, current_user, question, system_values
 
-def _resolve_param_value(param: Dict, context: Dict, secret_values: Dict[str, Optional[str]]) -> Optional[str]:
+def _resolve_param_value(param: Dict, context: Dict, secret_values: Dict[str, Optional[str]],
+                          grouped_names: Optional[set] = None) -> Optional[str]:
     source = param.get("input_source", "customer_message")
     name = param["name"]
     if source in ("secret_configuration", "credential_store"):
         return secret_values.get(name)
     if source == "customer_message":
-        # Explicit customer value takes precedence; a non-required
-        # customer_message parameter (e.g. Latest) may still carry a
-        # configured example_value as its safe default for the turns
-        # where the customer didn't say anything — this does not apply
-        # to fixed_configuration params, which are never customer-set.
+        # Explicit customer value takes precedence; a non-required,
+        # UNGROUPED customer_message parameter (e.g. Latest) may still
+        # carry a configured example_value as its safe default for the
+        # turns where the customer didn't say anything — this does not
+        # apply to fixed_configuration params, which are never
+        # customer-set.
+        #
+        # Final Conversational Correctness (2026-08-15): a parameter that
+        # is a member of a parameter GROUP (AT_LEAST_ONE/EXACTLY_ONE/ALL,
+        # e.g. GetDataCustomer's CustCode/CustEmail/CustName/CustPhone)
+        # must NEVER fall back to example_value here — example_value
+        # holds documentation/Test-Action placeholder data (e.g.
+        # "customer@example.com"), never a real identifier. Confirmed
+        # live: a customer message that only supplied CustCode was still
+        # sending fabricated CustEmail/CustName/CustPhone example values
+        # to the real ERP alongside it. The Decision Engine's own
+        # validate_can_execute() already confirms the group is satisfied
+        # by a REAL collected value before execution is ever reached, so
+        # an unfilled sibling group member must simply stay absent from
+        # the outgoing request, not be silently fabricated.
         value = (context.get("collected_slots") or {}).get(name)
         if value is not None:
             return value
+        if name in (grouped_names or set()):
+            return None
         return param.get("example_value") if not param.get("required") else None
     if source == "customer_profile":
         return (context.get("customer_context") or {}).get(name)
@@ -83,9 +101,10 @@ def _resolve_param_value(param: Dict, context: Dict, secret_values: Dict[str, Op
 
 
 def _collect_parameter_values(action: Dict, context: Dict, secret_values: Dict[str, Optional[str]]) -> Dict[str, str]:
+    grouped_names = {m for g in (action.get("parameter_groups") or []) for m in (g.get("members") or [])}
     values = {}
     for param in action.get("parameters") or []:
-        value = _resolve_param_value(param, context, secret_values)
+        value = _resolve_param_value(param, context, secret_values, grouped_names)
         if value not in (None, ""):
             values[param["name"]] = value
     return values

@@ -132,6 +132,45 @@ class TestIdentifierPersistence(unittest.TestCase):
         updated = self._run({"line_user_id": "U1"}, {}, actionable_intent="unknown")
         self.assertNotIn("primary_intent", updated)
 
+    def test_last_business_action_persisted_for_real_erp_execution(self):
+        """Conversation Resolver (Final Conversational Correctness,
+        2026-08-15; migration 039)."""
+        fake_sb = _FakeSupabase({"line_user_id": "U1"})
+        with patch("profiles.manager.supabase", fake_sb):
+            conversation_fields = {
+                "collected_parameters": {"CustCode": "SP1014"}, "actionable_intent": None, "broad_intent": None,
+                "routing_type": "API", "selected_business_action": "getdatacustomer",
+                "erp_request": {}, "escalated": False,
+            }
+            update_profile_from_turn("U1", decide_result=_decide_result(),
+                                      conversation_fields=conversation_fields, is_new_conversation=True)
+        self.assertEqual(fake_sb._table.profile["last_business_action"], "getdatacustomer")
+
+    def test_last_business_action_never_set_from_a_rag_answer(self):
+        fake_sb = _FakeSupabase({"line_user_id": "U1"})
+        with patch("profiles.manager.supabase", fake_sb):
+            conversation_fields = {
+                "collected_parameters": {}, "actionable_intent": None, "broad_intent": None,
+                "routing_type": "RAG", "selected_business_action": None,
+                "erp_request": {}, "escalated": False,
+            }
+            update_profile_from_turn("U1", decide_result=_decide_result(),
+                                      conversation_fields=conversation_fields, is_new_conversation=True)
+        self.assertNotIn("last_business_action", fake_sb._table.profile)
+
+    def test_last_business_action_never_erased_by_a_later_rag_turn(self):
+        existing_profile = {"line_user_id": "U1", "last_business_action": "getdatacustomer"}
+        fake_sb = _FakeSupabase(existing_profile)
+        with patch("profiles.manager.supabase", fake_sb):
+            conversation_fields = {
+                "collected_parameters": {}, "actionable_intent": None, "broad_intent": None,
+                "routing_type": "RAG", "selected_business_action": None,
+                "erp_request": {}, "escalated": False,
+            }
+            update_profile_from_turn("U1", decide_result=_decide_result(),
+                                      conversation_fields=conversation_fields, is_new_conversation=True)
+        self.assertEqual(fake_sb._table.profile["last_business_action"], "getdatacustomer")
+
     def test_j_no_secret_code_ever_persisted(self):
         # collected_parameters can only ever contain customer_message-
         # sourced values (services/decision_engine.py never puts a

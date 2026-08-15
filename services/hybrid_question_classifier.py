@@ -36,6 +36,7 @@ from services.action_selection_primitives import (
     _askable_parameters_by_name,
     _bind_candidate_to_parameter,
     _extract_candidates_for_binding,
+    _extract_structural_candidates,
     _keyword_score,
 )
 
@@ -130,14 +131,59 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
             top_score = scored[0]["_kw_score"]
             close = [a for a in scored if a["_kw_score"] >= top_score * _AMBIGUITY_RATIO]
             if len(close) > 1:
-                return _result(
-                    "CLARIFICATION_REQUIRED", 0.4,
-                    [f"{len(close)} Business Actions matched with comparably strong evidence "
-                     f"({', '.join(a.get('action_key') or a.get('name') or a['id'] for a in close)})"],
-                    candidate_action_ids=[a["id"] for a in close],
-                )
-            matched_action = registry.get_full(scored[0]["id"], mask_secrets=True)
-            candidate_ids = [scored[0]["id"]]
+                # Final Conversational Correctness (2026-08-15) — a tied
+                # KEYWORD score alone (e.g. SearchDataTracking and
+                # SearchDataShipmentList both configuring "tracking" as a
+                # search keyword) must not be the ONLY signal once real
+                # parameter evidence can settle it. If the message
+                # carries a STRUCTURAL value (never the whole-message
+                # free-text fallback — see _extract_structural_candidates)
+                # that a tied candidate's own REQUIRED parameter can bind,
+                # AND no OTHER tied candidate can bind that SAME value
+                # (e.g. a shared CustCode present in every candidate is
+                # never discriminating on its own — mirrors the same
+                # "shared evidence is weak evidence for any ONE candidate"
+                # principle services/decision_engine.py's own
+                # _identifier_pattern_score already applies), that
+                # candidate wins outright instead of forcing a
+                # clarification the evidence doesn't actually require.
+                # Deliberately REQUIRED parameters only — an optional
+                # filter/passthrough parameter (date-range/status with no
+                # real validation configured yet) says nothing about which
+                # action the customer means, and would otherwise
+                # spuriously "match" via the same permissive
+                # generic-identifier fallback every unconfigured parameter
+                # shares. A generic message with no discriminating value
+                # (e.g. "ขอดู tracking ของผม FT3182" — only a bare CustCode
+                # every tied action requires identically) still correctly
+                # falls through to clarification below.
+                structural_candidates = _extract_structural_candidates(message)
+                decisive = []
+                if structural_candidates:
+                    bindable_values_by_action = {}
+                    for a in close:
+                        full = registry.get_full(a["id"], mask_secrets=True)
+                        required_askable = [p for p in _askable_parameters_by_name(full).values() if p.get("required")]
+                        bindable_values_by_action[a["id"]] = {
+                            v for v in structural_candidates
+                            if any(_bind_candidate_to_parameter([v], p)["status"] == "bound" for p in required_askable)
+                        }
+                    for a in close:
+                        others = set().union(*(vals for aid, vals in bindable_values_by_action.items()
+                                                if aid != a["id"])) if len(close) > 1 else set()
+                        if bindable_values_by_action[a["id"]] - others:
+                            decisive.append(a)
+                if len(decisive) == 1:
+                    close = decisive
+                else:
+                    return _result(
+                        "CLARIFICATION_REQUIRED", 0.4,
+                        [f"{len(close)} Business Actions matched with comparably strong evidence "
+                         f"({', '.join(a.get('action_key') or a.get('name') or a['id'] for a in close)})"],
+                        candidate_action_ids=[a["id"] for a in close],
+                    )
+            matched_action = registry.get_full(close[0]["id"], mask_secrets=True)
+            candidate_ids = [close[0]["id"]]
 
     if not matched_action:
         return _result("RAG_ONLY", 0.6, ["no Business Action keyword/example/description overlap found"],

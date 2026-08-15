@@ -159,6 +159,119 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
         self.assertEqual(result["workflow"], "tracking")
         mock_req.assert_called_once()
 
+    def test_bare_identifier_reply_continues_the_pending_at_least_one_group_action(self):
+        """Final Conversational Correctness (2026-08-15) — Issue 1:
+        Turn 1 asks for a customer identifier (an AT_LEAST_ONE group, not
+        a single ungrouped required parameter); turn 2's bare reply must
+        continue the SAME action with that value bound to the group
+        member it actually matches, executing exactly once — never fall
+        to RAG, never a different action, never a second, unrelated ERP
+        call."""
+        action_id = _seed_action(self.reg, key="customer_lookup_continuation", action_type="API",
+                                  category="customer", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            {"name": "CustEmail", "display_name": "อีเมล", "required": False, "input_source": "customer_message",
+             "validation_type": "email"},
+        ])
+        self.reg.set_parameter_groups(action_id, [
+            {"name": "identifier_group", "rule": "AT_LEAST_ONE", "members": ["CustCode", "CustEmail"]},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+
+        turn1 = self.engine.decide("ขอข้อมูลลูกค้าหน่อย", history=[])
+        self.assertEqual(turn1["routing"]["type"], "WORKFLOW")
+        question = turn1["reply"]["text"]
+        history = [{"role": "user", "content": "ขอข้อมูลลูกค้าหน่อย"}, {"role": "assistant", "content": question}]
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
+            turn2 = self.engine.decide("SP1014", history=history)
+        self.assertEqual(turn2["routing"]["type"], "API")
+        mock_req.assert_called_once()
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("CustCode"), "SP1014")
+        self.assertNotIn("CustEmail", sent_params)
+
+    def test_conversation_resolver_resumes_remembered_action_for_topic_free_reference(self):
+        """Final Conversational Correctness (2026-08-15) — P0 Conversation
+        Resolver: a pure referring-expression follow-up ("แล้วของถึงหรือยัง")
+        with NO topic word of its own and no keyword/pattern match resumes
+        the Business Action the profile remembers the customer was last
+        using (customer_context.last_business_action), instead of falling
+        to RAG. Identifier memory (CustCode) fills what it can; the
+        action still genuinely needs ShipmentCode this turn, so it must
+        ask for it rather than invent one — proves this is real
+        continuation, not a forced guess."""
+        action_id = _seed_action(self.reg, key="search_shipment_detail", action_type="API",
+                                  category="shipment", keywords=["เลขบิลขนส่ง", "shipment detail"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "ShipmentCode", "display_name": "เลขบิลขนส่ง", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/shipment", "http_method": "GET"})
+        # A SECOND action sharing the identical CustCode parameter name —
+        # a bare remembered CustCode alone must not decisively win via
+        # fresh-search scoring either (the same sharer-weighting principle
+        # _identifier_pattern_score already applies), so this test proves
+        # the resolver — not a diluted, still-passing fresh-search score —
+        # is what actually selects the right action here.
+        other_id = _seed_action(self.reg, key="get_customer_unrelated", action_type="API", category="customer")
+        self.reg.replace_parameters(other_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(other_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+
+        result = self.engine.decide("แล้วของถึงหรือยัง", history=[],
+                                     context={"customer_context": {"last_business_action": "search_shipment_detail",
+                                                                    "cust_code": "SP1014"},
+                                               "developer_mode": True})
+        dev = result.get("developer") or {}
+        self.assertEqual(dev.get("selection_source"), "conversation_reference")
+        info = dev.get("information_collection_status") or {}
+        self.assertEqual(info.get("selected_business_action"), "search_shipment_detail")
+        self.assertEqual(info.get("collected_parameters", {}).get("CustCode"), "SP1014")
+        self.assertFalse(info.get("is_complete"))
+
+    def test_conversation_resolver_never_fires_without_a_remembered_action(self):
+        """No last_business_action on the profile -> normal RAG fallback,
+        unchanged — the resolver must never invent a starting point."""
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="", confidence=0.0)):
+            result = self.engine.decide("แล้วของถึงหรือยัง", history=[],
+                                         context={"customer_context": {"cust_code": "SP1014"}, "developer_mode": True})
+        dev = result.get("developer") or {}
+        self.assertNotEqual(dev.get("selection_source"), "conversation_reference")
+
+    def test_rag_guard_bare_identifier_with_no_context_asks_instead_of_rag_search(self):
+        """Final Conversational Correctness (2026-08-15) — P0/P1 RAG
+        Guard: a message that IS, in its entirety, a bare identifier-
+        shaped token with no pending slot, no remembered action, and no
+        Business Action match must never be silently handed to RAG (which
+        would just report "not found in the knowledge base") — it must
+        ask what to check instead. Proven by asserting the RAG pipeline
+        is never even invoked."""
+        with patch("services.playground_orchestrator.run_playground_turn") as mock_rag:
+            result = self.engine.decide("SP1014", history=[])
+        mock_rag.assert_not_called()
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        self.assertIn("SP1014", result["reply"]["text"])
+
+    def test_identifier_memory_boosts_fresh_search_scoring(self):
+        """The _parameter_availability_score fix (2026-08-15) — a
+        remembered identifier now genuinely counts as evidence during a
+        fresh (non-continuation) search, exactly like a slot bound THIS
+        turn already did before the fix."""
+        action_id = _seed_action(self.reg, key="customer_lookup_scored", action_type="API", category="customer")
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        candidates = search_candidate_actions(self.reg, workflow=None, message="สวัสดีค่ะ",
+                                               collected_slots={"CustCode": "SP1014"})
+        match = next(a for a in candidates if a["id"] == action_id)
+        self.assertGreaterEqual(match["_score"], 1.0)
+
 
 class TestBusinessActionExecutionByType(unittest.TestCase):
     def setUp(self):
@@ -698,6 +811,37 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertIn("CustEmail", sent_params)
         self.assertNotIn("CustCode", sent_params)
+
+    def test_group_member_never_binds_the_whole_message_via_free_text_fallback(self):
+        """Final Conversational Correctness (2026-08-15) — a group member
+        with no configured pattern/type (CustName-shaped) must NOT
+        swallow an entire unrelated sentence as if it were a real
+        identifying value. Before this fix, a bare "ขอข้อมูลลูกค้าหน่อย"
+        (no CustCode/email/phone-shaped token anywhere) would still
+        execute immediately because the whole-message free-text fallback
+        (designed for a genuinely free-text, UNGROUPED parameter like
+        SendLineNotiCS's Message) also satisfied this GROUP via its
+        non_empty-validated CustName member."""
+        action_id = _seed_action(self.reg, key="customer_lookup_name", action_type="API", category="customer",
+                                  keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            {"name": "CustName", "display_name": "ชื่อลูกค้า", "required": False, "input_source": "customer_message"},
+        ])
+        self.reg.set_parameter_groups(action_id, [
+            {"name": "identifier_group", "rule": "AT_LEAST_ONE", "members": ["CustCode", "CustName"]},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
+            result = self.engine.decide("ขอข้อมูลลูกค้าหน่อยครับ", history=[])
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        mock_req.assert_not_called()
+        collection = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertFalse(collection.get("is_complete"))
+        self.assertNotIn("CustName", collection.get("collected_parameters") or {})
 
     def test_optional_parameter_never_blocks_completion(self):
         action_id = _seed_action(self.reg, key="order_with_optional", action_type="API", category="order",

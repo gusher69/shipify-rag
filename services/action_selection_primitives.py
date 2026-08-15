@@ -41,12 +41,23 @@ _PARAMETER_VALIDATORS = {
 _EMAIL_CANDIDATE_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
-def _extract_candidates_for_binding(message: str) -> List[str]:
+def _extract_structural_candidates(message: str) -> List[str]:
+    """Candidates with an actual structural signal only (a digit-bearing
+    token, or an @-shaped email) — never the raw whole message. Used
+    wherever binding a whole free-text sentence to a parameter would be
+    semantically wrong, e.g. a member of an identifier parameter GROUP
+    (see _extract_candidates_for_binding's docstring for why that
+    specifically must never happen)."""
     candidates = list(extract_candidates(message))
     for m in _EMAIL_CANDIDATE_RE.finditer(message or ""):
         token = m.group(0)
         if token not in candidates:
             candidates.append(token)
+    return candidates
+
+
+def _extract_candidates_for_binding(message: str) -> List[str]:
+    candidates = _extract_structural_candidates(message)
     # Free-text fallback (2026-08-09, SendLineNotiCS Message parameter) —
     # extract_candidates() and the email extension above both require a
     # structural signal (a digit, or an @-shaped token); a genuinely
@@ -57,6 +68,21 @@ def _extract_candidates_for_binding(message: str) -> List[str]:
     # (which would turn a clean single-candidate bind into a spurious
     # "ambiguous" result) — it exists purely to give a pure free-text
     # message somewhere to bind to.
+    #
+    # IMPORTANT (Final Conversational Correctness, 2026-08-15): this
+    # whole-message candidate must NEVER be used to satisfy a member of a
+    # parameter GROUP (AT_LEAST_ONE/EXACTLY_ONE/ALL) — a group like
+    # GetDataCustomer's customer_identifier (CustCode/CustEmail/CustName/
+    # CustPhone) exists specifically to require ONE genuine identifying
+    # value, and CustName's permissive "non_empty" validator would
+    # otherwise happily swallow an entire unrelated sentence ("ขอข้อมูล
+    # ลูกค้าหน่อยครับ") as if it were the customer's real name, silently
+    # satisfying the group with zero real identifying information and
+    # letting execution proceed with fabricated/empty identifiers.
+    # Callers binding a GROUP member must call
+    # _extract_structural_candidates() directly instead of this function.
+    # Ungrouped free-text parameters (SendLineNotiCS's Message) are
+    # unaffected — they were never part of a group to begin with.
     if not candidates:
         trimmed = (message or "").strip()
         if trimmed:
@@ -115,6 +141,20 @@ def _bind_candidate_to_parameter(candidates: List[str], param: Dict) -> Dict:
         return {"status": "ambiguous", "value": None, "valid_candidates": valid}
     return {"status": "none_valid", "value": None, "valid_candidates": []}
 
+
+# Identifier Memory (Customer Intelligence V1, 2026-08-15; generalized for
+# Final Conversational Correctness) — the fixed, small set of ERP concept
+# names this platform persists onto a customer's profile as they're
+# collected in conversation (profiles/manager.py::update_profile_from_turn)
+# and reads back to auto-fill a still-missing parameter of the SAME
+# concept name on a later turn (services/decision_engine.py::
+# _handle_dynamic_collection), so a customer is never asked to repeat an
+# identifier they already gave. Defined once, here, so the write side and
+# the read side can never silently drift apart.
+IDENTIFIER_MEMORY_FIELDS = (
+    ("cust_code", "CustCode"), ("last_order_code", "OrderCode"),
+    ("last_shipment_code", "ShipmentCode"), ("last_tracking", "Tracking"),
+)
 
 _NON_ASKABLE_INPUT_SOURCES = ("secret_configuration", "credential_store", "fixed_configuration", "system_generated")
 
