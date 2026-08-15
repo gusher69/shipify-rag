@@ -440,6 +440,50 @@ def _resolve_conversation_reference(registry, message: str, customer_context: Di
     return registry.get_full(action["id"], mask_secrets=False)
 
 
+def _opportunistic_identifier_capture(registry, message: str) -> Dict[str, str]:
+    """Final Conversational Correctness (2026-08-15) — a message that
+    mentions a real identifier alongside other words ("ผม FT3182", not a
+    Business-Action-selecting message on its own, so it falls through to
+    RAG this turn) should still be REMEMBERED for the next turn, exactly
+    like a value bound via a real ERP execution would be — the customer
+    already told us their code; the fact THIS turn had nothing to do
+    with it doesn't mean it should be forgotten. Never invents a value:
+    only a STRUCTURAL candidate (never the whole-message free-text
+    fallback) that fullmatches one of the platform's own configured
+    identifier patterns (IDENTIFIER_MEMORY_FIELDS' concept names, read
+    from whichever enabled action happens to configure them — never a
+    hardcoded shape) counts."""
+    captured: Dict[str, str] = {}
+    structural = _extract_structural_candidates(message)
+    if not structural:
+        return captured
+    try:
+        candidates = registry.enabled_actions()
+    except Exception:
+        return captured
+    concept_names = {n for _, n in IDENTIFIER_MEMORY_FIELDS}
+    seen_patterns: set = set()
+    for action in candidates:
+        try:
+            params = registry.get_parameters(action["id"])
+        except Exception:
+            continue
+        for p in params:
+            name = p.get("name")
+            pattern = p.get("validation_pattern")
+            if name not in concept_names or name in captured or not pattern or pattern in seen_patterns:
+                continue
+            seen_patterns.add(pattern)
+            try:
+                regex = re.compile(pattern)
+            except re.error:
+                continue
+            match = next((c for c in structural if regex.fullmatch(c)), None)
+            if match:
+                captured[name] = match
+    return captured
+
+
 # ── Alert vocabulary — deliberately small, generic, deterministic (no
 # LLM call, consistent with every other conversation-intelligence module
 # in this codebase). Detects a SIGNAL worth flagging; it never decides
@@ -914,6 +958,15 @@ class DecisionEngine:
                     return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
                                            developer_trace=developer_trace, context=context, start=start,
                                            alert=_detect_alert(message, context))
+                # Opportunistic Identifier Capture (2026-08-15) — this
+                # turn is genuinely going to RAG (no action selected, not
+                # a bare identifier either), but if the message ALSO
+                # mentioned a real identifier ("ผม FT3182") it must still
+                # be remembered for the next turn — see
+                # _opportunistic_identifier_capture's own docstring.
+                captured = _opportunistic_identifier_capture(self.registry, message)
+                if captured:
+                    developer_trace.setdefault("information_collection_status", {})["collected_parameters"] = captured
                 return self._route_safe_fallback(message, history, context, developer_trace, start,
                                                   reason="no_matching_business_action")
 

@@ -272,6 +272,110 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
         match = next(a for a in candidates if a["id"] == action_id)
         self.assertGreaterEqual(match["_score"], 1.0)
 
+    def test_known_cust_code_reused_on_follow_up_order_question(self):
+        """User instruction (2026-08-15, continuation of Final
+        Conversational Correctness): "order ล่าสุดล่ะ" with a CustCode
+        already remembered from earlier in the conversation must resolve
+        SearchDataOrderList and execute with that CustCode -- never RAG,
+        never re-asking for the code the customer already gave."""
+        action_id = _seed_action(self.reg, key="search_data_order_list", action_type="API",
+                                  category="order", keywords=["order"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/orders", "http_method": "GET"})
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"orders": []})) as mock_req:
+            result = self.engine.decide("order ล่าสุดล่ะ", history=[],
+                                         context={"customer_context": {"cust_code": "FT3182"}})
+        self.assertEqual(result["routing"]["type"], "API")
+        mock_req.assert_called_once()
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("CustCode"), "FT3182")
+
+    def test_known_cust_code_reused_on_shipment_question(self):
+        """Same principle for Shipment: "ขอดูพัสดุของผม" with a remembered
+        CustCode resolves SearchDataShipmentList and executes with it."""
+        action_id = _seed_action(self.reg, key="search_data_shipment_list", action_type="API",
+                                  category="shipment", keywords=["พัสดุ"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/shipments", "http_method": "GET"})
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"shipments": []})) as mock_req:
+            result = self.engine.decide("ขอดูพัสดุของผม", history=[],
+                                         context={"customer_context": {"cust_code": "FT1004"}})
+        self.assertEqual(result["routing"]["type"], "API")
+        mock_req.assert_called_once()
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("CustCode"), "FT1004")
+
+    def test_pending_tracking_flow_retains_tracking_while_asking_for_cust_code(self):
+        """P1 Tracking Continuation: turn 1 supplies only the Tracking
+        value -> must ask for CustCode next (not re-ask for Tracking);
+        turn 2's bare CustCode reply continues the SAME action, executing
+        exactly once with BOTH values retained."""
+        action_id = _seed_action(self.reg, key="search_data_tracking", action_type="API",
+                                  category="tracking", keywords=["tracking"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            {"name": "Tracking", "display_name": "เลข Tracking", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/tracking", "http_method": "GET"})
+
+        turn1 = self.engine.decide("ช่วยเช็ก tracking testlineOnNut007", history=[])
+        self.assertEqual(turn1["routing"]["type"], "WORKFLOW")
+        question = turn1["reply"]["text"]
+        self.assertIn("รหัสลูกค้า", question)
+        history = [{"role": "user", "content": "ช่วยเช็ก tracking testlineOnNut007"},
+                   {"role": "assistant", "content": question}]
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "in_transit"})) as mock_req:
+            turn2 = self.engine.decide("FT3182", history=history)
+        self.assertEqual(turn2["routing"]["type"], "API")
+        mock_req.assert_called_once()
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("Tracking"), "testlineOnNut007")
+        self.assertEqual(sent_params.get("CustCode"), "FT3182")
+
+    def test_no_example_value_reaches_executor_end_to_end(self):
+        """P0 Mock/example data: end-to-end via decide(), not just the
+        executor unit test -- a GetDataCustomer-shaped action with
+        example_value configured on every optional identifier field must
+        never send them once only CustCode was genuinely collected."""
+        action_id = _seed_action(self.reg, key="get_customer_examples", action_type="API",
+                                  category="customer", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d+$", "example_value": "C00001"},
+            {"name": "CustEmail", "display_name": "อีเมล", "required": False, "input_source": "customer_message",
+             "validation_type": "email", "example_value": "customer@example.com"},
+            {"name": "CustName", "display_name": "ชื่อลูกค้า", "required": False, "input_source": "customer_message",
+             "example_value": "สมชาย ใจดี"},
+            {"name": "CustPhone", "display_name": "เบอร์โทร", "required": False, "input_source": "customer_message",
+             "validation_type": "phone_number", "example_value": "0812345678"},
+        ])
+        self.reg.set_parameter_groups(action_id, [
+            {"name": "identifier_group", "rule": "AT_LEAST_ONE",
+             "members": ["CustCode", "CustEmail", "CustName", "CustPhone"]},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
+            result = self.engine.decide("ข้อมูลลูกค้ารหัส FT3182", history=[])
+        self.assertEqual(result["routing"]["type"], "API")
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("CustCode"), "FT3182")
+        self.assertNotIn("CustEmail", sent_params)
+        self.assertNotIn("CustName", sent_params)
+        self.assertNotIn("CustPhone", sent_params)
+
 
 class TestBusinessActionExecutionByType(unittest.TestCase):
     def setUp(self):
