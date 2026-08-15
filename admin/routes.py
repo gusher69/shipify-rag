@@ -661,29 +661,6 @@ SETTINGS_FIELD_METADATA = {
     },
 }
 
-SETTINGS_GROUP_LABELS = {
-    "live":    "Runtime Settings (Live Reload)",
-    "restart": "Restart Required",
-    "secret":  "Secrets / Credentials",
-}
-SETTINGS_GROUP_ORDER = ["live", "restart", "secret"]
-
-
-def _build_settings_groups(env: dict) -> list:
-    """Groups SETTINGS_FIELD_METADATA into the 3 categories for the
-    Configuration Overview card — never the raw secret value, only
-    whether something is currently set, so this adds zero new exposure
-    beyond what the existing per-field forms already show."""
-    groups = {g: [] for g in SETTINGS_GROUP_ORDER}
-    for key, meta in SETTINGS_FIELD_METADATA.items():
-        groups[meta["group"]].append({
-            "key": key, "label": meta["label"], "note": meta["note"],
-            "restart_too": meta.get("restart_too", False),
-            "configured": bool(env.get(key)),
-        })
-    return [{"group": g, "title": SETTINGS_GROUP_LABELS[g], "fields": groups[g]} for g in SETTINGS_GROUP_ORDER]
-
-
 @app.get("/admin/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, saved: str = ""):
     if (r := auth(request)): return r
@@ -708,8 +685,7 @@ async def settings_page(request: Request, saved: str = ""):
     return render("settings.html", {"request": request, "active": "settings",
                                      "env": env, "msg": msg, "msg_type": "success",
                                      "legacy_embed_warning": legacy_embed_warning,
-                                     "field_meta": SETTINGS_FIELD_METADATA,
-                                     "settings_groups": _build_settings_groups(env)})
+                                     "field_meta": SETTINGS_FIELD_METADATA})
 
 @app.post("/admin/settings")
 async def settings_save(request: Request):

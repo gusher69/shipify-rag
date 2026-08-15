@@ -76,11 +76,10 @@ Admin app.
 ### Settings UI (`/admin/settings`)
 A subset of `.env`-backed configuration can also be edited from the Admin UI after first
 boot — OpenAI key/chat model/embedding model, Supabase URL/keys, LINE credentials, admin
-username/password, and Developer Mode. The page groups every editable field into three
-categories with an inline badge (see "Runtime Config" below), plus a read-only
-**Configuration Overview** card summarizing all of them at a glance. The Settings page
-writes directly to `.env` (`admin/routes.py`'s `_read_env()`/`_write_env()`) — there is no
-second, separate storage layer for these values.
+username/password, and Developer Mode. Each field carries an inline badge (see "Runtime
+Config" below) showing its own category. The Settings page writes directly to `.env`
+(`admin/routes.py`'s `_read_env()`/`_write_env()`) — there is no second, separate storage
+layer for these values.
 
 ### Retrieval Settings (a different, DB-backed system)
 Not `.env`-backed at all: search strategy, top-k, ranking weights, and reranker choice

@@ -12,20 +12,6 @@
 .settings-badge-live    { background:rgba(52,199,89,.12);  color:#2E9E4E; border:1px solid rgba(52,199,89,.3); }
 .settings-badge-restart { background:rgba(245,166,35,.12); color:#B5790A; border:1px solid rgba(245,166,35,.3); }
 .settings-badge-secret  { background:rgba(220,53,69,.10);  color:#C0293D; border:1px solid rgba(220,53,69,.3); }
-.settings-overview-group { margin-bottom:16px; }
-.settings-overview-group:last-child { margin-bottom:0; }
-.settings-overview-group-title { font-size:12.5px; font-weight:700; margin-bottom:6px; }
-.settings-overview-row {
-  display:flex; align-items:baseline; gap:10px; padding:5px 0;
-  border-bottom:1px solid var(--border, rgba(128,128,128,.15));
-  font-size:12.5px;
-}
-.settings-overview-row:last-child { border-bottom:none; }
-.settings-overview-key { font-family:'SF Mono','Fira Code',monospace; font-size:11.5px; color:var(--text-muted); min-width:220px; }
-.settings-overview-status { margin-left:auto; font-size:11px; white-space:nowrap; }
-.settings-overview-status.is-set { color:#2E9E4E; }
-.settings-overview-status.not-set { color:var(--text-muted); }
-.settings-overview-note { color:var(--text-muted); font-size:11.5px; }
 </style>
 {% endblock %}
 
@@ -38,38 +24,6 @@
 {% if msg %}
 <div class="alert alert-{{ msg_type or 'success' }}" id="settings-msg">{{ msg }}</div>
 {% endif %}
-
-<!-- ── Configuration Overview (2026-08-01 hardening pass) ──
-     Read-only reference grouping EVERY editable setting below into the
-     three categories that matter operationally: does it take effect
-     immediately, does it need a restart, or is it a secret that should
-     never be handled casually. Driven entirely by SETTINGS_FIELD_METADATA
-     in admin/routes.py — never a second hardcoded copy — so this can't
-     silently drift out of sync with the badges on the actual fields
-     below. Never shows a real value, only whether one is currently set. -->
-<div class="card">
-  <div class="card-title">🗂️ Configuration Overview</div>
-  <div class="form-hint" style="margin-bottom:12px">
-    Every setting below, grouped by how it behaves when changed. See the matching badge next to
-    each field further down this page for the same classification in context.
-  </div>
-  {% for g in settings_groups %}
-  <div class="settings-overview-group">
-    <div class="settings-overview-group-title">
-      <span class="settings-badge settings-badge-{{ g.group }}">{{ g.group.upper() if g.group != 'restart' else 'RESTART REQUIRED' }}</span>
-      {{ g.title }}
-    </div>
-    {% for f in g.fields %}
-    <div class="settings-overview-row">
-      <span class="settings-overview-key">{{ f.key }}</span>
-      <span>{{ f.label }}{% if f.restart_too and g.group == 'secret' %} <span class="settings-badge settings-badge-restart">+ Restart</span>{% endif %}</span>
-      <span class="settings-overview-status {{ 'is-set' if f.configured else 'not-set' }}">{{ 'Configured' if f.configured else 'Not set' }}</span>
-    </div>
-    <div class="settings-overview-note">{{ f.note }}</div>
-    {% endfor %}
-  </div>
-  {% endfor %}
-</div>
 
 {% macro badge(key) -%}
 {%- set m = field_meta.get(key) -%}
