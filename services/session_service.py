@@ -735,6 +735,24 @@ class SessionService:
     def export_json(self, session_id: str) -> Optional[Dict]:
         return self.get_session(session_id)
 
+    def export_all_json(self, *, search: Optional[str] = None, date_filter: Optional[str] = None,
+                         model: Optional[str] = None, status: Optional[str] = None,
+                         confidence: Optional[str] = None, channel: Optional[str] = None,
+                         limit: int = 200) -> Dict:
+        """Bundles every session matching the given filters (the SAME
+        filters the Conversation History table applies — "Export All"
+        downloads exactly what's currently listed, not literally every row
+        in the table regardless of filter) into one JSON document, each
+        with its full message/event/trace detail via get_session()."""
+        summaries = self.list_sessions(search=search, date_filter=date_filter, model=model,
+                                        status=status, confidence=confidence, channel=channel, limit=limit)
+        sessions = [self.get_session(s["id"]) for s in summaries]
+        return {
+            "exported_at": _now_iso(),
+            "session_count": len(sessions),
+            "sessions": [s for s in sessions if s],
+        }
+
 
 def _matches_date_filter(ts: Optional[str], date_filter: str) -> bool:
     if not ts:

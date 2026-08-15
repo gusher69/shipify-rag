@@ -362,6 +362,24 @@ class TestExport(unittest.TestCase):
         self.assertEqual(data["id"], session["id"])
         self.assertEqual(len(data["messages"]), 2)
 
+    def test_export_all_json_bundles_every_session_with_full_messages(self):
+        s1 = self.svc.record_turn(None, "q1", FakeResult(answer="a1"))
+        s2 = self.svc.record_turn(None, "q2", FakeResult(answer="a2"))
+        data = self.svc.export_all_json()
+        self.assertEqual(data["session_count"], 2)
+        ids = {s["id"] for s in data["sessions"]}
+        self.assertEqual(ids, {s1["id"], s2["id"]})
+        for s in data["sessions"]:
+            self.assertEqual(len(s["messages"]), 2)
+
+    def test_export_all_json_respects_channel_filter(self):
+        self.svc.record_turn(None, "line question", FakeResult(answer="a"))
+        playground_session = self.svc.get_or_create_active_conversation("playground:X", channel="playground")
+        self.svc.record_conversation_turn(playground_session["id"], "pg question", {"reply": {"text": "pg answer"}})
+        data = self.svc.export_all_json(channel="playground")
+        self.assertEqual(data["session_count"], 1)
+        self.assertEqual(data["sessions"][0]["id"], playground_session["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

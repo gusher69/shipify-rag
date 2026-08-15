@@ -41,6 +41,10 @@
 .cv-chunk{font-size:11px;color:rgba(232,237,245,.6);padding:4px 0;border-top:1px dashed rgba(255,255,255,.06)}
 .cv-json{font-size:10.5px;font-family:'SF Mono','Fira Code',monospace;background:rgba(0,0,0,.2);border-radius:6px;
   padding:8px;max-height:180px;overflow:auto;color:rgba(232,237,245,.6);white-space:pre-wrap}
+.cv-row-export{color:rgba(232,237,245,.35);text-decoration:none;font-size:14px;padding:2px 6px;border-radius:6px}
+.cv-row-export:hover{color:#e8edf5;background:rgba(255,255,255,.08)}
+.cv-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px}
+.cv-detail-export{font-size:11.5px;padding:6px 12px;white-space:nowrap}
 </style>
 {% endblock %}
 
@@ -63,9 +67,10 @@
         <option value="playground">AI Playground</option>
       </select>
       <input class="cv-input" id="cv-search" placeholder="Search question/answer…" style="flex:1;min-width:200px" oninput="debouncedLoad()">
+      <a class="btn btn-secondary" id="cv-export-all" href="/admin/api/conversations/export-all.json" download>⇩ Export All</a>
     </div>
     <table class="cv-table">
-      <thead><tr><th>Channel</th><th>Name / Last Question</th><th>Turns</th><th>Last Confidence</th><th>Tier</th><th>Updated</th></tr></thead>
+      <thead><tr><th>Channel</th><th>Name / Last Question</th><th>Turns</th><th>Last Confidence</th><th>Tier</th><th>Updated</th><th></th></tr></thead>
       <tbody id="cv-table-body"><tr><td colspan="6" style="color:rgba(232,237,245,.3)">Loading…</td></tr></tbody>
     </table>
   </div>
@@ -123,6 +128,7 @@ function loadConversations(){
   var params = new URLSearchParams();
   if (channel) params.set('channel', channel);
   if (search) params.set('search', search);
+  document.getElementById('cv-export-all').href = '/admin/api/conversations/export-all.json' + (params.toString() ? '?' + params.toString() : '');
   fetch('/admin/playground/sessions?' + params.toString())
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -142,8 +148,9 @@ function loadConversations(){
           '<td>' + (s.last_confidence != null ? (s.last_confidence * 100).toFixed(0) + '%' : '—') + '</td>' +
           '<td>' + tierBadge(s.conversation_tier) + '</td>' +
           '<td style="color:rgba(232,237,245,.4);font-size:11px">' + (s.updated_at ? s.updated_at.slice(0, 16).replace('T', ' ') : '') + '</td>' +
+          '<td onclick="event.stopPropagation()"><a class="cv-row-export" href="/admin/playground/sessions/' + s.id + '/export.json" title="Download JSON" download>&#8681;</a></td>' +
           '</tr>';
-      }).join('') || '<tr><td colspan="6" style="color:rgba(232,237,245,.3)">No conversations yet.</td></tr>';
+      }).join('') || '<tr><td colspan="7" style="color:rgba(232,237,245,.3)">No conversations yet.</td></tr>';
     });
 }
 
@@ -155,7 +162,8 @@ function openDetail(sessionId){
   fetch('/admin/playground/sessions/' + sessionId).then(function(r){ return r.json(); }).then(function(d){
     if (!d.ok) { content.innerHTML = 'Could not load conversation.'; return; }
     var session = d.session;
-    var html = '<div style="font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:2px">' + esc(session.name) + '</div>';
+    var html = '<div class="cv-detail-header"><div style="font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:2px">' + esc(session.name) + '</div>' +
+      '<a class="btn btn-secondary cv-detail-export" href="/admin/playground/sessions/' + sessionId + '/export.json" download>&#8681; Download JSON</a></div>';
     html += '<div style="font-size:11px;color:rgba(232,237,245,.4);margin-bottom:16px">Channel: ' + esc(session.channel || 'playground') +
       (session.line_user_id ? ' · LINE User: ' + esc(session.line_user_id.slice(0, 12)) + '…' : '') + '</div>';
 

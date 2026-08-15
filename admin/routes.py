@@ -6276,6 +6276,27 @@ async def api_conversation_stats(request: Request):
     return JSONResponse({"ok": True, "stats": stats})
 
 
+@app.get("/admin/api/conversations/export-all.json")
+async def api_conversations_export_all(request: Request):
+    """Conversation History "Export All" (2026-08-15) — bundles every
+    session matching the SAME filters the table is currently showing
+    (channel/search/date/model/status/confidence) into one JSON file, each
+    with its full message/event/trace detail. Reuses
+    SessionService.export_all_json(), which itself reuses list_sessions()
+    and the existing per-session export_json()/get_session() — no new
+    persistence or query path."""
+    if (r := auth(request)): return r
+    from services.session_service import get_session_service
+    q = request.query_params
+    data = get_session_service().export_all_json(
+        search=q.get("search") or None, date_filter=q.get("date_filter") or None,
+        model=q.get("model") or None, status=q.get("status") or None,
+        confidence=q.get("confidence") or None, channel=q.get("channel") or None,
+    )
+    filename = f"conversations-export-{datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
+    return JSONResponse(data, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @app.get("/admin/conversations", response_class=HTMLResponse)
 async def conversations_page(request: Request):
     if (r := auth(request)): return r
