@@ -316,6 +316,27 @@ _HUMAN_REQUEST_RE = re.compile(
 )
 _REFUSAL_RE = re.compile(r"ไม่มี|ไม่สะดวกให้|ไม่บอก|ไม่อยากให้|หาไม่เจอ|ไม่รู้เลขที่")
 
+# Active Handoff Follow-up (Golden Application Defect Fixes, 2026-08-16) --
+# a message that refers to an ALREADY-outstanding human-contact request
+# ("ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย", "เมื่อไหร่จะมีคนติดต่อ") rather than
+# asking for one fresh (_HUMAN_REQUEST_RE, above). Deliberately a SEPARATE
+# regex, never merged into _HUMAN_REQUEST_RE: the caller (decision_engine.
+# py::decide) only treats a match here as handoff continuation when the
+# conversation's OWN persisted handoff_status is currently PENDING/NOTIFIED
+# (passed in via context["handoff_status"]) -- this pattern alone, on a
+# conversation with no active handoff, must fall through to ordinary
+# routing (e.g. RAG) same as before. Both "active state" AND "follow-up
+# intent" are required; neither alone is sufficient (see decide()'s own
+# comment at the call site for why).
+_HANDOFF_FOLLOWUP_RE = re.compile(
+    r"(ยังไม่มี[^.!?]{0,15}(เจ้าหน้าที่|คน|ใคร)[^.!?]{0,10}(ติดต่อ|โทร)"
+    r"|(เจ้าหน้าที่|คน)[^.!?]{0,10}ยังไม่[^.!?]{0,10}(ติดต่อ|โทร)"
+    r"|เมื่อไหร่[^.!?]{0,15}(เจ้าหน้าที่|คน|ใคร)[^.!?]{0,10}ติดต่อ"
+    r"|ยังรอ[^.!?]{0,10}เจ้าหน้าที่"
+    r"|รอ[^.!?]{0,10}เจ้าหน้าที่[^.!?]{0,10}อยู่)",
+    re.IGNORECASE,
+)
+
 
 def resolve_active_erp_intent(history: Optional[List[Dict]], current_message: str) -> Optional[str]:
     """detect_erp_intent() alone only recognizes a message that itself

@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 from rag.query_understanding import classify_actionable_intent
 from services.slot_filling_engine import (
     ERP_INTENTS,
+    _HANDOFF_FOLLOWUP_RE,
     _HUMAN_REQUEST_RE,
     _REFUSAL_RE,
     _validate_generic_identifier,
@@ -990,6 +991,36 @@ class DecisionEngine:
                 return self._route_human_handoff(
                     message, history, context, developer_trace, start,
                     reason="user_requested_human", workflow=workflow_hint)
+
+            # Active Handoff Follow-up (Golden Application Defect Fixes,
+            # 2026-08-16 -- root cause of the ORIGINAL GOLDEN-038's
+            # failure) -- a message referring to an already-outstanding
+            # human-contact request ("ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย") never
+            # matches _HUMAN_REQUEST_RE above (it isn't a fresh request)
+            # and previously fell straight through to ordinary routing
+            # (usually RAG, since it carries no ERP Business Action
+            # keyword), silently abandoning an active handoff instead of
+            # staying inside it. Requires BOTH signals, deliberately: the
+            # conversation's OWN persisted state (context["handoff_status"]
+            # -- set by whichever channel adapter called decide(); "NONE"
+            # when absent, e.g. a caller that never wired it in, so this
+            # never fires on an ordinary complaint with no real handoff
+            # behind it) AND the message's own follow-up phrasing
+            # (_HANDOFF_FOLLOWUP_RE). Neither alone is sufficient -- see
+            # that regex's own docstring. Duplicate-notification
+            # protection itself is NOT reimplemented here: reusing
+            # _route_human_handoff means the SAME PENDING/NOTIFIED dedup
+            # state machine every other HUMAN_HANDOFF path already goes
+            # through downstream (services/session_service.py, verified
+            # working by GOLDEN-038B) suppresses the actual duplicate
+            # send -- this trigger only fixes which ROUTE the turn takes.
+            if context.get("handoff_status") in ("PENDING", "NOTIFIED") \
+                    and _HANDOFF_FOLLOWUP_RE.search(message or ""):
+                return self._route_human_handoff(
+                    message, history, context, developer_trace, start,
+                    reason="handoff_follow_up", workflow=workflow_hint,
+                    message_override="รับทราบค่ะ ตอนนี้มีคำขอติดต่อเจ้าหน้าที่อยู่แล้ว "
+                                      "เจ้าหน้าที่จะติดต่อกลับโดยเร็วที่สุดค่ะ จึงจะไม่ส่งคำขอซ้ำนะคะ")
 
             # Customer Intelligence Handoff Recommendation (Human Handoff
             # V1, 2026-08-15) — Trigger C. A deterministic, per-message

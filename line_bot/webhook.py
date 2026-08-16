@@ -272,6 +272,13 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     session_service = get_session_service()
     conversation = session_service.get_or_create_active_conversation(user_id)
     recent_history = session_service.get_recent_history(conversation["id"]) if conversation else []
+    # Fetched once, BEFORE any decide() call below -- reused by the
+    # existing dedup check further down this function, so Active Handoff
+    # Follow-up routing (services/decision_engine.py::decide()) and
+    # duplicate-notification suppression read the exact same value,
+    # never two separately-timed reads of the same row.
+    handoff_status_before = session_service.get_handoff_status(conversation["id"]) if conversation else "NONE"
+    decide_context["handoff_status"] = handoff_status_before
 
     # LINE Confirmation Flow (2026-08-10) — a customer-typed reply like
     # "ยืนยัน"/"yes" only means anything in the context of a PENDING
@@ -374,7 +381,12 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     if is_handoff:
         handoff_payload = result.get("handoff_payload") or {}
         reason = handoff_payload.get("reason", "handoff")
-        handoff_status = session_service.get_handoff_status(conversation["id"]) if conversation else "NONE"
+        # Nothing between the pre-decide() read above and here can change
+        # handoff_status (none of the confirm/cancel/fresh decide() paths
+        # touch it; set_handoff_status is only ever called in the `else`
+        # branch just below) -- reusing the same value avoids a second,
+        # redundant read of the same row.
+        handoff_status = handoff_status_before
         if handoff_status in ("NOTIFIED", "PENDING"):
             print(f"[webhook] Human Handoff already {handoff_status} for this conversation — skipping duplicate notification")
         else:

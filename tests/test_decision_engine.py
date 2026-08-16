@@ -968,6 +968,78 @@ class TestHumanHandoffTriggers(unittest.TestCase):
         self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
 
 
+class TestActiveHandoffFollowUpRouting(unittest.TestCase):
+    """Golden Application Defect Fixes (2026-08-16) — GOLDEN-038 root
+    cause: a follow-up about an ALREADY-outstanding human-contact request
+    ("ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย") never matched _HUMAN_REQUEST_RE (it
+    isn't a fresh request) and fell straight through to ordinary routing
+    (RAG, since it carries no ERP Business Action keyword), silently
+    abandoning an active handoff. Requires BOTH context["handoff_status"]
+    (PENDING/NOTIFIED — the exact values services/session_service.py's
+    get_handoff_status/set_handoff_status state machine produces) AND the
+    message's own follow-up phrasing — neither alone is sufficient. This
+    is deliberately a ROUTING fix only: duplicate-notification protection
+    itself is untouched, reusing the SAME _route_human_handoff /
+    downstream dedup state machine every other HUMAN_HANDOFF path already
+    goes through (see tests/golden/golden_cases.json's
+    GOLDEN-038B-HANDOFF-DUPLICATE-PROTECTION, which already proves that
+    dedup logic works once routing_type==HUMAN_HANDOFF is reached)."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+
+    def test_follow_up_with_active_notified_status_routes_to_handoff(self):
+        result = self.engine.decide("ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย", history=[],
+                                     context={"handoff_status": "NOTIFIED"})
+        self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_follow_up_with_active_pending_status_routes_to_handoff(self):
+        result = self.engine.decide("ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย", history=[],
+                                     context={"handoff_status": "PENDING"})
+        self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_follow_up_phrasing_variants_all_route_to_handoff(self):
+        for message in ("ยังไม่มีใครโทรมา", "เจ้าหน้าที่ยังไม่ติดต่อกลับ",
+                         "เมื่อไหร่จะมีคนติดต่อ", "ยังรอเจ้าหน้าที่อยู่"):
+            with self.subTest(message=message):
+                result = self.engine.decide(message, history=[], context={"handoff_status": "NOTIFIED"})
+                self.assertEqual(result["routing"]["type"], "HUMAN_HANDOFF", msg=f"failed for: {message}")
+
+    def test_same_message_without_active_handoff_state_never_escalates(self):
+        """Active state AND follow-up intent are both required — the SAME
+        phrasing with no outstanding handoff (context["handoff_status"]
+        absent/"NONE", e.g. a genuinely unrelated complaint) must fall
+        through to ordinary routing, never treated as handoff
+        continuation. This is the "Do not treat every complaint as active
+        handoff" guard from the task brief."""
+        result = self.engine.decide("ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย", history=[])
+        self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_active_handoff_state_without_follow_up_phrasing_never_escalates(self):
+        """The other half of the same guard — an active handoff state
+        alone, on a message with no follow-up-shaped content at all, must
+        not force HUMAN_HANDOFF either."""
+        result = self.engine.decide("CBM คืออะไร", history=[], context={"handoff_status": "NOTIFIED"})
+        self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_unrelated_delivery_complaint_never_escalates_even_with_active_status(self):
+        """A complaint that happens to share surface words ("ยังไม่มี...")
+        but is about something else entirely (a delivery, not a person)
+        must not false-positive off the loose "คน"/"เจ้าหน้าที่" evidence
+        this trigger requires."""
+        result = self.engine.decide("ของยังไม่มาส่งเลย", history=[], context={"handoff_status": "NOTIFIED"})
+        self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    def test_follow_up_never_produces_the_fresh_request_reply_text(self):
+        """The customer-facing reply must acknowledge an EXISTING request,
+        never repeat the fresh-request wording (which would misleadingly
+        imply a brand-new notification is being sent)."""
+        result = self.engine.decide("ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย", history=[],
+                                     context={"handoff_status": "NOTIFIED"})
+        self.assertNotEqual(result["reply"]["text"], "ได้เลยค่ะ เดี๋ยวแจ้งเจ้าหน้าที่ให้ติดต่อกลับนะคะ")
+
+
 class TestCustomerIntelligenceHandoffTrigger(unittest.TestCase):
     """Human Handoff V1 (2026-08-15), Trigger C — Customer Intelligence's
     per-message stage/handoff signal (services/customer_tier_service.py)
@@ -1977,7 +2049,12 @@ def _seed_order_shipment_tracking_actions(reg):
                      {"name": "OrderCode", "required": True, "validation_pattern": r"^POS\d+$"},
                  ])
     _seed_action(reg, key="searchdataorderlist", action_type="API", category="Customer Order Retrieval",
-                 keywords=["คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "order list", "PO"],
+                 # "ออเดอร์" added by migration 042 (Golden Application
+                 # Defect Fixes, 2026-08-16) — GOLDEN-049 root cause: no
+                 # keyword covered the common Thai-English loanword for
+                 # "order" at all, so a message using it scored 0 via
+                 # search_keywords on every ERP action.
+                 keywords=["คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "order list", "PO", "ออเดอร์"],
                  params=[{"name": "CustCode", "required": True, "validation_pattern": cust_pattern}])
     _seed_action(reg, key="searchdatashipment", action_type="API", category="Customer Shipment Retrieval",
                  keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"],
@@ -1990,7 +2067,16 @@ def _seed_order_shipment_tracking_actions(reg):
                  params=[{"name": "CustCode", "required": True, "validation_pattern": cust_pattern}])
     _seed_action(reg, key="searchdatatracking", action_type="API", category="Customer Shipment Retrieval",
                  priority=1,
-                 keywords=["tracking จีน", "เลข tracking", "tracking", "ค้นหาด้วยเลข tracking", "เลข tracking จีน"],
+                 # "เลขพัสดุจีน"/"เลขจีน"/"พัสดุจีน"/"หมายเลขพัสดุจีน" added
+                 # by migration 042 (Golden Application Defect Fixes,
+                 # 2026-08-16) — GOLDEN-024 root cause: every existing
+                 # keyword required the literal English word "tracking";
+                 # a customer phrasing the exact same intent in native Thai
+                 # ("เลขพัสดุจีน...ถึงไหนแล้ว") scored 0 here while
+                 # SearchDataShipmentList's generic "พัสดุ" keyword matched
+                 # and won by default.
+                 keywords=["tracking จีน", "เลข tracking", "tracking", "ค้นหาด้วยเลข tracking", "เลข tracking จีน",
+                           "เลขพัสดุจีน", "เลขจีน", "พัสดุจีน", "หมายเลขพัสดุจีน"],
                  params=[
                      {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
                      {"name": "Tracking", "required": True},
@@ -2100,6 +2186,45 @@ class TestOrderShipmentTrackingRoutingPrecision(unittest.TestCase):
             (result.get("developer") or {}).get("selected_business_action"), "searchdatatracking")
         collection = (result.get("developer") or {}).get("information_collection_status") or {}
         self.assertNotEqual(collection.get("selected_business_action"), "searchdatatracking")
+
+    # -- GOLDEN-024 (Golden Application Defect Fixes, 2026-08-16): native
+    # Thai phrasing for "Chinese tracking/package number" must resolve to
+    # SearchDataTracking, never SearchDataShipmentList's generic "พัสดุ"
+    # keyword, across several distinct phrasings (never just the one
+    # literal sentence the Golden case happened to use). --
+
+    def test_chinese_tracking_number_thai_phrase_selects_tracking(self):
+        self.assertEqual(self._selected_action_key("เลขพัสดุจีน testlineOnNut007 ถึงไหนแล้ว"), "searchdatatracking")
+
+    def test_chinese_tracking_number_thai_phrase_variant_with_check_selects_tracking(self):
+        self.assertEqual(self._selected_action_key("ช่วยเช็กเลขพัสดุจีน testlineOnNut007"), "searchdatatracking")
+
+    def test_tracking_jeen_english_word_variant_selects_tracking(self):
+        self.assertEqual(self._selected_action_key("tracking จีน testlineOnNut007 ถึงไหนแล้ว"), "searchdatatracking")
+
+    def test_lek_jeen_variant_selects_tracking(self):
+        self.assertEqual(self._selected_action_key("เลขจีน testlineOnNut007 อยู่ไหนแล้ว"), "searchdatatracking")
+
+    def test_generic_package_question_without_china_still_selects_shipment_list(self):
+        """Regression guard — the new "จีน"-scoped keywords must never
+        make an ordinary, non-China-specific package question (no
+        SearchDataTracking-specific evidence at all) drift away from
+        SearchDataShipmentList."""
+        self.assertEqual(self._selected_action_key("FT1004 มีพัสดุอะไรบ้าง"), "searchdatashipmentlist")
+
+    # -- GOLDEN-049 (Golden Application Defect Fixes, 2026-08-16): the
+    # Thai-English loanword "ออเดอร์" (order) alone, combined with a
+    # customer identifier and "latest/list" phrasing, must be sufficient
+    # evidence for SearchDataOrderList — not a false 3-way tie between
+    # SearchDataOrderList/SearchDataShipmentList/GetUrlProductDetail via
+    # the weak ai_description word-overlap fallback (a bare "ของ" — "of"
+    # — happened to appear in all three descriptions). --
+
+    def test_order_loanword_with_customer_code_selects_order_list_not_clarification(self):
+        self.assertEqual(self._selected_action_key("ของ FT3182 มีออเดอร์ล่าสุดอะไรบ้าง"), "searchdataorderlist")
+
+    def test_order_loanword_alone_still_selects_order_list(self):
+        self.assertEqual(self._selected_action_key("FT3182 มีออเดอร์อะไรบ้าง"), "searchdataorderlist")
 
 
 if __name__ == "__main__":

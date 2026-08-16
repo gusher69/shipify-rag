@@ -3581,11 +3581,18 @@ async def hybrid_playground_ask(request: Request):
         conversation = pg_session_service.get_or_create_active_conversation(
             playground_user_id, channel="playground", name=journey_label or None)
         normalized_history = pg_session_service.get_recent_history(conversation["id"]) if conversation else []
+        # Fetched once, BEFORE decide() -- reused below (the existing
+        # dedup check at the HUMAN_HANDOFF branch) so Active Handoff
+        # Follow-up routing (services/decision_engine.py::decide()) and
+        # duplicate-notification suppression read the exact same value,
+        # never two separately-timed reads of the same row.
+        handoff_status_before = pg_session_service.get_handoff_status(conversation["id"]) if conversation else "NONE"
 
         engine = DecisionEngine(get_sb())
         decide_result = engine.decide(question, history=normalized_history,
                                        context={"developer_mode": True, "channel": "playground",
-                                                "customer_context": profile or {}})
+                                                "customer_context": profile or {},
+                                                "handoff_status": handoff_status_before})
         dev = decide_result.get("developer") or {}
         routing_type = (decide_result.get("routing") or {}).get("type")
         collection_status = dev.get("information_collection_status") or {}
@@ -3697,7 +3704,12 @@ async def hybrid_playground_ask(request: Request):
             # message regardless of how many times it's invoked.
             if routing_type == "HUMAN_HANDOFF":
                 h_reason = (decide_result.get("handoff_payload") or {}).get("reason", "handoff")
-                h_status = pg_session_service.get_handoff_status(conversation["id"])
+                # Nothing between the pre-decide() read above and here can
+                # change handoff_status (decide() itself never persists
+                # anything; set_handoff_status is only ever called in the
+                # `else` branch just below) -- reusing the same value
+                # avoids a second, redundant read of the same row.
+                h_status = handoff_status_before
                 if h_status in ("NOTIFIED", "PENDING"):
                     production_trace_out["handoff_notification"] = {
                         "simulated_sent": False, "reason": f"duplicate suppressed (status={h_status})"}

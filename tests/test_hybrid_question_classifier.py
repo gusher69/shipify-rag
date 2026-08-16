@@ -165,5 +165,77 @@ class TestClassifyQuestion(unittest.TestCase):
         self.assertEqual(result["classification"], "RAG_ONLY")
 
 
+class TestLooseMarkerSegmentation(unittest.TestCase):
+    """Golden Application Defect Fixes (2026-08-16) — GOLDEN-026 root
+    cause: bare "แล้ว" (never "และ"/"แล้วก็"/any of the other FIXED
+    _SEGMENT_CONJUNCTIONS) is the single most common way a Thai customer
+    joins two related questions in one message, but it's heavily
+    overloaded — also an ordinary temporal/completion particle with no
+    second question at all. See _LOOSE_SEGMENT_MARKERS' own docstring for
+    why it's only trusted as a clause boundary when the candidate RAG
+    clause independently carries its own question evidence."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+
+    def _seed_customer_lookup(self, key="get_customer_coupons", keywords=None):
+        action_id = _seed_action(self.reg, key=key, category="customer",
+                                  keywords=keywords or ["คูปอง", "ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False,
+             "input_source": "customer_message", "validation_pattern": r"^C\d+$"},
+        ])
+        self.reg.set_parameter_groups(action_id, [
+            {"name": "identifier_group", "rule": "AT_LEAST_ONE", "members": ["CustCode"]},
+        ])
+        return action_id
+
+    def test_bare_laew_with_question_marker_segments_as_hybrid(self):
+        """The exact GOLDEN-026 pattern — 'มีคูปองอะไรบ้าง แล้วคูปองใช้งาน
+        ยังไง' never contains 'และ'/'แล้วก็'/any fixed conjunction at all,
+        so the ORIGINAL classifier (fixed conjunctions only) never split
+        it — it stayed one clause, so segmentation returned None and the
+        turn fell to ERP_ONLY instead of HYBRID."""
+        action_id = self._seed_customer_lookup()
+        result = classify_question("ลูกค้า C00001 มีคูปองอะไรบ้าง แล้วคูปองใช้งานยังไง", self.reg)
+        self.assertEqual(result["classification"], "HYBRID")
+        self.assertEqual(result["selected_action_id"], action_id)
+        self.assertEqual(result["erp_sub_question"], "ลูกค้า C00001 มีคูปองอะไรบ้าง")
+        self.assertEqual(result["rag_sub_question"], "คูปองใช้งานยังไง")
+
+    def test_wallet_top_up_variant_segments_as_hybrid(self):
+        action_id = self._seed_customer_lookup(key="get_wallet", keywords=["wallet", "เติมเงิน"])
+        result = classify_question("ลูกค้า C00001 มี wallet เท่าไหร่ แล้วเติมเงินยังไง", self.reg)
+        self.assertEqual(result["classification"], "HYBRID")
+        self.assertEqual(result["selected_action_id"], action_id)
+        self.assertEqual(result["rag_sub_question"], "เติมเงินยังไง")
+
+    def test_bare_laew_without_question_marker_stays_single_intent(self):
+        """'แล้ว' used purely as a completion particle ("already done"),
+        no genuine second question follows it — must NOT be forced into
+        HYBRID off the marker alone (the exact over-triggering the task
+        brief explicitly warns against: "Do not make every sentence
+        containing แล้ว Hybrid")."""
+        self._seed_customer_lookup()
+        result = classify_question("ลูกค้า C00001 เช็คคูปองให้แล้วนะ", self.reg)
+        self.assertNotEqual(result["classification"], "HYBRID")
+
+    def test_leading_laew_with_no_second_clause_stays_single_intent(self):
+        self._seed_customer_lookup()
+        result = classify_question("แล้วลูกค้า C00001 มีคูปองไหม", self.reg)
+        self.assertNotEqual(result["classification"], "HYBRID")
+
+    def test_fixed_conjunction_path_still_wins_over_loose_fallback(self):
+        """A message with BOTH a fixed conjunction ("และ") and no bare
+        "แล้ว" must still segment via the original, unmodified path —
+        regression guard that the loose fallback never interferes with
+        the existing, already-passing behavior (GOLDEN-025)."""
+        action_id = self._seed_customer_lookup(keywords=["คูปอง", "ข้อมูลลูกค้า", "กระเป๋าเงิน"])
+        result = classify_question("ลูกค้ารหัส C00001 กระเป๋าเงินเหลือเท่าไหร่ และ CBM คำนวณยังไง", self.reg)
+        self.assertEqual(result["classification"], "HYBRID")
+        self.assertEqual(result["selected_action_id"], action_id)
+        self.assertEqual(result["rag_sub_question"], "CBM คำนวณยังไง")
+
+
 if __name__ == "__main__":
     unittest.main()

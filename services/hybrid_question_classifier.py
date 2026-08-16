@@ -46,6 +46,29 @@ from services.action_selection_primitives import (
 # clause (segmentation then correctly reports "not separable").
 _SEGMENT_CONJUNCTIONS = ("และ", "กับ", "แล้วก็", "รวมถึง", "พร้อมกับ", " and ", " plus ", " as well as ")
 
+# Loose Segment Markers (Golden Application Defect Fixes, 2026-08-16) --
+# bare "แล้ว" ("then"/"also"/"already") is the single most common way a
+# Thai customer joins two related questions in one message ("...มีคูปอง
+# อะไรบ้าง แล้วคูปองใช้งานยังไง"), but unlike the fixed conjunctions above
+# it is heavily overloaded -- it's just as commonly a temporal/completion
+# particle with NO second question at all ("ส่งของแล้วหรือยัง", "เช็คให้
+# แล้วนะ"). Never used as a conjunction on its own (see
+# _segment_by_value): only trusted as a genuine clause boundary when the
+# resulting non-ERP clause independently carries its own question
+# evidence (_QUESTION_MARKER_RE) -- two distinct signals required, not
+# one, exactly like a tied keyword score elsewhere in this module already
+# requires independent structural evidence before it's allowed to decide
+# anything on its own.
+_LOOSE_SEGMENT_MARKERS = ("แล้ว",)
+
+# Generic Thai question particles -- not tied to any customer/domain
+# vocabulary (coupons, wallets, shipments, ...); the same handful of
+# words that turn any clause into a recognizable question, regardless of
+# what it's asking about.
+_QUESTION_MARKER_RE = re.compile(
+    r"(ยังไง|อย่างไร|อะไร|ทำไม|เท่าไหร่|เท่าไร|หรือไม่|ไหม|กี่|ที่ไหน)"
+)
+
 # A message that is ONLY a greeting has no actionable question content —
 # deterministically UNKNOWN rather than a low-confidence guess either way.
 _GREETING_RE = re.compile(r"^(สวัสดี|หวัดดี|hello|hi|hey)[\sครับค่ะ!.]*$", re.IGNORECASE)
@@ -77,12 +100,35 @@ def _segment_by_value(message: str, matched_value: str) -> Optional[Dict[str, st
     None when the message doesn't cleanly separate into 2+ clauses with
     both a matching and a non-matching one — callers must NOT force a
     HYBRID classification in that case (see classify_question)."""
-    clauses = _split_clauses(message)
-    if len(clauses) < 2 or not matched_value:
+    if not matched_value:
         return None
-    erp_clauses = [c for c in clauses if matched_value in c]
-    rag_clauses = [c for c in clauses if c not in erp_clauses]
+    clauses = _split_clauses(message)
+    if len(clauses) >= 2:
+        erp_clauses = [c for c in clauses if matched_value in c]
+        rag_clauses = [c for c in clauses if c not in erp_clauses]
+        if erp_clauses and rag_clauses:
+            return {"erp_sub_question": " ".join(erp_clauses), "rag_sub_question": " ".join(rag_clauses)}
+
+    # Loose-marker fallback (see _LOOSE_SEGMENT_MARKERS docstring) — only
+    # reached when NONE of the fixed conjunctions produced a valid split.
+    # Requires evidence of two genuinely distinct intents, not just the
+    # marker: the candidate RAG clause must independently contain its own
+    # question evidence, or this returns None exactly like the fixed path
+    # above (never forces HYBRID off the marker alone).
+    loose_clauses = [message]
+    for marker in _LOOSE_SEGMENT_MARKERS:
+        next_parts: List[str] = []
+        for p in loose_clauses:
+            next_parts.extend(p.split(marker))
+        loose_clauses = next_parts
+    loose_clauses = [c.strip() for c in loose_clauses if c.strip()]
+    if len(loose_clauses) < 2:
+        return None
+    erp_clauses = [c for c in loose_clauses if matched_value in c]
+    rag_clauses = [c for c in loose_clauses if c not in erp_clauses]
     if not erp_clauses or not rag_clauses:
+        return None
+    if not any(_QUESTION_MARKER_RE.search(c) for c in rag_clauses):
         return None
     return {"erp_sub_question": " ".join(erp_clauses), "rag_sub_question": " ".join(rag_clauses)}
 
