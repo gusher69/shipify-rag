@@ -45,6 +45,9 @@
 .cv-row-export:hover{color:#e8edf5;background:rgba(255,255,255,.08)}
 .cv-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px}
 .cv-detail-export{font-size:11.5px;padding:6px 12px;white-space:nowrap}
+.cv-spinner{display:inline-block;width:11px;height:11px;border:2px solid rgba(232,237,245,.25);
+  border-top-color:#e8edf5;border-radius:50%;animation:cv-spin .7s linear infinite;margin-right:5px;vertical-align:-1.5px}
+@keyframes cv-spin{to{transform:rotate(360deg)}}
 </style>
 {% endblock %}
 
@@ -67,7 +70,8 @@
         <option value="playground">AI Playground</option>
       </select>
       <input class="cv-input" id="cv-search" placeholder="Search question/answer…" style="flex:1;min-width:200px" oninput="debouncedLoad()">
-      <a class="btn btn-secondary" id="cv-export-all" href="/admin/api/conversations/export-all.json" download>⇩ Export All</a>
+      <a class="btn btn-secondary" id="cv-export-all" href="/admin/api/conversations/export-all.json"
+         onclick="return exportViaFetch(this.href, this)">⇩ Export All</a>
     </div>
     <table class="cv-table">
       <thead><tr><th>Channel</th><th>Name / Last Question</th><th>Turns</th><th>Last Confidence</th><th>Tier</th><th>Updated</th><th></th></tr></thead>
@@ -92,6 +96,48 @@ var _cvTierSnapshot = {}; // line_user_id isn't on the row list; tier comes from
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){
   return {'&':'&lt;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
 }); }
+
+// Export loading feedback (2026-08-16) — a plain `<a href download>` gives
+// the browser no chance to show progress while the server builds a
+// possibly-large export payload, so the page just looks frozen until the
+// download silently starts. Fetching explicitly lets us show a spinner for
+// exactly as long as the request actually takes, then hand the browser a
+// Blob to save — same end result, visible feedback in between.
+function exportViaFetch(url, el){
+  // The synchronous `return false` at the bottom (reached before the fetch
+  // promise resolves) is what the inline `onclick="return ..."` attribute
+  // reads as "prevent default navigation" — no explicit
+  // event.preventDefault() needed.
+  var compact = el.dataset.compact === '1';
+  var original = el.innerHTML;
+  el.style.pointerEvents = 'none';
+  el.style.opacity = '0.55';
+  el.innerHTML = compact ? '<span class="cv-spinner"></span>' : '<span class="cv-spinner"></span>Exporting…';
+  fetch(url)
+    .then(function(r){
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var disposition = r.headers.get('Content-Disposition') || '';
+      var match = disposition.match(/filename="([^"]+)"/);
+      return r.blob().then(function(blob){ return {blob: blob, filename: match ? match[1] : 'export.json'}; });
+    })
+    .then(function(result){
+      var blobUrl = URL.createObjectURL(result.blob);
+      var a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = result.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    })
+    .catch(function(e){ alert('Export failed: ' + e.message); })
+    .finally(function(){
+      el.style.pointerEvents = '';
+      el.style.opacity = '';
+      el.innerHTML = original;
+    });
+  return false;
+}
 
 function debouncedLoad(){ clearTimeout(_cvSearchDebounce); _cvSearchDebounce = setTimeout(loadConversations, 250); }
 
@@ -148,7 +194,7 @@ function loadConversations(){
           '<td>' + (s.last_confidence != null ? (s.last_confidence * 100).toFixed(0) + '%' : '—') + '</td>' +
           '<td>' + tierBadge(s.conversation_tier) + '</td>' +
           '<td style="color:rgba(232,237,245,.4);font-size:11px">' + (s.updated_at ? s.updated_at.slice(0, 16).replace('T', ' ') : '') + '</td>' +
-          '<td onclick="event.stopPropagation()"><a class="cv-row-export" href="/admin/playground/sessions/' + s.id + '/export.json" title="Download JSON" download>&#8681;</a></td>' +
+          '<td onclick="event.stopPropagation()"><a class="cv-row-export" href="/admin/playground/sessions/' + s.id + '/export.json" title="Download JSON" data-compact="1" onclick="return exportViaFetch(this.href, this)">&#8681;</a></td>' +
           '</tr>';
       }).join('') || '<tr><td colspan="7" style="color:rgba(232,237,245,.3)">No conversations yet.</td></tr>';
     });
@@ -163,7 +209,7 @@ function openDetail(sessionId){
     if (!d.ok) { content.innerHTML = 'Could not load conversation.'; return; }
     var session = d.session;
     var html = '<div class="cv-detail-header"><div style="font-size:15px;font-weight:700;color:#e8edf5;margin-bottom:2px">' + esc(session.name) + '</div>' +
-      '<a class="btn btn-secondary cv-detail-export" href="/admin/playground/sessions/' + sessionId + '/export.json" download>&#8681; Download JSON</a></div>';
+      '<a class="btn btn-secondary cv-detail-export" href="/admin/playground/sessions/' + sessionId + '/export.json" onclick="return exportViaFetch(this.href, this)">&#8681; Download JSON</a></div>';
     html += '<div style="font-size:11px;color:rgba(232,237,245,.4);margin-bottom:16px">Channel: ' + esc(session.channel || 'playground') +
       (session.line_user_id ? ' · LINE User: ' + esc(session.line_user_id.slice(0, 12)) + '…' : '') + '</div>';
 
