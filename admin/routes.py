@@ -3864,6 +3864,11 @@ async def hybrid_playground_ask(request: Request):
             "rag_contribution": synthesis["rag_section"],
             "merged_answer": synthesis["merged_answer"],
             "merge_strategy": synthesis["strategy"],
+            # Developer-only view (architecture labels + citations) —
+            # never what a real customer sees; kept for the Playground's
+            # own Developer Mode inspection.
+            "labeled_answer": synthesis["labeled_answer"],
+            "citations": synthesis["citations"],
         }
 
     if production_trace_out is None:

@@ -15,7 +15,7 @@ importers (e.g. services/erp_test_harness.py's
 keep working completely unchanged.
 """
 import re
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from services.slot_filling_engine import _validate_generic_identifier, _validate_phone_number, extract_candidates
 
@@ -191,7 +191,8 @@ def _keyword_score(action: Dict, message: str) -> float:
     return score
 
 
-def select_requested_mapped_fields(question: str, mapped_fields: Optional[Dict], response_mapping: Optional[List[Dict]] = None) -> Optional[Dict]:
+def select_requested_mapped_fields(question: str, mapped_fields: Optional[Dict], response_mapping: Optional[List[Dict]] = None,
+                                    input_param_names: Optional[Iterable[str]] = None) -> Optional[Dict]:
     """Generic Requested-Field Filtering — narrows an already-mapped ERP
     result down to only the field(s) the customer's own question actually
     asked about, driven entirely by each response_mapping row's own
@@ -207,6 +208,18 @@ def select_requested_mapped_fields(question: str, mapped_fields: Optional[Dict],
     (see CLAUDE.md: deterministic post-processing must stay separably
     labeled from AI-generated output).
 
+    Identifier Self-Match Guard (2026-08-16) — a row that merely echoes
+    back one of THIS turn's own input parameters (e.g. a "รหัสลูกค้า" /
+    CustCode row, json_path ending "...CustCode") is skipped when
+    computing matches, never let alone satisfy the filter. Otherwise any
+    message that simply NAMES the identifier the customer already gave
+    ("อยากทราบข้อมูลลูกค้ารหัส FT3182") collides with that field's own
+    keywords ("รหัส"/"code") and narrows a rich customer record down to
+    a bare echo of the code the customer already supplied — the customer
+    is naming their identifier, not asking to have it read back. The row
+    is still included whenever nothing else narrows the result (the
+    "safe by construction" default below still shows it).
+
     Safe by construction: if nothing in the question matches any field's
     keywords (e.g. "ดูข้อมูลทั้งหมด" / "show me everything", or a business
     action with no curated keywords at all), the full `mapped_fields` dict
@@ -215,10 +228,15 @@ def select_requested_mapped_fields(question: str, mapped_fields: Optional[Dict],
     if not isinstance(mapped_fields, dict) or not mapped_fields:
         return mapped_fields
     question_l = (question or "").lower()
+    input_names_lower = {str(n).lower() for n in (input_param_names or [])}
     matched_labels = set()
     for m in response_mapping or []:
         label = m.get("mapped_label")
         if not label or label not in mapped_fields:
+            continue
+        json_path = m.get("json_path") or ""
+        last_segment = json_path.rsplit(".", 1)[-1].lower() if json_path else ""
+        if input_names_lower and last_segment in input_names_lower:
             continue
         keywords = (m.get("field_metadata") or {}).get("keywords") or [label]
         if any(str(kw).lower() in question_l for kw in keywords if kw):

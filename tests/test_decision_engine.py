@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tests.test_business_action_registry import _FakeSupabase
 from services.business_action_registry import BusinessActionRegistry
-from services.decision_engine import DecisionEngine, search_candidate_actions, select_best_action
+from services.decision_engine import DecisionEngine, search_candidate_actions, select_best_action, _sanitize_customer_text
 from services.action_selection_primitives import select_requested_mapped_fields
 
 
@@ -387,6 +387,53 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         self.reg = BusinessActionRegistry(_FakeSupabase())
         self.engine = _engine_with_registry(self.reg)
 
+    def test_bare_identifier_clarification_captures_identifier_for_next_turn(self):
+        """Confirmed live bug (2026-08-16) — a WHOLE bare identifier
+        ("SP1014") triggers the Pure Identifier Guard's clarifying
+        question, but never persisted the identifier itself, unlike its
+        sibling "identifier + other words" guard a few lines below. The
+        next turn, naming only an intent ("ข้อมูลลูกค้า"), had nothing to
+        bind SP1014 to and re-asked for the identifier from scratch."""
+        # Several unrelated actions share the identifier's own shape
+        # (mirrors the real production registry) so sharer-weighting
+        # dilutes a single pattern match below the selection threshold —
+        # this bug only reproduced against the real registry, not a
+        # single-action toy setup, exactly like the sibling "identifier +
+        # other words" guard's own regression test above.
+        for i in range(4):
+            action_id = _seed_action(self.reg, key=f"get_customer_full_{i}", action_type="API",
+                                      category=f"unrelated_{i}", keywords=[f"เฉพาะเจาะจงมากๆ{i}"])
+            self.reg.replace_parameters(action_id, [
+                {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                 "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            ])
+        result = self.engine.decide("SP1014", history=[], context={"developer_mode": True})
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        info = result["developer"]["information_collection_status"]
+        self.assertEqual(info["collected_parameters"], {"CustCode": "SP1014"})
+
+    def test_identifier_reused_automatically_once_intent_named_after_clarification(self):
+        """Full round-trip of the same bug: once SP1014 is remembered
+        (customer_context.cust_code, exactly like profiles/manager.py
+        would persist it from the previous turn's collected_parameters),
+        naming only the intent ("ข้อมูลลูกค้า") must execute GetDataCustomer
+        with SP1014 automatically — never re-ask for the identifier."""
+        action_id = _seed_action(self.reg, key="get_customer_full", action_type="API",
+                                  category="customer", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {"CustName": "ใจเย็นๆ"}})) as mock_req:
+            result = self.engine.decide("ข้อมูลลูกค้า", history=[],
+                                         context={"developer_mode": True, "customer_context": {"cust_code": "SP1014"}})
+        self.assertEqual(result["routing"]["type"], "API")
+        mock_req.assert_called_once()
+        sent_params = mock_req.call_args.kwargs.get("params") or {}
+        self.assertEqual(sent_params.get("CustCode"), "SP1014")
+
     def _seed_customer_lookup_with_coupon_field(self):
         action_id = _seed_action(self.reg, key="get_customer_full", action_type="API",
                                   category="customer", keywords=["ข้อมูลลูกค้า"])
@@ -700,6 +747,47 @@ class TestBusinessActionExecutionByType(unittest.TestCase):
         with patch.object(self.engine.executor, "execute", return_value=_fake_exec_result(result={"mapped_fields": {}})):
             result = self.engine.decide("แจ้งเตือนภายนอกหน่อย", history=[])
         self.assertEqual(result["routing"]["type"], "WEBHOOK")
+
+
+class TestCustomerTextSanitizer(unittest.TestCase):
+    """Customer Response Sanitizer (2026-08-16) — the final defensive
+    net behind the composer/response architecture, not the primary fix.
+    Must never fire on ordinary customer-facing prose."""
+
+    def test_catches_raw_list_of_dicts(self):
+        text = _sanitize_customer_text('รายการคำสั่งซื้อทั้งหมด: [{"Code": "PO1", "Status": "ยกเลิก"}]')
+        self.assertNotIn("[{", text)
+        self.assertIn("ขอโทษ", text)
+
+    def test_catches_python_repr_dict(self):
+        text = _sanitize_customer_text("ข้อมูล: {'Code': 'PO1', 'Status': 'ยกเลิก'}")
+        self.assertNotIn("{'", text)
+
+    def test_catches_bare_none(self):
+        text = _sanitize_customer_text("วันที่จัดส่ง: None")
+        self.assertNotIn("None", text)
+
+    def test_catches_source_citation_metadata(self):
+        text = _sanitize_customer_text("คำตอบค่ะ\n\nแหล่งที่มา:\n- AI Knowledge Master.xlsx, page 5")
+        self.assertNotIn("แหล่งที่มา", text)
+
+    def test_catches_xlsx_filename(self):
+        text = _sanitize_customer_text("อ้างอิงจาก AI Knowledge Master (1).xlsx")
+        self.assertNotIn(".xlsx", text)
+
+    def test_never_fires_on_ordinary_customer_prose(self):
+        ordinary = [
+            "รหัสลูกค้า: SP1014\nชื่อลูกค้า: ใจเย็นๆ\nยอดเงิน Purchase Wallet 21.94 บาทค่ะ",
+            "พบคูปอง 2 รายการค่ะ",
+            "CBM คือปริมาตรของสินค้าค่ะ โดยคำนวณจาก ความยาว × ความกว้าง × ความสูง",
+            "ขอบคุณค่ะ ยินดีให้บริการ",
+        ]
+        for text in ordinary:
+            self.assertEqual(_sanitize_customer_text(text), text)
+
+    def test_none_and_empty_text_pass_through_unchanged(self):
+        self.assertIsNone(_sanitize_customer_text(None))
+        self.assertEqual(_sanitize_customer_text(""), "")
 
 
 class TestFallbackAndUnknownIntent(unittest.TestCase):
@@ -1665,6 +1753,31 @@ class TestHybridRouting(unittest.TestCase):
             result = self.engine.decide("ขอทราบนโยบายการคืนสินค้า", history=[])
         self.assertIn(result["routing"]["type"], ("RAG", "SAFE_FALLBACK"))
 
+    def test_hybrid_customer_answer_has_no_internal_architecture_wording(self):
+        """Customer Response Quality (2026-08-16) — the real customer
+        reply (result["reply"]["text"]) must read as ONE natural answer,
+        never expose "ERP"/"Knowledge Base" section labels or inline
+        source citations. Those stay available in developer_trace only."""
+        self._seed_customer_coupons()
+        with patch.object(self.engine.executor, "execute",
+                           return_value=_fake_exec_result(result={"mapped_fields": {"coupons": "2 ใบ"}})), \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(
+                       answer="คูปองใช้ได้ที่หน้าชำระเงินค่ะ",
+                       chunks=[{"text": "...", "cited": True, "citation": "FAQ.xlsx, page 3"}])):
+            result = self.engine.decide("ลูกค้า C00001 มีคูปองอะไร และคูปองใช้งานอย่างไร", history=[],
+                                          context={"developer_mode": True})
+        text = result["reply"]["text"]
+        self.assertNotIn("ERP", text)
+        self.assertNotIn("Knowledge Base", text)
+        self.assertNotIn("แหล่งที่มา", text)
+        self.assertNotIn(".xlsx", text)
+        self.assertIn("coupons", text)
+        self.assertIn("คูปองใช้ได้ที่หน้าชำระเงินค่ะ", text)
+        # Developer Trace still carries the labeled view + citations.
+        self.assertIn("Knowledge Base", result["developer"]["hybrid_labeled_answer"])
+        self.assertIn("FAQ.xlsx", result["developer"]["hybrid_citations"][0])
+
 
 class TestRequestedMappedFieldSelection(unittest.TestCase):
     """Generic Requested-Field Filtering (2026-08-05, Live ERP Verification
@@ -1706,6 +1819,42 @@ class TestRequestedMappedFieldSelection(unittest.TestCase):
     def test_empty_mapped_fields_passthrough(self):
         self.assertEqual(select_requested_mapped_fields("ยอดเงิน", {}, self.mapping), {})
         self.assertIsNone(select_requested_mapped_fields("ยอดเงิน", None, self.mapping))
+
+    def test_naming_the_identifier_does_not_narrow_to_just_the_identifier_field(self):
+        """Confirmed live bug (2026-08-16) — "อยากทราบข้อมูลลูกค้ารหัส
+        FT3182" contains the word "รหัส" (code), which collides with the
+        CustCode field's OWN keywords ("รหัสลูกค้า"/"รหัส"/"code") and
+        narrowed a rich customer record down to a bare echo of the code
+        the customer already supplied. Naming an identifier is not the
+        same as asking to have it read back — the row is skipped when it
+        merely mirrors the parameter the customer just gave as input."""
+        mapping = [
+            {"json_path": "$.data.0.CustCode", "mapped_label": "รหัสลูกค้า",
+             "field_metadata": {"keywords": ["รหัสลูกค้า", "รหัส", "customer code", "code"]}},
+            {"json_path": "$.data.0.CustName", "mapped_label": "ชื่อลูกค้า",
+             "field_metadata": {"keywords": ["ชื่อ", "name"]}},
+            {"json_path": "$.data.0.Wallet", "mapped_label": "ยอดเงิน Wallet",
+             "field_metadata": {"keywords": ["wallet", "ยอดเงิน"]}},
+        ]
+        mapped_fields = {"รหัสลูกค้า": "FT3182", "ชื่อลูกค้า": "สมชาย", "ยอดเงิน Wallet": "100.00"}
+        result = select_requested_mapped_fields("อยากทราบข้อมูลลูกค้ารหัส FT3182", mapped_fields, mapping,
+                                                  input_param_names=["CustCode"])
+        self.assertEqual(result, mapped_fields)
+
+    def test_identifier_self_match_guard_only_applies_to_input_params_actually_supplied(self):
+        """A genuine field-specific question ("ยอดเงิน wallet") still
+        narrows normally — the guard only ever skips a row that mirrors
+        THIS turn's own input, never any other field."""
+        mapping = [
+            {"json_path": "$.data.0.CustCode", "mapped_label": "รหัสลูกค้า",
+             "field_metadata": {"keywords": ["รหัสลูกค้า", "รหัส"]}},
+            {"json_path": "$.data.0.Wallet", "mapped_label": "ยอดเงิน Wallet",
+             "field_metadata": {"keywords": ["wallet", "ยอดเงิน"]}},
+        ]
+        mapped_fields = {"รหัสลูกค้า": "FT3182", "ยอดเงิน Wallet": "100.00"}
+        result = select_requested_mapped_fields("ยอดเงิน wallet เหลือเท่าไหร่", mapped_fields, mapping,
+                                                  input_param_names=["CustCode"])
+        self.assertEqual(result, {"ยอดเงิน Wallet": "100.00"})
 
 
 class TestRequestedFieldFilteringEndToEnd(unittest.TestCase):

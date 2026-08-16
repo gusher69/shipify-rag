@@ -117,8 +117,15 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.assertIn("คูปองใช้งานอย่างไร", rag_question_sent)
         self.assertNotIn("C00001", rag_question_sent)
 
-        self.assertIn("ข้อมูลเฉพาะลูกค้า", data["hybrid"]["merged_answer"])
-        self.assertIn("ความรู้ทั่วไป", data["hybrid"]["merged_answer"])
+        # Customer Response Quality (2026-08-16) — the customer-facing
+        # merged_answer must read as one natural reply, never expose
+        # internal architecture wording; the labeled view is still
+        # available separately for Developer Mode.
+        self.assertNotIn("ข้อมูลเฉพาะลูกค้า", data["hybrid"]["merged_answer"])
+        self.assertNotIn("ความรู้ทั่วไป", data["hybrid"]["merged_answer"])
+        self.assertIn("คูปองใช้งานได้ที่หน้าชำระเงินค่ะ", data["hybrid"]["merged_answer"])
+        self.assertIn("ข้อมูลเฉพาะลูกค้า", data["hybrid"]["labeled_answer"])
+        self.assertIn("ความรู้ทั่วไป", data["hybrid"]["labeled_answer"])
 
     def test_auto_mode_rag_only_question_never_calls_erp(self):
         with patch("services.playground_orchestrator.run_playground_turn",

@@ -706,10 +706,36 @@ def _safe_fallback_response(reason: str) -> Dict:
     }, reason
 
 
+_UNSAFE_CUSTOMER_TEXT_RE = re.compile(
+    r"\[\{|\{'|\{\"|(?<![ก-๙A-Za-z0-9_])None(?![ก-๙A-Za-z0-9_])|(?<![ก-๙A-Za-z0-9_])null(?![ก-๙A-Za-z0-9_])"
+    r"|แหล่งที่มา\s*:|\bsource\s*:|\.xlsx\b|\bpage\s*:|\bsection\s*:", re.IGNORECASE)
+
+
+def _sanitize_customer_text(text: Optional[str]) -> Optional[str]:
+    """Customer Response Sanitizer (2026-08-16) — a final defensive net,
+    NOT the primary fix. The composer/response architecture (natural
+    ERP composition, Requested-Field Filtering, Hybrid's label-free
+    merged_answer) is what actually keeps raw serialization and source
+    metadata out of customer replies; this only catches whatever slips
+    past every one of those upstream, generically, without knowing which
+    business action or field produced it.
+
+    On a hit, the ENTIRE reply is replaced with an honest, generic
+    apology — never a regex-edit of the offending text in place, which
+    would just leave a garbled fragment instead of a clean sentence.
+    The patterns are all raw-serialization-shaped ("[{", "{'", '{"',
+    bare None/null) or developer-metadata-shaped (citation/page/section
+    markers, .xlsx) — none of them collide with ordinary Thai or English
+    customer-facing prose, so this never fires in normal operation."""
+    if text and _UNSAFE_CUSTOMER_TEXT_RE.search(text):
+        return "ขอโทษด้วยค่ะ ระบบพบปัญหาในการแสดงผลข้อมูล รบกวนสอบถามอีกครั้งหรือระบุคำถามให้ชัดเจนขึ้นนะคะ"
+    return text
+
+
 def _build_response(*, text: str, message_parts=None, buttons=None, quick_replies=None,
                      images=None, files=None) -> Dict:
     return {
-        "text": text, "message_parts": message_parts, "buttons": buttons or [],
+        "text": _sanitize_customer_text(text), "message_parts": message_parts, "buttons": buttons or [],
         "quick_replies": quick_replies or [], "images": images or [], "files": files or [],
     }
 
@@ -1149,6 +1175,16 @@ class DecisionEngine:
                 # in the first place.
                 bare_value = (message or "").strip()
                 if bare_value and _validate_generic_identifier(bare_value):
+                    # Identifier Continuity (2026-08-16) — this bare code
+                    # must still be REMEMBERED for the next turn, exactly
+                    # like the "identifier + other words" guard below
+                    # already does, otherwise a follow-up naming only an
+                    # intent ("คำสั่งซื้อ") has nothing to bind it to and
+                    # either re-asks for the identifier or, worse, selects
+                    # an action with a still-missing required parameter.
+                    captured = _opportunistic_identifier_capture(self.registry, bare_value)
+                    if captured:
+                        developer_trace.setdefault("information_collection_status", {})["collected_parameters"] = captured
                     reply = _build_response(
                         text=f"ได้ค่ะ ต้องการตรวจสอบข้อมูลอะไรของ {bare_value} คะ เช่น ข้อมูลลูกค้า คำสั่งซื้อ หรือพัสดุ")
                     return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
@@ -1502,7 +1538,8 @@ class DecisionEngine:
                         **(info_status.get("collected_parameters") or {}), **captured}
             mapped = full_mapped
             if mapped:
-                mapped = select_requested_mapped_fields(message, mapped, selected.get("response_mapping"))
+                mapped = select_requested_mapped_fields(message, mapped, selected.get("response_mapping"),
+                                                          input_param_names=collected_slots.keys())
             text = self._compose_natural_reply(mapped if mapped else result_payload, selected.get("response_mapping"),
                                                 fallback_payload=full_mapped)
             reply = _build_response(text=text)
@@ -1823,10 +1860,14 @@ class DecisionEngine:
                     erp_exec_result = {"status": "error", "error": sanitize_for_preview(str(e))}
                 developer_trace["erp_execution_result"] = erp_exec_result
                 if erp_exec_result.get("status") == "success":
-                    mapped = (erp_exec_result.get("result") or {}).get("mapped_fields")
+                    full_mapped = (erp_exec_result.get("result") or {}).get("mapped_fields")
+                    mapped = full_mapped
                     if mapped:
-                        mapped = select_requested_mapped_fields(erp_sub_question, mapped, full_action.get("response_mapping"))
-                    erp_answer = self._summarize_action_result(mapped if mapped else erp_exec_result.get("result"))
+                        mapped = select_requested_mapped_fields(erp_sub_question, mapped, full_action.get("response_mapping"),
+                                                                  input_param_names=collected.keys())
+                    erp_answer = self._compose_natural_reply(
+                        mapped if mapped else erp_exec_result.get("result"), full_action.get("response_mapping"),
+                        fallback_payload=full_mapped)
                 else:
                     erp_error = erp_exec_result.get("error") or "unknown ERP error"
             elif ambiguous:
@@ -1856,6 +1897,11 @@ class DecisionEngine:
                                               rag_citations=rag_citations)
         developer_trace["merge_strategy"] = synthesis["strategy"]
         developer_trace["selected_business_action"] = full_action.get("action_key") if full_action else None
+        # Internal architecture labels ("ERP"/"Knowledge Base") and RAG
+        # source citations are developer-only context — never shown to
+        # the customer (see synthesize_hybrid_answer's own docstring).
+        developer_trace["hybrid_labeled_answer"] = synthesis["labeled_answer"]
+        developer_trace["hybrid_citations"] = synthesis["citations"]
 
         reply = _build_response(text=synthesis["merged_answer"])
         return self._finalize(reply=reply, routing_type="HYBRID", workflow=workflow,
