@@ -1154,15 +1154,30 @@ class DecisionEngine:
                     return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
                                            developer_trace=developer_trace, context=context, start=start,
                                            alert=_detect_alert(message, context))
-                # Opportunistic Identifier Capture (2026-08-15) — this
-                # turn is genuinely going to RAG (no action selected, not
-                # a bare identifier either), but if the message ALSO
-                # mentioned a real identifier ("ผม FT3182") it must still
-                # be remembered for the next turn — see
-                # _opportunistic_identifier_capture's own docstring.
+                # Pure Identifier Guard extended to "identifier + other
+                # words" (2026-08-16) — a message like "ผม FT3182" isn't a
+                # bare identifier as a WHOLE string (it carries "ผม" too),
+                # so the guard above doesn't catch it, but it still names
+                # a real identifier and RAG has no realistic chance of
+                # having information about an arbitrary customer/order/
+                # shipment code. Previously this fell through to RAG with
+                # only a "remember it for next turn" consolation; now it
+                # asks the SAME natural clarifying question the bare-
+                # identifier guard uses, referencing the captured value —
+                # RAG is never queried for a message that just introduces
+                # an identifier. _opportunistic_identifier_capture only
+                # ever returns a STRUCTURAL match against one of the
+                # platform's own configured identifier patterns, never a
+                # free-text guess, so this stays config-driven.
                 captured = _opportunistic_identifier_capture(self.registry, message)
                 if captured:
                     developer_trace.setdefault("information_collection_status", {})["collected_parameters"] = captured
+                    identifier_value = next(iter(captured.values()))
+                    reply = _build_response(
+                        text=f"ได้ค่ะ ต้องการตรวจสอบข้อมูลอะไรของ {identifier_value} คะ เช่น ข้อมูลลูกค้า คำสั่งซื้อ หรือพัสดุ")
+                    return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
+                                           developer_trace=developer_trace, context=context, start=start,
+                                           alert=_detect_alert(message, context))
                 return self._route_safe_fallback(message, history, context, developer_trace, start,
                                                   reason="no_matching_business_action")
 

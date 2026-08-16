@@ -775,6 +775,36 @@ class TestFallbackAndUnknownIntent(unittest.TestCase):
         self.assertEqual(exec_result["prompt_template_version"], "5")
         self.assertEqual(exec_result["policy_set_name"], "Escalation-Heavy Policy Set")
 
+    def test_identifier_plus_extra_words_asks_naturally_instead_of_rag(self):
+        """Confirmed live bug (2026-08-16) — a message like "ผม FT3182"
+        isn't a bare identifier as a WHOLE string (it also carries "ผม"),
+        so it never matched any Business Action's keywords and fell
+        through to RAG, which has zero realistic chance of having
+        information about an arbitrary customer code. It must ask the
+        same natural clarifying question the bare-identifier guard uses,
+        never query RAG for a message that just introduces an
+        identifier the platform itself recognizes the shape of."""
+        # Mirrors the real production registry: several unrelated actions
+        # all require the SAME identifier concept, so sharer-weighting
+        # (_identifier_pattern_score's param_action_counts) dilutes a
+        # single pattern match below the selection threshold — exactly
+        # why the live bug only reproduced with the real registry and
+        # not a single-action toy setup.
+        for i in range(4):
+            action_id = _seed_action(self.reg, key=f"get_customer_id_plus_words_{i}", action_type="API",
+                                      category=f"unrelated_{i}", keywords=[f"เฉพาะเจาะจงมากๆ{i}"])
+            self.reg.replace_parameters(action_id, [
+                {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                 "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            ])
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   side_effect=AssertionError("RAG must never be queried for this message")):
+            result = self.engine.decide("ผม FT3182", history=[])
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        self.assertIn("FT3182", result["reply"]["text"])
+        self.assertNotEqual(result["routing"]["type"], "RAG")
+        self.assertNotEqual(result["routing"]["type"], "SAFE_FALLBACK")
+
     def test_executor_failure_returns_structured_error_not_crash(self):
         _seed_action(self.reg, key="broken_api", action_type="API", category="hr", keywords=["ข้อมูลพนักงาน"])
         with patch.object(self.engine.executor, "execute", return_value=_fake_exec_result(status="error", error="boom")):
