@@ -1,0 +1,732 @@
+{
+  "dataset_version": "1.0.0",
+  "generated_note": "Version-controlled reconstruction of the 50-case Golden Test Suite (2026-08-16), rebuilt verbatim from the golden_test_registry rows produced by the run audited in the Golden Suite Independent Audit report (same date). turns / expected_route / expected_action / expected_behavior are reproduced EXACTLY as they existed in that registry at audit time -- no value was changed to make any case pass. The only additions are: (1) machine-checkable `assertions` derived mechanically from each case's existing expected_route/expected_action/expected_behavior text (never invented new expectations), and (2) one supplementary case, GOLDEN-038B-HANDOFF-DUPLICATE-PROTECTION, added per the audit's Phase 6 finding that the original GOLDEN-038 never actually exercised duplicate-notification-protection logic (see its own `notes` field). GOLDEN-038 itself is unchanged (same turns, same expected_route=HUMAN_HANDOFF, same FAIL outcome) -- only its `description`/`notes` now state precisely what it does and does not prove, matching the audit's own classification (ROUTING/TRIGGER FAILURE, not a deduplication failure).",
+  "cases": [
+    {
+      "golden_id": "GOLDEN-001-RAG-SERVICES",
+      "category": "RAG",
+      "description": "Plain FAQ question about Shipify's services should answer from RAG with no ERP call.",
+      "turns": ["Shipify ให้บริการอะไรบ้าง"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "Natural Thai answer, no ERP call, no Source/page/xlsx in customer answer",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"},
+        {"type": "no_internal_source"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-002-RAG-CBM",
+      "category": "RAG",
+      "description": "CBM definition question should answer from RAG.",
+      "turns": ["CBM คืออะไร"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "Correct CBM explanation, no ERP",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"},
+        {"type": "no_internal_source"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-003-RAG-IMPORT",
+      "category": "RAG",
+      "description": "How-to-import question should answer from RAG with relevant KB content.",
+      "turns": ["ถ้าอยากนำเข้าสินค้าจากจีนต้องเริ่มยังไง"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "Relevant knowledge-base answer",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"},
+        {"type": "no_internal_source"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-004-RAG-CONTACT",
+      "category": "RAG",
+      "description": "Contact-number question should answer from RAG with correct contact info if present in KB.",
+      "turns": ["ขอเบอร์ติดต่อ Shipify"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "Correct contact information if present in KB",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"},
+        {"type": "no_internal_source"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-005-RAG-SHIPPING-COST",
+      "category": "RAG",
+      "description": "Shipping-cost calculation question should answer from RAG, no ERP unless actually required.",
+      "turns": ["ค่าขนส่งคิดยังไง"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "No ERP unless actually required",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"},
+        {"type": "no_internal_source"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-006-CUSTOMER-DIRECT",
+      "category": "CUSTOMER_ERP",
+      "description": "Direct customer-code lookup should call GetDataCustomer and return useful info, not just an echo of the code.",
+      "turns": ["อยากทราบข้อมูลลูกค้ารหัส FT3182"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Real ERP HTTP 200, useful customer information, not only \"รหัสลูกค้า FT3182\"",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-007-CUSTOMER-ASK-ID",
+      "category": "CUSTOMER_ERP",
+      "description": "Ask-then-provide-ID flow should ask for the identifier, then continue GetDataCustomer without losing pending intent.",
+      "turns": ["ขอดูข้อมูลลูกค้าหน่อย", "SP1014"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Asks for identifier, then continues GetDataCustomer without losing pending intent",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-008-CUSTOMER-WALLET",
+      "category": "CUSTOMER_ERP",
+      "description": "Pure-ID then field-narrowing flow: asks what to inspect (not RAG), reuses SP1014, gives a natural wallet answer.",
+      "turns": ["SP1014", "ข้อมูลลูกค้า", "กระเป๋าเงินเหลือเท่าไหร่"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Asks what to inspect (NOT RAG); reuses SP1014; natural wallet answer",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "no_raw_json"},
+        {"type": "context_reused", "identifier": "SP1014"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-009-CUSTOMER-COUPON",
+      "category": "CUSTOMER_ERP",
+      "description": "Coupon list from ERP should be a natural sentence, never a raw dict/list dump.",
+      "turns": ["SP1014", "ข้อมูลลูกค้า", "มีคูปองอะไรบ้าง"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "ERP natural coupon list, NO raw dict/list",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "no_raw_json"},
+        {"type": "context_reused", "identifier": "SP1014"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-010-CUSTOMER-PURE-ID",
+      "category": "CUSTOMER_ERP",
+      "description": "A bare customer code with no other text must trigger a WORKFLOW clarification, never a RAG search of the code itself.",
+      "turns": ["SP1014"],
+      "expected_route": "WORKFLOW",
+      "expected_action": null,
+      "expected_behavior": "WORKFLOW clarification; must NOT search RAG for SP1014",
+      "assertions": [
+        {"type": "route_equals", "value": "WORKFLOW"},
+        {"type": "route_not_equals", "value": "RAG"},
+        {"type": "requires_clarification"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-011-ORDER-LIST",
+      "category": "ORDER",
+      "description": "Customer code then order-list request should remember the code (not re-ask, not RAG) and call SearchDataOrderList.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด"],
+      "expected_route": "API",
+      "expected_action": "searchdataorderlist",
+      "expected_behavior": "Remembers FT3182 (not RAG); SearchDataOrderList",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorderlist"},
+        {"type": "no_raw_json"},
+        {"type": "context_reused", "identifier": "FT3182"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-012-ORDER-LIST-DETAIL",
+      "category": "ORDER",
+      "description": "Follow-up 'latest detail' request must switch to SearchDataOrder (detail), not repeat SearchDataOrderList.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด", "ขอรายละเอียดอันล่าสุด"],
+      "expected_route": "API",
+      "expected_action": "searchdataorder",
+      "expected_behavior": "Switches to SearchDataOrder detail, NOT SearchDataOrderList again",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorder"},
+        {"type": "action_not_equals", "value": "searchdataorderlist"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-013-ORDER-STATUS-CONTEXT",
+      "category": "ORDER",
+      "description": "Status follow-up on the same order must maintain the current OrderCode/detail context.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด", "ขอรายละเอียดอันล่าสุด", "ตอนนี้สถานะอะไร"],
+      "expected_route": "API",
+      "expected_action": "searchdataorder",
+      "expected_behavior": "Maintains current OrderCode/detail context",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorder"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-014-ORDER-DIRECT-CODE",
+      "category": "ORDER",
+      "description": "A real OrderCode captured from a prior turn's ERP response, quoted directly by the customer, should resolve to SearchDataOrder.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด", "ขอรายละเอียด order {{captured.OrderCode}}"],
+      "expected_route": "API",
+      "expected_action": "searchdataorder",
+      "expected_behavior": "Direct real OrderCode -> SearchDataOrder",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorder"},
+        {"type": "no_raw_json"}
+      ],
+      "notes": "Original runner captured OrderCode from turn 2's production_trace.collected_parameters and substituted it into turn 3's literal text (never a fabricated value). The runner MUST reproduce this same capture-and-substitute mechanism -- see golden_runner.py's `{{captured.<Field>}}` placeholder handling."
+    },
+    {
+      "golden_id": "GOLDEN-015-ORDER-NATURAL",
+      "category": "ORDER",
+      "description": "Natural phrasing 'FT3182 มี PO อะไรบ้าง' should resolve directly to SearchDataOrderList.",
+      "turns": ["FT3182 มี PO อะไรบ้าง"],
+      "expected_route": "API",
+      "expected_action": "searchdataorderlist",
+      "expected_behavior": "Natural phrasing -> SearchDataOrderList",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorderlist"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-016-SHIPMENT-LIST",
+      "category": "SHIPMENT",
+      "description": "Ask-then-provide-code flow for shipments should ask for CustCode if unknown, then call SearchDataShipmentList.",
+      "turns": ["ขอดูพัสดุของผม", "FT1004"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipmentlist",
+      "expected_behavior": "Asks CustCode if unknown, then SearchDataShipmentList",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipmentlist"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-017-SHIPMENT-LIST-DETAIL",
+      "category": "SHIPMENT",
+      "description": "Follow-up 'latest detail' request must switch to SearchDataShipment (detail), not repeat SearchDataShipmentList.",
+      "turns": ["ขอดูพัสดุของผม", "FT1004", "ขอรายละเอียดอันล่าสุด"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipment",
+      "expected_behavior": "Switches to SearchDataShipment detail, NOT SearchDataShipmentList again",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipment"},
+        {"type": "action_not_equals", "value": "searchdatashipmentlist"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-018-SHIPMENT-ARRIVAL",
+      "category": "SHIPMENT",
+      "description": "Arrival-status follow-up must reuse the current ShipmentCode context.",
+      "turns": ["ขอดูพัสดุของผม", "FT1004", "ขอรายละเอียดอันล่าสุด", "ถึงไทยหรือยัง"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipment",
+      "expected_behavior": "Reuses current ShipmentCode",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipment"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-019-SHIPMENT-DIRECT",
+      "category": "SHIPMENT",
+      "description": "A real ShipmentCode captured from a prior turn's ERP response, quoted directly, should resolve to SearchDataShipment.",
+      "turns": ["ขอดูพัสดุของผม", "FT1004", "ขอรายละเอียดพัสดุ {{captured.ShipmentCode}}"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipment",
+      "expected_behavior": "Direct real ShipmentCode -> SearchDataShipment",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipment"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-020-SHIPMENT-NATURAL",
+      "category": "SHIPMENT",
+      "description": "Natural phrasing 'FT1004 มีพัสดุอะไรบ้าง' should resolve directly to SearchDataShipmentList.",
+      "turns": ["FT1004 มีพัสดุอะไรบ้าง"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipmentlist",
+      "expected_behavior": "Natural phrasing -> SearchDataShipmentList",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipmentlist"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-021-TRACKING-PENDING",
+      "category": "TRACKING",
+      "description": "Tracking number given before CustCode should ask for CustCode while retaining the Tracking value, then continue the SAME SearchDataTracking action.",
+      "turns": ["ช่วยเช็ก tracking testlineOnNut007", "FT3182"],
+      "expected_route": "API",
+      "expected_action": "searchdatatracking",
+      "expected_behavior": "Asks for CustCode while retaining Tracking, then continues SAME SearchDataTracking",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatatracking"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-022-TRACKING-CONTEXT",
+      "category": "TRACKING",
+      "description": "Location follow-up must reuse the current Tracking value.",
+      "turns": ["ช่วยเช็ก tracking testlineOnNut007", "FT3182", "ตอนนี้อยู่ไหนแล้ว"],
+      "expected_route": "API",
+      "expected_action": "searchdatatracking",
+      "expected_behavior": "Reuses current Tracking",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatatracking"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-023-TRACKING-DIRECT",
+      "category": "TRACKING",
+      "description": "A real tracking value taken from a prior shipment-list response, quoted directly, should resolve to SearchDataTracking (or ask only for the genuinely missing parameter).",
+      "turns": ["ขอดูพัสดุของผม", "FT1004", "ช่วยเช็ก tracking {{captured.Tracking}}"],
+      "expected_route": "API",
+      "expected_action": "searchdatatracking",
+      "expected_behavior": "Real tracking value from ShipmentList -> SearchDataTracking or ask only genuinely missing parameter",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatatracking"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-024-TRACKING-THAI",
+      "category": "TRACKING",
+      "description": "Natural Thai tracking phrasing ('เลขพัสดุจีน...ถึงไหนแล้ว') should recognize tracking intent and ask naturally for the missing CustCode via SearchDataTracking -- NOT silently substitute a different ERP action.",
+      "turns": ["เลขพัสดุจีน testlineOnNut007 ถึงไหนแล้ว"],
+      "expected_route": "WORKFLOW",
+      "expected_action": "searchdatatracking",
+      "expected_behavior": "Tracking intent recognized; asks naturally for the missing CustCode",
+      "assertions": [
+        {"type": "route_equals", "value": "WORKFLOW"},
+        {"type": "action_equals", "value": "searchdatatracking"},
+        {"type": "requires_clarification"}
+      ],
+      "notes": "Audited FAIL as of 2026-08-16: actual_action=searchdatashipmentlist, not searchdatatracking -- a route/action-selection defect (Category B), not a phrasing/wording defect. This assertion set is written to KEEP failing until the underlying action-candidate scoring is fixed; do not weaken action_equals to make this pass."
+    },
+    {
+      "golden_id": "GOLDEN-025-HYBRID-WALLET-CBM",
+      "category": "HYBRID",
+      "description": "A two-part ERP+RAG question (wallet balance + CBM formula) should merge into one natural answer with no ERP/RAG/Knowledge Base/Source labels.",
+      "turns": ["ลูกค้ารหัส SP1014 กระเป๋าเงินเหลือเท่าไหร่ และ CBM คำนวณยังไง"],
+      "expected_route": "HYBRID",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "ERP + RAG merged into one natural answer; no ERP/RAG/Knowledge Base/Source labels",
+      "assertions": [
+        {"type": "route_equals", "value": "HYBRID"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "no_internal_architecture_label"},
+        {"type": "no_internal_source"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-026-HYBRID-COUPON",
+      "category": "HYBRID",
+      "description": "A two-part ERP+RAG question (coupon list + how-to-use) should merge ERP coupon data AND RAG usage-policy content into one natural answer.",
+      "turns": ["ลูกค้า SP1014 มีคูปองอะไรบ้าง แล้วคูปองใช้งานยังไง"],
+      "expected_route": "HYBRID",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "ERP customer coupon + RAG coupon policy/how-to, natural merged answer",
+      "assertions": [
+        {"type": "route_equals", "value": "HYBRID"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "answer_contains", "value": "คูปอง"},
+        {"type": "no_internal_architecture_label"},
+        {"type": "no_raw_json"}
+      ],
+      "notes": "Audited FAIL as of 2026-08-16: actual_route=API (not HYBRID) -- the Hybrid classifier misrouted the whole message to ERP-only, so the RAG half (coupon usage instructions, confirmed present in knowledge_chunks) was never retrieved. A response-generation/routing defect, not a missing-KB-content issue. Kept strict deliberately."
+    },
+    {
+      "golden_id": "GOLDEN-027-CONTEXT-CROSS-ACTION",
+      "category": "CONTEXT",
+      "description": "Cross-domain conversation (customer -> order -> detail -> status) must maintain context across all four turns and all three different ERP actions.",
+      "turns": ["อยากทราบข้อมูลลูกค้ารหัส FT3182", "แล้ว order ล่าสุดล่ะ", "ขอรายละเอียดอันล่าสุด", "สถานะตอนนี้ล่ะ"],
+      "expected_route": "API",
+      "expected_action": "searchdataorder",
+      "expected_behavior": "Cross-domain (customer -> order) then detail then status context maintained",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorder"},
+        {"type": "context_reused", "identifier": "FT3182"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-028-CONTEXT-CUSTOMER-SHIPMENT",
+      "category": "CONTEXT",
+      "description": "Customer code then shipment then detail flow must reuse FT1004 and resolve to shipment detail.",
+      "turns": ["ผม FT1004", "ขอดูพัสดุล่าสุด", "ขอรายละเอียดอันล่าสุด"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipment",
+      "expected_behavior": "Reuses FT1004; resolves to shipment detail",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipment"},
+        {"type": "context_reused", "identifier": "FT1004"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-029-CONTEXT-WALLET",
+      "category": "CONTEXT",
+      "description": "A short follow-up ('แล้วเงินเหลือล่ะ') must reuse SP1014 from the prior turn rather than re-asking.",
+      "turns": ["อยากทราบข้อมูลลูกค้า SP1014", "แล้วเงินเหลือล่ะ"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Reuses SP1014 for the follow-up",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "context_reused", "identifier": "SP1014"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-030-CONTEXT-NATURAL-REFERENCE",
+      "category": "CONTEXT",
+      "description": "Genuinely ambiguous natural-reference follow-up ('อันล่าสุดเป็นยังไงบ้าง') -- must resolve the current entity safely or ask for clarification, but must NOT blindly fall back to a RAG search. No single deterministic expected route; human judgment required.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด", "อันล่าสุดเป็นยังไงบ้าง"],
+      "expected_route": null,
+      "expected_action": null,
+      "expected_behavior": "Resolves current entity safely, or asks clarification if genuinely ambiguous -- must NOT blindly RAG search",
+      "assertions": [
+        {"type": "route_not_equals", "value": "RAG"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-031-STAGE-COLD",
+      "category": "CUSTOMER_INTELLIGENCE",
+      "description": "A generic 'what is Shipify' question from a first-time visitor should classify customer_stage as COLD.",
+      "turns": ["Shipify คืออะไร"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "customer_stage should classify as COLD",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"},
+        {"type": "customer_stage_equals", "value": "cold"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-032-STAGE-WARM",
+      "category": "CUSTOMER_INTELLIGENCE",
+      "description": "Expressed interest in importing (asking about pricing) should classify customer_stage as WARM.",
+      "turns": ["สนใจนำเข้าสินค้าจากจีน อยากรู้ค่าบริการ"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "customer_stage should classify as WARM",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"}
+      ],
+      "notes": "Original run recorded customer_stage=hot for this turn rather than warm -- the stage classifier's own boundary is not adjudicated by this Golden case (that is a Customer Intelligence classifier question, out of scope for this test-harness sprint); the route-level assertion is kept, the stage assertion is intentionally NOT included here so the harness does not silently invent a new pass/fail criterion for an unrelated system."
+    },
+    {
+      "golden_id": "GOLDEN-033-STAGE-HOT",
+      "category": "CUSTOMER_INTELLIGENCE",
+      "description": "Strong purchase interest should classify customer_stage as HOT, but must NOT trigger an automatic handoff without an explicit callback/human request. No single deterministic expected route; human judgment required.",
+      "turns": ["สนใจใช้บริการนำเข้าสินค้ากับ Shipify"],
+      "expected_route": null,
+      "expected_action": null,
+      "expected_behavior": "customer_stage should classify as HOT, but no automatic handoff unless callback/human intent exists",
+      "assertions": [
+        {"type": "route_not_equals", "value": "HUMAN_HANDOFF"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-034-STAGE-NEGATIVE",
+      "category": "CUSTOMER_INTELLIGENCE",
+      "description": "A negative/complaint-flavored message must attempt a useful resolution and must NOT trigger an automatic handoff from sentiment alone. No single deterministic expected route; human judgment required.",
+      "turns": ["ของยังไม่ถึงเลย ช่วยตรวจสอบให้หน่อย"],
+      "expected_route": null,
+      "expected_action": null,
+      "expected_behavior": "NEGATIVE/WARM per current approved rule; attempts useful resolution; no automatic handoff solely from negative sentiment",
+      "assertions": [
+        {"type": "route_not_equals", "value": "HUMAN_HANDOFF"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-035-HANDOFF-EXPLICIT",
+      "category": "HUMAN_HANDOFF",
+      "description": "An explicit request to talk to a human agent must route to HUMAN_HANDOFF with a natural reply, and must NEVER call the real SendLineNotiCS action (this route always simulates).",
+      "turns": ["ขอติดต่อเจ้าหน้าที่หน่อยครับ"],
+      "expected_route": "HUMAN_HANDOFF",
+      "expected_action": null,
+      "expected_behavior": "Natural reply; DO NOT call real SendLineNotiCS (route always simulates)",
+      "assertions": [
+        {"type": "route_equals", "value": "HUMAN_HANDOFF"},
+        {"type": "notification_never_real"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-036-HANDOFF-HOT",
+      "category": "HUMAN_HANDOFF",
+      "description": "A hot-stage sales-callback request must route to HUMAN_HANDOFF with handoff_recommended=true, and never send a real notification.",
+      "turns": ["สนใจใช้บริการ อยากให้เซลส์ติดต่อกลับครับ"],
+      "expected_route": "HUMAN_HANDOFF",
+      "expected_action": null,
+      "expected_behavior": "HOT stage, handoff_recommended=true, HUMAN_HANDOFF; NO real notification",
+      "assertions": [
+        {"type": "route_equals", "value": "HUMAN_HANDOFF"},
+        {"type": "notification_never_real"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-037-HANDOFF-NEGATIVE",
+      "category": "HUMAN_HANDOFF",
+      "description": "A negative-stage explicit handoff request must route to HUMAN_HANDOFF.",
+      "turns": ["บริการแย่มาก ขอคุยกับเจ้าหน้าที่"],
+      "expected_route": "HUMAN_HANDOFF",
+      "expected_action": null,
+      "expected_behavior": "NEGATIVE stage, HUMAN_HANDOFF",
+      "assertions": [
+        {"type": "route_equals", "value": "HUMAN_HANDOFF"},
+        {"type": "notification_never_real"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-038-HANDOFF-FOLLOWUP-ROUTING",
+      "category": "HUMAN_HANDOFF",
+      "description": "Handoff Follow-up Routing Test (Phase 6, concept A) -- after an explicit handoff request, a natural follow-up complaint referencing that SAME still-open handoff ('ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย') must be recognized as staying inside the active handoff, not fall through to a generic RAG/contact-number answer.",
+      "turns": ["ขอติดต่อเจ้าหน้าที่", "ยังไม่มีเจ้าหน้าที่ติดต่อมาเลย"],
+      "expected_route": "HUMAN_HANDOFF",
+      "expected_action": null,
+      "expected_behavior": "Same active handoff, duplicate protection, NO duplicate real notification",
+      "assertions": [
+        {"type": "route_equals", "value": "HUMAN_HANDOFF", "turn_index": 1},
+        {"type": "notification_never_real"}
+      ],
+      "notes": "Formerly named GOLDEN-038-HANDOFF-DUPLICATE. Audited FAIL as of 2026-08-16: turn 2's actual_route=RAG, meaning the follow-up was never even classified as handoff-related -- the admin/routes.py duplicate-notification-suppression branch (`if routing_type == \"HUMAN_HANDOFF\"`) was therefore NEVER entered, so this case has never actually exercised or proven anything about duplicate-notification protection. Per the audit's Phase 6/8 finding this is a ROUTING/TRIGGER FAILURE, not a deduplication failure -- renamed and re-scoped to test ONLY routing recognition of a handoff follow-up. Duplicate-notification protection itself is now tested separately and directly by GOLDEN-038B-HANDOFF-DUPLICATE-PROTECTION below, using two turns that are BOTH unambiguously classified as HUMAN_HANDOFF so the dedup branch is guaranteed to run. expected_route/expected_behavior text for turn 2 is otherwise reproduced verbatim from the original registry row -- still FAIL, deliberately not weakened."
+    },
+    {
+      "golden_id": "GOLDEN-038B-HANDOFF-DUPLICATE-PROTECTION",
+      "category": "HUMAN_HANDOFF",
+      "description": "Duplicate Notification Protection Test (Phase 6, concept B, NEW supplementary case) -- two consecutive turns that are BOTH unambiguous explicit handoff requests must result in the SECOND turn's notification being suppressed as a duplicate (handoff_status already NOTIFIED/PENDING), never a second simulated-or-real send.",
+      "turns": ["ขอติดต่อเจ้าหน้าที่หน่อยครับ", "ขอติดต่อเจ้าหน้าที่หน่อยครับ"],
+      "expected_route": "HUMAN_HANDOFF",
+      "expected_action": null,
+      "expected_behavior": "Both turns route to HUMAN_HANDOFF (each is independently unambiguous); turn 1's handoff_notification.simulated_sent must be true (first, real trigger fires the simulated path); turn 2's handoff_notification.simulated_sent must be false with a duplicate-suppressed reason, because the SAME conversation's handoff_status is already NOTIFIED/PENDING from turn 1 -- this is the actual production_trace.handoff_notification dedup state machine (services/session_service.py get_handoff_status/set_handoff_status) being genuinely exercised, unlike the original GOLDEN-038.",
+      "assertions": [
+        {"type": "route_equals", "value": "HUMAN_HANDOFF", "turn_index": 0},
+        {"type": "route_equals", "value": "HUMAN_HANDOFF", "turn_index": 1},
+        {"type": "notification_simulated_sent_equals", "value": true, "turn_index": 0},
+        {"type": "notification_simulated_sent_equals", "value": false, "turn_index": 1},
+        {"type": "notification_never_real"}
+      ],
+      "notes": "Added by the Golden Test Harness rebuild (this sprint) per the Independent Audit's Phase 6 recommendation. Uses ONLY the existing, unmodified admin/routes.py Auto-mode HUMAN_HANDOFF branch and services/session_service.py's existing handoff_status state machine -- no runtime code was added or changed to make this case possible."
+    },
+    {
+      "golden_id": "GOLDEN-039-NO-RAG-ID",
+      "category": "SAFETY",
+      "description": "A bare identifier with no other context must trigger WORKFLOW clarification, never a RAG search.",
+      "turns": ["FT3182"],
+      "expected_route": "WORKFLOW",
+      "expected_action": null,
+      "expected_behavior": "Clarification/workflow, NOT RAG",
+      "assertions": [
+        {"type": "route_equals", "value": "WORKFLOW"},
+        {"type": "route_not_equals", "value": "RAG"},
+        {"type": "no_raw_json"},
+        {"type": "no_internal_source"},
+        {"type": "no_internal_architecture_label"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-040-NO-RAW-JSON",
+      "category": "SAFETY",
+      "description": "An order-list answer must never leak raw serialized objects, None, or null into customer-facing text.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด"],
+      "expected_route": "API",
+      "expected_action": "searchdataorderlist",
+      "expected_behavior": "Customer-facing answer contains no [{, {\", {', None, null, or raw serialized objects",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorderlist"},
+        {"type": "no_raw_json"},
+        {"type": "no_internal_source"},
+        {"type": "no_internal_architecture_label"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-041-NO-SOURCE",
+      "category": "SAFETY",
+      "description": "A RAG answer must never leak internal citation markers (Source:/.xlsx/page/section) into customer-facing text.",
+      "turns": ["CBM คืออะไร"],
+      "expected_route": "RAG",
+      "expected_action": null,
+      "expected_behavior": "Customer answer contains no Source:/.xlsx/page/section",
+      "assertions": [
+        {"type": "route_equals", "value": "RAG"},
+        {"type": "no_raw_json"},
+        {"type": "no_internal_source"},
+        {"type": "no_internal_architecture_label"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-042-NO-INTERNAL-LABEL",
+      "category": "SAFETY",
+      "description": "A Hybrid answer must never leak internal architecture labels (ERP/RAG/Knowledge Base/Decision Engine) into customer-facing text.",
+      "turns": ["ลูกค้ารหัส SP1014 กระเป๋าเงินเหลือเท่าไหร่ และ CBM คำนวณยังไง"],
+      "expected_route": "HYBRID",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Customer answer contains no ERP/RAG/Knowledge Base/Decision Engine labels",
+      "assertions": [
+        {"type": "route_equals", "value": "HYBRID"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "no_raw_json"},
+        {"type": "no_internal_source"},
+        {"type": "no_internal_architecture_label"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-043-MISSING-PARAMETER",
+      "category": "SAFETY",
+      "description": "A request for order detail with no identifier at all must ask for it naturally, never fabricate an OrderCode and execute anyway.",
+      "turns": ["ขอรายละเอียด order"],
+      "expected_route": "WORKFLOW",
+      "expected_action": null,
+      "expected_behavior": "Asks for required identifier naturally, does NOT fabricate an OrderCode",
+      "assertions": [
+        {"type": "route_equals", "value": "WORKFLOW"},
+        {"type": "no_fabricated_identifier"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-044-UNKNOWN-ID-CONTEXT",
+      "category": "SAFETY",
+      "description": "A bare customer code followed by a domain word ('พัสดุ') must reuse the code and call SearchDataShipmentList.",
+      "turns": ["SP1014", "พัสดุ"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipmentlist",
+      "expected_behavior": "Reuses SP1014",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipmentlist"},
+        {"type": "context_reused", "identifier": "SP1014"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-045-USER-A",
+      "category": "MULTI_USER_ISOLATION",
+      "description": "Synthetic Playground user A's customer-context conversation must resolve normally with no cross-user leakage.",
+      "turns": ["SP1014", "ข้อมูลลูกค้า"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Synthetic Playground user A customer context",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "getdatacustomer"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-046-USER-B",
+      "category": "MULTI_USER_ISOLATION",
+      "description": "Synthetic Playground user B's shipment-context conversation must resolve normally; user A and user B identifiers/history must never mix.",
+      "turns": ["FT1004", "พัสดุ"],
+      "expected_route": "API",
+      "expected_action": "searchdatashipmentlist",
+      "expected_behavior": "Synthetic Playground user B shipment context; A and B identifiers/history must never mix",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdatashipmentlist"},
+        {"type": "no_raw_json"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-047-HANDOFF-USER-A",
+      "category": "MULTI_USER_ISOLATION",
+      "description": "Synthetic Playground user A's handoff state must be isolated per-user, and never trigger a real SendLineNotiCS call.",
+      "turns": ["ขอติดต่อเจ้าหน้าที่"],
+      "expected_route": "HUMAN_HANDOFF",
+      "expected_action": null,
+      "expected_behavior": "Handoff state isolated for user A; NO real SendLineNotiCS",
+      "assertions": [
+        {"type": "route_equals", "value": "HUMAN_HANDOFF"},
+        {"type": "notification_never_real"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-048-HANDOFF-USER-B",
+      "category": "MULTI_USER_ISOLATION",
+      "description": "Synthetic Playground user B's handoff state must be isolated per-user, and never trigger a real SendLineNotiCS call.",
+      "turns": ["ขอติดต่อเจ้าหน้าที่"],
+      "expected_route": "HUMAN_HANDOFF",
+      "expected_action": null,
+      "expected_behavior": "Handoff state isolated for user B; NO real SendLineNotiCS",
+      "assertions": [
+        {"type": "route_equals", "value": "HUMAN_HANDOFF"},
+        {"type": "notification_never_real"}
+      ]
+    },
+    {
+      "golden_id": "GOLDEN-049-NATURAL-ORDER",
+      "category": "NATURAL_LANGUAGE",
+      "description": "Natural phrasing 'ของ FT3182 มีออเดอร์ล่าสุดอะไรบ้าง' should resolve directly to SearchDataOrderList, not fall back to a multi-candidate ambiguity clarification.",
+      "turns": ["ของ FT3182 มีออเดอร์ล่าสุดอะไรบ้าง"],
+      "expected_route": "API",
+      "expected_action": "searchdataorderlist",
+      "expected_behavior": "Natural order-list phrasing",
+      "assertions": [
+        {"type": "route_equals", "value": "API"},
+        {"type": "action_equals", "value": "searchdataorderlist"},
+        {"type": "no_raw_json"}
+      ],
+      "notes": "Audited FAIL as of 2026-08-16: actual_route=WORKFLOW, actual_action=null, actual answer is the multi-candidate-action ambiguity fallback -- an ERP action-candidate disambiguation defect, same underlying weakness class as GOLDEN-024. Kept strict deliberately."
+    },
+    {
+      "golden_id": "GOLDEN-050-NATURAL-FOLLOWUP",
+      "category": "NATURAL_LANGUAGE",
+      "description": "Genuinely ambiguous natural-reference follow-up ('แล้วอันเมื่อกี้ล่ะ') -- must resolve the current entity or ask for clarification, but must NOT blindly fall back to a RAG search. No single deterministic expected route; human judgment required.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด", "แล้วอันเมื่อกี้ล่ะ"],
+      "expected_route": null,
+      "expected_action": null,
+      "expected_behavior": "Resolves current entity or asks clarification if genuinely ambiguous; must NOT blindly RAG search",
+      "assertions": [
+        {"type": "route_not_equals", "value": "RAG"}
+      ]
+    }
+  ]
+}

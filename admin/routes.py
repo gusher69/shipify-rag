@@ -6400,6 +6400,48 @@ async def export_session_route(request: Request, session_id: str, fmt: str):
     return JSONResponse({"ok": False, "error": f"Unsupported export format '{fmt}'"}, status_code=400)
 
 
+# ── Golden Test Runs (Golden Test Harness rebuild, 2026-08-16) ─────────
+# Read-only visibility into migrations/041_golden_test_runs.sql --
+# golden_test_runs / golden_test_results, written ONLY by
+# tests/golden/golden_runner.py (INSERT-only, one row per (run_id,
+# golden_id), never updated/overwritten). This is deliberately separate
+# from golden_test_registry (migration 040): that table is the untouched
+# historical evidence from the Independent Audit's own run and is never
+# read or written here. Session transcripts open through the SAME
+# /admin/playground/sessions/{session_id} endpoint the Conversation
+# History page already uses -- no second transcript viewer.
+
+@app.get("/admin/golden", response_class=HTMLResponse)
+async def golden_runs_page(request: Request):
+    if (r := auth(request)): return r
+    return render("golden.html", {"request": request, "active": "golden"})
+
+
+@app.get("/admin/api/golden/runs")
+async def api_golden_runs_list(request: Request):
+    if (r := auth(request)): return r
+    try:
+        res = get_sb().table("golden_test_runs").select("*").order("started_at", desc=True).limit(200).execute()
+        return JSONResponse({"ok": True, "runs": res.data or []})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/admin/api/golden/runs/{run_id}/results")
+async def api_golden_run_results(request: Request, run_id: str):
+    if (r := auth(request)): return r
+    try:
+        run_res = get_sb().table("golden_test_runs").select("*").eq("run_id", run_id).execute()
+        run = (run_res.data or [None])[0]
+        if not run:
+            return JSONResponse({"ok": False, "error": "Run not found"}, status_code=404)
+        results_res = get_sb().table("golden_test_results").select("*") \
+            .eq("run_id", run_id).order("golden_id").execute()
+        return JSONResponse({"ok": True, "run": run, "results": results_res.data or []})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.get("/admin/preview/sessions/{session_id}/print", response_class=HTMLResponse)
 async def print_session_page(request: Request, session_id: str):
     """Print-friendly view for the PDF export path — open this and use

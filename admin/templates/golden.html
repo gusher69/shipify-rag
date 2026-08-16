@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% set active = "golden" %}
+{% block title %}Golden Test Runs — Shipify Admin{% endblock %}
+{% block topbar_title %}Golden Test Runs{% endblock %}
+
+{% block extra_head %}
+<style>
+.gt-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:16px;margin-bottom:16px}
+.gt-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.gt-select{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;
+  border-radius:8px;padding:7px 10px;font-size:12.5px;outline:none;min-width:340px}
+.gt-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:6px}
+.gt-meta-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 12px}
+.gt-meta-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:rgba(232,237,245,.4);margin-bottom:3px}
+.gt-meta-value{font-size:14px;font-weight:700;color:#e8edf5;word-break:break-all}
+.gt-counts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.gt-count-chip{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px}
+.gt-count-total{background:rgba(148,163,184,.15);color:#cbd5e1}
+.gt-count-pass{background:rgba(52,211,153,.15);color:#34d399}
+.gt-count-fail{background:rgba(239,68,68,.15);color:#f87171}
+.gt-count-pending{background:rgba(251,191,36,.15);color:#fbbf24}
+.gt-count-error{background:rgba(168,85,247,.15);color:#c4b5fd}
+.gt-count-skipped{background:rgba(148,163,184,.1);color:#94a3b8}
+.gt-table-wrap{overflow-x:auto}
+.gt-table{width:100%;border-collapse:collapse;font-size:12px;min-width:1400px}
+.gt-table th{text-align:left;padding:8px 10px;color:rgba(232,237,245,.4);font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.03em;border-bottom:1px solid rgba(255,255,255,.08);white-space:nowrap}
+.gt-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.04);color:#e8edf5;vertical-align:top}
+.gt-table tr:hover td{background:rgba(255,255,255,.03)}
+.gt-cell-truncate{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gt-badge{font-size:9px;padding:2px 8px;border-radius:10px;font-weight:700;display:inline-block}
+.gt-badge-pass{background:rgba(52,211,153,.15);color:#34d399}
+.gt-badge-fail{background:rgba(239,68,68,.15);color:#f87171}
+.gt-badge-pending{background:rgba(251,191,36,.15);color:#fbbf24}
+.gt-badge-error{background:rgba(168,85,247,.15);color:#c4b5fd}
+.gt-badge-skipped{background:rgba(148,163,184,.1);color:#94a3b8}
+.gt-badge-review-pending{background:rgba(148,163,184,.12);color:#cbd5e1}
+.gt-link{color:#7db3ff;cursor:pointer;text-decoration:underline;font-size:11.5px}
+.gt-empty{color:rgba(232,237,245,.45);font-size:12.5px;padding:20px;text-align:center}
+
+.gt-modal-ov{display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);align-items:flex-start;
+  justify-content:center;overflow-y:auto;padding:30px 16px}
+.gt-modal-ov.open{display:flex}
+.gt-modal-box{background:#0f1e38;border:1px solid rgba(27,79,155,.4);border-radius:16px;padding:22px 26px;
+  width:820px;max-width:96vw;margin-bottom:30px}
+.gt-modal-close{float:right;background:none;border:none;color:rgba(232,237,245,.4);cursor:pointer;font-size:18px}
+.gt-turn{border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+.gt-turn-role{font-size:10.5px;font-weight:700;text-transform:uppercase;color:rgba(232,237,245,.4);margin-bottom:4px}
+.gt-turn-content{font-size:12.5px;color:#e8edf5;white-space:pre-wrap}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="gt-panel">
+  <div class="gt-toolbar">
+    <select id="gt-run-select" class="gt-select"><option value="">Loading runs…</option></select>
+    <span id="gt-run-summary" style="font-size:11.5px;color:rgba(232,237,245,.5)"></span>
+  </div>
+  <div id="gt-meta" class="gt-meta"></div>
+  <div id="gt-counts" class="gt-counts"></div>
+</div>
+
+<div class="gt-panel">
+  <div class="gt-table-wrap">
+    <table class="gt-table">
+      <thead>
+        <tr>
+          <th>Golden ID</th><th>Category</th><th>Input Turns</th>
+          <th>Expected Route</th><th>Actual Route</th>
+          <th>Expected Action</th><th>Actual Action</th>
+          <th>Expected Behavior</th><th>Actual Answer</th>
+          <th>Automatic Result</th><th>Failure Reason</th>
+          <th>Manual Review</th><th>Session</th>
+        </tr>
+      </thead>
+      <tbody id="gt-results-body"></tbody>
+    </table>
+  </div>
+  <div id="gt-empty" class="gt-empty" style="display:none">No Golden Test Runs yet. Run <code>python -m tests.golden.golden_runner --base-url ...</code> to create one.</div>
+</div>
+
+<div class="gt-modal-ov" id="gt-modal-ov">
+  <div class="gt-modal-box">
+    <button class="gt-modal-close" onclick="gtCloseModal()">&times;</button>
+    <h3 id="gt-modal-title" style="margin:0 0 12px">Session Transcript</h3>
+    <div id="gt-modal-body"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let gtRuns = [];
+let gtCurrentResults = [];
+
+function gtEsc(s){ return (s == null ? "" : String(s)).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function gtBadgeClass(result){ return "gt-badge gt-badge-" + (result || "pending").toLowerCase(); }
+
+async function gtLoadRuns(){
+  const res = await fetch("/admin/api/golden/runs");
+  const data = await res.json();
+  gtRuns = data.runs || [];
+  const sel = document.getElementById("gt-run-select");
+  if (!gtRuns.length){
+    sel.innerHTML = '<option value="">No runs yet</option>';
+    document.getElementById("gt-empty").style.display = "block";
+    return;
+  }
+  sel.innerHTML = gtRuns.map(r =>
+    `<option value="${gtEsc(r.run_id)}">${gtEsc(r.run_id)} — ${gtEsc(r.dataset_version)} — ${gtEsc((r.started_at||"").slice(0,19))}</option>`
+  ).join("");
+  sel.onchange = () => gtLoadRun(sel.value);
+  gtLoadRun(gtRuns[0].run_id);
+}
+
+async function gtLoadRun(runId){
+  if (!runId) return;
+  const res = await fetch(`/admin/api/golden/runs/${encodeURIComponent(runId)}/results`);
+  const data = await res.json();
+  if (!data.ok){ alert("Failed to load run: " + data.error); return; }
+  const run = data.run;
+  gtCurrentResults = data.results || [];
+
+  document.getElementById("gt-meta").innerHTML = `
+    <div class="gt-meta-card"><div class="gt-meta-label">Dataset Version</div><div class="gt-meta-value">${gtEsc(run.dataset_version)}</div></div>
+    <div class="gt-meta-card"><div class="gt-meta-label">Git SHA</div><div class="gt-meta-value" style="font-size:11px">${gtEsc((run.git_sha||"—").slice(0,12))}</div></div>
+    <div class="gt-meta-card"><div class="gt-meta-label">Server Git SHA</div><div class="gt-meta-value" style="font-size:11px">${gtEsc((run.server_git_sha||"—").slice(0,12))}</div></div>
+    <div class="gt-meta-card"><div class="gt-meta-label">Started</div><div class="gt-meta-value" style="font-size:11px">${gtEsc((run.started_at||"").slice(0,19))}</div></div>
+    <div class="gt-meta-card"><div class="gt-meta-label">Completed</div><div class="gt-meta-value" style="font-size:11px">${gtEsc((run.completed_at||"in progress").slice(0,19))}</div></div>
+  `;
+  document.getElementById("gt-counts").innerHTML = `
+    <span class="gt-count-chip gt-count-total">TOTAL ${run.total_cases}</span>
+    <span class="gt-count-chip gt-count-pass">PASS ${run.pass_count}</span>
+    <span class="gt-count-chip gt-count-fail">FAIL ${run.fail_count}</span>
+    <span class="gt-count-chip gt-count-pending">PENDING ${run.pending_count}</span>
+    <span class="gt-count-chip gt-count-error">ERROR ${run.error_count}</span>
+    <span class="gt-count-chip gt-count-skipped">SKIPPED ${run.skipped_count}</span>
+  `;
+
+  const body = document.getElementById("gt-results-body");
+  document.getElementById("gt-empty").style.display = gtCurrentResults.length ? "none" : "block";
+  body.innerHTML = gtCurrentResults.map((r, i) => `
+    <tr>
+      <td><strong>${gtEsc(r.golden_id)}</strong></td>
+      <td>${gtEsc(r.category)}</td>
+      <td class="gt-cell-truncate" title="${gtEsc((r.user_journey||[]).join(' → '))}">${gtEsc((r.user_journey||[]).join(' → '))}</td>
+      <td>${gtEsc(r.expected_route || '—')}</td>
+      <td>${gtEsc(r.actual_route || '—')}</td>
+      <td>${gtEsc(r.expected_action || '—')}</td>
+      <td>${gtEsc(r.actual_action || '—')}</td>
+      <td class="gt-cell-truncate" title="${gtEsc(r.expected_behavior)}">${gtEsc(r.expected_behavior)}</td>
+      <td class="gt-cell-truncate" title="${gtEsc(r.actual_answer)}">${gtEsc(r.actual_answer)}</td>
+      <td><span class="${gtBadgeClass(r.automatic_result)}">${gtEsc(r.automatic_result)}</span></td>
+      <td class="gt-cell-truncate" title="${gtEsc(r.automatic_result_reason)}">${gtEsc(r.automatic_result_reason)}</td>
+      <td><span class="gt-badge gt-badge-review-pending">PENDING_REVIEW</span></td>
+      <td>${r.session_id ? `<span class="gt-link" onclick="gtOpenTranscript(${i})">View</span>` : '—'}</td>
+    </tr>
+  `).join("");
+}
+
+async function gtOpenTranscript(i){
+  const r = gtCurrentResults[i];
+  if (!r.session_id) return;
+  const res = await fetch(`/admin/playground/sessions/${r.session_id}`);
+  const data = await res.json();
+  if (!data.ok){ alert("Could not load session: " + data.error); return; }
+  const messages = (data.session && data.session.messages) || [];
+  document.getElementById("gt-modal-title").textContent = `${r.golden_id} — Session Transcript`;
+  document.getElementById("gt-modal-body").innerHTML = messages.map(m => `
+    <div class="gt-turn">
+      <div class="gt-turn-role">${gtEsc(m.role)}</div>
+      <div class="gt-turn-content">${gtEsc(m.content)}</div>
+    </div>
+  `).join("") || '<div class="gt-empty">No messages found.</div>';
+  document.getElementById("gt-modal-ov").classList.add("open");
+}
+function gtCloseModal(){ document.getElementById("gt-modal-ov").classList.remove("open"); }
+document.getElementById("gt-modal-ov").addEventListener("click", e => { if (e.target.id === "gt-modal-ov") gtCloseModal(); });
+
+gtLoadRuns();
+</script>
+{% endblock %}

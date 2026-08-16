@@ -233,6 +233,7 @@ SIDEBAR_CONFIG: List[dict] = [
         _leaf("prompt-studio", "Prompt Studio", "/admin/ai/prompts", "edit"),
         _leaf("ai-policies", "AI Policies", "/admin/ai/policies", "shield"),
         _leaf("conversations", "Conversation History", "/admin/conversations", "table"),
+        _leaf("golden", "Golden Test Runs", "/admin/golden", "check-circle"),
     ]),
 
     _dynamic_slot("developer_tools"),

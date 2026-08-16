@@ -272,9 +272,10 @@ class TestSidebarIntegration(unittest.TestCase):
                 ai_group = next(e for e in get_sidebar() if e["key"] == "ai")
                 child_keys = {c["key"] for c in ai_group["children"]}
                 # "conversations" (Conversation History, Phase 3.7, 2026-08-05)
-                # is a normal, always-visible AI-group item, same as the
-                # three that predate it — not developer-mode-gated.
-                self.assertEqual(child_keys, {"preview", "prompt-studio", "ai-policies", "conversations"},
+                # and "golden" (Golden Test Runs, Golden Test Harness rebuild,
+                # 2026-08-16) are normal, always-visible AI-group items, same
+                # as the three that predate them — not developer-mode-gated.
+                self.assertEqual(child_keys, {"preview", "prompt-studio", "ai-policies", "conversations", "golden"},
                                   msg=f"dev_mode={dev_mode}")
 
     def test_developer_tools_group_present_only_when_on(self):
