@@ -4,8 +4,14 @@ single source of truth for which admin menus are visible/clickable, and
 admin/sidebar_config.py must never duplicate that logic.
 """
 import os
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from starlette.testclient import TestClient
 
 from services.developer_mode import (
     is_developer_mode_enabled, get_feature_state, is_feature_route_accessible,
@@ -337,6 +343,34 @@ class TestSidebarIntegration(unittest.TestCase):
                 keys = [e["key"] for e in get_sidebar()]
                 for expected in ("dashboard", "knowledge", "ai", "settings"):
                     self.assertIn(expected, keys, msg=f"dev_mode={dev_mode}")
+
+
+class TestPlaygroundDevModeChatBubbleWiring(unittest.TestCase):
+    """AI Playground Chat Bubble Dev/Customer View (2026-08-17) — reuses
+    THIS SAME Settings-page Developer Mode toggle (no new per-page
+    switch) to decide whether the Auto-mode chat bubble shows the
+    technical/dev view or the exact LINE OA customer view. Only the
+    server-rendered JS global (DEV_MODE_ENABLED, admin/templates/
+    preview.html) is tested here — the ternary logic that consumes it is
+    covered by manual browser verification (see commit message); a full
+    JS unit-test harness doesn't exist in this codebase."""
+
+    def setUp(self):
+        from admin.routes import app
+        self.client = TestClient(app)
+        self.client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+
+    def test_dev_mode_off_by_default_renders_false(self):
+        with patch.dict(os.environ, {"DEVELOPER_MODE": "false"}):
+            resp = self.client.get("/admin/preview")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("var DEV_MODE_ENABLED = false;", resp.text)
+
+    def test_dev_mode_on_renders_true(self):
+        with patch.dict(os.environ, {"DEVELOPER_MODE": "true"}):
+            resp = self.client.get("/admin/preview")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("var DEV_MODE_ENABLED = true;", resp.text)
 
 
 if __name__ == "__main__":

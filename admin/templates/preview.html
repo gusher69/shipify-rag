@@ -387,6 +387,17 @@
 
 {% block extra_scripts %}
 <script>
+// Chat Bubble Dev/Customer View (2026-08-17) — reuses the SAME Settings-
+// page Developer Mode toggle every other part of the admin already reads
+// (services/developer_mode.py::is_developer_mode_enabled(), injected into
+// every template's context by admin/routes.py::render() — never a new
+// per-page switch). ON: the chat bubble shows the richer, technical view
+// (Hybrid's labeled_answer with 📦/📘 section markers, ERP's raw mapped
+// fields) — useful for debugging response_mapping/segmentation. OFF
+// (default): the chat bubble always shows exactly what a real LINE OA
+// customer would see (reply_text) — no separate toggle to remember on
+// this page itself.
+var DEV_MODE_ENABLED = {{ 'true' if developer_mode else 'false' }};
 var _lastResult = null;
 var _conversation = [];
 var _sessionId = null;
@@ -2091,18 +2102,30 @@ function hybridAskQuestion(question, mode) {
       // Customer-Facing Reply Leak Fix (2026-08-17) — mode=="auto" always
       // carries its own correct, already-composed/sanitized reply_text
       // (the SAME text record_conversation_turn() persists to
-      // Conversation History); it must win outright, never the
-      // hybrid/rag/erp/clarification ladder below. That ladder existed to
-      // approximate an answer when there was no single decide_result to
-      // draw from — but for a plain successful API/ERP-only Auto turn it
-      // fell through to erp.answer, which is raw json.dumps(mapped_fields)
-      // built purely for the debug ERP Response panel, never meant to be
-      // shown as the chat reply. Manual RAG/ERP/Hybrid modes (mode !==
+      // Conversation History). Manual RAG/ERP/Hybrid modes (mode !==
       // "auto") never call DecisionEngine.decide() at all, so reply_text
-      // stays null there and the original ladder still applies unchanged.
-      var displayAnswer = (d.mode === 'auto' && d.reply_text)
-        ? d.reply_text
-        : (d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : (d.clarification ? d.clarification.message : '(no answer)'))));
+      // stays null there and always use the technical ladder below — those
+      // modes exist specifically to inspect one pipeline in isolation,
+      // never claimed LINE-OA parity.
+      //
+      // Dev/Customer View (2026-08-17) — for mode=="auto" specifically,
+      // DEV_MODE_ENABLED (Settings' existing Developer Mode toggle)
+      // chooses WHICH of the two already-correct answers to show:
+      // reply_text (exactly what a real LINE OA customer sees) when off,
+      // or the richer technical view (Hybrid's labeled_answer with its
+      // 📦/📘 section markers, ERP's raw mapped fields) when on. Neither
+      // branch ever falls back to a raw-JSON-shaped erp.answer for the
+      // customer view — that only happens in the dev branch, on purpose.
+      var displayAnswer;
+      if (d.mode === 'auto' && !DEV_MODE_ENABLED && d.reply_text) {
+        displayAnswer = d.reply_text;
+      } else if (d.mode === 'auto' && DEV_MODE_ENABLED) {
+        displayAnswer = d.hybrid ? d.hybrid.labeled_answer
+          : (d.erp ? (d.erp.answer || d.erp.clarification_question)
+          : (d.rag ? d.rag.answer : (d.clarification ? d.clarification.message : d.reply_text)));
+      } else {
+        displayAnswer = d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : (d.clarification ? d.clarification.message : '(no answer)')));
+      }
       _conversation.push({role: 'ai', text: displayAnswer, meta: 'mode=' + d.mode + (d.route_decision ? ' · route=' + d.route_decision.route : '')});
       renderConversation();
       renderHybridTabs(d);
