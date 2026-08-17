@@ -708,8 +708,33 @@ def _safe_fallback_response(reason: str) -> Dict:
 
 
 _UNSAFE_CUSTOMER_TEXT_RE = re.compile(
-    r"\[\{|\{'|\{\"|(?<![ก-๙A-Za-z0-9_])None(?![ก-๙A-Za-z0-9_])|(?<![ก-๙A-Za-z0-9_])null(?![ก-๙A-Za-z0-9_])"
-    r"|แหล่งที่มา\s*:|\bsource\s*:|\.xlsx\b|\bpage\s*:|\bsection\s*:", re.IGNORECASE)
+    r"\[\{|\{'|\{\"|\['|\[\""
+    r"|(?<![ก-๙A-Za-z0-9_])None(?![ก-๙A-Za-z0-9_])|(?<![ก-๙A-Za-z0-9_])null(?![ก-๙A-Za-z0-9_])"
+    r"|แหล่งที่มา\s*:|\bsource\s*:|\.xlsx\b|\bpage\s*:|\bsection\s*:"
+    r"|\bERP:|\bRAG:|Knowledge Base:", re.IGNORECASE)
+
+# Latest-N Aggregation (Customer-Reported ERP Conversation Defects,
+# 2026-08-17) — a generic, language-level detector for "how many of my
+# last N records" / "what's the total of my last N" phrasing. Never
+# tied to one Business Action or field name: it only tells the caller
+# WHAT the customer is asking for (a record limit, and/or a sum);
+# _aggregate_list_reply (below) is the one that decides, from the
+# action's OWN response_mapping, whether a real list + a real
+# currency-shaped per-item field actually exist to answer it from.
+_LATEST_N_RE = re.compile(r"(\d+)\s*(?:อัน|รายการ|ใบ|ครั้ง|บิล|order|orders)?\s*(?:ล่าสุด|แรก|ที่ผ่านมา)")
+_SUM_INTENT_RE = re.compile(
+    r"รวม.{0,10}(?:เท่าไหร่|เท่าไร|เท่าใด)|(?:เท่าไหร่|เท่าไร).{0,10}รวม"
+    r"|ยอดรวม|รวมทั้งหมด|รวมกัน(?:แล้ว)?เท่าไหร่|\bsum\b|\btotal\b", re.IGNORECASE)
+
+
+def _detect_aggregation_request(message: str) -> Optional[Dict]:
+    message = message or ""
+    n_match = _LATEST_N_RE.search(message)
+    limit = int(n_match.group(1)) if n_match else None
+    wants_sum = bool(_SUM_INTENT_RE.search(message))
+    if limit is None and not wants_sum:
+        return None
+    return {"limit": limit, "wants_sum": wants_sum}
 
 
 def _sanitize_customer_text(text: Optional[str]) -> Optional[str]:
@@ -725,9 +750,19 @@ def _sanitize_customer_text(text: Optional[str]) -> Optional[str]:
     apology — never a regex-edit of the offending text in place, which
     would just leave a garbled fragment instead of a clean sentence.
     The patterns are all raw-serialization-shaped ("[{", "{'", '{"',
-    bare None/null) or developer-metadata-shaped (citation/page/section
-    markers, .xlsx) — none of them collide with ordinary Thai or English
-    customer-facing prose, so this never fires in normal operation."""
+    "['", '["', bare None/null) or developer-metadata-shaped (citation/
+    page/section markers, .xlsx, bare "ERP:"/"RAG:"/"Knowledge Base:"
+    labels) — none of them collide with ordinary Thai or English
+    customer-facing prose, so this never fires in normal operation.
+
+    Customer-Reported ERP Conversation Defects (2026-08-17), Issue 4 —
+    hardened to a genuinely UNCONDITIONAL final boundary: if `text`
+    itself is not a plain string (a dict/list ever reached this call by
+    mistake, upstream of every composer that's supposed to have already
+    turned it into prose), it is NEVER stringified/leaked — the same
+    honest apology is returned instead."""
+    if text is not None and not isinstance(text, str):
+        return "ขอโทษด้วยค่ะ ระบบพบปัญหาในการแสดงผลข้อมูล รบกวนสอบถามอีกครั้งหรือระบุคำถามให้ชัดเจนขึ้นนะคะ"
     if text and _UNSAFE_CUSTOMER_TEXT_RE.search(text):
         return "ขอโทษด้วยค่ะ ระบบพบปัญหาในการแสดงผลข้อมูล รบกวนสอบถามอีกครั้งหรือระบุคำถามให้ชัดเจนขึ้นนะคะ"
     return text
@@ -1571,8 +1606,11 @@ class DecisionEngine:
             if mapped:
                 mapped = select_requested_mapped_fields(message, mapped, selected.get("response_mapping"),
                                                           input_param_names=collected_slots.keys())
-            text = self._compose_natural_reply(mapped if mapped else result_payload, selected.get("response_mapping"),
-                                                fallback_payload=full_mapped)
+            agg_request = _detect_aggregation_request(message)
+            agg_text = (self._aggregate_list_reply(full_mapped, selected.get("response_mapping"), agg_request)
+                        if agg_request and full_mapped else None)
+            text = agg_text or self._compose_natural_reply(
+                mapped if mapped else result_payload, selected.get("response_mapping"), fallback_payload=full_mapped)
             reply = _build_response(text=text)
 
         return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
@@ -1672,6 +1710,81 @@ class DecisionEngine:
         if not text.rstrip().endswith(("ค่ะ", "คะ", "ครับ")):
             text += "ค่ะ"
         return text
+
+    @staticmethod
+    def _aggregate_list_reply(payload: Dict, response_mapping: Optional[List[Dict]],
+                               agg_request: Dict) -> Optional[str]:
+        """Latest-N Aggregation composer (Customer-Reported ERP
+        Conversation Defects, 2026-08-17) — answers "5 อันล่าสุด...รวม
+        เท่าไหร่"-style questions from the REAL records an ERP call
+        already returned, never a second/fabricated lookup. Only ever
+        returns a real answer when BOTH a genuine list-of-records field
+        (payload's own raw array, e.g. SearchDataOrderList's "$.data")
+        AND a currency-shaped sibling field marking which per-item key
+        to sum are actually present — both discovered generically from
+        the action's OWN response_mapping (field_metadata.keywords /
+        identity_concept), never a hardcoded field/action name. Returns
+        None (never a fabricated number) when the action's response
+        shape doesn't support the question — the caller falls through to
+        the normal _compose_natural_reply unaffected."""
+        if not isinstance(payload, dict):
+            return None
+        rows = response_mapping or []
+        json_path_by_label = {r.get("mapped_label"): (r.get("json_path") or "") for r in rows}
+        metadata_by_label = {r.get("mapped_label"): (r.get("field_metadata") or {}) for r in rows}
+        currency_keywords = ("ยอดเงิน", "ราคา", "ค่าขนส่ง", "total", "บาท", "ยอดรวม")
+
+        for label, value in payload.items():
+            if not (isinstance(value, list) and value and isinstance(value[0], dict)):
+                continue
+            list_path = json_path_by_label.get(label) or ""
+            if not list_path:
+                continue
+
+            def _sibling_key(predicate) -> Optional[str]:
+                for other_label, other_path in json_path_by_label.items():
+                    if other_label == label or not (other_path or "").startswith(list_path + "."):
+                        continue
+                    if predicate(other_label):
+                        return other_path.rsplit(".", 1)[-1]
+                return None
+
+            amount_key = _sibling_key(lambda lbl: any(
+                ck in " ".join(str(k).lower() for k in (metadata_by_label.get(lbl, {}).get("keywords") or []))
+                or ck in str(lbl).lower() for ck in currency_keywords))
+            if not amount_key:
+                continue
+
+            limit = agg_request.get("limit")
+            records = value[:limit] if limit else value
+            actual_count = len(records)
+            if actual_count == 0:
+                continue
+            amounts = [r.get(amount_key) for r in records if isinstance(r.get(amount_key), (int, float))]
+            if not amounts:
+                continue
+            total = sum(amounts)
+
+            if agg_request.get("wants_sum"):
+                if limit and actual_count < limit:
+                    return (f"พบข้อมูลจริงเพียง {actual_count} รายการ (จากที่ขอ {limit} รายการล่าสุด) "
+                            f"มียอดรวม {total:,.2f} บาทค่ะ")
+                return f"{actual_count} รายการล่าสุด มียอดรวมทั้งหมด {total:,.2f} บาทค่ะ"
+
+            # limit-only (no explicit sum request) — a short, real,
+            # per-record summary, never the raw list dump.
+            code_key = _sibling_key(lambda lbl: (metadata_by_label.get(lbl, {}) or {}).get("identity_concept"))
+            lines = [f"{actual_count} รายการล่าสุดค่ะ"]
+            for r in records:
+                code = r.get(code_key) if code_key else None
+                amt = r.get(amount_key)
+                piece = str(code) if code else ""
+                if isinstance(amt, (int, float)):
+                    piece = f"{piece} ({amt:,.2f} บาท)" if piece else f"{amt:,.2f} บาท"
+                if piece:
+                    lines.append(f"- {piece}")
+            return "\n".join(lines)
+        return None
 
     # ── Human Handoff ──────────────────────────────────────────────────────
 
@@ -1896,7 +2009,10 @@ class DecisionEngine:
                     if mapped:
                         mapped = select_requested_mapped_fields(erp_sub_question, mapped, full_action.get("response_mapping"),
                                                                   input_param_names=collected.keys())
-                    erp_answer = self._compose_natural_reply(
+                    agg_request = _detect_aggregation_request(erp_sub_question)
+                    agg_answer = (self._aggregate_list_reply(full_mapped, full_action.get("response_mapping"), agg_request)
+                                  if agg_request and full_mapped else None)
+                    erp_answer = agg_answer or self._compose_natural_reply(
                         mapped if mapped else erp_exec_result.get("result"), full_action.get("response_mapping"),
                         fallback_payload=full_mapped)
                 else:

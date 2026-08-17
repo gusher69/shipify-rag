@@ -1,6 +1,6 @@
 {
-  "dataset_version": "1.0.0",
-  "generated_note": "Version-controlled reconstruction of the 50-case Golden Test Suite (2026-08-16), rebuilt verbatim from the golden_test_registry rows produced by the run audited in the Golden Suite Independent Audit report (same date). turns / expected_route / expected_action / expected_behavior are reproduced EXACTLY as they existed in that registry at audit time -- no value was changed to make any case pass. The only additions are: (1) machine-checkable `assertions` derived mechanically from each case's existing expected_route/expected_action/expected_behavior text (never invented new expectations), and (2) one supplementary case, GOLDEN-038B-HANDOFF-DUPLICATE-PROTECTION, added per the audit's Phase 6 finding that the original GOLDEN-038 never actually exercised duplicate-notification-protection logic (see its own `notes` field). GOLDEN-038 itself is unchanged (same turns, same expected_route=HUMAN_HANDOFF, same FAIL outcome) -- only its `description`/`notes` now state precisely what it does and does not prove, matching the audit's own classification (ROUTING/TRIGGER FAILURE, not a deduplication failure).",
+  "dataset_version": "1.1.0",
+  "generated_note": "Version-controlled reconstruction of the 50-case Golden Test Suite (2026-08-16), rebuilt verbatim from the golden_test_registry rows produced by the run audited in the Golden Suite Independent Audit report (same date). turns / expected_route / expected_action / expected_behavior are reproduced EXACTLY as they existed in that registry at audit time -- no value was changed to make any case pass. The only additions are: (1) machine-checkable `assertions` derived mechanically from each case's existing expected_route/expected_action/expected_behavior text (never invented new expectations), and (2) one supplementary case, GOLDEN-038B-HANDOFF-DUPLICATE-PROTECTION, added per the audit's Phase 6 finding that the original GOLDEN-038 never actually exercised duplicate-notification-protection logic (see its own `notes` field). GOLDEN-038 itself is unchanged (same turns, same expected_route=HUMAN_HANDOFF, same FAIL outcome) -- only its `description`/`notes` now state precisely what it does and does not prove, matching the audit's own classification (ROUTING/TRIGGER FAILURE, not a deduplication failure). Dataset version 1.1.0 (2026-08-17) adds GOLDEN-051 through GOLDEN-056, six new regression cases derived from real customer AI Playground UAT feedback (Customer-Reported ERP Conversation Defects) -- covering order-identifier retention across turns, CustCode continuation after clarification, latest-N order aggregation, contextual bill reference resolution, order-list responses free of raw JSON, and natural customer-field follow-up. None of the original 50 (or 038B) cases were modified; every new case uses REAL customer codes already established elsewhere in this same dataset (FT3182, SP1014), never the literal customer-reported identifiers themselves (never hardcoded per the fix task's own explicit rule), and multiple independent wording variations across the 6 cases rather than one exact reported sentence repeated.",
   "cases": [
     {
       "golden_id": "GOLDEN-001-RAG-SERVICES",
@@ -727,6 +727,111 @@
       "assertions": [
         {"type": "route_not_equals", "value": "RAG"}
       ]
+    },
+    {
+      "golden_id": "GOLDEN-051-ORDER-CODE-RETENTION",
+      "category": "CUSTOMER_UAT_CONTEXT",
+      "description": "Customer-Reported ERP Conversation Defects (2026-08-17), Issue 1 -- a customer naming a specific OrderCode ('X หมายถึงบิลนี้' -- 'X refers to this bill') after an order-list turn must have BOTH the earlier CustCode and the newly-named OrderCode retained together for the detail lookup, never re-asked, never dropped.",
+      "turns": ["ผม FT3182", "ขอดู order ล่าสุด", "PO318220260806008 หมายถึงบิลนี้"],
+      "expected_route": "API",
+      "expected_action": "searchdataorder",
+      "expected_behavior": "Turn 2 resolves the order list (regression guard -- must not be forced into an ambiguity clarification); turn 3 retains BOTH FT3182 and the named OrderCode and calls SearchDataOrder, no raw JSON.",
+      "assertions": [
+        {"type": "route_equals", "value": "API", "turn_index": 1},
+        {"type": "action_equals", "value": "searchdataorderlist", "turn_index": 1},
+        {"type": "route_equals", "value": "API", "turn_index": 2},
+        {"type": "action_equals", "value": "searchdataorder", "turn_index": 2},
+        {"type": "context_reused", "identifier": "FT3182", "turn_index": 2},
+        {"type": "no_raw_json"}
+      ],
+      "source": "customer_uat", "severity": "P1", "reported_at": "2026-08-17"
+    },
+    {
+      "golden_id": "GOLDEN-052-CUSTCODE-CLARIFICATION-CONTINUATION",
+      "category": "CUSTOMER_UAT_CONTEXT",
+      "description": "Customer-Reported ERP Conversation Defects (2026-08-17), Issue 1 -- once a bare CustCode has triggered a WORKFLOW clarification asking what to inspect, the customer's answer must continue with that SAME CustCode, never re-asking for it.",
+      "turns": ["SP1014", "ข้อมูลลูกค้า"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Turn 1 asks what to inspect (WORKFLOW); turn 2 answers with real GetDataCustomer data for SP1014, never re-asking for the customer code.",
+      "assertions": [
+        {"type": "requires_clarification", "turn_index": 0},
+        {"type": "route_equals", "value": "API", "turn_index": 1},
+        {"type": "action_equals", "value": "getdatacustomer", "turn_index": 1},
+        {"type": "context_reused", "identifier": "SP1014", "turn_index": 1},
+        {"type": "answer_not_contains", "value": "รหัสลูกค้าค่ะ", "turn_index": 1},
+        {"type": "no_raw_json"}
+      ],
+      "source": "customer_uat", "severity": "P1", "reported_at": "2026-08-17"
+    },
+    {
+      "golden_id": "GOLDEN-053-LATEST-N-AGGREGATION",
+      "category": "CUSTOMER_UAT_AGGREGATION",
+      "description": "Customer-Reported ERP Conversation Defects (2026-08-17), Issue 3 -- 'ออเดอร์ 5 อันล่าสุด...รวมเท่าไหร่' ('what's the total of my last 5 orders') must compute a REAL sum across the actual returned records, never just describe the single latest order, and never dump raw JSON.",
+      "turns": ["FT3182", "ออเดอร์ 5 อันล่าสุดของผมรวมเท่าไหร่"],
+      "expected_route": "API",
+      "expected_action": "searchdataorderlist",
+      "expected_behavior": "Real aggregation over the actual returned order records (never fabricated), natural Thai sentence stating the total, no raw JSON/list/dict.",
+      "assertions": [
+        {"type": "route_equals", "value": "API", "turn_index": 1},
+        {"type": "action_equals", "value": "searchdataorderlist", "turn_index": 1},
+        {"type": "answer_contains", "value": "บาท", "turn_index": 1},
+        {"type": "answer_contains", "value": "รายการล่าสุด", "turn_index": 1},
+        {"type": "context_reused", "identifier": "FT3182", "turn_index": 1},
+        {"type": "no_raw_json"}
+      ],
+      "source": "customer_uat", "severity": "P0", "reported_at": "2026-08-17"
+    },
+    {
+      "golden_id": "GOLDEN-054-CONTEXTUAL-BILL-REFERENCE",
+      "category": "CUSTOMER_UAT_CONTEXT",
+      "description": "Customer-Reported ERP Conversation Defects (2026-08-17), Issue 2 -- 'ค่าส่งของบิลนี้เท่าไหร่' ('what's the shipping cost of THIS bill') following an order-list turn must resolve 'บิลนี้' to the OrderCode the ERP itself just surfaced, never re-asking for it, never fabricating a different one.",
+      "turns": ["FT3182", "ขอดู order ล่าสุด", "ค่าส่งของบิลนี้เท่าไหร่"],
+      "expected_route": "API",
+      "expected_action": "searchdataorder",
+      "expected_behavior": "Turn 3 reuses the CustCode and the OrderCode the order-list response itself surfaced in turn 2 (response-derived identifier memory) -- no re-request of either.",
+      "assertions": [
+        {"type": "route_equals", "value": "API", "turn_index": 2},
+        {"type": "action_equals", "value": "searchdataorder", "turn_index": 2},
+        {"type": "context_reused", "identifier": "FT3182", "turn_index": 2},
+        {"type": "context_reused", "identifier": "PO318220260806008", "turn_index": 2},
+        {"type": "answer_not_contains", "value": "รหัสลูกค้าค่ะ", "turn_index": 2},
+        {"type": "no_raw_json"}
+      ],
+      "source": "customer_uat", "severity": "P1", "reported_at": "2026-08-17"
+    },
+    {
+      "golden_id": "GOLDEN-055-ORDER-LIST-NO-RAW-JSON",
+      "category": "SAFETY",
+      "description": "Customer-Reported ERP Conversation Defects (2026-08-17), Issue 4 -- a real, successful order-list response ('ออเดอร์ของผมมีอะไรบ้าง' -- natural phrasing, deliberately different wording from GOLDEN-011/015/049/053) must never leak raw JSON/dict/list or internal architecture labels to the customer.",
+      "turns": ["FT3182", "ออเดอร์ของผมมีอะไรบ้าง"],
+      "expected_route": "API",
+      "expected_action": "searchdataorderlist",
+      "expected_behavior": "Natural composed answer only -- no raw serialization, no ERP/RAG/Knowledge Base labels.",
+      "assertions": [
+        {"type": "route_equals", "value": "API", "turn_index": 1},
+        {"type": "action_equals", "value": "searchdataorderlist", "turn_index": 1},
+        {"type": "no_raw_json"},
+        {"type": "no_internal_architecture_label"}
+      ],
+      "source": "customer_uat", "severity": "P0", "reported_at": "2026-08-17"
+    },
+    {
+      "golden_id": "GOLDEN-056-NATURAL-FOLLOWUP-FIELD",
+      "category": "CUSTOMER_UAT_CONTEXT",
+      "description": "Customer-Reported ERP Conversation Defects (2026-08-17), Issue 1/5 -- a natural single-field follow-up ('เบอร์โทรอะไร' -- 'what's the phone number') after a customer-info turn must reuse the established CustCode and answer only the requested field, never re-asking for the identifier.",
+      "turns": ["SP1014", "ข้อมูลลูกค้า", "เบอร์โทรอะไร"],
+      "expected_route": "API",
+      "expected_action": "getdatacustomer",
+      "expected_behavior": "Reuses SP1014 without re-asking; answers with the phone field specifically.",
+      "assertions": [
+        {"type": "route_equals", "value": "API", "turn_index": 2},
+        {"type": "action_equals", "value": "getdatacustomer", "turn_index": 2},
+        {"type": "context_reused", "identifier": "SP1014", "turn_index": 2},
+        {"type": "answer_contains", "value": "เบอร์โทร", "turn_index": 2},
+        {"type": "no_raw_json"}
+      ],
+      "source": "customer_uat", "severity": "P2", "reported_at": "2026-08-17"
     }
   ]
 }

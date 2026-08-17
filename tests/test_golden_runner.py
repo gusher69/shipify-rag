@@ -65,9 +65,21 @@ class TestDatasetIntegrity(unittest.TestCase):
         self.assertRegex(self.dataset["dataset_version"], r"^\d+\.\d+\.\d+$")
 
     def test_fifty_canonical_cases_plus_one_supplement(self):
-        canonical = [c for c in self.cases if not c["golden_id"].startswith("GOLDEN-038B")]
+        canonical = [c for c in self.cases
+                     if not c["golden_id"].startswith("GOLDEN-038B") and c.get("source") != "customer_uat"]
         self.assertEqual(len(canonical), 50)
-        self.assertEqual(len(self.cases), 51)
+
+    def test_customer_uat_cases_present_and_never_touch_the_original_fifty_one(self):
+        """Dataset version 1.1.0 (2026-08-17) — Customer-Reported ERP
+        Conversation Defects added 6 new regression cases derived from
+        real customer UAT feedback, without modifying any of the
+        original 50 cases or GOLDEN-038B."""
+        customer_uat = [c for c in self.cases if c.get("source") == "customer_uat"]
+        self.assertEqual(len(customer_uat), 6)
+        for c in customer_uat:
+            self.assertEqual(c.get("reported_at"), "2026-08-17")
+            self.assertIn(c.get("severity"), ("P0", "P1", "P2"))
+        self.assertEqual(len(self.cases), 57)
 
     def test_golden_ids_unique(self):
         ids = [c["golden_id"] for c in self.cases]

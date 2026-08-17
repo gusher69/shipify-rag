@@ -302,10 +302,10 @@
       <div style="display:flex;gap:8px;width:100%;align-items:center;flex-wrap:wrap">
         <label style="font-size:12px;color:rgba(232,237,245,.6)">Hybrid Mode</label>
         <select id="hp-mode" onchange="hpModeChanged()" style="background:#1b2230;color:#e8edf5;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 8px;font-size:12.5px">
-          <option value="rag">RAG (classic)</option>
-          <option value="auto">Auto</option>
-          <option value="erp">ERP</option>
-          <option value="hybrid">Hybrid</option>
+          <option value="auto" selected>Auto (Recommended)</option>
+          <option value="rag">RAG (Developer Tool)</option>
+          <option value="erp">ERP (Developer Tool)</option>
+          <option value="hybrid">Hybrid (Developer Tool)</option>
         </select>
         <select id="hp-action" style="display:none;background:#1b2230;color:#e8edf5;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 8px;font-size:12.5px;max-width:280px">
           <option value="">Select ERP action…</option>
@@ -1887,11 +1887,13 @@ function hpModeChanged() {
   var hint = document.getElementById('hp-mode-hint');
   actionSel.style.display = (mode === 'erp' || mode === 'hybrid') ? '' : 'none';
   if (mode === 'auto') {
-    hint.textContent = 'Auto = runs the SAME production Decision Engine the LINE webhook uses (routing, Business Action selection, Human Handoff, Customer Intelligence).';
+    hint.textContent = 'Auto = runs the SAME production Decision Engine the LINE webhook uses (routing, Business Action selection, Human Handoff, Customer Intelligence, and conversation memory across turns). Use this for normal conversation testing — you never need to pick an action manually.';
   } else if (mode === 'hybrid') {
-    hint.textContent = 'Hybrid = runs RAG + ERP (selected action) and naively concatenates both answers.';
+    hint.textContent = 'Hybrid = Developer Tool. Runs RAG + ERP (selected action) as an isolated one-shot test and naively concatenates both answers. No conversation memory between turns — for normal conversation testing, use Auto instead.';
   } else if (mode === 'erp') {
-    hint.textContent = 'ERP = runs the ERP Test Harness against the selected action only.';
+    hint.textContent = 'ERP = Developer Tool. Runs the ERP Test Harness against the selected action only, as an isolated one-shot test. No conversation memory between turns — for normal conversation testing, use Auto instead.';
+  } else if (mode === 'rag') {
+    hint.textContent = 'RAG (classic) = Developer Tool. Tests the knowledge-base retrieval pipeline in isolation. For normal conversation testing, use Auto instead.';
   } else {
     hint.textContent = '';
   }
@@ -2246,5 +2248,6 @@ function refreshStatusBar() {
 
 refreshStatusBar();
 loadSessions();
+hpModeChanged();
 </script>
 {% endblock %}

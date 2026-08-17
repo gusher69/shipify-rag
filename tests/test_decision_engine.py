@@ -14,7 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tests.test_business_action_registry import _FakeSupabase
 from services.business_action_registry import BusinessActionRegistry
-from services.decision_engine import DecisionEngine, search_candidate_actions, select_best_action, _sanitize_customer_text
+from services.decision_engine import (
+    DecisionEngine, search_candidate_actions, select_best_action, _sanitize_customer_text,
+    _detect_aggregation_request,
+)
 from services.action_selection_primitives import select_requested_mapped_fields
 
 
@@ -788,6 +791,119 @@ class TestCustomerTextSanitizer(unittest.TestCase):
     def test_none_and_empty_text_pass_through_unchanged(self):
         self.assertIsNone(_sanitize_customer_text(None))
         self.assertEqual(_sanitize_customer_text(""), "")
+
+    def test_catches_raw_list_of_scalars(self):
+        """Customer-Reported ERP Conversation Defects (2026-08-17), Issue
+        4 hardening -- a raw JSON/Python array of plain scalars (never a
+        list of dicts) is also a serialization leak, not just '[{'."""
+        text = _sanitize_customer_text('Tracking: ["9822930076037", "79024349456322"]')
+        self.assertNotIn('["', text)
+
+    def test_catches_bare_internal_architecture_labels(self):
+        text = _sanitize_customer_text("ERP: มีคูปอง 2 รายการ")
+        self.assertNotIn("ERP:", text)
+        text = _sanitize_customer_text("Knowledge Base: คูปองใช้ได้ที่หน้าชำระเงิน")
+        self.assertNotIn("Knowledge Base:", text)
+
+    def test_never_fires_on_hybrid_labeled_answer_parenthesized_form(self):
+        """The Hybrid labeled_answer's own real format uses 'ERP)' /
+        'Knowledge Base)' with a closing paren before the colon-less
+        label text -- this is developer-only content that never reaches
+        _sanitize_customer_text at all (see hybrid_runtime_service.py),
+        but the regex itself must not be so broad it would also reject
+        ordinary text that happens to mention these words without the
+        exact bare-label shape."""
+        text = "ข้อมูลเฉพาะลูกค้า (ERP) และข้อมูลนโยบาย (Knowledge Base) ถูกรวมเป็นคำตอบเดียวค่ะ"
+        self.assertEqual(_sanitize_customer_text(text), text)
+
+    def test_non_string_input_never_leaks_a_stringified_object(self):
+        """Issue 4's explicit hard requirement — if a dict/list somehow
+        reaches this final boundary directly (never stringified upstream
+        by mistake), it must never be leaked, not even via str()."""
+        self.assertNotIn("{", _sanitize_customer_text({"Code": "PO1", "Status": "ยกเลิก"}))
+        self.assertNotIn("[", _sanitize_customer_text([{"Code": "PO1"}]))
+        self.assertIn("ขอโทษ", _sanitize_customer_text({"Code": "PO1"}))
+
+
+class TestLatestNAggregation(unittest.TestCase):
+    """Customer-Reported ERP Conversation Defects (2026-08-17), Issue 3/5
+    — 'N อันล่าสุด...รวมเท่าไหร่'-style aggregation questions must compute
+    a real sum over the actual returned records (never fabricated), and
+    return None (never a guess) when the action's response shape doesn't
+    actually support it — the caller then falls through to the normal
+    composer unaffected."""
+
+    RESPONSE_MAPPING = [
+        {"json_path": "$.data", "mapped_label": "รายการคำสั่งซื้อทั้งหมด",
+         "field_metadata": {"keywords": ["รายการ", "ทั้งหมด", "คำสั่งซื้อ"]}},
+        {"json_path": "$.data.0.Code", "mapped_label": "เลขที่คำสั่งซื้อล่าสุด",
+         "field_metadata": {"keywords": ["เลขคำสั่งซื้อ"], "identity_concept": "OrderCode"}},
+        {"json_path": "$.data.0.Total", "mapped_label": "ยอดรวมคำสั่งซื้อล่าสุด",
+         "field_metadata": {"keywords": ["ยอดรวม", "total"]}},
+    ]
+
+    def _payload(self, records):
+        return {"รายการคำสั่งซื้อทั้งหมด": records}
+
+    def test_detects_limit_and_sum_intent(self):
+        agg = _detect_aggregation_request("ออเดอร์ 5 อันล่าสุดของผมรวมเท่าไหร่")
+        self.assertEqual(agg, {"limit": 5, "wants_sum": True})
+
+    def test_detects_sum_without_explicit_limit(self):
+        agg = _detect_aggregation_request("ยอดรวมทั้งหมดเท่าไหร่")
+        self.assertEqual(agg["wants_sum"], True)
+        self.assertIsNone(agg["limit"])
+
+    def test_no_aggregation_intent_returns_none(self):
+        self.assertIsNone(_detect_aggregation_request("ขอดู order ล่าสุด"))
+
+    def test_sums_real_records_correctly(self):
+        records = [{"Code": "PO1", "Total": 1022}, {"Code": "PO2", "Total": 0},
+                   {"Code": "PO3", "Total": 1768.06}]
+        agg = {"limit": 5, "wants_sum": True}
+        text = DecisionEngine._aggregate_list_reply(self._payload(records), self.RESPONSE_MAPPING, agg)
+        self.assertIn("2,790.06", text)
+        self.assertIn("บาท", text)
+        self.assertNotIn("{", text)
+        self.assertNotIn("[", text)
+
+    def test_never_fabricates_when_fewer_records_than_requested(self):
+        records = [{"Code": "PO1", "Total": 1022}]
+        agg = {"limit": 5, "wants_sum": True}
+        text = DecisionEngine._aggregate_list_reply(self._payload(records), self.RESPONSE_MAPPING, agg)
+        self.assertIn("1", text)  # honestly states only 1 record was found
+        self.assertIn("1,022.00", text)
+        self.assertNotIn("5 รายการล่าสุด มียอดรวม", text)  # never claims 5 when only 1 exists
+
+    def test_respects_limit_slicing(self):
+        records = [{"Code": f"PO{i}", "Total": 100} for i in range(10)]
+        agg = {"limit": 3, "wants_sum": True}
+        text = DecisionEngine._aggregate_list_reply(self._payload(records), self.RESPONSE_MAPPING, agg)
+        self.assertIn("300.00", text)  # only first 3 * 100, never all 10 * 100
+
+    def test_returns_none_when_no_list_field_present(self):
+        agg = {"limit": 5, "wants_sum": True}
+        payload = {"รหัสลูกค้า": "FT3182", "ชื่อลูกค้า": "สมชาย"}
+        self.assertIsNone(DecisionEngine._aggregate_list_reply(payload, self.RESPONSE_MAPPING, agg))
+
+    def test_returns_none_when_no_currency_sibling_configured(self):
+        mapping_no_currency = [
+            {"json_path": "$.data", "mapped_label": "รายการทั้งหมด", "field_metadata": {}},
+            {"json_path": "$.data.0.Code", "mapped_label": "รหัสล่าสุด", "field_metadata": {}},
+        ]
+        records = [{"Code": "PO1"}, {"Code": "PO2"}]
+        agg = {"limit": 5, "wants_sum": True}
+        payload = {"รายการทั้งหมด": records}
+        self.assertIsNone(DecisionEngine._aggregate_list_reply(payload, mapping_no_currency, agg))
+
+    def test_limit_only_no_sum_gives_short_real_summary_not_raw_dump(self):
+        records = [{"Code": "PO1", "Total": 1022}, {"Code": "PO2", "Total": 0}]
+        agg = {"limit": 2, "wants_sum": False}
+        text = DecisionEngine._aggregate_list_reply(self._payload(records), self.RESPONSE_MAPPING, agg)
+        self.assertIn("PO1", text)
+        self.assertIn("PO2", text)
+        self.assertNotIn("{", text)
+        self.assertNotIn("[", text)
 
 
 class TestFallbackAndUnknownIntent(unittest.TestCase):
@@ -2043,18 +2159,46 @@ def _seed_order_shipment_tracking_actions(reg):
     TestIdentifierPatternScoring above."""
     cust_pattern = r"^[A-Za-z]{2}\d+$"
     _seed_action(reg, key="searchdataorder", action_type="API", category="Customer Order Retrieval",
-                 keywords=["เลขคำสั่งซื้อ", "PO เดียว", "order detail", "รายละเอียดคำสั่งซื้อ"],
+                 # OrderCode pattern widened + "รายละเอียด order" keyword
+                 # added by migration 043 (Customer-Reported ERP
+                 # Conversation Defects, 2026-08-17) — root cause: the
+                 # customer's real ERP issues BOTH "POS"-prefixed AND
+                 # "PO"-prefixed (no "S") order codes; the old
+                 # `^POS\d+$` pattern only matched the former, so a
+                 # "PO"-prefixed code (used throughout this platform's
+                 # OWN Golden data, e.g. PO318220260806008) never validly
+                 # bound to OrderCode at all — it fell through to
+                 # CustCode's/SearchDataShipment's own broader patterns
+                 # instead. A bare "order" keyword was tried first and
+                 # reverted (see the migration's own comment) after it
+                 # regressed the ALREADY-correct "ขอดู order ล่าสุด"
+                 # continuation by colliding with SearchDataOrderList's
+                 # own pre-existing "order" keyword whenever no
+                 # identifier was present to break the tie; the narrower
+                 # "รายละเอียด order" only ever fires for genuinely
+                 # DETAIL-shaped phrasing.
+                 keywords=["เลขคำสั่งซื้อ", "PO เดียว", "order detail", "รายละเอียดคำสั่งซื้อ", "รายละเอียด order"],
                  params=[
                      {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
-                     {"name": "OrderCode", "required": True, "validation_pattern": r"^POS\d+$"},
+                     {"name": "OrderCode", "required": True, "validation_pattern": r"^POS?\d+$"},
                  ])
     _seed_action(reg, key="searchdataorderlist", action_type="API", category="Customer Order Retrieval",
                  # "ออเดอร์" added by migration 042 (Golden Application
                  # Defect Fixes, 2026-08-16) — GOLDEN-049 root cause: no
                  # keyword covered the common Thai-English loanword for
                  # "order" at all, so a message using it scored 0 via
-                 # search_keywords on every ERP action.
-                 keywords=["คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "order list", "PO", "ออเดอร์"],
+                 # search_keywords on every ERP action. Bare "order" (a
+                 # pre-existing keyword predating this fixture's own
+                 # migration-042 update, confirmed via a live read of the
+                 # real production registry during migration 043's own
+                 # verification, 2026-08-17) is included here too so this
+                 # fixture accurately mirrors real production config --
+                 # a fixture-only omission of it previously caused a
+                 # false CLARIFICATION_REQUIRED in one of THIS fixture's
+                 # own tests that never reproduced against the real
+                 # server (see test_po_prefixed_order_code_detail_lookup_
+                 # selects_order_detail's own history).
+                 keywords=["คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "order list", "PO", "ออเดอร์", "order"],
                  params=[{"name": "CustCode", "required": True, "validation_pattern": cust_pattern}])
     _seed_action(reg, key="searchdatashipment", action_type="API", category="Customer Shipment Retrieval",
                  keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"],
@@ -2225,6 +2369,27 @@ class TestOrderShipmentTrackingRoutingPrecision(unittest.TestCase):
 
     def test_order_loanword_alone_still_selects_order_list(self):
         self.assertEqual(self._selected_action_key("FT3182 มีออเดอร์อะไรบ้าง"), "searchdataorderlist")
+
+    # -- Customer-Reported ERP Conversation Defects (2026-08-17): a "PO"-
+    # prefixed order code (no "S", e.g. PO318220260806008 -- used
+    # throughout this platform's own real Golden/UAT data) must resolve
+    # SearchDataOrder for a genuine detail-lookup message, and the
+    # "รายละเอียด order" keyword fix that makes that possible must NEVER
+    # regress the already-correct "ขอดู order ล่าสุด" list continuation
+    # (this exact regression was caught and reverted once already during
+    # this same fix -- see migration 043's own comment). --
+
+    def test_po_prefixed_order_code_detail_lookup_selects_order_detail(self):
+        self.assertEqual(
+            self._selected_action_key("ขอรายละเอียด order PO318220260806008"), "searchdataorder")
+
+    def test_bare_order_mention_with_no_identifier_still_selects_order_list_not_clarification(self):
+        """Regression guard for the exact bug this same fix accidentally
+        introduced and then reverted: a message naming "order" with NO
+        identifier at all (a pure list/browse intent) must resolve
+        cleanly to SearchDataOrderList, never a false
+        CLARIFICATION_REQUIRED tie against SearchDataOrder."""
+        self.assertEqual(self._selected_action_key("ขอดู order ล่าสุด"), "searchdataorderlist")
 
 
 if __name__ == "__main__":
