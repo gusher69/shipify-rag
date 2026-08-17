@@ -2088,7 +2088,21 @@ function hybridAskQuestion(question, mode) {
       if (d.production_trace && d.production_trace.playground_user_id) {
         _hpPlaygroundUserId = d.production_trace.playground_user_id;
       }
-      var displayAnswer = d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : (d.clarification ? d.clarification.message : '(no answer)')));
+      // Customer-Facing Reply Leak Fix (2026-08-17) — mode=="auto" always
+      // carries its own correct, already-composed/sanitized reply_text
+      // (the SAME text record_conversation_turn() persists to
+      // Conversation History); it must win outright, never the
+      // hybrid/rag/erp/clarification ladder below. That ladder existed to
+      // approximate an answer when there was no single decide_result to
+      // draw from — but for a plain successful API/ERP-only Auto turn it
+      // fell through to erp.answer, which is raw json.dumps(mapped_fields)
+      // built purely for the debug ERP Response panel, never meant to be
+      // shown as the chat reply. Manual RAG/ERP/Hybrid modes (mode !==
+      // "auto") never call DecisionEngine.decide() at all, so reply_text
+      // stays null there and the original ladder still applies unchanged.
+      var displayAnswer = (d.mode === 'auto' && d.reply_text)
+        ? d.reply_text
+        : (d.hybrid ? d.hybrid.merged_answer : (d.rag ? d.rag.answer : (d.erp ? (d.erp.answer || d.erp.clarification_question) : (d.clarification ? d.clarification.message : '(no answer)'))));
       _conversation.push({role: 'ai', text: displayAnswer, meta: 'mode=' + d.mode + (d.route_decision ? ' · route=' + d.route_decision.route : '')});
       renderConversation();
       renderHybridTabs(d);

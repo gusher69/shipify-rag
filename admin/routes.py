@@ -3536,6 +3536,13 @@ async def hybrid_playground_ask(request: Request):
     is_hybrid_turn = False
     rag_err = erp_err = None
     production_trace_out: Optional[Dict] = None
+    # Customer-Facing Reply Leak Fix (2026-08-17) — the SAME, already
+    # sanitized/naturally-composed answer that record_conversation_turn()
+    # persists to Conversation History (decide_result["reply"]["text"]).
+    # Only ever populated for mode=="auto" (the only mode with a real
+    # decide_result to draw from); stays None for the manual RAG/ERP/
+    # Hybrid modes, which never call DecisionEngine.decide() at all.
+    answer_text: Optional[str] = None
 
     if mode == "auto":
         # Playground Production Parity (2026-08-15) — Auto mode now runs
@@ -3915,6 +3922,15 @@ async def hybrid_playground_ask(request: Request):
         # exactly what decided Auto/Hybrid routing this turn, and the
         # ambiguity-clarification payload when 2+ Business Actions matched.
         "classification": classification_out, "clarification": clarification_out,
+        # Customer-Facing Reply Leak Fix (2026-08-17) — the ONE correct
+        # display text for mode=="auto" (see answer_text's own comment
+        # above). erp.answer/rag.answer/hybrid.merged_answer remain in the
+        # response for their own dedicated debug panels (Unified Pipeline
+        # tab, ERP Response section) — never removed — but the frontend's
+        # main chat bubble must prefer THIS field for Auto mode instead of
+        # falling back to erp.answer's raw json.dumps(mapped_fields), which
+        # was never meant to be customer-facing text.
+        "reply_text": answer_text,
         "errors": errors,
         # Playground Production Parity (2026-08-15), Phase 3 — sanitized
         # developer metadata for every answer, regardless of mode. Never

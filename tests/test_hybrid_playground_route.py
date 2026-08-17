@@ -156,6 +156,52 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.assertEqual(data["production_trace"]["selected_business_action"], "get_customer_coupons")
         self.assertEqual(data["production_trace"]["erp_http_status"], 200)
 
+    def test_auto_mode_erp_only_reply_text_never_raw_json(self):
+        """Customer-Facing Reply Leak Fix (2026-08-17) — reproduces the
+        exact live bug: a successful, mapped_fields-bearing ERP-only Auto
+        turn (mode == "auto", no RAG, no Hybrid) previously had no
+        top-level field carrying the real, composed decide_result reply
+        text at all — the frontend's chat bubble fell back to erp.answer,
+        which is raw json.dumps(mapped_fields) (list-of-dicts with
+        Python/JSON None/null scattered through it, exactly like the
+        reported screenshot: '{"รายการคำสั่งซื้อทั้งหมด": [{"Code": ...,
+        "DateConfirm": null, ...}]}'). reply_text must carry the real
+        natural answer instead; erp.answer is left untouched for its own
+        legitimate debug-panel use."""
+        list_action_id = _seed_action(
+            self.reg, key="search_data_order_list", category="order", keywords=["order", "PO"],
+            params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                     "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"}],
+        )
+        self.reg.replace_response_mapping(list_action_id, [
+            {"json_path": "$.orders", "mapped_label": "รายการคำสั่งซื้อทั้งหมด",
+             "field_metadata": {"keywords": ["order", "คำสั่งซื้อ"]}},
+        ])
+        fake_orders = [
+            {"Code": "POS100820260815001", "Status": "รอยืนยันรายการ", "Total": 1022,
+             "DateConfirm": None, "DateProgress": None, "Tracking": []},
+            {"Code": "POS100820260809001", "Status": "ยกเลิก", "Total": 0,
+             "DateConfirm": "2026-08-09 16:18:04", "DateProgress": None, "Tracking": []},
+        ]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"orders": fake_orders})):
+            resp = self.client.post("/admin/api/hybrid-playground/ask", json={
+                "question": "PO ล่าสุดของ FT1008", "mode": "auto",
+            })
+        data = resp.json()
+        self.assertTrue(data["ok"])
+        self.assertIsNotNone(data.get("reply_text"), "mode=auto must always expose reply_text")
+        # The exact leak shape reported live: raw JSON object/array syntax,
+        # or a bare Python/JSON null, must never appear in the field the
+        # frontend's chat bubble is told to prefer.
+        self.assertNotIn('{"', data["reply_text"])
+        self.assertNotIn("[{", data["reply_text"])
+        self.assertNotIn("null", data["reply_text"])
+        self.assertNotIn("None", data["reply_text"])
+        # erp.answer (the debug-panel field) is untouched — still exists,
+        # still raw, proving this is a NEW field addition, not a removal.
+        self.assertIn('"Code"', data["erp"]["answer"])
+
     def test_ambiguous_actions_produce_clarification_with_no_execution(self):
         _seed_action(self.reg, key="another_customer_action", category="customer", keywords=["ข้อมูลลูกค้า"])
         with patch("services.playground_orchestrator.run_playground_turn") as mock_rag, \
