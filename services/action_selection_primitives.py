@@ -176,14 +176,38 @@ def _askable_parameters_by_name(action: Dict) -> Dict[str, Dict]:
     }
 
 
+_ASCII_KEYWORD_RE = re.compile(r"^[A-Za-z0-9]+$")
+
+
+def _keyword_matches(kw: str, message_l: str) -> bool:
+    """Case-insensitive containment check used by every keyword-scoring
+    caller below. A pure-ASCII keyword (e.g. "PO") must match as its own
+    token, never as a prefix fragment silently swallowed inside a longer
+    identifier VALUE the customer supplied in the same message (e.g. "PO"
+    must not match inside an OrderCode like "POS100820260815001" — a
+    real, generic false-positive discovered via customer UAT 2026-08-17:
+    it made _resolve_continuation_action's tie-break pick the wrong
+    sibling action and drop the already-known OrderCode). Thai-script
+    keywords are deliberately left on plain substring matching — Thai has
+    no space-delimited word boundaries, so an ASCII-style boundary guard
+    would reject legitimate compound-word matches instead of protecting
+    anything."""
+    kw_l = str(kw or "").lower()
+    if not kw_l:
+        return False
+    if _ASCII_KEYWORD_RE.match(kw_l):
+        return re.search(r"(?<![A-Za-z0-9])" + re.escape(kw_l) + r"(?![A-Za-z0-9])", message_l) is not None
+    return kw_l in message_l
+
+
 def _keyword_score(action: Dict, message: str) -> float:
     message_l = (message or "").lower()
     score = 0.0
     for kw in action.get("search_keywords") or []:
-        if kw and str(kw).lower() in message_l:
+        if _keyword_matches(kw, message_l):
             score += 1.0
     for ex in (action.get("_examples_text") or []):
-        if ex and str(ex).lower() in message_l:
+        if ex and _keyword_matches(ex, message_l):
             score += 0.5
     ai_desc = (action.get("ai_description") or "").lower()
     if ai_desc and any(word in ai_desc for word in message_l.split() if len(word) > 2):

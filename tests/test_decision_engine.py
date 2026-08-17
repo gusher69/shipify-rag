@@ -16,9 +16,9 @@ from tests.test_business_action_registry import _FakeSupabase
 from services.business_action_registry import BusinessActionRegistry
 from services.decision_engine import (
     DecisionEngine, search_candidate_actions, select_best_action, _sanitize_customer_text,
-    _detect_aggregation_request,
+    _detect_aggregation_request, _resolve_continuation_action,
 )
-from services.action_selection_primitives import select_requested_mapped_fields
+from services.action_selection_primitives import select_requested_mapped_fields, _keyword_score, _keyword_matches
 
 
 def _seed_action(reg, *, key, action_type, category=None, ai_description="", keywords=None,
@@ -2179,8 +2179,9 @@ def _seed_order_shipment_tracking_actions(reg):
                  # DETAIL-shaped phrasing.
                  keywords=["เลขคำสั่งซื้อ", "PO เดียว", "order detail", "รายละเอียดคำสั่งซื้อ", "รายละเอียด order"],
                  params=[
-                     {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
-                     {"name": "OrderCode", "required": True, "validation_pattern": r"^POS?\d+$"},
+                     {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "OrderCode", "display_name": "เลขที่คำสั่งซื้อ", "required": True,
+                      "validation_pattern": r"^POS?\d+$"},
                  ])
     _seed_action(reg, key="searchdataorderlist", action_type="API", category="Customer Order Retrieval",
                  # "ออเดอร์" added by migration 042 (Golden Application
@@ -2199,16 +2200,19 @@ def _seed_order_shipment_tracking_actions(reg):
                  # server (see test_po_prefixed_order_code_detail_lookup_
                  # selects_order_detail's own history).
                  keywords=["คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "order list", "PO", "ออเดอร์", "order"],
-                 params=[{"name": "CustCode", "required": True, "validation_pattern": cust_pattern}])
+                 params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                          "validation_pattern": cust_pattern}])
     _seed_action(reg, key="searchdatashipment", action_type="API", category="Customer Shipment Retrieval",
                  keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"],
                  params=[
-                     {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
-                     {"name": "ShipmentCode", "required": True, "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+                     {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True,
+                      "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
                  ])
     _seed_action(reg, key="searchdatashipmentlist", action_type="API", category="Customer Shipment Retrieval",
                  keywords=["บิลขนส่ง", "พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ"],
-                 params=[{"name": "CustCode", "required": True, "validation_pattern": cust_pattern}])
+                 params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                          "validation_pattern": cust_pattern}])
     _seed_action(reg, key="searchdatatracking", action_type="API", category="Customer Shipment Retrieval",
                  priority=1,
                  # "เลขพัสดุจีน"/"เลขจีน"/"พัสดุจีน"/"หมายเลขพัสดุจีน" added
@@ -2222,12 +2226,13 @@ def _seed_order_shipment_tracking_actions(reg):
                  keywords=["tracking จีน", "เลข tracking", "tracking", "ค้นหาด้วยเลข tracking", "เลข tracking จีน",
                            "เลขพัสดุจีน", "เลขจีน", "พัสดุจีน", "หมายเลขพัสดุจีน"],
                  params=[
-                     {"name": "CustCode", "required": True, "validation_pattern": cust_pattern},
-                     {"name": "Tracking", "required": True},
+                     {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "Tracking", "display_name": "เลข Tracking จีน", "required": True},
                  ])
     _seed_action(reg, key="getdatacustomer", action_type="API", category="Customer Data Retrieval",
                  keywords=["ข้อมูลลูกค้า", "Wallet", "คูปอง", "ยอดเงิน", "ข้อมูลทั้งหมด"],
-                 params=[{"name": "CustCode", "required": False, "validation_pattern": cust_pattern}])
+                 params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False,
+                          "validation_pattern": cust_pattern}])
 
 
 class TestOrderShipmentTrackingRoutingPrecision(unittest.TestCase):
@@ -2390,6 +2395,126 @@ class TestOrderShipmentTrackingRoutingPrecision(unittest.TestCase):
         cleanly to SearchDataOrderList, never a false
         CLARIFICATION_REQUIRED tie against SearchDataOrder."""
         self.assertEqual(self._selected_action_key("ขอดู order ล่าสุด"), "searchdataorderlist")
+
+    # -- Customer-Reported ERP Conversation Defects, server UAT follow-up
+    # (2026-08-17): an OrderCode named BEFORE any CustCode is ever
+    # supplied triggers a CustCode clarification that SIX different
+    # actions generate identically ("กรุณาแจ้งรหัสลูกค้าค่ะ"). A natural
+    # follow-up carrying no new identifier must not let the continuation
+    # tie-break silently switch to an unrelated sibling action
+    # (searchdataorderlist) and drop the already-known OrderCode -- found
+    # live against the deployed server while re-testing this same fix
+    # round's own mandatory UAT journeys, root-caused to _keyword_score's
+    # bare "PO" keyword substring-matching inside the OrderCode VALUE
+    # itself. Deliberately uses "POS"-prefixed POS100820260809001 (already
+    # established elsewhere in this file), NOT a bare "PO"-prefixed code
+    # (e.g. GOLDEN-051's PO318220260806008) -- a bare 2-letter "PO" prefix
+    # also structurally satisfies CustCode's own broad `^[A-Za-z]{2}\d+$`
+    # pattern, and which of two simultaneously-missing required
+    # parameters wins that binding tie is a separate, pre-existing
+    # precedence gap outside this fix's scope (confirmed identical in
+    # both this fixture and the real production registry). --
+
+    def test_ordercode_first_then_bare_followup_keeps_order_detail_pending(self):
+        history = [
+            {"role": "user", "content": "POS100820260809001 หมายถึงบิลนี้"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+        ]
+        result, mock_req = self._decide_with_history("บิลนี้สถานะอะไร", history)
+        dev = result.get("developer") or {}
+        collection = dev.get("information_collection_status") or {}
+        self.assertEqual(collection.get("selected_business_action"), "searchdataorder")
+        self.assertNotEqual(collection.get("selected_business_action"), "searchdataorderlist")
+        self.assertIn("POS100820260809001", (collection.get("collected_parameters") or {}).values())
+        mock_req.assert_not_called()
+
+    def test_ordercode_first_then_custcode_resolves_order_detail_not_list(self):
+        history = [
+            {"role": "user", "content": "POS100820260809001 หมายถึงบิลนี้"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+            {"role": "user", "content": "บิลนี้สถานะอะไร"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+        ]
+        self.assertEqual(self._selected_action_key_with_history("FT3182", history), "searchdataorder")
+
+    def _decide_with_history(self, message, history):
+        with patch("services.action_executor.requests.request") as mock_req:
+            mock_req.return_value = MagicMock(status_code=200, json=lambda: {"status": "success"})
+            result = self.engine.decide(message, history=history, context={"developer_mode": True})
+        return result, mock_req
+
+    def _selected_action_key_with_history(self, message, history):
+        result, _ = self._decide_with_history(message, history)
+        dev = result.get("developer") or {}
+        selected = (dev.get("selected_business_action")
+                    or (dev.get("information_collection_status") or {}).get("selected_business_action"))
+        self.assertIsNotNone(selected, f"no Business Action selected for: {message}")
+        return selected
+
+
+class TestKeywordMatchesAsciiBoundary(unittest.TestCase):
+    """_keyword_matches / _keyword_score (services/action_selection_
+    primitives.py) — a short, pure-ASCII search_keyword like "PO" must
+    not match as a substring fragment swallowed inside a longer ASCII
+    identifier VALUE (e.g. an OrderCode) the customer supplied in the
+    same message. Thai-script keywords keep their original, unguarded
+    substring behavior — Thai has no space-delimited word boundaries, so
+    guarding them would reject legitimate compound-word matches instead
+    of protecting anything real."""
+
+    def test_short_ascii_keyword_does_not_match_inside_a_longer_identifier_value(self):
+        self.assertFalse(_keyword_matches("PO", "pos100820260815001 หมายถึงบิลนี้"))
+        self.assertFalse(_keyword_matches("PO", "po318220260806008 หมายถึงบิลนี้"))
+
+    def test_short_ascii_keyword_still_matches_as_a_standalone_token(self):
+        self.assertTrue(_keyword_matches("PO", "ขอดู po ล่าสุดของ sp1014"))
+        self.assertTrue(_keyword_matches("PO", "po"))
+
+    def test_thai_keyword_substring_matching_is_unaffected(self):
+        self.assertTrue(_keyword_matches("คำสั่งซื้อ", "ขอดูประวัติคำสั่งซื้อล่าสุด"))
+
+    def test_keyword_score_end_to_end_no_false_positive_from_embedded_identifier(self):
+        action = {"search_keywords": ["PO"], "_examples_text": [], "ai_description": ""}
+        self.assertEqual(_keyword_score(action, "POS100820260815001 หมายถึงบิลนี้"), 0.0)
+        self.assertGreater(_keyword_score(action, "ขอดู PO ล่าสุด"), 0.0)
+
+
+class TestResolveContinuationActionTieBreak(unittest.TestCase):
+    """_resolve_continuation_action (services/decision_engine.py) — when
+    several Business Actions generate an identical clarification
+    question, the action that already has MORE parameters bound from
+    history-so-far must win the tie, before falling back to keyword
+    score against the original trigger message."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        _seed_order_shipment_tracking_actions(self.reg)
+
+    def test_prefers_the_action_with_more_already_collected_parameters(self):
+        history = [
+            {"role": "user", "content": "POS100820260809001 หมายถึงบิลนี้"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+            {"role": "user", "content": "บิลนี้สถานะอะไร"},
+        ]
+        result = _resolve_continuation_action(self.reg, history, workflow_hint=None)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("action_key"), "searchdataorder")
+
+    def test_still_falls_back_to_keyword_score_when_nothing_is_collected_on_either_side(self):
+        """Regression guard: two candidates tied on the SAME clarification
+        question with ZERO parameters collected on both sides must still
+        resolve via keyword score exactly as before this fix (this test
+        would fail loudly if the new collected-parameter preference step
+        ever became unconditional instead of a before-keyword-score
+        tie-break)."""
+        history = [
+            {"role": "user", "content": "ขอดู PO ล่าสุด"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+            {"role": "user", "content": "เอาอันล่าสุดค่ะ"},
+        ]
+        result = _resolve_continuation_action(self.reg, history, workflow_hint=None)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("action_key"), "searchdataorderlist")
 
 
 if __name__ == "__main__":

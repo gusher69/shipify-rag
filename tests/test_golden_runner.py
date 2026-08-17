@@ -73,13 +73,15 @@ class TestDatasetIntegrity(unittest.TestCase):
         """Dataset version 1.1.0 (2026-08-17) — Customer-Reported ERP
         Conversation Defects added 6 new regression cases derived from
         real customer UAT feedback, without modifying any of the
-        original 50 cases or GOLDEN-038B."""
+        original 50 cases or GOLDEN-038B. Version 1.2.0 (same day) added
+        a 7th (GOLDEN-057), found during this same fix round's own
+        mandatory server UAT re-test — see its own `description`."""
         customer_uat = [c for c in self.cases if c.get("source") == "customer_uat"]
-        self.assertEqual(len(customer_uat), 6)
+        self.assertEqual(len(customer_uat), 7)
         for c in customer_uat:
             self.assertEqual(c.get("reported_at"), "2026-08-17")
             self.assertIn(c.get("severity"), ("P0", "P1", "P2"))
-        self.assertEqual(len(self.cases), 57)
+        self.assertEqual(len(self.cases), 58)
 
     def test_golden_ids_unique(self):
         ids = [c["golden_id"] for c in self.cases]

@@ -206,19 +206,80 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
                 structural_candidates = _extract_structural_candidates(message)
                 decisive = []
                 if structural_candidates:
-                    bindable_values_by_action = {}
+                    # Sharer-Weighted Identifier Specificity (Customer UAT
+                    # fix, 2026-08-17) — a SINGLE structural value in the
+                    # message can structurally satisfy REQUIRED parameters
+                    # on MORE THAN ONE close candidate at once (e.g. a
+                    # well-formed OrderCode like "PO318220260806008" also
+                    # happens to satisfy another action's much broader,
+                    # independently-configured CustCode pattern
+                    # `^[A-Za-z]{2}\d+$` — inherent, unavoidable overlap
+                    # between two generic identifier shapes, not a defect
+                    # in either pattern). The original check treated "this
+                    # value is ALSO bindable elsewhere" as an all-or-
+                    # nothing veto, discarding the fact that ONE candidate
+                    # may satisfy the value via a pattern unique to it
+                    # (OrderCode) while another satisfies the SAME value
+                    # only via a pattern every close candidate shares
+                    # identically (CustCode) — real, discriminating
+                    # evidence for the former. Scored per structural value
+                    # in two tiers: Tier 1 counts ONLY bindings through a
+                    # parameter that has an actual configured
+                    # validation_pattern, weighted by how many close
+                    # candidates share that exact pattern string (mirrors
+                    # services/decision_engine.py's own
+                    # _identifier_pattern_score sharer-weighting). Tier 2
+                    # — binding through a parameter with NO configured
+                    # pattern (e.g. a free-form Tracking number, which
+                    # accepts any non-empty value) — only ever applies
+                    # when NO close candidate has ANY Tier 1 evidence for
+                    # that value at all; otherwise an unconstrained
+                    # parameter would trivially "match" every value in the
+                    # message and manufacture false specificity for
+                    # whichever candidate happens to have one (confirmed
+                    # live: a bare CustCode alone was incorrectly resolved
+                    # decisively once Tracking's own pattern-less
+                    # parameter was allowed to independently "bind" that
+                    # same CustCode value). A value bindable identically
+                    # on every close candidate (e.g. a bare CustCode with
+                    # nothing else in the message) still scores equally
+                    # for all of them, correctly falling through to
+                    # clarification below; a value unique to ONE candidate
+                    # (e.g. a genuine Tracking number no sibling action
+                    # even has a parameter for) stays fully decisive via
+                    # Tier 2, exactly like the original check.
+                    required_by_action: Dict[str, List[Dict]] = {}
                     for a in close:
                         full = registry.get_full(a["id"], mask_secrets=True)
-                        required_askable = [p for p in _askable_parameters_by_name(full).values() if p.get("required")]
-                        bindable_values_by_action[a["id"]] = {
-                            v for v in structural_candidates
-                            if any(_bind_candidate_to_parameter([v], p)["status"] == "bound" for p in required_askable)
+                        required_by_action[a["id"]] = [p for p in _askable_parameters_by_name(full).values()
+                                                        if p.get("required")]
+                    id_scores: Dict[str, float] = {a["id"]: 0.0 for a in close}
+                    for v in structural_candidates:
+                        tier1_patterns = {
+                            aid: [p.get("validation_pattern") for p in params
+                                  if p.get("validation_pattern") and _bind_candidate_to_parameter([v], p)["status"] == "bound"]
+                            for aid, params in required_by_action.items()
                         }
-                    for a in close:
-                        others = set().union(*(vals for aid, vals in bindable_values_by_action.items()
-                                                if aid != a["id"])) if len(close) > 1 else set()
-                        if bindable_values_by_action[a["id"]] - others:
-                            decisive.append(a)
+                        pattern_sharers: Dict[str, set] = {}
+                        for aid, patterns in tier1_patterns.items():
+                            for pat in patterns:
+                                pattern_sharers.setdefault(pat, set()).add(aid)
+                        tier1_scores = {aid: sum(1.0 / len(pattern_sharers[pat]) for pat in patterns)
+                                        for aid, patterns in tier1_patterns.items()}
+                        if max(tier1_scores.values(), default=0.0) > 0:
+                            for aid, s in tier1_scores.items():
+                                id_scores[aid] += s
+                            continue
+                        binds = {aid: any(_bind_candidate_to_parameter([v], p)["status"] == "bound" for p in params)
+                                 for aid, params in required_by_action.items()}
+                        sharers = sum(1 for b in binds.values() if b)
+                        if sharers:
+                            for aid, b in binds.items():
+                                if b:
+                                    id_scores[aid] += 1.0 / sharers
+                    max_id_score = max(id_scores.values()) if id_scores else 0.0
+                    if max_id_score > 0:
+                        decisive = [a for a in close if id_scores.get(a["id"], 0.0) == max_id_score]
                 if len(decisive) == 1:
                     close = decisive
                 else:

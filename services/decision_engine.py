@@ -396,6 +396,26 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
             return by_category[0]
         if by_category:
             matches = by_category
+
+    # Already-Collected-Parameter Preference (Customer UAT fix,
+    # 2026-08-17) — runs BEFORE the keyword-score tie-break below. Many
+    # Business Actions share an identical generated clarification
+    # question (e.g. every action whose next-missing parameter is
+    # CustCode asks the exact same "กรุณาแจ้งรหัสลูกค้าค่ะ"), so several
+    # unrelated actions routinely tie here. The action that already has
+    # MORE of its own parameters bound from history-so-far is the one
+    # genuinely "in progress" — preferring it over a bare keyword score
+    # against the ORIGINAL trigger message stops an already-known
+    # identifier (e.g. a just-supplied OrderCode) from being silently
+    # discarded by switching to an unrelated sibling action that merely
+    # scores higher on a short, coincidentally-matching keyword.
+    collected_counts = [(a, len(_replay_business_action_collection(a, registry, history[:-1]))) for a in matches]
+    max_collected = max(c for _, c in collected_counts)
+    if max_collected > 0:
+        matches = [a for a, c in collected_counts if c == max_collected]
+        if len(matches) == 1:
+            return matches[0]
+
     trigger_message = next((t.get("content") or "" for t in history if t.get("role") == "user"), "")
     return max(matches, key=lambda a: _keyword_score(a, trigger_message))
 
