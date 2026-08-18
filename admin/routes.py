@@ -3094,6 +3094,23 @@ async def file_library(request: Request):
     })
 
 
+@app.get("/admin/api/files/{file_id}/download")
+async def download_knowledge_file(request: Request, file_id: str):
+    """File Library "Download" action — reuses _ensure_local_file (the
+    same storage-provider-agnostic resolver the sync pipeline already
+    uses) so this works identically regardless of whether the file lives
+    on local disk, S3, or Google Drive, without duplicating that logic."""
+    if (r := auth(request)): return r
+    res = get_sb().table("knowledge_files").select("*").eq("id", file_id).is_("deleted_at", "null").execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="File not found")
+    row = res.data[0]
+    path = _ensure_local_file(row)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="File content not available")
+    return FileResponse(path, filename=row["filename"])
+
+
 @app.get("/admin/sync-activity", response_class=HTMLResponse)
 async def sync_activity(request: Request):
     if (r := auth(request)): return r
