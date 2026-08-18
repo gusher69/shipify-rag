@@ -10,9 +10,9 @@ from ingestion.word_reader import read_word, read_word_pages
 from ingestion.excel_reader import read_excel_pages
 from ingestion.markdown_converter import convert_to_markdown
 from ingestion.excel_extractor import extract_workbook, extract_csv, workbook_to_summary_pages
-from config import CHUNK_SIZE, CHUNK_OVERLAP
+from config import CHUNK_SIZE, CHUNK_OVERLAP, LOCAL_STORAGE_ROOT
 
-KNOWLEDGE_DIR = Path("knowledge")
+KNOWLEDGE_DIR = Path(LOCAL_STORAGE_ROOT)
 
 INTENT_KEYWORDS = {
     "สต็อก":   ["สต็อก", "สินค้า", "มีของ", "ราคา", "catalog", "product"],

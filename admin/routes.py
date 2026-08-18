@@ -26,7 +26,10 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-from config import ADMIN_USERNAME, ADMIN_PASSWORD, SESSION_SECRET, SUPABASE_URL, SUPABASE_KEY, STORAGE_DELETE_MODE
+from config import (
+    ADMIN_USERNAME, ADMIN_PASSWORD, SESSION_SECRET, SUPABASE_URL, SUPABASE_KEY,
+    STORAGE_DELETE_MODE, LOCAL_STORAGE_ROOT,
+)
 from ingestion.ingest import read_file_pages, chunk_pages, analyze_and_chunk
 from ingestion.attachment_handler import process_excel_attachments
 from ingestion.embedder import (
@@ -35,7 +38,17 @@ from ingestion.embedder import (
     store_excel_workbook, delete_excel_data,
 )
 
-KNOWLEDGE_DIR = Path("knowledge")
+# Single source of truth for the local knowledge-file directory — was
+# independently hardcoded as Path("knowledge") here and in 4 other files
+# (admin/preview_server.py, ingestion/ingest.py, ingestion/
+# attachment_handler.py, ingestion/reingest.py), all silently drifting
+# from config.py's own LOCAL_STORAGE_ROOT (used correctly by
+# storage/factory.py) whenever anyone changed one without the others.
+# Resolves to the exact same "knowledge" default as before — zero
+# behavior change on its own; only lets a persistent bind mount
+# (docker-compose.override.yml, 2026-08-18) sit under ONE path everyone
+# actually agrees on.
+KNOWLEDGE_DIR = Path(LOCAL_STORAGE_ROOT)
 SUPPORTED_EXT = {".pdf", ".docx", ".doc", ".md", ".txt", ".xlsx", ".xls", ".csv"}
 SUPPORTED_MIME = {
     "application/pdf",
@@ -3101,13 +3114,44 @@ async def download_knowledge_file(request: Request, file_id: str):
     uses) so this works identically regardless of whether the file lives
     on local disk, S3, or Google Drive, without duplicating that logic."""
     if (r := auth(request)): return r
-    res = get_sb().table("knowledge_files").select("*").eq("id", file_id).is_("deleted_at", "null").execute()
+    # file_id is a raw path segment — a non-UUID value (e.g. a path-
+    # traversal probe like "../../etc/passwd") makes PostgREST reject the
+    # id filter with a type-cast error, which the Supabase client raises
+    # as an exception; letting that surface as an uncaught 500 both looks
+    # like a real server fault in monitoring AND is a worse failure mode
+    # than the ordinary "not found" case it actually is.
+    try:
+        res = get_sb().table("knowledge_files").select("*").eq("id", file_id).is_("deleted_at", "null").execute()
+    except Exception:
+        raise HTTPException(status_code=404, detail="File not found")
     if not res.data:
         raise HTTPException(status_code=404, detail="File not found")
     row = res.data[0]
     path = _ensure_local_file(row)
     if not path or not path.exists():
-        raise HTTPException(status_code=404, detail="File content not available")
+        # A DB record can outlive its physical source file (pre-persistent-
+        # storage historical rows, or a file removed from disk out of
+        # band) — a distinct reason string, never a filesystem path, lets
+        # the frontend show a natural, non-alarming message instead of a
+        # raw 404 page. RAG search/answers are unaffected either way —
+        # this only blocks re-downloading the ORIGINAL file, never the
+        # already-embedded chunks.
+        raise HTTPException(status_code=404, detail={
+            "reason": "source_file_missing",
+            "message": "ไม่พบไฟล์ต้นฉบับ กรุณาอัปโหลดไฟล์ต้นฉบับใหม่",
+        })
+    # Path-containment guard — _ensure_local_file's local-provider branch
+    # joins KNOWLEDGE_DIR with the DB row's OWN filename/storage_path
+    # (never sanitized against "../" traversal at upload time), so this
+    # is the last line of defense before serving arbitrary bytes back to
+    # an admin: the resolved file must still live inside KNOWLEDGE_DIR.
+    try:
+        path.resolve().relative_to(KNOWLEDGE_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail={
+            "reason": "source_file_missing",
+            "message": "ไม่พบไฟล์ต้นฉบับ กรุณาอัปโหลดไฟล์ต้นฉบับใหม่",
+        })
     return FileResponse(path, filename=row["filename"])
 
 

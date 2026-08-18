@@ -26,7 +26,9 @@ import argparse
 import sys
 from pathlib import Path
 
-KNOWLEDGE_DIR = Path("knowledge")
+from config import LOCAL_STORAGE_ROOT
+
+KNOWLEDGE_DIR = Path(LOCAL_STORAGE_ROOT)
 
 
 def _get_file_row(sb, filename: str):

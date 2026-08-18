@@ -8,7 +8,9 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPExcep
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-KNOWLEDGE_DIR = Path("knowledge")
+from config import LOCAL_STORAGE_ROOT
+
+KNOWLEDGE_DIR = Path(LOCAL_STORAGE_ROOT)
 KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
 
 templates = Jinja2Templates(directory="admin/templates")

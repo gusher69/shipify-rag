@@ -6,9 +6,9 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
 import requests
 
-from config import GOOGLE_DRIVE_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON, LINE_NOTIFY_TOKEN
+from config import GOOGLE_DRIVE_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON, LINE_NOTIFY_TOKEN, LOCAL_STORAGE_ROOT
 
-KNOWLEDGE_DIR = Path("knowledge/products")
+KNOWLEDGE_DIR = Path(LOCAL_STORAGE_ROOT) / "products"
 SCOPES        = ["https://www.googleapis.com/auth/drive.readonly"]
 
 

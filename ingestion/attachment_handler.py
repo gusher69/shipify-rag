@@ -26,9 +26,10 @@ from urllib.parse import urlparse, parse_qs
 import requests as _requests
 
 from storage import get_storage_service
+from config import LOCAL_STORAGE_ROOT
 
-ATTACHMENTS_DIR = Path("knowledge/attachments")
-KNOWLEDGE_DIR   = Path("knowledge")
+KNOWLEDGE_DIR   = Path(LOCAL_STORAGE_ROOT)
+ATTACHMENTS_DIR = KNOWLEDGE_DIR / "attachments"
 
 # ── Column detection ──────────────────────────────────────────────
 # This regex is a HINT, not a gate — a column matching it also gets
