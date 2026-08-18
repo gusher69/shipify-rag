@@ -35,7 +35,7 @@ The **Admin Web UI** (`admin/routes.py`) is the primary day-to-day surface: Know
 | Embedding | OpenAI `text-embedding-3-large`, 3072 dims | `services/embedding_service.py`; `EMBEDDING_PROVIDER=local` is a non-default fallback |
 | Vector DB | Supabase pgvector | `knowledge_chunks.embedding VECTOR(3072)` — see `migrations/019_openai_embedding_dimension.sql` |
 | Relational DB | Supabase Postgres | Business Actions, credentials, user profiles, sync jobs, AI policies, benchmark data |
-| File storage | Supabase Storage (default) | pluggable via `storage/` (S3, local disk, Google Drive also supported) |
+| File storage | Local server disk (default, `STORAGE_PROVIDER=local`) | pluggable via `storage/` (Supabase Storage, S3, Google Drive also supported) — Supabase Postgres/pgvector remains the always-on DB regardless of this setting |
 | Backend | Python 3.13 + FastAPI | no other backend language |
 | ERP Bridge | Python wrapper → PHP/MySQL (`erp/bridge.py`) | read-only only, never writes to the customer's ERP |
 | Business Action Center | `services/business_action_registry.py`, `services/action_executor.py` | config-driven ERP/API integration registry — the general-purpose replacement for hand-coded per-customer ERP glue |
