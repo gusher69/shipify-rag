@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from starlette.testclient import TestClient
 
 from tests.test_business_action_registry import _FakeSupabase
+from tests._admin_test_auth import login_as_test_admin
 from services.business_action_registry import BusinessActionRegistry
 
 
@@ -37,7 +38,7 @@ class TestAiAutoSetupRoutes(unittest.TestCase):
     def setUp(self):
         from admin.routes import app
         self.client = TestClient(app)
-        self.client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+        login_as_test_admin(self.client)
         self.fake_sb = _FakeSupabase()
         self.registry = BusinessActionRegistry(self.fake_sb)
         self.patcher = patch("admin.routes.get_sb", return_value=self.fake_sb)
@@ -310,7 +311,7 @@ class TestAiSetupSaveDuplicateBug(unittest.TestCase):
     def setUp(self):
         from admin.routes import app
         self.client = TestClient(app)
-        self.client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+        login_as_test_admin(self.client)
         self.fake_sb = _FakeSupabase()
         self.registry = BusinessActionRegistry(self.fake_sb)
         self.patcher = patch("admin.routes.get_sb", return_value=self.fake_sb)

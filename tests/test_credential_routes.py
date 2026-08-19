@@ -13,6 +13,7 @@ from cryptography.fernet import Fernet
 from starlette.testclient import TestClient
 
 from tests.test_business_action_registry import _FakeSupabase
+from tests._admin_test_auth import login_as_test_admin
 
 TEST_KEY = Fernet.generate_key().decode()
 
@@ -21,7 +22,7 @@ class TestCredentialRoutes(unittest.TestCase):
     def setUp(self):
         from admin.routes import app
         self.client = TestClient(app)
-        self.client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+        login_as_test_admin(self.client)
         self.fake_sb = _FakeSupabase()
         self.patcher_sb = patch("admin.routes.get_sb", return_value=self.fake_sb)
         self.patcher_sb.start()

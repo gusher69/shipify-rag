@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from starlette.testclient import TestClient
 
+from tests._admin_test_auth import login_as_test_admin
+
 
 class TestRootRedirect(unittest.TestCase):
     def setUp(self):
@@ -26,7 +28,7 @@ class TestRootRedirect(unittest.TestCase):
 
     def test_authenticated_root_redirects_to_dashboard(self):
         client = TestClient(self.app)
-        client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+        login_as_test_admin(client)
         resp = client.get("/", follow_redirects=False)
         self.assertIn(resp.status_code, (302, 307))
         self.assertEqual(resp.headers["location"], "/admin/dashboard")

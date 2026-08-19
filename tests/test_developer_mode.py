@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from starlette.testclient import TestClient
 
+from tests._admin_test_auth import login_as_test_admin
+
 from services.developer_mode import (
     is_developer_mode_enabled, get_feature_state, is_feature_route_accessible,
     build_developer_menu_items, FEATURE_STATE_VISIBLE, FEATURE_STATE_HIDDEN,
@@ -358,7 +360,7 @@ class TestPlaygroundDevModeChatBubbleWiring(unittest.TestCase):
     def setUp(self):
         from admin.routes import app
         self.client = TestClient(app)
-        self.client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+        login_as_test_admin(self.client)
 
     def test_dev_mode_off_by_default_renders_false(self):
         with patch.dict(os.environ, {"DEVELOPER_MODE": "false"}):

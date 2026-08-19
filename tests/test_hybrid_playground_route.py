@@ -16,6 +16,7 @@ from starlette.testclient import TestClient
 
 from tests.test_business_action_registry import _FakeSupabase
 from tests.test_session_service import FakeSb
+from tests._admin_test_auth import login_as_test_admin
 from services.business_action_registry import BusinessActionRegistry
 
 
@@ -55,7 +56,7 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
     def setUp(self):
         from admin.routes import app
         self.client = TestClient(app)
-        self.client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+        login_as_test_admin(self.client)
         self.fake_sb = _FakeSupabase()
         self.reg = BusinessActionRegistry(self.fake_sb)
         self.action_id = _seed_action(

@@ -13,12 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from starlette.testclient import TestClient
 
+from tests._admin_test_auth import login_as_test_admin
+
 
 class TestFileLibraryDownloadRoute(unittest.TestCase):
     def setUp(self):
         from admin.routes import app, KNOWLEDGE_DIR
         self.client = TestClient(app)
-        self.client.post("/admin/login", data={"username": "admin", "password": "shipify2026"})
+        login_as_test_admin(self.client)
         self.knowledge_dir = KNOWLEDGE_DIR
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
         self.test_path = self.knowledge_dir / "test_download_route_file.txt"
