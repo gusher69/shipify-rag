@@ -1589,6 +1589,192 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
         self.assertIn("missing_reason", status)
 
 
+class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
+    """GetUrlProductDetail ('แปลงลิงก์สินค้า') customer-reported defect
+    (2026-08-19): CustCode is genuinely required by the real ERP (proven
+    empirically — a live request with URL only returns HTTP 400, adding a
+    real CustCode returns 200 with a customer-specific converted link), so
+    it must NOT be stripped from the action's required parameters. The fix
+    is generic identifier reuse (already-existing IDENTIFIER_MEMORY_FIELDS
+    machinery) plus two real bugs found while verifying that reuse against
+    the shape of the real production actions:
+
+    1. `_bind_message_to_action`'s generic digit-bearing candidate scanner
+       was tokenizing the URL's OWN internal structure (e.g. "1688" out of
+       "https://detail.1688.com/...") as a plausible identifier value for
+       an unrelated sibling action's parameter (e.g. a Tracking-shaped
+       field), which then out-scored the real URL-consuming action in
+       _resolve_continuation_action's "already collected" tie-break —
+       confirmed live: after asking for CustCode, the customer's very next
+       reply silently misrouted to a different, unrelated action.
+    2. `_extract_system_values()` only ever read the URL from THIS turn's
+       message, so a URL given on an earlier turn vanished by the time
+       CustCode was supplied on a later turn — the ERP call would go out
+       with URL missing.
+
+    The fixture below seeds two actions sharing the exact same
+    auto-generated "please give your customer code" question — reproducing
+    the exact ambiguity that exposed both bugs."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+
+    def _seed_geturlproductdetail(self):
+        action_id = _seed_action(
+            self.reg, key="geturlproductdetail", action_type="API", category="Product Link Conversion",
+            ai_description="แปลงลิงก์สินค้าจาก 1688, Taobao หรือ Tmall เป็นลิงก์หน้ารายละเอียดสินค้าของ Shipify",
+            keywords=["แปลงลิงก์", "ลิงก์สินค้า", "1688", "taobao", "tmall"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "SecretCode", "display_name": "รหัสยืนยันตัวตน", "required": True,
+             "input_source": "credential_store", "credential_ref": "secretcode"},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            {"name": "URL", "display_name": "ลิงก์สินค้า", "required": True, "input_source": "system_generated"},
+        ])
+        self.reg.replace_response_mapping(action_id, [
+            {"json_path": "$.data.Link", "mapped_label": "ลิงก์รายละเอียดสินค้า", "field_metadata": {}},
+        ])
+        self.reg.upsert_execution(action_id, {
+            "endpoint": "https://example.test/GetUrlProductDetail", "http_method": "POST",
+            "content_type": "application/x-www-form-urlencoded"})
+        return action_id
+
+    def _seed_tracking_sibling(self):
+        """Shaped like the real SearchDataTracking action — same CustCode
+        question, plus a Tracking parameter whose validator would
+        otherwise happily accept a bare digit-run like "1688"."""
+        action_id = _seed_action(
+            self.reg, key="search_data_tracking", action_type="API", category="Shipment Tracking",
+            ai_description="ค้นหาสถานะพัสดุจากเลขแทรค", keywords=["แทรค", "tracking", "เลขพัสดุ"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "SecretCode", "display_name": "รหัสยืนยันตัวตน", "required": True,
+             "input_source": "credential_store", "credential_ref": "secretcode"},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            {"name": "Tracking", "display_name": "เลขแทรค", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/SearchDataTracking",
+                                                "http_method": "POST"})
+        return action_id
+
+    def _credential_patch(self):
+        return patch("services.credential_store.CredentialStore.resolve",
+                     return_value={"ok": True, "value": "resolved-secret", "error": None})
+
+    # A. URL only, nothing known anywhere -> asks naturally, no raw JSON, no fabricated link
+    def test_a_url_only_no_custcode_anywhere_asks_naturally(self):
+        self._seed_geturlproductdetail()
+        result = self.engine.decide("https://detail.1688.com/offer/682345678901.html", history=[], context={})
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        text = result["reply"]["text"]
+        self.assertIn("รหัสลูกค้า", text)
+        self.assertNotIn("{", text)
+        self.assertNotIn("http", text.lower())  # no fabricated link before CustCode is known
+
+    # B. Natural phrase + URL + CustCode already known via customer_context (profile reuse)
+    def test_b_natural_phrase_with_known_custcode_in_profile_executes_immediately(self):
+        self._seed_geturlproductdetail()
+        context = {"customer_context": {"cust_code": "SP1014"}}
+        with self._credential_patch(), \
+             patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "status": "success", "data": {"Link": "https://www.shipify.co.th/PageProductDetail/1688/682345678901"}})) as mock_req:
+            result = self.engine.decide(
+                "ช่วยแปลงลิงก์นี้ให้หน่อย https://detail.1688.com/offer/682345678901.html",
+                history=[], context=context)
+        self.assertEqual(result["routing"]["type"], "API")
+        sent = mock_req.call_args.kwargs.get("data") or {}
+        self.assertEqual(sent.get("CustCode"), "SP1014")
+        self.assertEqual(sent.get("URL"), "https://detail.1688.com/offer/682345678901.html")
+        text = result["reply"]["text"]
+        self.assertIn("https://www.shipify.co.th", text)
+        self.assertNotIn("{", text)
+        self.assertNotIn('"status"', text)
+        # The politeness particle must never be glued directly onto the URL.
+        self.assertNotIn("682345678901ค่ะ", text)
+
+    # C/D. Cross-turn: URL given turn 1 (asked for CustCode), CustCode given
+    # turn 2 -- must reuse the ORIGINAL URL (not lose it) and must NOT
+    # misroute to the sibling Tracking action just because "1688" appears
+    # inside the URL.
+    def test_c_url_then_custcode_across_turns_reuses_url_and_does_not_misroute(self):
+        self._seed_geturlproductdetail()
+        self._seed_tracking_sibling()
+        msg1 = "https://detail.1688.com/offer/682345678901.html"
+        turn1 = self.engine.decide(msg1, history=[], context={})
+        self.assertEqual(turn1["routing"]["type"], "WORKFLOW")
+        self.assertIn("รหัสลูกค้า", turn1["reply"]["text"])
+
+        history = [{"role": "user", "content": msg1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with self._credential_patch(), \
+             patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "status": "success", "data": {"Link": "https://www.shipify.co.th/x"}})) as mock_req:
+            turn2 = self.engine.decide("SP1014", history=history, context={})
+        self.assertEqual(turn2["routing"]["type"], "API")
+        sent_url = mock_req.call_args.args[1] if mock_req.call_args.args else mock_req.call_args.kwargs.get("url")
+        self.assertIn("GetUrlProductDetail", sent_url)  # never silently switched to the Tracking sibling
+        sent = mock_req.call_args.kwargs.get("data") or {}
+        self.assertEqual(sent.get("CustCode"), "SP1014")
+        self.assertEqual(sent.get("URL"), msg1)  # URL from turn 1 must survive to turn 2's execution
+
+    # E. Existing order/tracking context already active must not hijack a fresh product-URL message.
+    def test_e_active_tracking_context_does_not_hijack_url_conversion_request(self):
+        self._seed_geturlproductdetail()
+        self._seed_tracking_sibling()
+        context = {"customer_context": {"cust_code": "SP1014", "last_business_action": "search_data_tracking"}}
+        with self._credential_patch(), \
+             patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "status": "success", "data": {"Link": "https://www.shipify.co.th/y"}})) as mock_req:
+            result = self.engine.decide(
+                "https://detail.1688.com/offer/682345678901.html", history=[], context=context)
+        self.assertEqual(result["routing"]["type"], "API")
+        sent_url = mock_req.call_args.args[1] if mock_req.call_args.args else mock_req.call_args.kwargs.get("url")
+        self.assertIn("GetUrlProductDetail", sent_url)
+
+    # F. Non-URL / unsupported message never fabricates a link.
+    def test_f_no_url_present_does_not_select_link_conversion_action(self):
+        self._seed_geturlproductdetail()
+        result = self.engine.decide("สวัสดีครับ", history=[], context={})
+        self.assertNotEqual(result["routing"]["type"], "API")
+
+    # G. Successful conversion reply is natural language, never raw JSON.
+    def test_g_successful_conversion_reply_has_no_raw_json_leakage(self):
+        self._seed_geturlproductdetail()
+        context = {"customer_context": {"cust_code": "FT1004"}}
+        with self._credential_patch(), \
+             patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "status": "success",
+                       "data": {"Link": "https://fasttrade.in.th/PageProductDetailGuest/1688/682345678901/home/guest/index"}})):
+            result = self.engine.decide(
+                "https://detail.1688.com/offer/682345678901.html", history=[], context=context)
+        text = result["reply"]["text"]
+        for token in ("{", "}", '"status"', '"data"'):
+            self.assertNotIn(token, text)
+        self.assertIn("https://fasttrade.in.th", text)
+
+    # H. Multi-user isolation: one caller's customer_context must never leak into another's decide() call.
+    def test_h_multi_user_customer_context_never_leaks_between_calls(self):
+        self._seed_geturlproductdetail()
+        with self._credential_patch(), \
+             patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "status": "success", "data": {"Link": "https://www.shipify.co.th/user-a"}})) as mock_req:
+            self.engine.decide("https://detail.1688.com/offer/1.html", history=[],
+                                context={"customer_context": {"cust_code": "SP1014"}})
+            sent_a = mock_req.call_args.kwargs.get("data") or {}
+        self.assertEqual(sent_a.get("CustCode"), "SP1014")
+
+        # A second, unrelated caller with NO customer_context must be asked
+        # fresh -- never silently inherit user A's CustCode.
+        result_b = self.engine.decide("https://detail.1688.com/offer/2.html", history=[], context={})
+        self.assertEqual(result_b["routing"]["type"], "WORKFLOW")
+        self.assertIn("รหัสลูกค้า", result_b["reply"]["text"])
+
+
 class TestSemanticParameterInference(unittest.TestCase):
     """Generic Semantic Parameter Inference sprint (2026-08-09) — natural
     language filter phrases ("ที่ส่งออกจากจีนแล้ว", "3 รายการล่าสุด") must

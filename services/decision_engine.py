@@ -205,7 +205,40 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
     if validation["ok"]:
         return {"bound": None, "ambiguous_candidates": []}
     askable = _askable_parameters_by_name(action)
-    candidates = [c for c in _extract_candidates_for_binding(message) if c not in (exclude_values or set())]
+    # A URL's own internal structure (domain segments, numeric path
+    # components — e.g. the "1688" in "https://detail.1688.com/offer/...")
+    # must never be scanned as a free-standing customer-supplied
+    # identifier for an UNRELATED parameter. Confirmed live: this exact
+    # substring was binding to a different action's "Tracking" parameter,
+    # which then out-scored the real URL-consuming action
+    # (GetUrlProductDetail) in _resolve_continuation_action's "already
+    # collected" tie-break — after asking for CustCode, the customer's
+    # very next reply got silently misrouted to the wrong action. The URL
+    # itself is captured separately, whole, via _extract_system_values()
+    # for any system_generated parameter that wants it; stripping it here
+    # only removes it from GENERIC digit/email candidate scanning, never
+    # from the message the customer actually sent. Structural candidates
+    # are scanned against the stripped text; the whole-message free-text
+    # fallback (see _extract_candidates_for_binding's own docstring)
+    # still uses the ORIGINAL message when no structural candidate is
+    # found at all, so a genuinely free-text parameter's behavior
+    # (e.g. SendLineNotiCS's Message) is unchanged.
+    scan_message = _URL_RE.sub(" ", message or "")
+    structural_candidates = _extract_structural_candidates(scan_message)
+    if structural_candidates:
+        candidates = list(structural_candidates)
+    else:
+        # Mirrors _extract_candidates_for_binding's own whole-message
+        # fallback (see its docstring) directly, rather than calling it —
+        # calling it here would re-run structural extraction on the
+        # UNSTRIPPED message and rediscover the very URL substring just
+        # excluded above. The ORIGINAL (unstripped) message is used as
+        # the free-text candidate itself: a genuinely free-text parameter
+        # (e.g. SendLineNotiCS's Message) may legitimately need the URL
+        # as part of its own content, unlike a structural digit/email scan.
+        trimmed = (message or "").strip()
+        candidates = [trimmed] if trimmed else []
+    candidates = [c for c in candidates if c not in (exclude_values or set())]
     # Group members deliberately use STRUCTURAL candidates only — never
     # the whole-message free-text fallback _extract_candidates_for_binding
     # offers (see that function's own docstring). A parameter GROUP (e.g.
@@ -213,7 +246,7 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
     # require ONE genuine identifying value; letting a permissive
     # non_empty member swallow an entire unrelated sentence would satisfy
     # the group with zero real identifying information.
-    group_candidates = [c for c in _extract_structural_candidates(message) if c not in (exclude_values or set())]
+    group_candidates = [c for c in structural_candidates if c not in (exclude_values or set())]
 
     # Try the MORE SPECIFIC validators first (a configured
     # validation_pattern, or a non-generic validation_type like email/
@@ -653,7 +686,7 @@ _ROUTING_TYPES = ("RAG", "API", "TOOL", "WORKFLOW", "NOTIFICATION", "HUMAN_HANDO
 _URL_RE = re.compile(r"https?://\S+")
 
 
-def _extract_system_values(message: str) -> Dict:
+def _extract_system_values(message: str, history: Optional[List[Dict]] = None) -> Dict:
     """Generic, action-agnostic values derived from the raw message that
     any Business Action's parameters may read via input_source
     'system_generated' — currently just the first URL, if any. Never
@@ -666,8 +699,25 @@ def _extract_system_values(message: str) -> Dict:
     equally likely to be named "url", "URL", or "Url" depending on the
     third party, the value is exposed under all three common castings
     here rather than forcing every such Business Action to rename its
-    real wire parameter to match one fixed casing."""
+    real wire parameter to match one fixed casing.
+
+    Cross-turn carry-forward (confirmed live defect): a system_generated
+    parameter is deliberately never "askable" (see
+    _NON_ASKABLE_INPUT_SOURCES) and never appears in `collected`, so a URL
+    given on an EARLIER turn (e.g. the customer sends a product link, is
+    asked for CustCode, then replies with just the code) would otherwise
+    vanish by the time this runs again — THIS turn's own `message` alone
+    has no URL. Only falls back to `history` when the current message
+    carries no URL of its own, so a fresher URL on this turn always wins;
+    scans the most recent user turn first, exactly like every other
+    identifier-memory mechanism in this module prefers the latest value."""
     match = _URL_RE.search(message or "")
+    if not match and history:
+        for turn in reversed(history):
+            if turn.get("role") == "user":
+                match = _URL_RE.search(turn.get("content") or "")
+                if match:
+                    break
     if not match:
         return {}
     url = match.group(0)
@@ -1526,7 +1576,7 @@ class DecisionEngine:
                 "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
                 # Generic system-derived values ANY tool/action may read
                 # (e.g. a URL-handling tool) — never a per-action special case.
-                "system_values": _extract_system_values(message),
+                "system_values": _extract_system_values(message, history=history),
             }
             exec_start = time.time()
             try:
@@ -1728,7 +1778,13 @@ class DecisionEngine:
         lines.extend(unflattened_list_lines)
         text = "\n".join(lines)
         if not text.rstrip().endswith(("ค่ะ", "คะ", "ครับ")):
-            text += "ค่ะ"
+            # A trailing ASCII value (URL, code, number) must never have
+            # the politeness particle glued directly onto it -- e.g.
+            # ".../682345678901ค่ะ" corrupts the URL and breaks LINE's
+            # own link auto-detection. Thai text gets no separating space
+            # (idiomatic: "เรียบร้อยค่ะ" not "เรียบร้อย ค่ะ").
+            sep = " " if text and text[-1].isascii() and not text[-1].isspace() else ""
+            text += sep + "ค่ะ"
         return text
 
     @staticmethod
@@ -2016,7 +2072,7 @@ class DecisionEngine:
                     "conversation_context": context.get("conversation_context") or {},
                     "customer_context": context.get("customer_context") or {},
                     "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
-                    "system_values": _extract_system_values(erp_sub_question),
+                    "system_values": _extract_system_values(erp_sub_question, history=history),
                 }
                 try:
                     erp_exec_result = self.executor.execute(action_id, exec_context)
