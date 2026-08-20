@@ -165,6 +165,69 @@ class TestClassifyQuestion(unittest.TestCase):
         self.assertEqual(result["classification"], "RAG_ONLY")
 
 
+class TestShipmentListKeywordCoverage(unittest.TestCase):
+    """Customer-Reported ERP Conversation Defect (2026-08-19) — a known
+    customer's personal shipping-cost / arrival-status question
+    (GOLDEN-059-SHIPMENT-COST-AND-ARRIVAL-NATURAL-LANGUAGE) fell through to
+    RAG_ONLY and answered with a generic rate FORMULA instead of the
+    customer's own real shipment record, because searchdatashipmentlist —
+    the Business Action that actually has this data (its response_mapping
+    already includes the latest shipment's real total cost and arrival
+    date) — had only 5 narrow keywords and zero example questions, so
+    _keyword_score's substring match never fired. Fixed as a Business
+    Action CONFIGURATION change on the live registry (never a Decision
+    Engine code change) — this test seeds a fake action with the EXACT
+    keyword set now configured in production, so a regression here (the
+    keyword list drifting back to something too narrow) is caught by
+    `python -m unittest discover -s tests`, not just eyeballed live."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        # The exact keyword list configured on searchdatashipmentlist in
+        # production 2026-08-19 (see GOLDEN-059's own description).
+        self.action_id = _seed_action(
+            self.reg, key="searchdatashipmentlist", category="Customer Shipment Retrieval",
+            ai_description="ค้นหารายการบิลขนส่งของลูกค้า โดยค้นหาจากรหัสลูกค้า",
+            keywords=[
+                "บิลขนส่ง", "พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ",
+                "ค่าขนส่งเท่าไหร่", "ค่าส่งเท่าไหร่", "ค่าส่งล่าสุด", "บิลขนส่งล่าสุด",
+                "ถูกที่สุด", "ถูกกว่า", "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "ถึงหรือยัง",
+                "มาถึงหรือยัง", "ของถึงไหนแล้ว", "พัสดุล่าสุด", "การจัดส่งล่าสุด",
+                "มาถึง", "จะมาถึง",
+            ],
+        )
+        self.reg.replace_parameters(self.action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+        ])
+
+    def test_personal_cheapest_shipping_cost_question_is_erp_not_rag(self):
+        result = classify_question(
+            "ของมาถึงแล้วช่วยคำนวณค่าขนส่งในไทยหน่อยได้ไหมว่าอะไรถูกที่สุด", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.action_id)
+
+    def test_personal_arrival_status_question_is_erp_not_rag(self):
+        result = classify_question("ช่วยเช็คบิลสั่งซื้อล่าสุดหน่อยว่าเมื่อไหร่จะมาถึง", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.action_id)
+
+    def test_generic_rate_formula_question_still_stays_rag_only(self):
+        """Regression guard: the new personal-phrasing keywords must never
+        capture the GENERIC "how is the rate calculated" FAQ question —
+        that one has no personal/record framing and must keep answering
+        from the static rate policy in RAG, not a specific customer's
+        shipment record."""
+        result = classify_question("ค่าขนส่งคิดยังไง", self.reg)
+        self.assertEqual(result["classification"], "RAG_ONLY")
+        self.assertIsNone(result["selected_action_id"])
+
+    def test_unrelated_question_still_stays_rag_only(self):
+        result = classify_question("โกดังจีนอยู่ที่ไหน", self.reg)
+        self.assertEqual(result["classification"], "RAG_ONLY")
+        self.assertIsNone(result["selected_action_id"])
+
+
 class TestLooseMarkerSegmentation(unittest.TestCase):
     """Golden Application Defect Fixes (2026-08-16) — GOLDEN-026 root
     cause: bare "แล้ว" (never "และ"/"แล้วก็"/any of the other FIXED

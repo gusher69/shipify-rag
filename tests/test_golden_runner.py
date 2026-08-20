@@ -77,13 +77,15 @@ class TestDatasetIntegrity(unittest.TestCase):
         a 7th (GOLDEN-057), found during this same fix round's own
         mandatory server UAT re-test — see its own `description`. Version
         1.3.0 (2026-08-19) added an 8th (GOLDEN-058), the GetUrlProductDetail
-        link-conversion defect — see its own `description`."""
+        link-conversion defect — see its own `description`. Version 1.4.0
+        (2026-08-19) added a 9th (GOLDEN-059), the searchdatashipmentlist
+        keyword/example-coverage gap — see its own `description`."""
         customer_uat = [c for c in self.cases if c.get("source") == "customer_uat"]
-        self.assertEqual(len(customer_uat), 8)
+        self.assertEqual(len(customer_uat), 9)
         for c in customer_uat:
             self.assertIn(c.get("reported_at"), ("2026-08-17", "2026-08-19"))
             self.assertIn(c.get("severity"), ("P0", "P1", "P2"))
-        self.assertEqual(len(self.cases), 59)
+        self.assertEqual(len(self.cases), 60)
 
     def test_golden_ids_unique(self):
         ids = [c["golden_id"] for c in self.cases]
