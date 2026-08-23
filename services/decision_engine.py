@@ -1189,6 +1189,44 @@ class DecisionEngine:
             developer_trace["intent"] = actionable_intent
             developer_trace["workflow"] = workflow_hint
 
+            # Confirmed Pending Action — Direct Execution (Confirmation
+            # Continuation Correctness fix, 2026-08-23). A caller
+            # (line_bot/webhook.py, admin/routes.py Auto mode) that has
+            # ALREADY resolved which pending confirmation this reply
+            # answers (via services/pending_confirmation_service.py,
+            # generic and channel-agnostic) passes the pending action's
+            # id and its already-collected, already-validated parameter
+            # dict directly here — never re-derived from a synthetic
+            # history replay. Root cause this fixes: _resolve_
+            # continuation_action/_replay_business_action_collection
+            # reconstruct "collected" purely by replaying whatever
+            # `history` this call received; a caller that (correctly)
+            # replays only the pending row's own 2-turn snapshot loses
+            # any parameter the customer gave MORE than one turn before
+            # the confirmation question (e.g. an identifier given several
+            # turns earlier) — confirmed live: "SP1008" (turn 1) then a
+            # separate address message (turn 3) reaching confirmation,
+            # then "ยืนยัน" fell through to an unrelated fresh-message
+            # classification because CustCode could never be recovered
+            # from replaying just the address turn alone. This bypasses
+            # Selection/Continuation-matching ENTIRELY for this one turn
+            # — every other turn (fresh messages, parameter follow-ups,
+            # cancellations, an action that no longer exists/is disabled)
+            # is completely unaffected, and _resolve_continuation_action
+            # itself is untouched, still used exactly as before by every
+            # other caller/scenario.
+            confirmed_action_id = context.get("confirmed_action_id")
+            if context.get("confirmed") and confirmed_action_id:
+                full_action = self.registry.get_full(confirmed_action_id, mask_secrets=False)
+                if full_action and full_action.get("enabled"):
+                    return self._execute_selected_action(
+                        full_action, [full_action], message, history, context, developer_trace, start,
+                        workflow=workflow_hint, intent=(actionable_intent or {}).get("actionable_intent"),
+                        collected_slots=dict(context.get("confirmed_parameters") or {}))
+                # The pending action vanished/was disabled since the
+                # confirmation was issued — fall through to normal
+                # routing rather than silently no-op.
+
             if _HUMAN_REQUEST_RE.search(message or ""):
                 return self._route_human_handoff(
                     message, history, context, developer_trace, start,

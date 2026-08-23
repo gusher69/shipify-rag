@@ -3689,18 +3689,22 @@ async def hybrid_playground_ask(request: Request):
         if pending:
             reply_kind = classify_confirmation_reply(question)
             if reply_kind == "confirm":
-                # Replays the EXACT 2-turn history that produced this
-                # pending confirmation, so the Decision Engine's own
-                # conversation-continuation matching
-                # (_resolve_continuation_action) re-selects the SAME
-                # action with the SAME already-collected parameters —
-                # never re-derived from this short "ยืนยัน" reply.
-                pending_history = [
-                    {"role": "user", "content": pending.get("original_message") or ""},
-                    {"role": "assistant", "content": pending.get("question_text") or ""},
-                ]
-                decide_result = engine.decide(question, history=pending_history,
-                                               context={**decide_base_context, "confirmed": True})
+                # Confirmation Continuation Correctness fix (2026-08-23)
+                # — passes the pending row's OWN already-collected,
+                # already-validated parameters straight through via
+                # confirmed_action_id/confirmed_parameters, so
+                # DecisionEngine.decide() executes directly instead of
+                # re-deriving "collected" from a replayed history (which
+                # loses any parameter given more than one turn before the
+                # confirmation question — confirmed live for the Shipping
+                # Address Change flow, where CustCode was given several
+                # turns earlier than the address details). Real
+                # persisted session history is passed through unchanged
+                # for everything else decide() may want it for.
+                decide_result = engine.decide(question, history=normalized_history,
+                                               context={**decide_base_context, "confirmed": True,
+                                                         "confirmed_action_id": pending["pending_action_id"],
+                                                         "confirmed_parameters": pending.get("pending_parameters") or {}})
                 # Resolve the pending row REGARDLESS of the execution
                 # outcome (success or ERP error) — duplicate-send
                 # protection: once consumed, get_active() can never

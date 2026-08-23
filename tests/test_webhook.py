@@ -300,10 +300,11 @@ class TestLineConfirmationFlow(unittest.TestCase):
             mock_engine_cls.return_value.decide.assert_called_once()
             call_kwargs = mock_engine_cls.return_value.decide.call_args.kwargs
             self.assertTrue(call_kwargs["context"]["confirmed"])
-            self.assertEqual(call_kwargs["history"], [
-                {"role": "user", "content": self.TRIGGER},
-                {"role": "assistant", "content": self.QUESTION},
-            ])
+            # Confirmation Continuation Correctness fix (2026-08-23) — the
+            # pending row's own action_id/parameters are passed directly,
+            # never re-derived from a synthetic history replay.
+            self.assertEqual(call_kwargs["context"]["confirmed_action_id"], self.ACTION_ID)
+            self.assertEqual(call_kwargs["context"]["confirmed_parameters"], {"Message": self.TRIGGER})
 
         row = [r for r in self.fake_sb.store["pending_confirmations"] if r["id"] == seeded["id"]][0]
         self.assertEqual(row["status"], "executed")
@@ -399,6 +400,39 @@ class TestLineConfirmationFlow(unittest.TestCase):
         matching = [r for r in self.fake_sb.store["pending_confirmations"] if r["id"] == seeded["id"]]
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]["status"], "executed")
+
+    # H ─────────────────────────────────────────────────────────────
+    def test_H_multi_turn_collected_parameters_survive_confirmation(self):
+        """Confirmation Continuation Correctness fix (2026-08-23) —
+        confirmed live: a parameter (e.g. CustCode) given several turns
+        BEFORE the confirmation question is never present in the pending
+        row's own `original_message` (which only captures the LAST
+        triggering message), so replaying just [original_message,
+        question_text] as history could never recover it. This pending
+        row's `pending_parameters` deliberately includes a value absent
+        from `original_message`/TRIGGER entirely, proving the webhook
+        passes the FULL stored parameter dict straight through instead of
+        relying on any history replay to reconstruct it."""
+        action = {"id": self.ACTION_ID, "action_key": "sendlinenotics",
+                  "parameters": [{"name": "SecretCode", "input_source": "credential_store"},
+                                 {"name": "CustCode", "input_source": "customer_message"},
+                                 {"name": "Message", "input_source": "customer_message"}]}
+        seeded = self.pending_service.create(
+            tenant_id=self.tenant_id, channel="line", conversation_key="U1", action=action,
+            parameters={"CustCode": "SP1008", "Message": self.TRIGGER},
+            original_message=self.TRIGGER, question_text=self.QUESTION)
+
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._executed_result()
+            webhook_module._handle_message_via_decision_engine(_fake_event("ยืนยัน", user_id="U1"))
+            call_kwargs = mock_engine_cls.return_value.decide.call_args.kwargs
+            self.assertTrue(call_kwargs["context"]["confirmed"])
+            self.assertEqual(call_kwargs["context"]["confirmed_action_id"], self.ACTION_ID)
+            self.assertEqual(call_kwargs["context"]["confirmed_parameters"],
+                              {"CustCode": "SP1008", "Message": self.TRIGGER})
+
+        row = [r for r in self.fake_sb.store["pending_confirmations"] if r["id"] == seeded["id"]][0]
+        self.assertEqual(row["status"], "executed")
 
     @staticmethod
     def _decide_result_plain(text):

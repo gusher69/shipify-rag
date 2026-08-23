@@ -3034,6 +3034,48 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
                                                   "customer_context": {"cust_code": "SP1008"}})
         self.assertFalse(turn2["reply"]["text"].strip().startswith("{"))
 
+    # TEST 15 — Confirmation Continuation Correctness fix (2026-08-23):
+    # a parameter (CustCode) given several turns before the confirmation
+    # question, then replayed as only a synthetic 2-turn history (the
+    # confirmation's OWN original_message + question_text — mirroring
+    # exactly what services/pending_confirmation_service.py stores and
+    # what line_bot/webhook.py / admin/routes.py Auto mode now pass
+    # through), must still execute — never fall through to an unrelated
+    # fresh-message classification. Deliberately passes NO customer_context
+    # at all, so this proves the fix does not rely on Identifier Memory
+    # happening to be available/strong enough — the caller's own already-
+    # collected, already-validated parameters are used directly.
+    def test_15_confirmed_action_id_bypasses_history_replay_entirely(self):
+        action_id = self._seed_address_change_action()
+        address_message = (f"บิล SP100820260716001 ผู้รับ ทดสอบ 0812345678 ที่อยู่ {self.FULL_ADDRESS}")
+        confirmation_question = "รบกวนตรวจสอบข้อมูลอีกครั้งนะคะ... ยืนยันการดำเนินการหรือไม่คะ?"
+        # This 2-turn history is EXACTLY what a synthetic pending-row
+        # replay would produce — CustCode is nowhere in it, proving the
+        # continuation-matching text-replay path (_resolve_continuation_
+        # action) could never recover it on its own (verified separately
+        # against production: it returns None for this exact shape).
+        truncated_history = [
+            {"role": "user", "content": address_message},
+            {"role": "assistant", "content": confirmation_question},
+        ]
+        collected_parameters = {
+            "CustCode": "SP1008", "ShipmentCode": "SP100820260716001",
+            "ReceiverName": "ทดสอบ", "ReceiverPhone": "0812345678",
+            "Address": "8/7 ม.8", "Subdistrict": "ตาขัน", "District": "บ้านค่าย",
+            "Province": "ระยอง", "PostalCode": "21120",
+        }
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req, \
+             self._mock_secret():
+            result = self.engine.decide(
+                "ยืนยัน", history=truncated_history,
+                context={"developer_mode": True, "confirmed": True,
+                          "confirmed_action_id": action_id, "confirmed_parameters": collected_parameters})
+        self.assertEqual(mock_req.call_count, 1, "must execute exactly once, never fall through to RAG/fallback")
+        self.assertNotEqual(result["routing"]["type"], "RAG")
+        sent_body = mock_req.call_args.kwargs.get("json") or mock_req.call_args.kwargs.get("data") or {}
+        self.assertEqual(sent_body.get("CustCode"), "SP1008")
+
 
 if __name__ == "__main__":
     unittest.main()
