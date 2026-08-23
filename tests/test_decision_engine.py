@@ -2703,5 +2703,315 @@ class TestResolveContinuationActionTieBreak(unittest.TestCase):
         self.assertEqual(result.get("action_key"), "searchdataorderlist")
 
 
+class TestShippingAddressChangeRequest(unittest.TestCase):
+    """Shipping Address Change Request (2026-08-20) — the entire flow is
+    built from EXISTING generic mechanisms only: the Business Action
+    Registry, the generic Slot Filling / Information Collection Engine,
+    the generic operation_type=NOTIFICATION confirmation gate (same one
+    SendLineNotiCS already uses), and the SAME notification execution
+    endpoint SendLineNotiCS points at — reused, not duplicated. The only
+    new code is (1) services/thai_address_parser.py, wired in as one more
+    metadata-driven pre-pass exactly like Semantic Parameter Inference,
+    and (2) a generic confirmation/notification-message summary composer
+    that reads any action's own parameter display_names — no per-action
+    special case. No new workflow subsystem, no ERP write endpoint.
+
+    CustCode is deliberately shorter (2 letters + 4-6 digits) and
+    ShipmentCode longer (2 letters + 10+ digits) so the two structurally
+    disambiguate when both appear in one message, matching the real
+    examples in the customer requirement (SP1008 vs SP100820260716001)."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+
+    def _seed_address_change_action(self, key="requestshippingaddresschange"):
+        action_id = _seed_action(
+            self.reg, key=key, action_type="API", category="Customer Support Request",
+            ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
+            keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
+                       "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล"])
+        self.reg.update(action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
+                                     "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
+        self.reg.replace_parameters(action_id, [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิล/Shipment", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+            {"name": "ReceiverName", "display_name": "ชื่อผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "receiver_name"}},
+            {"name": "ReceiverPhone", "display_name": "เบอร์โทรผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "phone_number",
+             "field_metadata": {"address_component": "receiver_phone"}},
+            {"name": "Address", "display_name": "ที่อยู่", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "address"}},
+            {"name": "Subdistrict", "display_name": "ตำบล/แขวง", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "subdistrict"}},
+            {"name": "District", "display_name": "อำเภอ/เขต", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "district"}},
+            {"name": "Province", "display_name": "จังหวัด", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "province"}},
+            {"name": "PostalCode", "display_name": "รหัสไปรษณีย์", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^\d{5}$",
+             "field_metadata": {"address_component": "postal_code"}},
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": False,
+             "input_source": "system_generated"},
+        ])
+        self.reg.upsert_execution(action_id, {
+            "endpoint": "https://fasttrade.in.th/web-service/ai-chat/SendLineNotiCS", "http_method": "POST"})
+        return action_id
+
+    FULL_ADDRESS = "8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง 21120"
+
+    def _mock_secret(self):
+        return patch("services.credential_store.CredentialStore.resolve",
+                      return_value={"ok": True, "value": "FAKE-SECRET", "error": None})
+
+    # TEST 1 — asks for the new address, never a bare refusal.
+    def test_1_initial_request_asks_for_new_address_not_a_refusal(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=[], context={"developer_mode": True})
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        self.assertNotIn("ไม่สามารถดำเนินการได้", result["reply"]["text"])
+        mock_req.assert_not_called()
+
+    # TEST 2 — complete address in one message -> parses into fields, asks confirmation.
+    def test_2_complete_message_parses_and_reaches_confirmation(self):
+        self._seed_address_change_action()
+        message = (f"ช่วยเปลี่ยนที่อยู่จัดส่งในไทยของบิล SP100820260716001 ให้หน่อย\n"
+                   f"ผู้รับ หญิง\n0616807329\nที่อยู่ {self.FULL_ADDRESS}")
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide(message, history=[],
+                                         context={"developer_mode": True,
+                                                   "customer_context": {"cust_code": "SP1008"}})
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("ShipmentCode"), "SP100820260716001")
+        self.assertEqual(collected.get("Subdistrict"), "ตาขัน")
+        self.assertEqual(collected.get("District"), "บ้านค่าย")
+        self.assertEqual(collected.get("Province"), "ระยอง")
+        self.assertEqual(collected.get("PostalCode"), "21120")
+        self.assertEqual(collected.get("CustCode"), "SP1008")  # reused from customer_context, never re-asked
+        reply = result["reply"]["text"]
+        self.assertIn("ระยอง", reply)
+        self.assertIn("21120", reply)
+        self.assertIn("ยืนยัน", reply)
+        mock_req.assert_not_called()
+
+    # TEST 3 — incomplete address asks ONLY for the missing field.
+    def test_3_incomplete_address_asks_only_missing_field(self):
+        self._seed_address_change_action()
+        message = ("บิล SP100820260716001 ผู้รับ หญิง 0616807329 "
+                    "ที่อยู่ 8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง")  # no postal code
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide(message, history=[],
+                                         context={"developer_mode": True,
+                                                   "customer_context": {"cust_code": "SP1008"}})
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertNotIn("PostalCode", collected)
+        self.assertEqual(collected.get("Province"), "ระยอง")  # everything else already retained
+        self.assertIn("รหัสไปรษณีย์", result["reply"]["text"])
+        mock_req.assert_not_called()
+
+    # TEST 4 — missing value supplied next turn merges with previous values.
+    def test_4_missing_field_supplied_next_turn_merges(self):
+        self._seed_address_change_action()
+        message1 = ("บิล SP100820260716001 ผู้รับ หญิง 0616807329 "
+                     "ที่อยู่ 8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn2 = self.engine.decide("21120", history=history,
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("PostalCode"), "21120")
+        self.assertEqual(collected.get("Province"), "ระยอง")  # not lost
+        self.assertEqual(collected.get("ShipmentCode"), "SP100820260716001")  # not lost
+        self.assertIn("ยืนยัน", turn2["reply"]["text"])
+        mock_req.assert_not_called()
+
+    # TEST 5 — everything (including address) in the very first message -> never re-asked.
+    def test_5_first_message_with_everything_never_reasks_address(self):
+        self._seed_address_change_action()
+        message = (f"ต้องการเปลี่ยนที่อยู่บิลขนส่งของบิล SP100820260716001 "
+                    f"ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide(message, history=[],
+                                         context={"developer_mode": True,
+                                                   "customer_context": {"cust_code": "SP1008"}})
+        self.assertNotIn("ที่อยู่จัดส่งใหม่", result["reply"]["text"])
+        self.assertIn("ยืนยัน", result["reply"]["text"])
+        mock_req.assert_not_called()
+
+    # TEST 6 — a correction before confirmation changes ONLY that field.
+    def test_6_correction_before_confirmation_changes_only_that_field(self):
+        self._seed_address_change_action()
+        message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        self.assertIn("ยืนยัน", turn1["reply"]["text"])  # already at confirmation step
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn2 = self.engine.decide("จังหวัดผิด เป็นชลบุรี", history=history,
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("Province"), "ชลบุรี")
+        self.assertEqual(collected.get("District"), "บ้านค่าย")  # untouched
+        self.assertEqual(collected.get("Subdistrict"), "ตาขัน")  # untouched
+        self.assertEqual(collected.get("PostalCode"), "21120")  # untouched
+        self.assertIn("ชลบุรี", turn2["reply"]["text"])  # revised summary shown again
+        mock_req.assert_not_called()
+
+    # TEST 7 — CustCode already known in history/profile is reused, never re-asked.
+    def test_7_custcode_already_known_is_reused(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=[],
+                                         context={"developer_mode": True,
+                                                   "customer_context": {"cust_code": "SP1008"}})
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("CustCode"), "SP1008")
+        mock_req.assert_not_called()
+
+    # TEST 8 — Shipment/Bill code supplied before the address is retained across turns.
+    def test_8_shipment_code_supplied_before_address_is_retained(self):
+        self._seed_address_change_action()
+        message1 = "ต้องการเปลี่ยนที่อยู่ของบิล SP100820260716001"
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request"):
+            turn2 = self.engine.decide(f"ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}", history=history,
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("ShipmentCode"), "SP100820260716001")
+
+    # TEST 9 — confirm -> exactly one (mocked) CS notification.
+    def test_9_confirmation_sends_exactly_one_notification(self):
+        self._seed_address_change_action()
+        message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req, \
+             self._mock_secret():
+            turn2 = self.engine.decide("ยืนยัน", history=history,
+                                        context={"developer_mode": True, "confirmed": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        self.assertEqual(turn2["routing"]["type"], "API")
+        mock_req.assert_called_once()
+        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
+        sent_message = sent_body.get("Message") or ""
+        self.assertIn("ระยอง", sent_message)
+        self.assertIn("21120", sent_message)
+        self.assertIn("ลูกค้ายืนยันข้อมูลแล้ว", sent_message)
+        self.assertNotIn("FAKE-SECRET", str(turn2))
+
+    # TEST 10 — confirming twice must not send a duplicate notification.
+    def test_10_confirming_twice_no_duplicate_notification(self):
+        self._seed_address_change_action()
+        message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req, \
+             self._mock_secret():
+            turn2 = self.engine.decide("ยืนยัน", history=history,
+                                        context={"developer_mode": True, "confirmed": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        history2 = history + [{"role": "user", "content": "ยืนยัน"},
+                               {"role": "assistant", "content": turn2["reply"]["text"]}]
+        # A caller (webhook/admin) only ever re-invokes decide() with
+        # confirmed=True in direct response to a customer's OWN fresh
+        # "ยืนยัน" reply for a turn that is still awaiting confirmation.
+        # This history already shows turn2 EXECUTED (routing_type=API,
+        # not a repeat of the confirmation question), so
+        # _resolve_continuation_action/_requires_confirmation would no
+        # longer treat a further bare "ยืนยัน" as answering a still-open
+        # gate for THIS action -- confirming the platform's existing,
+        # already-tested duplicate-protection precondition rather than
+        # re-deriving it here.
+        with patch("services.action_executor.requests.request") as mock_req2:
+            self.engine.decide("ยืนยัน", history=history2,
+                                context={"developer_mode": True, "confirmed": True,
+                                          "customer_context": {"cust_code": "SP1008"}})
+        mock_req2.assert_not_called()
+
+    # TEST 11 — cancellation never sends a notification.
+    def test_11_cancellation_never_notifies(self):
+        self._seed_address_change_action()
+        message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide("ยกเลิก", history=history,
+                                         context={"developer_mode": True,
+                                                   "customer_context": {"cust_code": "SP1008"}})
+        mock_req.assert_not_called()
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+
+    # TEST 12 — China warehouse question must never select this action.
+    def test_12_china_warehouse_question_never_selects_this_action(self):
+        self._seed_address_change_action()
+        candidates = search_candidate_actions(self.reg, workflow=None, message="ที่อยู่โกดังจีนอยู่ที่ไหน",
+                                               collected_slots={})
+        selected = select_best_action(candidates, minimum_score=1.0)
+        self.assertIsNone(selected)  # RAG_ONLY territory, no Business Action should claim this
+
+    # TEST 13 — a new session/user never leaks the previous customer's address/CustCode.
+    def test_13_new_session_no_leakage(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=[], context={"developer_mode": True})
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertNotIn("CustCode", collected)
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])  # must ask fresh, nothing carried over
+
+    # TEST 14 — no raw JSON ever reaches the customer-facing reply.
+    def test_14_no_raw_json_in_any_customer_reply(self):
+        self._seed_address_change_action()
+        message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        self.assertFalse(turn1["reply"]["text"].strip().startswith("{"))
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})), \
+             self._mock_secret():
+            turn2 = self.engine.decide("ยืนยัน", history=history,
+                                        context={"developer_mode": True, "confirmed": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        self.assertFalse(turn2["reply"]["text"].strip().startswith("{"))
+
+
 if __name__ == "__main__":
     unittest.main()

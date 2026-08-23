@@ -110,15 +110,65 @@ def _generate_parameter_question(param: Dict) -> str:
     return f"กรุณาแจ้ง{display}ค่ะ"
 
 
-def _generate_confirmation_question(action: Dict) -> str:
+def _compose_field_summary(action: Dict, collected: Dict) -> str:
+    """Generic, config-driven summary composer (2026-08-20) — used both
+    to enrich the confirmation-gate question below and to build the
+    composed 'Message' system value some NOTIFICATION-type actions
+    declare (see _compose_notification_message_system_value). Iterates
+    the action's OWN parameters (never a hardcoded field list), emitting
+    "{display_name}: {value}" for every customer_message-sourced
+    parameter that actually has a collected value — any current or future
+    action gets a readable summary automatically just by having ordinary
+    parameters with display_name set, no per-action code."""
+    lines = []
+    for p in action.get("parameters") or []:
+        if p.get("input_source") != "customer_message":
+            continue
+        value = collected.get(p["name"])
+        if value:
+            lines.append(f"{p.get('display_name') or p['name']}: {value}")
+    return "\n".join(lines)
+
+
+def _generate_confirmation_question(action: Dict, collected: Optional[Dict] = None) -> str:
     """The exact text asked when a COMMAND-type action (see
     _requires_confirmation) has all its parameters collected but hasn't
     been confirmed yet. Factored out to a single function — used both to
     BUILD the question (_execute_selected_action) and to RECOGNIZE a
     reply to it on the next turn (_resolve_continuation_action) — so the
-    two can never silently drift apart."""
+    two can never silently drift apart. `collected`, when given, is a
+    pure input (same value in -> same text out at both call sites) — a
+    non-empty _compose_field_summary() result is prepended so the
+    customer sees exactly what they're about to confirm (2026-08-20,
+    Shipping Address Change Request) instead of a bare yes/no; an action
+    with no customer_message parameters collected yet is unaffected."""
     action_label = action.get("display_name") or action.get("name") or "การดำเนินการนี้"
-    return f"ยืนยันการดำเนินการ '{action_label}' หรือไม่คะ? กรุณาตอบ 'ยืนยัน' เพื่อดำเนินการต่อ"
+    base = f"ยืนยันการดำเนินการ '{action_label}' หรือไม่คะ? กรุณาตอบ 'ยืนยัน' เพื่อดำเนินการต่อ"
+    summary = _compose_field_summary(action, collected) if collected else ""
+    if summary:
+        return f"รบกวนตรวจสอบข้อมูลอีกครั้งนะคะ\n\n{summary}\n\n{base}"
+    return base
+
+
+def _compose_notification_message_system_value(action: Dict, collected: Dict) -> Dict[str, str]:
+    """Generic support (2026-08-20) for a NOTIFICATION-type action whose
+    real endpoint expects one free-text message field (e.g.
+    sendlinenotics's own 'Message' parameter) built from this
+    conversation's OTHER collected, customer-message-sourced parameters —
+    so a Business Action can be configured with real structured slots
+    (a proper per-field Slot Filling experience) while still sending a
+    single composed string to an endpoint that only accepts one. Only
+    engages for a parameter literally named "Message" with input_source
+    "system_generated" — any action may opt into this by shaping its own
+    parameters this way; nothing here names a specific action_key."""
+    for p in action.get("parameters") or []:
+        if p.get("name") == "Message" and p.get("input_source") == "system_generated":
+            summary = _compose_field_summary(action, collected)
+            if not summary:
+                return {}
+            header = action.get("display_name") or action.get("name") or ""
+            return {"Message": f"{header}\n\n{summary}\n\nสถานะ: ลูกค้ายืนยันข้อมูลแล้ว"}
+    return {}
 
 
 def _next_expected_parameter(action: Dict, registry, collected: Dict) -> Optional[Dict]:
@@ -313,6 +363,37 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
     for name, value in semantic_matches.items():
         working.setdefault(name, value)
 
+    # Thai Address Compound Parsing + Field Correction (2026-08-20,
+    # Shipping Address Change Request) — same metadata-driven convention
+    # as Semantic Parameter Inference above: field_metadata.address_component
+    # tags which of THIS action's parameters holds which parsed address
+    # piece (e.g. {"address_component": "province"}); an action with no
+    # such tags is completely unaffected. Lets a customer supply a full
+    # address block in one message ("8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง
+    # 21120") and have it decomposed into separate slots instead of being
+    # asked for each piece individually. Field correction is the one
+    # deliberate exception to "never overwrite" -- its whole purpose is
+    # undoing a mistake in an ALREADY-collected value before confirmation,
+    # never discarding the sibling fields collected alongside it, so it
+    # takes priority and skips the compound parse for the same message
+    # (a correction like "จังหวัดผิด เป็นชลบุรี" would otherwise itself get
+    # misparsed as a full address block by the generic parser above).
+    address_param_by_component = {
+        (p.get("field_metadata") or {}).get("address_component"): p["name"]
+        for p in (action.get("parameters") or [])
+        if (p.get("field_metadata") or {}).get("address_component")
+    }
+    if address_param_by_component:
+        from services.thai_address_parser import parse_thai_address, detect_field_correction
+        correction = detect_field_correction(message)
+        if correction and correction[0] in address_param_by_component:
+            working[address_param_by_component[correction[0]]] = correction[1]
+        else:
+            for component, value in parse_thai_address(message).items():
+                param_name = address_param_by_component.get(component)
+                if param_name:
+                    working.setdefault(param_name, value)
+
     used_values = set()
     ambiguous_candidates: List[str] = []
     while True:
@@ -412,7 +493,7 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
         if next_param and _generate_parameter_question(next_param) == last_text:
             matches.append(full_action)
         elif (next_param is None and _requires_confirmation(full_action)
-              and _generate_confirmation_question(full_action) == last_text):
+              and _generate_confirmation_question(full_action, collected_so_far) == last_text):
             # The last assistant turn was THIS action's confirmation-gate
             # question (2026-08-09, SendLineNotiCS enablement) — the
             # customer's reply this turn (e.g. "ยืนยัน"/"ยกเลิก") is an
@@ -1565,18 +1646,21 @@ class DecisionEngine:
                 "reason": "This action performs a real external side effect and requires "
                           "explicit confirmation before execution.",
             }
-            reply = _build_response(text=_generate_confirmation_question(selected))
+            reply = _build_response(text=_generate_confirmation_question(selected, collected_slots))
             return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow,
                                    developer_trace=developer_trace, context=context, start=start, alert=alert)
         else:
+            system_values = _extract_system_values(message, history=history)
+            system_values.update(_compose_notification_message_system_value(selected, collected_slots))
             exec_context = {
                 "question": message, "collected_slots": collected_slots, "workflow": workflow, "intent": intent,
                 "conversation_context": context.get("conversation_context") or {},
                 "customer_context": context.get("customer_context") or {},
                 "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
                 # Generic system-derived values ANY tool/action may read
-                # (e.g. a URL-handling tool) — never a per-action special case.
-                "system_values": _extract_system_values(message, history=history),
+                # (e.g. a URL-handling tool, or a NOTIFICATION action's
+                # composed Message — see _compose_notification_message_system_value).
+                "system_values": system_values,
             }
             exec_start = time.time()
             try:

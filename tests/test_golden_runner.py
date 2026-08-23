@@ -79,13 +79,15 @@ class TestDatasetIntegrity(unittest.TestCase):
         1.3.0 (2026-08-19) added an 8th (GOLDEN-058), the GetUrlProductDetail
         link-conversion defect — see its own `description`. Version 1.4.0
         (2026-08-19) added a 9th (GOLDEN-059), the searchdatashipmentlist
-        keyword/example-coverage gap — see its own `description`."""
+        keyword/example-coverage gap — see its own `description`. Version
+        1.5.0 (2026-08-20) added a 10th (GOLDEN-060), the new Shipping
+        Address Change Request feature — see its own `description`."""
         customer_uat = [c for c in self.cases if c.get("source") == "customer_uat"]
-        self.assertEqual(len(customer_uat), 9)
+        self.assertEqual(len(customer_uat), 10)
         for c in customer_uat:
-            self.assertIn(c.get("reported_at"), ("2026-08-17", "2026-08-19"))
+            self.assertIn(c.get("reported_at"), ("2026-08-17", "2026-08-19", "2026-08-20"))
             self.assertIn(c.get("severity"), ("P0", "P1", "P2"))
-        self.assertEqual(len(self.cases), 60)
+        self.assertEqual(len(self.cases), 61)
 
     def test_golden_ids_unique(self):
         ids = [c["golden_id"] for c in self.cases]
