@@ -1653,10 +1653,20 @@ def run_erp_test(*, sb, action_id: str, message: str, mode: str,
             # even though the same Business Action worked fine through
             # the real Decision Engine path. Reuses the SAME function,
             # never a second extractor.
-            from services.decision_engine import _extract_system_values
+            # Same gap, same fix, for a NOTIFICATION-type action's composed
+            # "Message" system value (see services/decision_engine.py::
+            # _compose_notification_message_system_value) — also missing
+            # here entirely (2026-08-23, FINAL CONTROLLED CS NOTIFICATION
+            # TEST), so a real "live" call through this harness sent the
+            # structured fields but an EMPTY Message to the real endpoint,
+            # even though the same action composes it correctly through
+            # the Decision Engine path. Reuses the SAME function.
+            from services.decision_engine import _extract_system_values, _compose_notification_message_system_value
+            system_values = _extract_system_values(message)
+            system_values.update(_compose_notification_message_system_value(action, collected_params))
             execution_result = executor.execute(action_id, context={
                 "collected_slots": collected_params, "action_params": collected_params, "developer_mode": True,
-                "system_values": _extract_system_values(message),
+                "system_values": system_values,
             })
         except Exception as e:
             trace.append(_trace_step("erp_execution", "error", latency_ms=(time.time() - t0) * 1000,
