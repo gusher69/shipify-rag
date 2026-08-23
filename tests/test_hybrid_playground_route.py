@@ -307,6 +307,8 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         self.assertTrue(any("C00001" in c for c in contents))
         self.assertFalse(any("C00002" in c for c in contents))
 
+
+
     def test_same_journey_label_stable_playground_user_id_across_turns(self):
         with patch("services.playground_orchestrator.run_playground_turn",
                    return_value=_fake_rag_result("ok")):
@@ -372,6 +374,217 @@ class TestHybridPlaygroundRoute(unittest.TestCase):
         erp_question_sent = mock_erp.call_args.kwargs["message"]
         self.assertNotIn("C00001", rag_question_sent)
         self.assertNotIn("คูปองใช้งานอย่างไร", erp_question_sent)
+
+
+class TestAutoModeConfirmationContinuation(unittest.TestCase):
+    """Auto Mode Confirmation Continuation fix (2026-08-23) — Auto mode
+    used to call decide() with a context that never included `confirmed`,
+    so a customer-typed "ยืนยัน" could never complete ANY confirmation-
+    gated Business Action here, regardless of which one (confirmed live:
+    both the pre-existing sendlinenotics and the new
+    requestshippingaddresschange just re-asked the same summary forever).
+    The fix reuses the EXACT SAME generic services/pending_confirmation_
+    service.py + classify_confirmation_reply mechanism line_bot/
+    webhook.py's own turn handler already uses.
+
+    Real DecisionEngine + real BusinessActionRegistry + real
+    PendingConfirmationService throughout (Playground Production Parity
+    convention, same as every other class in this file) — only the
+    actual outbound HTTP call (services.action_executor.requests.request)
+    and credential resolution are ever mocked, so this file can never
+    make a real SendLineNotiCS call."""
+
+    def setUp(self):
+        from admin.routes import app
+        self.client = TestClient(app)
+        login_as_test_admin(self.client)
+        self.fake_sb = _FakeSupabase()
+        self.reg = BusinessActionRegistry(self.fake_sb)
+        self.patcher_sb = patch("admin.routes.get_sb", return_value=self.fake_sb)
+        self.patcher_sb.start()
+        self.pg_fake_sb = FakeSb()
+        self.patcher_session_sb = patch("services.session_service._get_sb", return_value=self.pg_fake_sb)
+        self.patcher_session_sb.start()
+        self.patcher_profiles_sb = patch("profiles.manager.supabase", self.pg_fake_sb)
+        self.patcher_profiles_sb.start()
+
+    def tearDown(self):
+        self.patcher_sb.stop()
+        self.patcher_session_sb.stop()
+        self.patcher_profiles_sb.stop()
+
+    def _ask(self, question, journey_label="AUTO-CONFIRM"):
+        return self.client.post("/admin/api/hybrid-playground/ask", json={
+            "question": question, "mode": "auto", "journey_label": journey_label,
+        })
+
+    def _mock_http_success(self):
+        return patch("services.action_executor.requests.request",
+                      return_value=MagicMock(status_code=200, json=lambda: {"status": "success"}))
+
+    def _mock_credential(self, value="REAL-SECRET-abc123"):
+        return patch("services.credential_store.CredentialStore.resolve",
+                      return_value={"ok": True, "value": value, "error": None})
+
+    def _seed_generic_notify_action(self):
+        """A deliberately made-up action_key/category (never sendlinenotics
+        or requestshippingaddresschange) — proves the fix is genuinely
+        generic, not special-cased to either known action."""
+        action = self.reg.create({
+            "action_key": "generic_notify_test_action", "name": "generic_notify_test_action",
+            "display_name": "generic_notify_test_action", "action_type": "API",
+            "category": "generic_notification_test", "ai_description": "",
+            "search_keywords": ["แจ้งเตือนลูกค้า", "ข้อมูลลูกค้า"],
+            "enabled": True, "priority": 0,
+            "setup_metadata": {"operation_type": "NOTIFICATION"},
+        })
+        self.reg.replace_parameters(action["id"], [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^C\d+$"},
+        ])
+        self.reg.upsert_execution(action["id"], {"endpoint": "https://example.test/notify", "http_method": "POST",
+                                                    "content_type": "application/x-www-form-urlencoded"})
+        return action["id"]
+
+    def _seed_address_change_action(self):
+        action = self.reg.create({
+            "action_key": "requestshippingaddresschange", "name": "requestshippingaddresschange",
+            "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง", "action_type": "API", "category": "notification",
+            "ai_description": "", "search_keywords": ["เปลี่ยนที่อยู่บิลขนส่ง", "เปลี่ยนที่อยู่จัดส่ง"],
+            "enabled": True, "priority": 0,
+            "setup_metadata": {"operation_type": "NOTIFICATION"},
+        })
+        self.reg.replace_parameters(action["id"], [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิล/Shipment", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+            {"name": "ReceiverName", "display_name": "ชื่อผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "receiver_name"}},
+            {"name": "ReceiverPhone", "display_name": "เบอร์โทรผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "phone_number",
+             "field_metadata": {"address_component": "receiver_phone"}},
+            {"name": "Address", "display_name": "ที่อยู่", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "address"}},
+            {"name": "Subdistrict", "display_name": "ตำบล/แขวง", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "subdistrict"}},
+            {"name": "District", "display_name": "อำเภอ/เขต", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "district"}},
+            {"name": "Province", "display_name": "จังหวัด", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "province"}},
+            {"name": "PostalCode", "display_name": "รหัสไปรษณีย์", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^\d{5}$",
+             "field_metadata": {"address_component": "postal_code"}},
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": False,
+             "input_source": "system_generated"},
+        ])
+        self.reg.upsert_execution(action["id"], {"endpoint": "https://example.test/notify", "http_method": "POST",
+                                                    "content_type": "application/x-www-form-urlencoded"})
+        return action["id"]
+
+    def _seed_sendlinenotics_action(self):
+        action = self.reg.create({
+            "action_key": "sendlinenotics", "name": "sendlinenotics", "display_name": "sendlinenotics",
+            "action_type": "API", "category": "notification", "ai_description": "",
+            "search_keywords": ["แจ้ง cs", "ติดต่อกลับ"], "enabled": True, "priority": 0,
+            "setup_metadata": {"operation_type": "NOTIFICATION"},
+        })
+        self.reg.replace_parameters(action["id"], [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty"},
+        ])
+        self.reg.upsert_execution(action["id"], {"endpoint": "https://example.test/notify", "http_method": "POST",
+                                                    "content_type": "application/x-www-form-urlencoded"})
+        return action["id"]
+
+    # 1 ─────────────────────────────────────────────────────────────────
+    def test_1_address_change_flow_confirm_executes_once(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            self._ask("SP1008")
+            self._ask("ต้องการเปลี่ยนที่อยู่บิลขนส่ง")
+            r3 = self._ask("บิล SP100820260716001 ผู้รับ ทดสอบ 0812345678 ที่อยู่ 8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง 21120")
+            mock_req.assert_not_called()
+        self.assertIn("ยืนยัน", r3.json()["reply_text"])
+
+        with self._mock_http_success() as mock_req, self._mock_credential():
+            r4 = self._ask("ยืนยัน")
+        self.assertEqual(mock_req.call_count, 1, "execution must happen exactly once")
+        self.assertNotIn("ยืนยันการดำเนินการ", r4.json()["reply_text"],
+                          "must not repeat the confirmation prompt")
+
+    # 2 ─────────────────────────────────────────────────────────────────
+    def test_2_confirm_with_no_pending_does_not_execute_arbitrary_action(self):
+        self._seed_generic_notify_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            self._ask("สวัสดีค่ะ")
+            self._ask("ยืนยัน")
+            mock_req.assert_not_called()
+
+    # 3 ─────────────────────────────────────────────────────────────────
+    def test_3_cancel_produces_no_execution(self):
+        self._seed_generic_notify_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            r1 = self._ask("แจ้งเตือนลูกค้ารหัส C00001")
+            self.assertIn("ยืนยัน", r1.json()["reply_text"])
+            r2 = self._ask("ยกเลิก")
+            mock_req.assert_not_called()
+        self.assertIn("ยกเลิก", r2.json()["reply_text"])
+
+    # 4 ─────────────────────────────────────────────────────────────────
+    def test_4_field_correction_before_confirm_returns_to_confirmation(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            self._ask("SP1008")
+            self._ask("ต้องการเปลี่ยนที่อยู่บิลขนส่ง")
+            self._ask("บิล SP100820260716001 ผู้รับ ทดสอบ 0812345678 ที่อยู่ 8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง 21120")
+            r = self._ask("จังหวัดผิด เป็นชลบุรี")
+            mock_req.assert_not_called()
+        self.assertIn("ชลบุรี", r.json()["reply_text"])
+        self.assertIn("ยืนยัน", r.json()["reply_text"])
+
+    # 5 ─────────────────────────────────────────────────────────────────
+    def test_5_double_confirm_executes_exactly_once(self):
+        self._seed_generic_notify_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            self._ask("แจ้งเตือนลูกค้ารหัส C00001")
+            mock_req.assert_not_called()
+        with self._mock_http_success() as mock_req, self._mock_credential():
+            self._ask("ยืนยัน")
+            self.assertEqual(mock_req.call_count, 1)
+            self._ask("ยืนยัน")
+            self.assertEqual(mock_req.call_count, 1, "second ยืนยัน must not execute again")
+
+    # 6 ─────────────────────────────────────────────────────────────────
+    def test_6_existing_sendlinenotics_confirmation_flow_still_works(self):
+        self._seed_sendlinenotics_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            self._ask("ช่วยแจ้ง cs ให้ติดต่อกลับหน่อย")
+            mock_req.assert_not_called()
+        with self._mock_http_success() as mock_req, self._mock_credential():
+            self._ask("ยืนยัน")
+        self.assertEqual(mock_req.call_count, 1)
+
+    # 7 ─────────────────────────────────────────────────────────────────
+    def test_7_pending_confirmation_never_leaks_across_sessions(self):
+        self._seed_generic_notify_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            self._ask("แจ้งเตือนลูกค้ารหัส C00001", journey_label="UAT-CONFIRM-USER-A")
+            # A DIFFERENT playground session/user typing "ยืนยัน" must find
+            # nothing pending — never user A's pending row.
+            self._ask("ยืนยัน", journey_label="UAT-CONFIRM-USER-B")
+            mock_req.assert_not_called()
 
 
 if __name__ == "__main__":

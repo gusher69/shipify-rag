@@ -3657,10 +3657,84 @@ async def hybrid_playground_ask(request: Request):
         handoff_status_before = pg_session_service.get_handoff_status(conversation["id"]) if conversation else "NONE"
 
         engine = DecisionEngine(get_sb())
-        decide_result = engine.decide(question, history=normalized_history,
-                                       context={"developer_mode": True, "channel": "playground",
-                                                "customer_context": profile or {},
-                                                "handoff_status": handoff_status_before})
+
+        # Auto Mode Confirmation Continuation (2026-08-23) — Auto mode
+        # used to call decide() with a fixed context that never included
+        # `confirmed`, so a customer-typed "ยืนยัน" could never complete
+        # ANY confirmation-gated Business Action here (confirmed live:
+        # both the pre-existing sendlinenotics and the new
+        # requestshippingaddresschange just re-asked the same summary
+        # forever). Fix: reuse the EXACT SAME generic
+        # services/pending_confirmation_service.py +
+        # classify_confirmation_reply mechanism line_bot/webhook.py's own
+        # _handle_message_via_decision_engine already uses — a second,
+        # playground-scoped pending row (channel="playground",
+        # conversation_key=playground_user_id, so it can never leak
+        # across playground sessions/users or into the real "line"
+        # channel's own rows), never a re-implementation, never a
+        # hardcoded action_key.
+        from services.pending_confirmation_service import get_pending_confirmation_service, classify_confirmation_reply
+        from line_bot.webhook import _cancelled_result, _expired_result
+        import config as _config
+
+        pending_service = get_pending_confirmation_service(get_sb())
+        pg_tenant_id = _config.DEFAULT_TENANT_ID
+        pg_channel = "playground"
+        decide_base_context = {"developer_mode": True, "channel": "playground",
+                                "customer_context": profile or {}, "handoff_status": handoff_status_before}
+
+        pending = pending_service.get_active(tenant_id=pg_tenant_id, channel=pg_channel,
+                                              conversation_key=playground_user_id)
+        decide_result = None
+        if pending:
+            reply_kind = classify_confirmation_reply(question)
+            if reply_kind == "confirm":
+                # Replays the EXACT 2-turn history that produced this
+                # pending confirmation, so the Decision Engine's own
+                # conversation-continuation matching
+                # (_resolve_continuation_action) re-selects the SAME
+                # action with the SAME already-collected parameters —
+                # never re-derived from this short "ยืนยัน" reply.
+                pending_history = [
+                    {"role": "user", "content": pending.get("original_message") or ""},
+                    {"role": "assistant", "content": pending.get("question_text") or ""},
+                ]
+                decide_result = engine.decide(question, history=pending_history,
+                                               context={**decide_base_context, "confirmed": True})
+                # Resolve the pending row REGARDLESS of the execution
+                # outcome (success or ERP error) — duplicate-send
+                # protection: once consumed, get_active() can never
+                # return it again, so a repeated "ยืนยัน" cannot trigger
+                # a second real execution.
+                pending_service.mark_confirmed(pending["id"], source="playground_text_reply")
+                pending_service.mark_executed(pending["id"])
+            elif reply_kind == "cancel":
+                pending_service.mark_cancelled(pending["id"], source="playground_text_reply")
+                decide_result = _cancelled_result()
+            else:
+                # Not a recognized confirm/cancel phrase — treat it as
+                # the customer revising their request rather than
+                # answering the confirmation question. The stale pending
+                # row is superseded (PendingConfirmationService.create
+                # below cancels it) and this message runs as a fresh
+                # turn, reusing the SAME selection/collection/
+                # confirmation pipeline — no per-action revision logic.
+                decide_result = engine.decide(question, history=normalized_history, context=decide_base_context)
+        else:
+            if classify_confirmation_reply(question) in ("confirm", "cancel"):
+                # A confirm/cancel-shaped reply with NOTHING currently
+                # pending — most likely this session's confirmation
+                # window (config.PENDING_CONFIRMATION_TIMEOUT_SECONDS)
+                # expired. Give a clear "please start again" reply
+                # instead of silently routing "ยืนยัน" through fresh
+                # keyword search.
+                most_recent = pending_service.get_most_recent(tenant_id=pg_tenant_id, channel=pg_channel,
+                                                                conversation_key=playground_user_id)
+                if most_recent and most_recent.get("status") == "expired":
+                    decide_result = _expired_result()
+            if decide_result is None:
+                decide_result = engine.decide(question, history=normalized_history, context=decide_base_context)
+
         dev = decide_result.get("developer") or {}
         routing_type = (decide_result.get("routing") or {}).get("type")
         collection_status = dev.get("information_collection_status") or {}
@@ -3668,6 +3742,26 @@ async def hybrid_playground_ask(request: Request):
         erp_exec = dev.get("erp_execution_result") or {}
         rag_exec = dev.get("rag_execution_result") or {}
         is_hybrid_turn = routing_type == "HYBRID"
+
+        # Persist a NEW pending confirmation whenever THIS turn's result
+        # is itself a confirmation-required response (works for any
+        # COMMAND-type Business Action, driven entirely by
+        # services/decision_engine.py::_requires_confirmation's own
+        # generic classification — never a per-action special case),
+        # mirroring line_bot/webhook.py's own turn handler exactly.
+        gate = dev.get("confirmation_gate")
+        if gate and gate.get("required") and not gate.get("confirmed") and gate.get("action_id"):
+            try:
+                full_action = engine.registry.get_full(gate["action_id"], mask_secrets=False)
+                collected = collection_status.get("collected_parameters") or {}
+                pending_service.create(
+                    tenant_id=pg_tenant_id, channel=pg_channel, conversation_key=playground_user_id,
+                    action=full_action or {"id": gate["action_id"], "action_key": gate.get("action_key")},
+                    parameters=collected, original_message=question,
+                    question_text=decide_result.get("reply", {}).get("text"),
+                )
+            except Exception as e:
+                print(f"[playground] failed to persist pending confirmation (non-fatal): {e}")
 
         route_decision = {
             "route": routing_type.lower() if routing_type else "unknown",
