@@ -82,16 +82,43 @@ def parse_thai_address(text: str) -> Dict[str, str]:
         text = text[:name_match.start()] + " " + text[name_match.end():]
 
     geo_matches = list(_GEO_MARKER_RE.finditer(text))
+    # Confirmed live defect (2026-08-20, Production UAT): a message with
+    # NEITHER a geo marker NOR an explicit "ที่อยู่" label (e.g. a bare
+    # "SP1008" or "ต้องการเปลี่ยนที่อยู่บิลขนส่ง" replayed against this
+    # action's OWN first-turn history slot, per _replay_business_action_
+    # collection's "always process turn 0" rule -- see decision_engine.py)
+    # must NEVER be claimed as the address merely because nothing else
+    # matched. That used to run via an unconditional "leading text = the
+    # whole message" fallback -- this pre-pass runs BEFORE the main
+    # per-parameter binding loop and uses setdefault(), so it grabbed
+    # "SP1008" as Address before CustCode's own, far more specific
+    # validation_pattern ever got a chance to bind it correctly. Only an
+    # EXPLICIT signal -- a "ที่อยู่"/"ที่อยู่จัดส่ง" label, or at least one
+    # geo marker following it -- earns the "address" attribution now; a
+    # genuinely bare, unmarked address line (no label, no geo marker at
+    # all) is left for the existing, already-proven-safe generic
+    # free-text fallback (_extract_candidates_for_binding) to bind, the
+    # SAME mechanism SendLineNotiCS's own free-text Message parameter
+    # already relies on.
     leading = text[:geo_matches[0].start()] if geo_matches else text
-    # If an explicit "ที่อยู่"/"ที่อยู่จัดส่ง" label appears anywhere before
-    # the first geo marker, take the text after its LAST occurrence as the
-    # address -- skips an earlier, unrelated mention inside a request
-    # phrase ("อยากเปลี่ยนที่อยู่จัดส่ง...") and lands on the real label
-    # right before the actual address value. With no such label at all,
-    # the whole leading segment is the address (the simple case with a
-    # bare house-number/address block and no label).
     label_matches = list(_ADDRESS_LABEL_RE.finditer(leading))
-    address_value = leading[label_matches[-1].end():].strip() if label_matches else leading.strip()
+    if label_matches:
+        address_value = leading[label_matches[-1].end():].strip()
+    elif geo_matches:
+        address_value = leading.strip()
+    else:
+        address_value = ""
+    # A bare "ที่อยู่" label match with NOTHING after it that looks like a
+    # real address (no geo marker followed, no digit at all) is very
+    # likely the verb "เปลี่ยนที่อยู่"/"แก้ที่อยู่" itself, not a label —
+    # confirmed live: "ต้องการเปลี่ยนที่อยู่บิลขนส่ง" (no geo marker at all)
+    # matched "ที่อยู่" as a label and left "บิลขนส่ง" as a false address.
+    # Every real Thai address in this feature's own requirement always
+    # includes at least a house/building number; requiring one digit is a
+    # safe, minimal plausibility check that rejects this false positive
+    # without rejecting any address that actually has a house number.
+    if address_value and not geo_matches and not any(ch.isdigit() for ch in address_value):
+        address_value = ""
     if address_value:
         result["address"] = address_value
 

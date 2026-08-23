@@ -313,7 +313,23 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
         param = askable.get(name)
         if not param:
             continue
-        binding = _bind_candidate_to_parameter(candidates, param)
+        # Address-component-tagged parameters (services/thai_address_
+        # parser.py's field_metadata.address_component -- e.g. ReceiverName,
+        # Subdistrict) are populated exclusively by their own dedicated
+        # pre-pass in _bind_all_from_message, never by this generic
+        # whole-message free-text fallback. Confirmed live (2026-08-20
+        # Production UAT): a loosely-validated field like ReceiverName
+        # (validation_type "non_empty") otherwise greedily swallows an
+        # entire unrelated sentence -- even the customer's own REQUEST
+        # message itself ("ต้องการเปลี่ยนที่อยู่บิลขนส่ง") -- whenever that
+        # message has no structural (digit/email) candidate at all, since
+        # the fallback only requires SOME non-empty text. Restricting
+        # these parameters to structural candidates only mirrors exactly
+        # how a parameter GROUP member already excludes the same fallback
+        # a few lines below, for the same reason.
+        is_address_component = bool((param.get("field_metadata") or {}).get("address_component"))
+        param_candidates = group_candidates if is_address_component else candidates
+        binding = _bind_candidate_to_parameter(param_candidates, param)
         if binding["status"] == "bound":
             return {"bound": (name, binding["value"]), "ambiguous_candidates": []}
         if binding["status"] == "ambiguous":

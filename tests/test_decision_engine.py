@@ -2783,6 +2783,28 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertNotIn("ไม่สามารถดำเนินการได้", result["reply"]["text"])
         mock_req.assert_not_called()
 
+    # Regression (2026-08-20 Production UAT) — the customer's first two
+    # real turns (bare CustCode, then the plain request sentence with no
+    # address info at all) must never corrupt Address/ReceiverName/etc.
+    # with unrelated text via either (a) turn-0 history replay binding
+    # "SP1008" as a bare address line, or (b) the current turn's own
+    # request sentence being swallowed whole by a loosely-validated
+    # non_empty field via the generic free-text fallback.
+    def test_1b_bare_custcode_then_request_sentence_never_corrupts_fields(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide("SP1008", history=[], context={"developer_mode": True})
+        history = [{"role": "user", "content": "SP1008"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=history,
+                                         context={"developer_mode": True})
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertNotIn("Address", collected)
+        self.assertNotIn("ReceiverName", collected)
+        self.assertNotIn("Subdistrict", collected)
+        self.assertEqual(collected.get("CustCode"), "SP1008")
+        mock_req.assert_not_called()
+
     # TEST 2 — complete address in one message -> parses into fields, asks confirmation.
     def test_2_complete_message_parses_and_reaches_confirmation(self):
         self._seed_address_change_action()

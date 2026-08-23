@@ -61,16 +61,20 @@ class TestParseThaiAddressFullRequestBlock(unittest.TestCase):
 
 
 class TestParseThaiAddressNoMarkers(unittest.TestCase):
-    def test_no_geo_marker_falls_back_to_a_bare_address_line(self):
-        # This function only ever runs within an already-selected address-
-        # collection flow (see decision_engine.py's field_metadata.
-        # address_component pre-pass) -- when the customer's reply has no
-        # ต./อ./จ./ผู้รับ/postal signal at all, treating the whole line as
-        # the address value (not fabricating a component that ISN'T
-        # there) is the useful behavior: a real customer legitimately
-        # replying with just a house number, with the other fields to
-        # follow on a later turn, must still have that value captured.
-        self.assertEqual(parse_thai_address("บ้านเลขที่ 8/7"), {"address": "บ้านเลขที่ 8/7"})
+    def test_no_marker_at_all_returns_empty_dict(self):
+        # Confirmed live defect (2026-08-20, Production UAT): this
+        # function's pre-pass runs BEFORE the main per-parameter binding
+        # loop and uses setdefault(), so an earlier "treat any markerless
+        # text as the address" fallback grabbed unrelated text (a bare
+        # "SP1008" replayed against this action's own history slot, and
+        # even the customer's own request sentence "ต้องการเปลี่ยนที่อยู่
+        # บิลขนส่ง") as the address BEFORE more specific fields (CustCode)
+        # ever got a chance to bind correctly. Only an EXPLICIT signal (a
+        # "ที่อยู่" label, or at least one geo marker) now earns the
+        # "address" attribution -- a genuinely bare, unmarked line is left
+        # for the existing, already-proven-safe generic free-text
+        # fallback to bind once it is truly the only thing left missing.
+        self.assertEqual(parse_thai_address("บ้านเลขที่ 8/7"), {})
 
     def test_empty_string(self):
         self.assertEqual(parse_thai_address(""), {})
