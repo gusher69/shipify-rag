@@ -58,11 +58,30 @@ _GEO_MARKER_RE = re.compile(
 # deliberately unaffected by this guard.
 _POSTAL_CODE_RE = re.compile(r"(?<![A-Za-z0-9])(\d{5})\s*$")
 _PHONE_RE = re.compile(r"(?<!\d)0\d{8,9}(?!\d)")
+# A "เบอร์"/"เบอร์โทร" label immediately before the phone digits (natural
+# casual phrasing, "...เบอร์ 0812345678...", never guaranteed a colon) is
+# stripped along with the number itself — same convention as the postal
+# code's own label cleanup below — so it never leaks into a neighbouring
+# field (confirmed live, Address Change Full UAT 2026-08-24: leftover
+# "เบอร์" text was bleeding into the receiver name / address value).
+_PHONE_LABEL_RE = re.compile(r"เบอร์(?:โทร)?\s*[:：]?\s*$")
 _RECEIVER_NAME_RE = re.compile(
-    r"(?:ชื่อผู้รับ|ผู้รับ)\s*[:\-]?\s*(.+?)"
-    r"(?=\n|ที่อยู่จัดส่ง|ที่อยู่|ตำบล|แขวง|ต\.|อำเภอ|เขต|อ\.|จังหวัด|กรุงเทพมหานคร|กทม\.|จ\.|$)"
+    # Longest/most specific marker first: casual "ผู้รับชื่อสมชาย" (no
+    # space) reverses the usual "ชื่อผู้รับ" word order — both are
+    # genuinely used by real customers (Address Change Full UAT,
+    # 2026-08-24) and must resolve to the same field.
+    r"(?:ผู้รับชื่อ|ชื่อผู้รับ|ผู้รับ)\s*[:\-]?\s*(.+?)"
+    r"(?=\n|ที่อยู่จัดส่ง|ที่อยู่|อยู่|เบอร์|ตำบล|แขวง|ต\.|อำเภอ|เขต|อ\.|จังหวัด|กรุงเทพมหานคร|กทม\.|จ\.|$)"
 )
-_ADDRESS_LABEL_RE = re.compile(r"ที่อยู่จัดส่ง|ที่อยู่")
+# Bare "อยู่" (no "ที่" prefix) is also a genuine, commonly-used address
+# label in casual phrasing ("...อยู่ 99/12 หมู่ 4 ตำบล...") — always
+# tried AFTER the longer "ที่อยู่"/"ที่อยู่จัดส่ง" alternatives (which
+# already contain "อยู่" as a substring) so a labeled address is never
+# double-matched. The existing "must contain a digit or a geo marker to
+# count as a real address value" plausibility check below protects
+# against a stray, unrelated "อยู่" (e.g. "...ข้อมูลอยู่เลยครับ") ever
+# fabricating a false address.
+_ADDRESS_LABEL_RE = re.compile(r"ที่อยู่จัดส่ง|ที่อยู่|อยู่")
 # A customer using a label+colon layout ("ตำบล: ตาขัน", "จังหวัด :ระยอง",
 # "จังหวัด : ระยอง", full-width "：" included) leaves the colon and any
 # surrounding spaces sitting right after a matched marker/label — never
@@ -109,7 +128,10 @@ def parse_thai_address(text: str) -> Dict[str, str]:
     phone_match = _PHONE_RE.search(text)
     if phone_match:
         result["receiver_phone"] = phone_match.group(0)
-        text = text[:phone_match.start()] + " " + text[phone_match.end():]
+        prefix = text[:phone_match.start()]
+        label_match = _PHONE_LABEL_RE.search(prefix)
+        cut_start = label_match.start() if label_match else phone_match.start()
+        text = text[:cut_start] + " " + text[phone_match.end():]
 
     name_match = _RECEIVER_NAME_RE.search(text)
     if name_match:

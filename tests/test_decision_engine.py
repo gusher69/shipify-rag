@@ -3618,6 +3618,33 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertEqual(turn3["routing"]["type"], "HUMAN_HANDOFF")
         mock_req.assert_not_called()
 
+    # TEST 20 — Address Change Full UAT fix (2026-08-24): supplying the
+    # full address block BEFORE CustCode is known must never produce the
+    # generic "found N possible values, which one?" ambiguous-candidate
+    # reply. Root cause: the compound Thai-address pre-pass correctly
+    # attributed the phone/postal-code substrings to their own slots, but
+    # never marked those raw values as "used" for the SEPARATE required-
+    # parameter binding loop that runs next — so Address's own loose
+    # non_empty validator saw the SAME phone/house-number/postal-code
+    # substrings as fresh, competing, ambiguous candidates for itself.
+    def test_20_address_before_custcode_never_produces_ambiguous_candidate_reply(self):
+        self._seed_address_change_action()
+        message = ("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 "
+                   "ตำบลบางแก้ว อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide(message, history=[], context={"developer_mode": True})
+        self.assertNotIn("พบข้อมูล", result["reply"]["text"])
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+        self.assertEqual(collected.get("ReceiverPhone"), "0812345678")
+        self.assertEqual(collected.get("Address"), "99/12 หมู่ 4")
+        self.assertEqual(collected.get("Subdistrict"), "บางแก้ว")
+        self.assertEqual(collected.get("District"), "บางพลี")
+        self.assertEqual(collected.get("Province"), "สมุทรปราการ")
+        self.assertEqual(collected.get("PostalCode"), "10540")
+        self.assertNotIn("CustCode", collected)
+        mock_req.assert_not_called()
+
 
 class TestGenericContinuationIntentGuard(unittest.TestCase):
     """Generic Continuation Intent Guard fix (2026-08-24) — proves the fix

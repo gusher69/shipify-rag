@@ -434,6 +434,19 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
         for p in (action.get("parameters") or [])
         if (p.get("field_metadata") or {}).get("address_component")
     }
+    # Address Change Full UAT fix (2026-08-24) — `used_values` (below)
+    # must ALREADY contain whatever this pre-pass itself just consumed
+    # from `message` before the generic required-parameter loop gets a
+    # turn. Confirmed live: a natural, unlabeled address block ("...เบอร์
+    # 0812345678 อยู่ 99/12 หมู่ 4 ...10540") got its phone/postal-code
+    # substrings correctly attributed here, but — since this pre-pass
+    # never recorded them as "used" — the SAME raw substrings were then
+    # re-offered as fresh, unclaimed candidates to the free-form Address
+    # parameter's loose non_empty validator (which happily accepts ANY
+    # non-empty string), manufacturing a false "found 3 possible values,
+    # which one?" ambiguity out of values that were already correctly
+    # assigned elsewhere.
+    used_values: set = set()
     if address_param_by_component:
         from services.thai_address_parser import parse_thai_address, detect_field_correction
         correction = detect_field_correction(message)
@@ -442,10 +455,10 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
         else:
             for component, value in parse_thai_address(message).items():
                 param_name = address_param_by_component.get(component)
-                if param_name:
-                    working.setdefault(param_name, value)
+                if param_name and param_name not in working:
+                    working[param_name] = value
+                    used_values.add(value)
 
-    used_values = set()
     ambiguous_candidates: List[str] = []
     while True:
         outcome = _bind_message_to_action(action, registry, working, message, exclude_values=used_values)

@@ -95,6 +95,22 @@ class TestParseThaiAddressNoMarkers(unittest.TestCase):
     def test_postal_code_immediately_after_colon_no_space_still_recognized(self):
         self.assertEqual(parse_thai_address("รหัสไปรษณีย์:21120"), {"postal_code": "21120"})
 
+    def test_casual_no_label_phrasing_with_receiver_marker_before_name(self):
+        # Address Change Full UAT fix (2026-08-24) — a real customer
+        # phrasing: "ผู้รับ" immediately followed by "ชื่อ" (reversed word
+        # order vs. the usual "ชื่อผู้รับ"), a bare "เบอร์" phone label,
+        # and a bare "อยู่" address label with no "ที่" prefix. Every
+        # field must resolve cleanly, with none of "เบอร์"/"อยู่"/"ชื่อ"
+        # leaking into a neighbouring value.
+        result = parse_thai_address(
+            "ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 "
+            "ตำบลบางแก้ว อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        self.assertEqual(result, {
+            "receiver_name": "สมชาย", "receiver_phone": "0812345678",
+            "address": "99/12 หมู่ 4", "subdistrict": "บางแก้ว",
+            "district": "บางพลี", "province": "สมุทรปราการ", "postal_code": "10540",
+        })
+
     def test_postal_code_immediately_after_thai_text_no_space_still_recognized(self):
         # Thai-script adjacency (no space before the digits) must remain
         # unaffected by the ASCII-only boundary guard above.
