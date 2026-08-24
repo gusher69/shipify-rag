@@ -80,6 +80,28 @@ class TestParseThaiAddressNoMarkers(unittest.TestCase):
         self.assertEqual(parse_thai_address(""), {})
         self.assertEqual(parse_thai_address(None), {})
 
+    def test_bare_shipment_code_never_fabricates_a_postal_code(self):
+        # Address Change Full UAT fix (2026-08-24) — confirmed live: a
+        # bare ShipmentCode reply ("SP100820260716001", answering this
+        # action's OWN ShipmentCode parameter) was silently fabricating
+        # postal_code="16001" from its own trailing digits, corrupting
+        # the confirmation summary with a postal code the customer never
+        # typed. A trailing digit run embedded inside a longer ASCII
+        # identifier is never a postal code.
+        self.assertEqual(parse_thai_address("SP100820260716001"), {})
+        self.assertEqual(parse_thai_address("PO100820260815001"), {})
+        self.assertEqual(parse_thai_address("FT318220260726001"), {})
+
+    def test_postal_code_immediately_after_colon_no_space_still_recognized(self):
+        self.assertEqual(parse_thai_address("รหัสไปรษณีย์:21120"), {"postal_code": "21120"})
+
+    def test_postal_code_immediately_after_thai_text_no_space_still_recognized(self):
+        # Thai-script adjacency (no space before the digits) must remain
+        # unaffected by the ASCII-only boundary guard above.
+        result = parse_thai_address("8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง21120")
+        self.assertEqual(result["postal_code"], "21120")
+        self.assertEqual(result["province"], "ระยอง")
+
     def test_postal_code_alone_still_recognized(self):
         # No admin-division marker, but a trailing 5-digit run is still a
         # postal code -- useful on its own for a "missing postal code"

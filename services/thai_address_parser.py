@@ -43,7 +43,20 @@ _GEO_MARKERS = (
 _GEO_MARKER_RE = re.compile(
     "|".join(f"(?P<{name}>{'|'.join(re.escape(m) for m in markers)})" for name, markers in _GEO_MARKERS)
 )
-_POSTAL_CODE_RE = re.compile(r"(\d{5})\s*$")
+# Address Change Full UAT fix (2026-08-24) — the trailing 5-digit run
+# must be its OWN token, never the tail end of a longer ASCII
+# alphanumeric identifier this same message might be answering a
+# DIFFERENT parameter with (confirmed live: this pre-pass runs on EVERY
+# message while the action has any address_component parameter, so a
+# bare ShipmentCode reply like "SP100820260716001" — itself ending in
+# "16001" — was silently fabricating a PostalCode of "16001" that was
+# never in the message at all). A real postal code is always preceded
+# by whitespace, punctuation, a Thai character, or nothing (start of
+# string); only an immediately-preceding ASCII letter/digit — i.e. the
+# digits are embedded inside a longer code — is rejected. Thai-script
+# adjacency (the compact "...จ.ระยอง21120" style, no space) is
+# deliberately unaffected by this guard.
+_POSTAL_CODE_RE = re.compile(r"(?<![A-Za-z0-9])(\d{5})\s*$")
 _PHONE_RE = re.compile(r"(?<!\d)0\d{8,9}(?!\d)")
 _RECEIVER_NAME_RE = re.compile(
     r"(?:ชื่อผู้รับ|ผู้รับ)\s*[:\-]?\s*(.+?)"
