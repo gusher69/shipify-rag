@@ -3076,6 +3076,248 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         sent_body = mock_req.call_args.kwargs.get("json") or mock_req.call_args.kwargs.get("data") or {}
         self.assertEqual(sent_body.get("CustCode"), "SP1008")
 
+    def _seed_customer_lookup_action(self):
+        """A second, unrelated Business Action ('ข้อมูลลูกค้า' really is
+        its own real production intent, getdatacustomer) seeded alongside
+        the address-change action, to reproduce the exact Production
+        Safety Check finding: a customer message that is itself a
+        decisive match for THIS action must never be silently absorbed
+        as a failed ShipmentCode collection attempt for the OTHER one."""
+        action_id = _seed_action(
+            self.reg, key="getdatacustomer", action_type="API", category="Customer Lookup",
+            ai_description="ค้นหาข้อมูลลูกค้า", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        self.reg.upsert_execution(action_id, {"endpoint": "https://fasttrade.in.th/web-service/ai-chat/GetDataCustomer",
+                                                "http_method": "POST"})
+        return action_id
+
+    # TEST 16 — Generic Continuation Intent Guard fix (2026-08-24):
+    # ADDRESS-UAT-04 regression (Production Safety Check finding) — a
+    # different valid intent between the identifier turn and the address
+    # trigger must never trip max_retry / escalate to Human Handoff.
+    def test_16_unrelated_intent_between_identifier_and_trigger_no_handoff(self):
+        self._seed_address_change_action()
+        self._seed_customer_lookup_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("SP1008", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "SP1008"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+            turn2 = self.engine.decide("ข้อมูลลูกค้า", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "ข้อมูลลูกค้า"}, {"role": "assistant", "content": turn2["reply"]["text"]}]
+            self.assertNotEqual(turn2["routing"]["type"], "HUMAN_HANDOFF")
+
+            turn3 = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=history, context={"developer_mode": True})
+        self.assertNotEqual(turn3["routing"]["type"], "HUMAN_HANDOFF")
+        collected = (turn3.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
+        self.assertEqual(collected.get("CustCode"), "SP1008", "CustCode must survive the unrelated turn")
+        # getdatacustomer itself has no confirmation gate and CustCode was
+        # already known, so turn 2's diversion correctly executed it (a
+        # real, legitimate lookup answer) -- proving requirement #4, not
+        # violating it.
+        mock_req.assert_called_once()
+
+    # TEST 17 — the more important mid-flow case: the diversion happens
+    # WHILE the address-change action is actively waiting for
+    # ShipmentCode (not before it's even selected), and the customer
+    # returns to the address-change request afterward.
+    def test_17_mid_flow_diversion_then_resume_no_premature_handoff(self):
+        self._seed_address_change_action()
+        self._seed_customer_lookup_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("SP1008", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "SP1008"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+            turn2 = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "ต้องการเปลี่ยนที่อยู่บิลขนส่ง"},
+                        {"role": "assistant", "content": turn2["reply"]["text"]}]
+            self.assertIn("เลขที่บิล", turn2["reply"]["text"])  # asking for ShipmentCode
+
+            # Diversion mid-collection — must be handled as its own intent,
+            # never counted as a failed ShipmentCode attempt.
+            turn3 = self.engine.decide("ข้อมูลลูกค้า", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "ข้อมูลลูกค้า"}, {"role": "assistant", "content": turn3["reply"]["text"]}]
+            self.assertNotEqual(turn3["routing"]["type"], "HUMAN_HANDOFF")
+            self.assertEqual((turn3.get("developer") or {}).get("information_collection_status", {})
+                              .get("selected_business_action"), "getdatacustomer")
+
+            # Return to the address-change request — must resume cleanly,
+            # CustCode still available, no premature escalation.
+            turn4 = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=history, context={"developer_mode": True})
+        self.assertNotEqual(turn4["routing"]["type"], "HUMAN_HANDOFF")
+        collected4 = (turn4.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
+        self.assertEqual(collected4.get("CustCode"), "SP1008")
+        # One real call from turn 3's legitimate getdatacustomer lookup;
+        # the address-change flow itself never reached execution (still
+        # missing ShipmentCode on turn 4).
+        mock_req.assert_called_once()
+
+    # TEST 18 — a customer simply repeating the SAME action's own trigger
+    # phrase (not supplying the pending value, but also not a different
+    # intent) must not consume a retry either.
+    def test_18_same_action_trigger_repeated_not_counted_as_retry(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("SP1008", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "SP1008"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+            for _ in range(3):
+                turn = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=history,
+                                           context={"developer_mode": True})
+                self.assertNotEqual(turn["routing"]["type"], "HUMAN_HANDOFF",
+                                     "repeating the action's own trigger must never exhaust the retry budget")
+                history += [{"role": "user", "content": "ต้องการเปลี่ยนที่อยู่บิลขนส่ง"},
+                            {"role": "assistant", "content": turn["reply"]["text"]}]
+        mock_req.assert_not_called()
+
+    # TEST 19 — genuine, repeated non-answers (no decisive match for
+    # anything) must still trip max_retry -> Human Handoff exactly as
+    # before this fix. Never globally disabled.
+    def test_19_genuine_repeated_non_answer_still_escalates(self):
+        self._seed_address_change_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("SP1008", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "SP1008"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+            turn2 = self.engine.decide("เอิ่ม", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "เอิ่ม"}, {"role": "assistant", "content": turn2["reply"]["text"]}]
+            self.assertNotEqual(turn2["routing"]["type"], "HUMAN_HANDOFF")
+
+            turn3 = self.engine.decide("ไม่รู้อะ", history=history, context={"developer_mode": True})
+        self.assertEqual(turn3["routing"]["type"], "HUMAN_HANDOFF")
+        mock_req.assert_not_called()
+
+
+class TestGenericContinuationIntentGuard(unittest.TestCase):
+    """Generic Continuation Intent Guard fix (2026-08-24) — proves the fix
+    in services/decision_engine.py::decide() (the diversion check right
+    after _resolve_continuation_action, and _count_genuine_retries) is
+    genuinely generic, using TWO existing, non-address Business Actions
+    with their own multi-turn parameter collection — never
+    requestshippingaddresschange, never any hardcoded action_key or Thai
+    phrase. Mirrors GOLDEN-059/get_customer_coupons-style fixtures already
+    used elsewhere in this test file, not a new fixture convention."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+        # Action A: order lookup, needs OrderCode then Email (2 turns).
+        # Email carries a real pattern (never a bare non_empty free-text
+        # field) so a genuinely off-topic reply like "ไม่ทราบ"/"เอิ่มม"
+        # cannot accidentally satisfy it via the generic whole-message
+        # free-text fallback (the same mechanism SendLineNotiCS's own
+        # Message field relies on) -- that fallback existing at all is
+        # correct, established platform behavior; it just isn't what
+        # these retry-focused tests want to exercise.
+        self.order_id = _seed_action(
+            self.reg, key="searchdataorder", action_type="API", category="Order Lookup",
+            ai_description="ค้นหาคำสั่งซื้อของลูกค้า", keywords=["คำสั่งซื้อ", "ตรวจสอบออเดอร์"])
+        self.reg.replace_parameters(self.order_id, [
+            {"name": "OrderCode", "display_name": "รหัสคำสั่งซื้อ", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^PO\d+$"},
+            {"name": "Email", "display_name": "อีเมล", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[^\s@]+@[^\s@]+\.[^\s@]+$"},
+        ])
+        self.reg.upsert_execution(self.order_id, {"endpoint": "https://fasttrade.in.th/web-service/ai-chat/SearchDataOrder",
+                                                     "http_method": "POST"})
+        # Action B: an unrelated, decisively-keyworded action the customer
+        # might genuinely switch to mid-collection. CustCode pattern
+        # deliberately does NOT overlap with OrderCode's "PO..." shape,
+        # so a stray OrderCode value from earlier history can never be
+        # mistaken for this action's own identifier.
+        self.coupon_id = _seed_action(
+            self.reg, key="get_customer_coupons", action_type="API", category="Customer Lookup",
+            ai_description="ดูคูปองของลูกค้า", keywords=["คูปอง"])
+        self.reg.replace_parameters(self.coupon_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^C\d+$"},
+        ])
+        self.reg.upsert_execution(self.coupon_id, {"endpoint": "https://fasttrade.in.th/web-service/ai-chat/GetCoupons",
+                                                      "http_method": "POST"})
+
+    # A — correct parameter answer -> normal continuation, unaffected.
+    # Both required parameters end up satisfied, and this action has no
+    # confirmation gate, so it correctly executes -- that's the expected,
+    # unaffected baseline this fix must never break.
+    def test_A_correct_answer_continues_normally(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req:
+            turn1 = self.engine.decide("PO100820260815001", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "PO100820260815001"},
+                       {"role": "assistant", "content": turn1["reply"]["text"]}]
+            turn2 = self.engine.decide("test@example.com", history=history, context={"developer_mode": True})
+        collected = (turn2.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
+        self.assertEqual(collected.get("OrderCode"), "PO100820260815001")
+        self.assertEqual(collected.get("Email"), "test@example.com")
+        mock_req.assert_called_once()
+
+    # B — genuine invalid answer repeated -> max_retry protection intact.
+    # Neither reply matches Email's pattern NOR any action's own
+    # keywords, so this is exactly the "irrelevant/unrecognized text"
+    # case this fix must leave alone.
+    def test_B_genuine_invalid_answers_still_trigger_max_retry(self):
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("PO100820260815001", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "PO100820260815001"},
+                       {"role": "assistant", "content": turn1["reply"]["text"]}]
+            turn2 = self.engine.decide("ไม่ทราบครับ", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "ไม่ทราบครับ"}, {"role": "assistant", "content": turn2["reply"]["text"]}]
+            self.assertNotEqual(turn2["routing"]["type"], "HUMAN_HANDOFF")
+            turn3 = self.engine.decide("เอิ่มมม", history=history, context={"developer_mode": True})
+        self.assertEqual(turn3["routing"]["type"], "HUMAN_HANDOFF")
+        mock_req.assert_not_called()
+
+    # C — a different valid intent mid-collection -> not counted as retry,
+    # and gets handled as its OWN request. CustCode is not yet known
+    # (no customer_context here), so get_customer_coupons asks for it
+    # instead of executing -- proving the diversion itself, independent
+    # of whether the diverted action happens to be immediately complete.
+    def test_C_different_valid_intent_not_counted_as_retry(self):
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("PO100820260815001", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "PO100820260815001"},
+                       {"role": "assistant", "content": turn1["reply"]["text"]}]
+            turn2 = self.engine.decide("คูปอง", history=history, context={"developer_mode": True})
+        self.assertNotEqual(turn2["routing"]["type"], "HUMAN_HANDOFF")
+        self.assertEqual((turn2.get("developer") or {}).get("information_collection_status", {})
+                          .get("selected_business_action"), "get_customer_coupons")
+        mock_req.assert_not_called()
+
+    # D — repeating the SAME action's own trigger keyword mid-collection
+    # -> not counted as a retry either, never exhausts the retry budget.
+    def test_D_same_action_trigger_repeated_not_counted_as_retry(self):
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("PO100820260815001", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "PO100820260815001"},
+                       {"role": "assistant", "content": turn1["reply"]["text"]}]
+            for _ in range(3):
+                turn = self.engine.decide("ตรวจสอบออเดอร์", history=history, context={"developer_mode": True})
+                self.assertNotEqual(turn["routing"]["type"], "HUMAN_HANDOFF")
+                history += [{"role": "user", "content": "ตรวจสอบออเดอร์"},
+                            {"role": "assistant", "content": turn["reply"]["text"]}]
+        mock_req.assert_not_called()
+
+    # E — Identifier Memory still works (a remembered CustCode auto-fills
+    # a still-missing parameter of the same concept, unaffected by this
+    # fix). CustCode is the only required parameter and is fully known,
+    # so this action correctly executes -- that's the expected baseline.
+    def test_E_identifier_memory_still_works(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req:
+            result = self.engine.decide("คูปอง", history=[],
+                                         context={"developer_mode": True, "customer_context": {"cust_code": "C1008"}})
+        collected = (result.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
+        self.assertEqual(collected.get("CustCode"), "C1008")
+        mock_req.assert_called_once()
+
+    # F — a fresh session/history has no leakage from any prior scenario.
+    def test_F_fresh_session_no_leakage(self):
+        result = self.engine.decide("ตรวจสอบออเดอร์", history=[], context={"developer_mode": True})
+        collected = (result.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
+        self.assertEqual(collected, {})
+
 
 if __name__ == "__main__":
     unittest.main()

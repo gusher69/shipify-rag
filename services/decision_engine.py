@@ -193,6 +193,41 @@ def _next_expected_parameter(action: Dict, registry, collected: Dict) -> Optiona
     return None  # nothing left to ask (e.g. only a secret is missing)
 
 
+def _count_genuine_retries(registry, history: List[Dict], expected_question: str) -> int:
+    """Companion to the Generic Continuation Intent Guard (2026-08-24,
+    same fix) — retry_count below is retroactively recomputed from
+    `history` every turn (no separate persisted counter, same convention
+    as every other conversation-intelligence module here), by counting
+    how many times `expected_question` already appears as an assistant
+    turn. That alone can't tell "customer ignored/couldn't answer" apart
+    from "customer's reply was itself a valid, different (or same-
+    action) request that got correctly diverted for that one turn" —
+    confirmed live: a customer whose message decisively matched a
+    DIFFERENT action (so that turn was properly handled as ITS OWN
+    intent, never reaching this action's collection step at all) still
+    left the SAME repeated question sitting in history, so a later
+    return to this action's own flow found the count already at
+    max_retry and escalated immediately. Walks each (assistant question,
+    following customer reply) pair; a reply that decisively matches SOME
+    Business Action (via the SAME generic search_candidate_actions/
+    select_best_action scoring used everywhere else for fresh routing —
+    same action or a different one, never re-derived here) is never
+    counted as a failed attempt. A reply with no decisive match for
+    anything (genuinely off-topic/confused/silent replies) still counts
+    exactly as before."""
+    count = 0
+    for i, t in enumerate(history):
+        if t.get("role") != "assistant" or (t.get("content") or "").strip() != expected_question:
+            continue
+        if i + 1 < len(history) and history[i + 1].get("role") == "user":
+            reply = history[i + 1].get("content") or ""
+            candidates = search_candidate_actions(registry, workflow=None, message=reply, collected_slots={})
+            if select_best_action(candidates, minimum_score=1.0):
+                continue
+        count += 1
+    return count
+
+
 def _is_execution_ready(validation: Dict, next_after: Optional[Dict], ambiguous_candidates) -> bool:
     """Confirmed defect fix (2026-08-02, Local Production Pipeline
     Verification), shared by _handle_dynamic_collection and
@@ -1302,6 +1337,38 @@ class DecisionEngine:
             # own parameter definitions — not a separate intent-keyed
             # schema — drive what gets asked.
             continuation_action = _resolve_continuation_action(self.registry, history, workflow_hint)
+
+            # Generic Continuation Intent Guard (Confirmation/Collection
+            # Continuation Correctness fix, 2026-08-24) — confirmed live:
+            # once an action asks a follow-up question, _resolve_
+            # continuation_action keeps it "active" for every subsequent
+            # turn purely because the LAST assistant turn matches that
+            # question — regardless of what the customer's new message
+            # actually says. A message that decisively matches a
+            # DIFFERENT Business Action's own keywords (the SAME generic
+            # scoring search_candidate_actions/select_best_action use for
+            # fresh routing below, never a new mechanism, never a
+            # hardcoded action/phrase) means the customer has moved on to
+            # a new request — let fresh classification handle this turn
+            # on its own merits instead of silently forcing it to keep
+            # answering the pending action's question (which used to
+            # count as a failed retry attempt purely because the message
+            # didn't supply the pending value, even when it was itself a
+            # perfectly valid, different, or same-action request). A
+            # message with no decisive match for anything (genuinely
+            # off-topic/confused replies) leaves continuation untouched —
+            # existing behavior for THAT case is unchanged. See
+            # _count_genuine_retries below for the companion fix that
+            # keeps retry counting itself from over-counting a turn like
+            # this one after the fact.
+            if continuation_action:
+                diversion_candidates = search_candidate_actions(
+                    self.registry, workflow=workflow_hint, message=message, collected_slots={})
+                diversion_selected = select_best_action(
+                    diversion_candidates, minimum_score=1.0 if not workflow_hint else 0.5)
+                if diversion_selected and diversion_selected["id"] != continuation_action["id"]:
+                    continuation_action = None
+
             detail_sibling_action = None
             if not continuation_action and customer_context.get("last_business_action") \
                     and _DETAIL_INTENT_RE.search(message or ""):
@@ -1586,8 +1653,7 @@ class DecisionEngine:
         escalation_reason = None
         if not is_complete and next_after and not ambiguous_candidates:
             expected_question = _generate_parameter_question(next_after)
-            retry_count = sum(1 for t in history if t.get("role") == "assistant"
-                               and (t.get("content") or "").strip() == expected_question)
+            retry_count = _count_genuine_retries(self.registry, history, expected_question)
             if _REFUSAL_RE.search(message or ""):
                 escalation_required, escalation_reason = True, "user_refused_to_provide_information"
             elif retry_count >= max_retry:
