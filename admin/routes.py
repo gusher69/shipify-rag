@@ -3648,7 +3648,23 @@ async def hybrid_playground_ask(request: Request):
         })
         conversation = pg_session_service.get_or_create_active_conversation(
             playground_user_id, channel="playground", name=journey_label or None)
-        normalized_history = pg_session_service.get_recent_history(conversation["id"]) if conversation else []
+        # Address Change Full UAT — Status Query fix (2026-08-24):
+        # max_turns raised from the function's own default (3 exchanges)
+        # -- confirmed live: a Dynamic Collection flow with more than 3
+        # sequential parameter-collection exchanges (requestshippingaddress-
+        # change alone has 9 askable fields) had EARLIER turns silently
+        # drop out of `normalized_history` by the time a later turn
+        # arrived. _resolve_continuation_action's own replay (unlike
+        # _handle_dynamic_collection, which also consults Identifier
+        # Memory / customer_context) has NO fallback beyond raw history,
+        # so it silently lost track of an identifier collected several
+        # turns earlier and stopped recognizing continuation at all --
+        # regardless of what the customer said next (a status query, a
+        # correction, or an ordinary answer were all equally affected).
+        # 20 exchanges comfortably covers the longest realistic multi-
+        # field collection flow with several corrections/status queries
+        # interspersed, while still being a real, bounded window.
+        normalized_history = pg_session_service.get_recent_history(conversation["id"], max_turns=20) if conversation else []
         # Fetched once, BEFORE decide() -- reused below (the existing
         # dedup check at the HUMAN_HANDOFF branch) so Active Handoff
         # Follow-up routing (services/decision_engine.py::decide()) and

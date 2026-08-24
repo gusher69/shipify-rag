@@ -501,6 +501,30 @@ class TestContextContinuityAndIsolation(unittest.TestCase):
             call_kwargs = self._send(mock_engine_cls, "สวัสดีค่ะ", user_id="U_FIRST")
         self.assertEqual(call_kwargs["history"], [])
 
+    # Address Change Full UAT — Status Query fix companion (2026-08-24) —
+    # confirmed live: a Dynamic Collection flow with more than 3
+    # sequential exchanges (requestshippingaddresschange alone has 9
+    # askable fields) had its EARLIEST turns (where an identifier like
+    # CustCode was established) silently drop out of the history this
+    # exact real call site passes to decide() once get_recent_history's
+    # own default (3 exchanges) was exceeded — _resolve_continuation_
+    # action has no fallback beyond raw history, so it stopped
+    # recognizing continuation entirely regardless of what the customer
+    # said next. Proves the fix (max_turns=20) against the REAL
+    # SessionService, not a mock.
+    def test_g_long_flow_beyond_three_exchanges_retains_earliest_history(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            self._send(mock_engine_cls, "SP1008", user_id="U_LONG")
+        for msg in ("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "SP100820260716001",
+                    "ชื่อผู้รับ: สมชาย ใจดี", "เบอร์โทร: 0812345678"):
+            with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+                self._send(mock_engine_cls, msg, user_id="U_LONG")
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            call_kwargs = self._send(mock_engine_cls, "มีข้อมูลอะไรบ้าง", user_id="U_LONG")
+        contents = [h["content"] for h in call_kwargs["history"]]
+        self.assertTrue(any("SP1008" in c for c in contents),
+                         f"turn 1's CustCode should still be in history 5 exchanges later, got: {contents}")
+
     # G ─────────────────────────────────────────────────────────────
     def test_g_two_users_histories_never_cross(self):
         with patch("services.decision_engine.DecisionEngine") as mock_engine_cls_a1:

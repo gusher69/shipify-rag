@@ -3728,12 +3728,17 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
 
     def _status_query_setup(self):
         """Turns 1-4 of the normal flow, stopping right before District/
-        PostalCode are supplied — the exact shape the task's own required
-        tests use."""
+        PostalCode are supplied — the exact shape (and exact turn ORDER —
+        a bare identifier as its OWN standalone first turn, mirroring the
+        real customer flow and the Production UAT spec) the task's own
+        required tests use. This exact order matters: it is what exposes
+        the history-truncation gap TEST 25b proves — a bare "SP1008" one
+        full exchange BEFORE the trigger phrase is the specific shape
+        that gets silently dropped once a flow exceeds 3 exchanges."""
         self._seed_address_change_action()
         history = []
         with patch("services.action_executor.requests.request"):
-            for msg in ("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "SP1008", "SP100820260716001",
+            for msg in ("SP1008", "ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "SP100820260716001",
                         "ชื่อผู้รับ: สมชาย ใจดี\nเบอร์โทร: 0812345678\nที่อยู่: 99/12 หมู่ 4\n"
                         "ตำบล: บางแก้ว\nจังหวัด: สมุทรปราการ"):
                 result = self.engine.decide(msg, history=history, context={"developer_mode": True})
@@ -3792,6 +3797,30 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertEqual(collected.get("PostalCode"), "10540")
         self.assertIn("ยืนยัน", final["reply"]["text"])
         mock_req.assert_not_called()
+
+    # TEST 25b — Address Change Full UAT — Status Query fix companion
+    # (2026-08-24): confirmed live in production — a 5th-exchange status
+    # query fell through to RAG entirely, root-caused to a caller-side
+    # limitation, not this feature: services/session_service.py::
+    # get_recent_history's own default (max_turns=3 exchanges) silently
+    # dropped the CONVERSATION'S EARLIEST turns (where CustCode was
+    # established) from the history a caller (admin/routes.py,
+    # line_bot/webhook.py) passes into decide() once a flow exceeds 3
+    # exchanges — regardless of whether the next message is a status
+    # query, a correction, or an ordinary answer. _resolve_continuation_
+    # action has no Identifier-Memory fallback of its own (unlike
+    # _handle_dynamic_collection), so it silently stopped recognizing
+    # continuation once history was incomplete. Fixed by raising
+    # max_turns to 20 at both real call sites; this proves the
+    # underlying mechanism directly: continuation recognition requires
+    # the FULL flow's history, and fails against a truncated window.
+    def test_25b_continuation_requires_full_history_not_a_truncated_window(self):
+        full_history = self._status_query_setup()  # 4 exchanges (8 messages)
+        from services.decision_engine import _resolve_continuation_action
+        truncated = full_history[-6:]  # simulates the OLD max_turns=3 default (3 exchanges)
+        self.assertIsNone(_resolve_continuation_action(self.reg, truncated, None))
+        resolved = _resolve_continuation_action(self.reg, full_history, None)
+        self.assertEqual(resolved.get("action_key"), "requestshippingaddresschange")
 
     # TEST 26 — status query never increments retry_count.
     def test_26_status_query_never_increments_retry_count(self):

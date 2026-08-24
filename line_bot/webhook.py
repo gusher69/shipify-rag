@@ -271,7 +271,13 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # History / profile-stats recording at the end of this function.
     session_service = get_session_service()
     conversation = session_service.get_or_create_active_conversation(user_id)
-    recent_history = session_service.get_recent_history(conversation["id"]) if conversation else []
+    # max_turns raised from the function's own default (3 exchanges) --
+    # see the identical fix and full rationale in admin/routes.py's Auto
+    # Mode wrapper (Address Change Full UAT — Status Query fix,
+    # 2026-08-24): a Dynamic Collection flow with more than 3 sequential
+    # exchanges silently lost continuation-matching for EARLIER-collected
+    # identifiers, on this exact same call site.
+    recent_history = session_service.get_recent_history(conversation["id"], max_turns=20) if conversation else []
     # Fetched once, BEFORE any decide() call below -- reused by the
     # existing dedup check further down this function, so Active Handoff
     # Follow-up routing (services/decision_engine.py::decide()) and
