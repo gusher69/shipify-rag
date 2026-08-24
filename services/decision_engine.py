@@ -1417,7 +1417,26 @@ class DecisionEngine:
                     self.registry, workflow=workflow_hint, message=message, collected_slots={})
                 diversion_selected = select_best_action(
                     diversion_candidates, minimum_score=1.0 if not workflow_hint else 0.5)
-                if diversion_selected and diversion_selected["id"] != continuation_action["id"]:
+                # Address Change Full UAT fix (2026-08-24) — this guard's
+                # own stated intent (see the comment above) is a message
+                # that "decisively matches a DIFFERENT Business Action's
+                # own KEYWORDS", but the check used the candidate's FULL
+                # score, which also includes identifier-pattern evidence.
+                # A bare value the pending action itself just asked for
+                # (e.g. a ShipmentCode reply to "กรุณาแจ้งเลขที่บิล/
+                # Shipmentค่ะ") can coincidentally ALSO match a different
+                # action's identically-shaped parameter (confirmed live:
+                # a ShipmentCode reply mid-address-change diverted to
+                # SearchDataShipment purely because it also configures a
+                # ShipmentCode parameter) — that is structural overlap on
+                # the SAME datum the continuation is waiting for, never
+                # real evidence the customer changed topic. Only genuine
+                # keyword/example/description overlap — actual topical
+                # signal — may override continuation; identifier-pattern-
+                # only "evidence" never does.
+                diversion_has_topical_evidence = diversion_selected and any(
+                    "keyword/example/AI-description overlap" in r for r in (diversion_selected.get("_reasons") or []))
+                if diversion_has_topical_evidence and diversion_selected["id"] != continuation_action["id"]:
                     continuation_action = None
 
             detail_sibling_action = None

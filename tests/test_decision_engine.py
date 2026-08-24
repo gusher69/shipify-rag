@@ -3747,6 +3747,39 @@ class TestGenericContinuationIntentGuard(unittest.TestCase):
         collected = (result.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
         self.assertEqual(collected, {})
 
+    # G — Address Change Full UAT fix (2026-08-24): a bare value that
+    # SATISFIES the pending action's own still-missing parameter must
+    # never be treated as "decisive evidence of a different intent"
+    # merely because it ALSO structurally matches a sibling action's
+    # identically-shaped, identically-named parameter, with ZERO real
+    # keyword/topical evidence for that sibling. Confirmed live: a
+    # ShipmentCode reply mid-address-change diverted into
+    # SearchDataShipment purely because both actions configure a
+    # ShipmentCode parameter of the same shape. Reproduced generically
+    # here with two unrelated, non-address actions sharing an identical
+    # "Email" parameter (name + pattern) -- one seeded ONLY for this
+    # test so the shared setUp's other tests are unaffected.
+    def test_G_structural_identifier_overlap_alone_never_diverts_continuation(self):
+        sibling_id = _seed_action(
+            self.reg, key="get_customer_by_email", action_type="API", category="Unrelated Lookup",
+            ai_description="", keywords=[])
+        self.reg.replace_parameters(sibling_id, [
+            {"name": "Email", "display_name": "อีเมล", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[^\s@]+@[^\s@]+\.[^\s@]+$"},
+        ])
+        self.reg.upsert_execution(sibling_id, {"endpoint": "https://fasttrade.in.th/web-service/ai-chat/GetByEmail",
+                                                  "http_method": "POST"})
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req:
+            turn1 = self.engine.decide("PO100820260815001", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "PO100820260815001"},
+                       {"role": "assistant", "content": turn1["reply"]["text"]}]
+            turn2 = self.engine.decide("test@example.com", history=history, context={"developer_mode": True})
+        collected = (turn2.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
+        self.assertEqual(collected.get("OrderCode"), "PO100820260815001")
+        self.assertEqual(collected.get("Email"), "test@example.com")
+        mock_req.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
