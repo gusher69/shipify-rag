@@ -2833,7 +2833,12 @@ def _seed_generic_routing_matrix(reg):
         ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
         keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
                    "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล",
-                   "แก้ไขที่อยู่จัดส่ง", "เปลี่ยนที่อยู่ของผม", "เปลี่ยนที่อยู่จัดส่งในไทย", "เปลี่ยนที่อยู่จัดส่ง"])
+                   "แก้ไขที่อยู่จัดส่ง", "เปลี่ยนที่อยู่ของผม", "เปลี่ยนที่อยู่จัดส่งในไทย", "เปลี่ยนที่อยู่จัดส่ง",
+                   # Address Change Full UAT fix (2026-08-24) — the bare
+                   # core verb phrase, covering natural resume phrasings
+                   # ("ขอเปลี่ยนที่อยู่ต่อครับ") no existing keyword
+                   # (all requiring an extra suffix word) matched.
+                   "เปลี่ยนที่อยู่"])
     reg.update(addr_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
                           "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
     reg.replace_parameters(addr_id, [
@@ -3159,7 +3164,7 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
             self.reg, key=key, action_type="API", category="Customer Support Request",
             ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
             keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
-                       "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล"])
+                       "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล", "เปลี่ยนที่อยู่"])
         self.reg.update(action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
                                      "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
         self.reg.replace_parameters(action_id, [
@@ -3620,6 +3625,37 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         # the address-change flow itself never reached execution (still
         # missing ShipmentCode on turn 4).
         mock_req.assert_called_once()
+
+    # TEST 17b — Address Change Full UAT fix (2026-08-24): the SAME
+    # resume-after-diversion scenario as TEST 17, but with a natural
+    # "let's continue" phrasing ("ขอเปลี่ยนที่อยู่ต่อครับ") instead of
+    # repeating the exact original trigger sentence — confirmed live
+    # this fell through to RAG entirely, because no existing keyword
+    # (every one requires an extra suffix word like "บิลขนส่ง"/"จัดส่ง"/
+    # "ของผม") matched the bare core verb phrase.
+    def test_17b_mid_flow_diversion_then_natural_resume_phrasing(self):
+        self._seed_address_change_action()
+        self._seed_customer_lookup_action()
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn1 = self.engine.decide("SP1008", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "SP1008"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+            turn2 = self.engine.decide("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "ต้องการเปลี่ยนที่อยู่บิลขนส่ง"},
+                        {"role": "assistant", "content": turn2["reply"]["text"]}]
+
+            turn3 = self.engine.decide("ข้อมูลลูกค้าของผมมีอะไรบ้าง", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "ข้อมูลลูกค้าของผมมีอะไรบ้าง"},
+                        {"role": "assistant", "content": turn3["reply"]["text"]}]
+            self.assertNotEqual(turn3["routing"]["type"], "HUMAN_HANDOFF")
+
+            turn4 = self.engine.decide("ขอเปลี่ยนที่อยู่ต่อครับ", history=history, context={"developer_mode": True})
+        self.assertNotEqual(turn4["routing"]["type"], "RAG")
+        self.assertNotEqual(turn4["routing"]["type"], "HUMAN_HANDOFF")
+        collected4 = (turn4.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
+        self.assertEqual(collected4.get("CustCode"), "SP1008")
+        self.assertEqual((turn4.get("developer") or {}).get("information_collection_status", {})
+                          .get("selected_business_action"), "requestshippingaddresschange")
 
     # TEST 18 — a customer simply repeating the SAME action's own trigger
     # phrase (not supplying the pending value, but also not a different
