@@ -184,12 +184,23 @@ class TestShipmentListKeywordCoverage(unittest.TestCase):
     def setUp(self):
         self.reg = BusinessActionRegistry(_FakeSupabase())
         # The exact keyword list configured on searchdatashipmentlist in
-        # production 2026-08-19 (see GOLDEN-059's own description).
+        # production, MINUS the bare "บิลขนส่ง" keyword removed 2026-08-24
+        # (Shipping Address Change Intent Ambiguity fix) — that single
+        # generic keyword (substring-matches inside ANY sentence merely
+        # mentioning a shipping bill, Thai keywords being plain substring
+        # matches with no word boundary) tied 1.0-for-1.0 against
+        # requestshippingaddresschange's own keyword on the exact phrase
+        # "ต้องการเปลี่ยนที่อยู่บิลขนส่ง", forcing CLARIFICATION_REQUIRED on
+        # a customer's unambiguous address-change request. Every OTHER
+        # keyword below already covers this action's real shipment-status
+        # intents (พัสดุ/tracking/บิลขนส่งล่าสุด/เมื่อไหร่จะถึง/...) without
+        # the bare generic term — see TestShipmentAddressChangeDisambiguation
+        # below for the regression coverage this fix is protecting.
         self.action_id = _seed_action(
             self.reg, key="searchdatashipmentlist", category="Customer Shipment Retrieval",
             ai_description="ค้นหารายการบิลขนส่งของลูกค้า โดยค้นหาจากรหัสลูกค้า",
             keywords=[
-                "บิลขนส่ง", "พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ",
+                "พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ",
                 "ค่าขนส่งเท่าไหร่", "ค่าส่งเท่าไหร่", "ค่าส่งล่าสุด", "บิลขนส่งล่าสุด",
                 "ถูกที่สุด", "ถูกกว่า", "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "ถึงหรือยัง",
                 "มาถึงหรือยัง", "ของถึงไหนแล้ว", "พัสดุล่าสุด", "การจัดส่งล่าสุด",
@@ -224,6 +235,110 @@ class TestShipmentListKeywordCoverage(unittest.TestCase):
 
     def test_unrelated_question_still_stays_rag_only(self):
         result = classify_question("โกดังจีนอยู่ที่ไหน", self.reg)
+        self.assertEqual(result["classification"], "RAG_ONLY")
+        self.assertIsNone(result["selected_action_id"])
+
+
+class TestShipmentAddressChangeDisambiguation(unittest.TestCase):
+    """Shipping Address Change Intent Ambiguity fix (2026-08-24) —
+    confirmed live on production: "ต้องการเปลี่ยนที่อยู่บิลขนส่ง" (an
+    unambiguous request to change a delivery address) returned
+    CLARIFICATION_REQUIRED instead of decisively selecting
+    requestshippingaddresschange. Root cause: searchdatashipmentlist's own
+    search_keywords included the bare, generic "บิลขนส่ง" ("shipping
+    bill") — Thai keywords are plain substring matches with no word
+    boundary (by design, Thai has none), so that single generic keyword
+    matched inside ANY sentence merely mentioning a shipping bill,
+    including the address-change phrase's own tail, tying 1.0-for-1.0
+    against requestshippingaddresschange's own keyword for the same
+    message. Fixed as a Business Action CONFIGURATION change only (the
+    bare "บิลขนส่ง" keyword removed from searchdatashipmentlist) — never a
+    Decision Engine code change, never a hardcoded phrase check. Both
+    actions here are seeded with their real, current production keyword
+    lists (searchdatashipmentlist's post-fix) so a keyword drifting back
+    to something this generic is caught by the test suite, not just
+    eyeballed live."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.shipment_id = _seed_action(
+            self.reg, key="searchdatashipmentlist", category="Customer Shipment Retrieval",
+            ai_description="ค้นหารายการบิลขนส่งของลูกค้า โดยค้นหาจากรหัสลูกค้า",
+            keywords=[
+                "พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ",
+                "ค่าขนส่งเท่าไหร่", "ค่าส่งเท่าไหร่", "ค่าส่งล่าสุด", "บิลขนส่งล่าสุด",
+                "ถูกที่สุด", "ถูกกว่า", "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "ถึงหรือยัง",
+                "มาถึงหรือยัง", "ของถึงไหนแล้ว", "พัสดุล่าสุด", "การจัดส่งล่าสุด",
+                "มาถึง", "จะมาถึง",
+            ],
+        )
+        self.reg.replace_parameters(self.shipment_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+        ])
+        self.address_change_id = _seed_action(
+            self.reg, key="requestshippingaddresschange", category="Customer Support Request",
+            ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
+            keywords=[
+                "ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
+                "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล",
+                "แก้ไขที่อยู่จัดส่ง", "เปลี่ยนที่อยู่ของผม", "เปลี่ยนที่อยู่จัดส่งในไทย",
+                # Added 2026-08-24 — a second, distinct gap found while
+                # reproducing the reported ambiguity: "ช่วยเปลี่ยนที่อยู่
+                # จัดส่งให้หน่อย" matched NO existing keyword at all (every
+                # keyword above requires a specific prefix/suffix word —
+                # "อยาก"/"แก้ไข"/"ในไทย" — this phrasing has none of them),
+                # scoring 0 and falling through to RAG_ONLY. This bare core
+                # phrase closes that gap without colliding with any
+                # shipment-status keyword (verified: none of
+                # searchdatashipmentlist's own keywords contain it).
+                "เปลี่ยนที่อยู่จัดส่ง",
+            ],
+        )
+
+    # The exact phrase confirmed live to fail before this fix.
+    def test_exact_reported_phrase_selects_address_change_decisively(self):
+        result = classify_question("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.address_change_id)
+
+    def test_alternate_address_change_phrasing_1(self):
+        result = classify_question("อยากเปลี่ยนที่อยู่จัดส่ง", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.address_change_id)
+
+    def test_alternate_address_change_phrasing_2(self):
+        result = classify_question("ขอเปลี่ยนที่อยู่รับของ", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.address_change_id)
+
+    def test_alternate_address_change_phrasing_3(self):
+        result = classify_question("ช่วยเปลี่ยนที่อยู่จัดส่งให้หน่อย", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.address_change_id)
+
+    # Competing shipment-status intents must still resolve to
+    # searchdatashipmentlist, never accidentally shift toward
+    # requestshippingaddresschange now that the tie is broken.
+    def test_shipment_status_phrase_1_still_selects_shipment_list(self):
+        result = classify_question("พัสดุล่าสุดถึงไหนแล้ว", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.shipment_id)
+
+    def test_shipment_status_phrase_2_still_selects_shipment_list(self):
+        result = classify_question("ของผมล่าสุดค่าส่งเท่าไหร่", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.shipment_id)
+
+    def test_shipment_status_phrase_3_still_selects_shipment_list(self):
+        result = classify_question("บิลล่าสุดจะมาถึงเมื่อไหร่", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.shipment_id)
+
+    # China warehouse question must still fall through to RAG for either
+    # action — never claimed by shipment-list or address-change.
+    def test_china_warehouse_question_stays_rag_only(self):
+        result = classify_question("ที่อยู่โกดังจีนอยู่ที่ไหน", self.reg)
         self.assertEqual(result["classification"], "RAG_ONLY")
         self.assertIsNone(result["selected_action_id"])
 
