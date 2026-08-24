@@ -847,7 +847,7 @@ class TestLatestNAggregation(unittest.TestCase):
 
     def test_detects_limit_and_sum_intent(self):
         agg = _detect_aggregation_request("ออเดอร์ 5 อันล่าสุดของผมรวมเท่าไหร่")
-        self.assertEqual(agg, {"limit": 5, "wants_sum": True})
+        self.assertEqual(agg, {"limit": 5, "wants_sum": True, "wants_count": False, "wants_outstanding": False})
 
     def test_detects_sum_without_explicit_limit(self):
         agg = _detect_aggregation_request("ยอดรวมทั้งหมดเท่าไหร่")
@@ -902,6 +902,117 @@ class TestLatestNAggregation(unittest.TestCase):
         text = DecisionEngine._aggregate_list_reply(self._payload(records), self.RESPONSE_MAPPING, agg)
         self.assertIn("PO1", text)
         self.assertIn("PO2", text)
+        self.assertNotIn("{", text)
+        self.assertNotIn("[", text)
+
+
+class TestShipmentFilterCountSumAggregation(unittest.TestCase):
+    """Shipment Filter/Count/Sum Aggregation fix (2026-08-24) — customer-
+    reported: "SP1008 มีบิลที่รับเข้าไทยกี่บิล ยอดค่าขนส่งเท่าไหร่ทั้งหมด
+    ที่ค้างจ่าย" and 3 related phrasings answered from the wrong (or
+    entirely unfiltered / single-latest-record) data. Mock response_mapping
+    below mirrors the real production searchdatashipmentlist shape: a list
+    field, a Status sibling carrying an admin-curated filter_values map
+    (never a hardcoded status string in code), and a ค่าขนส่ง currency
+    sibling. Never hardcodes SP1008, 112.46, or any one ShipmentCode."""
+
+    RESPONSE_MAPPING = [
+        {"json_path": "$.data", "mapped_label": "รายการบิลขนส่งทั้งหมด",
+         "field_metadata": {"keywords": ["บิล", "รายการ", "shipment"]}},
+        {"json_path": "$.data.0.ShipmentCode", "mapped_label": "เลขบิลขนส่งล่าสุด",
+         "field_metadata": {"keywords": ["เลขบิล"], "identity_concept": "ShipmentCode"}},
+        {"json_path": "$.data.0.Status", "mapped_label": "สถานะบิลขนส่งล่าสุด",
+         "field_metadata": {
+             "keywords": ["สถานะ", "status"],
+             "filter_values": {
+                 "รับเข้าไทย": "รับเข้าที่ไทย", "เข้าไทย": "รับเข้าที่ไทย", "ถึงไทย": "รับเข้าที่ไทย",
+             },
+         }},
+        {"json_path": "$.data.0.Charge", "mapped_label": "ค่าขนส่งล่าสุด",
+         "field_metadata": {"keywords": ["ค่าขนส่ง", "total"]}},
+    ]
+
+    def _payload(self):
+        # 5 realistic mixed-status shipment records — never all one
+        # status, so a filtering bug (wrong status, or no filtering at
+        # all) is observable in the count/sum, not just the wording.
+        records = [
+            {"ShipmentCode": "SP100820260101001", "Status": "รับเข้าที่จีน", "Charge": 500.00},
+            {"ShipmentCode": "SP100820260201001", "Status": "รับเข้าที่ไทย", "Charge": 300.00},
+            {"ShipmentCode": "SP100820260301001", "Status": "รับเข้าที่ไทย", "Charge": 250.50},
+            {"ShipmentCode": "SP100820260401001", "Status": "รับเข้าที่จีน", "Charge": 800.00},
+            {"ShipmentCode": "SP100820260501001", "Status": "รับเข้าที่ไทย", "Charge": 112.46},
+        ]
+        return {"รายการบิลขนส่งทั้งหมด": records}
+
+    def _reply(self, message):
+        agg = _detect_aggregation_request(message)
+        self.assertIsNotNone(agg, f"expected an aggregation intent for: {message}")
+        return DecisionEngine._aggregate_list_reply(self._payload(), self.RESPONSE_MAPPING, agg, message)
+
+    def test_count_only_filters_by_status(self):
+        text = self._reply("มีกี่บิลที่เข้าไทย")
+        self.assertIn("3", text)
+        self.assertNotIn("5", text)  # never the unfiltered total record count
+        self.assertNotIn("รับเข้าที่จีน", text)
+
+    def test_sum_only_filters_by_status(self):
+        text = self._reply("ยอดค่าขนส่งของบิลที่ถึงไทยรวมเท่าไหร่")
+        self.assertIn("662.96", text)  # 300 + 250.50 + 112.46, China-status records excluded
+
+    def test_count_and_sum_combined_matches_original_customer_phrasing(self):
+        text = self._reply("SP1008 มีบิลที่รับเข้าไทยกี่บิล ยอดค่าขนส่งเท่าไหร่ทั้งหมดที่ค้างจ่าย")
+        self.assertIn("3", text)
+        self.assertIn("662.96", text)
+
+    def test_second_customer_phrasing_count_and_sum(self):
+        text = self._reply("ต้องการเช็คบิลที่สถานะรับเข้าไทย ว่ามีทั้งหมดกี่บิล และค่าขนส่งรวมเท่าไหร่")
+        self.assertIn("3", text)
+        self.assertIn("662.96", text)
+
+    def test_outstanding_question_declines_honestly_never_fabricates(self):
+        text = self._reply("SP1008 มีบิลที่รับเข้าไทยกี่บิล ยอดค่าขนส่งเท่าไหร่ทั้งหมดที่ค้างจ่าย")
+        # ERP has no outstanding/unpaid-shaped field configured — the
+        # decline must be stated, and no invented "ค้างจ่าย" number.
+        self.assertIn("ยังไม่มีข้อมูล", text)
+        self.assertNotIn("ค้างจ่าย 662.96", text)
+        self.assertNotIn("ค้างจ่าย 300", text)
+        # Still gives the answerable total for context, per spec.
+        self.assertIn("662.96", text)
+
+    def test_outstanding_supported_when_a_real_field_is_configured(self):
+        mapping_with_outstanding = self.RESPONSE_MAPPING + [
+            {"json_path": "$.data.0.UnpaidAmount", "mapped_label": "ยอดค้างชำระล่าสุด",
+             "field_metadata": {"keywords": ["ค้างชำระ", "unpaid"]}},
+        ]
+        agg = _detect_aggregation_request("มีบิลที่รับเข้าไทยกี่บิล ยอดค้างชำระเท่าไหร่")
+        text = DecisionEngine._aggregate_list_reply(self._payload(), mapping_with_outstanding, agg,
+                                                      "มีบิลที่รับเข้าไทยกี่บิล ยอดค้างชำระเท่าไหร่")
+        self.assertNotIn("ยังไม่มีข้อมูล", text)
+
+    def test_amount_traceback_never_misread_as_a_record_count(self):
+        # The exact reported defect: "112.46" must never resurface as
+        # "112 รายการ" (mistaking the decimal amount for a count of
+        # ALL of the customer's historical records).
+        agg = _detect_aggregation_request("ยอดรวมบิลขนส่งล่าสุด 112.46 บาท เอามาจากบิลไหน")
+        self.assertIsNone(agg)  # disqualified as a source-trace question, not a new aggregate
+
+    def test_latest_shipment_no_filter_regression_unaffected(self):
+        # No status phrase at all -- must behave exactly as before this
+        # fix: every record counted, nothing silently filtered out.
+        text = self._reply("ยอดรวมค่าขนส่งทั้งหมดเท่าไหร่")
+        self.assertIn("1,962.96", text)  # 500+300+250.5+800+112.46, unfiltered
+
+    def test_no_matching_status_returns_honest_zero_not_fabricated(self):
+        agg = _detect_aggregation_request("มีกี่บิลที่เข้าไทย")
+        payload = {"รายการบิลขนส่งทั้งหมด": [
+            {"ShipmentCode": "SP1", "Status": "รับเข้าที่จีน", "Charge": 500.00},
+        ]}
+        text = DecisionEngine._aggregate_list_reply(payload, self.RESPONSE_MAPPING, agg, "มีกี่บิลที่เข้าไทย")
+        self.assertIn("ไม่พบ", text)
+
+    def test_never_leaks_raw_json_in_filtered_reply(self):
+        text = self._reply("มีกี่บิลที่เข้าไทย และค่าขนส่งรวมเท่าไหร่")
         self.assertNotIn("{", text)
         self.assertNotIn("[", text)
 

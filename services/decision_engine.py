@@ -926,17 +926,44 @@ _UNSAFE_CUSTOMER_TEXT_RE = re.compile(
 _LATEST_N_RE = re.compile(r"(\d+)\s*(?:อัน|รายการ|ใบ|ครั้ง|บิล|order|orders)?\s*(?:ล่าสุด|แรก|ที่ผ่านมา)")
 _SUM_INTENT_RE = re.compile(
     r"รวม.{0,10}(?:เท่าไหร่|เท่าไร|เท่าใด)|(?:เท่าไหร่|เท่าไร).{0,10}รวม"
-    r"|ยอดรวม|รวมทั้งหมด|รวมกัน(?:แล้ว)?เท่าไหร่|\bsum\b|\btotal\b", re.IGNORECASE)
+    r"|ยอดรวม|รวมทั้งหมด|รวมกัน(?:แล้ว)?เท่าไหร่"
+    r"|ยอด.{0,15}(?:เท่าไหร่|เท่าไร|เท่าใด)|\bsum\b|\btotal\b", re.IGNORECASE)
+# Count/Sum/Outstanding Filter Aggregation (Shipment Filter/Count/Sum
+# fix, 2026-08-24) — two more generic, language-level signals sitting
+# alongside _LATEST_N_RE/_SUM_INTENT_RE above, never tied to shipments
+# or any one Business Action.
+_COUNT_INTENT_RE = re.compile(
+    r"กี่(?:บิล|รายการ|ใบ|ครั้ง|order|orders)|มีทั้งหมดกี่|จำนวน.{0,10}เท่าไหร่|จำนวน.{0,10}เท่าไร"
+    r"|\bhow many\b|\bcount\b", re.IGNORECASE)
+_OUTSTANDING_INTENT_RE = re.compile(
+    r"ค้างจ่าย|ค้างชำระ|คงค้าง|ยังไม่จ่าย|ยังไม่ชำระ|\bunpaid\b|\boutstanding\b", re.IGNORECASE)
+# A "which record did this number come from" question (e.g. "ยอดรวม
+# บิลขนส่งล่าสุด 112.46 บาท เอามาจากบิลไหน") is a single-record
+# TRACEABILITY question, never a request to compute a NEW aggregate —
+# confirmed live: without this guard, "ยอดรวม" alone made the composer
+# re-sum every record the customer ever had and mislabel the result as
+# "112 รายการล่าสุด" (112 being the record COUNT, not part of the
+# 112.46 THB figure the customer was asking about), because "no limit"
+# was rendered with the same "ล่าสุด" wording as an actual N-latest
+# request. Disqualifying it here lets the existing, already-correct
+# single-latest-record composer (_compose_natural_reply) answer it.
+_SOURCE_TRACE_RE = re.compile(
+    r"(?:เอา)?มาจาก(?:บิล|ออเดอร์|รายการ)?ไหน|which\s+(?:bill|order|shipment)", re.IGNORECASE)
 
 
 def _detect_aggregation_request(message: str) -> Optional[Dict]:
     message = message or ""
+    if _SOURCE_TRACE_RE.search(message):
+        return None
     n_match = _LATEST_N_RE.search(message)
     limit = int(n_match.group(1)) if n_match else None
     wants_sum = bool(_SUM_INTENT_RE.search(message))
-    if limit is None and not wants_sum:
+    wants_count = bool(_COUNT_INTENT_RE.search(message))
+    wants_outstanding = bool(_OUTSTANDING_INTENT_RE.search(message))
+    if limit is None and not (wants_sum or wants_count or wants_outstanding):
         return None
-    return {"limit": limit, "wants_sum": wants_sum}
+    return {"limit": limit, "wants_sum": wants_sum, "wants_count": wants_count,
+            "wants_outstanding": wants_outstanding}
 
 
 def _sanitize_customer_text(text: Optional[str]) -> Optional[str]:
@@ -1881,7 +1908,7 @@ class DecisionEngine:
                 mapped = select_requested_mapped_fields(message, mapped, selected.get("response_mapping"),
                                                           input_param_names=collected_slots.keys())
             agg_request = _detect_aggregation_request(message)
-            agg_text = (self._aggregate_list_reply(full_mapped, selected.get("response_mapping"), agg_request)
+            agg_text = (self._aggregate_list_reply(full_mapped, selected.get("response_mapping"), agg_request, message)
                         if agg_request and full_mapped else None)
             text = agg_text or self._compose_natural_reply(
                 mapped if mapped else result_payload, selected.get("response_mapping"), fallback_payload=full_mapped)
@@ -1993,7 +2020,7 @@ class DecisionEngine:
 
     @staticmethod
     def _aggregate_list_reply(payload: Dict, response_mapping: Optional[List[Dict]],
-                               agg_request: Dict) -> Optional[str]:
+                               agg_request: Dict, message: str = "") -> Optional[str]:
         """Latest-N Aggregation composer (Customer-Reported ERP
         Conversation Defects, 2026-08-17) — answers "5 อันล่าสุด...รวม
         เท่าไหร่"-style questions from the REAL records an ERP call
@@ -2013,6 +2040,7 @@ class DecisionEngine:
         json_path_by_label = {r.get("mapped_label"): (r.get("json_path") or "") for r in rows}
         metadata_by_label = {r.get("mapped_label"): (r.get("field_metadata") or {}) for r in rows}
         currency_keywords = ("ยอดเงิน", "ราคา", "ค่าขนส่ง", "total", "บาท", "ยอดรวม")
+        outstanding_keywords = ("ค้างจ่าย", "ค้างชำระ", "คงค้าง", "unpaid", "outstanding")
 
         for label, value in payload.items():
             if not (isinstance(value, list) and value and isinstance(value[0], dict)):
@@ -2029,32 +2057,106 @@ class DecisionEngine:
                         return other_path.rsplit(".", 1)[-1]
                 return None
 
+            def _detect_filter_value() -> "Tuple[Optional[str], Optional[str]]":
+                """Generic status/attribute filter (2026-08-24) — the
+                customer's own phrase is only ever matched against
+                filter_values maps the admin curated on a sibling
+                field's field_metadata (the SAME config surface as
+                identity_concept/currency keywords); the ERP value
+                returned is always the map's value, never the
+                customer's own phrase, so "รับเข้าไทย" never becomes a
+                made-up filter — it resolves to the real ERP status
+                string an admin explicitly configured (e.g. "รับเข้าที่
+                ไทย"), and a China-side status string is never treated
+                as if it meant the same thing."""
+                for other_label, other_path in json_path_by_label.items():
+                    if other_label == label or not (other_path or "").startswith(list_path + "."):
+                        continue
+                    filter_values = (metadata_by_label.get(other_label, {}) or {}).get("filter_values") or {}
+                    if not isinstance(filter_values, dict):
+                        continue
+                    for phrase, erp_value in filter_values.items():
+                        if phrase and str(phrase).lower() in message.lower():
+                            return other_path.rsplit(".", 1)[-1], erp_value
+                return None, None
+
             amount_key = _sibling_key(lambda lbl: any(
                 ck in " ".join(str(k).lower() for k in (metadata_by_label.get(lbl, {}).get("keywords") or []))
                 or ck in str(lbl).lower() for ck in currency_keywords))
             if not amount_key:
                 continue
 
+            # Generic status/attribute filter (Shipment Filter/Count/Sum
+            # Aggregation fix, 2026-08-24) — confirmed live: "SP1008 มีบิล
+            # ที่รับเข้าไทยกี่บิล..." always answered from the FULL,
+            # unfiltered record set (or just the single latest record),
+            # because nothing here could narrow `records` by anything
+            # other than a positional "first N" limit. filter_values is
+            # an admin-curated {customer phrase: real ERP value} map on
+            # any sibling field (e.g. the Status row) — the SAME
+            # established config surface as identity_concept/currency
+            # keywords above; code never hardcodes a status string, and
+            # the filter VALUE is always the ERP's own real value, never
+            # invented.
+            filter_key, filter_value = _detect_filter_value()
+            base_records = [r for r in value if r.get(filter_key) == filter_value] if filter_key and filter_value else value
+            filter_desc = f"ที่อยู่ในสถานะ{filter_value}" if filter_value else ""
+
+            # Outstanding/unpaid (2026-08-24) — NEVER inferred from an
+            # unrelated field; only ever answered from a real ERP field
+            # explicitly tagged with an outstanding/unpaid-shaped
+            # keyword, exactly like amount_key above. When the customer
+            # asked about it and no such field is configured (confirmed
+            # live: searchdatashipmentlist's real ERP response has no
+            # such field at all), an honest limitation is stated — the
+            # shipping total itself, if askable, is still given for
+            # context, never silently withheld alongside the disclaimer.
+            outstanding_note = None
+            if agg_request.get("wants_outstanding"):
+                outstanding_key = _sibling_key(lambda lbl: any(
+                    ck in " ".join(str(k).lower() for k in (metadata_by_label.get(lbl, {}).get("keywords") or []))
+                    or ck in str(lbl).lower() for ck in outstanding_keywords))
+                if not outstanding_key:
+                    outstanding_note = ("ระบบยังไม่มีข้อมูลว่ายอดใดค้างชำระอยู่ค่ะ "
+                                         "แต่สามารถตรวจสอบยอดค่าขนส่งรวมที่มีอยู่ในระบบให้ได้ค่ะ")
+
             limit = agg_request.get("limit")
-            records = value[:limit] if limit else value
+            records = base_records[:limit] if limit else base_records
             actual_count = len(records)
             if actual_count == 0:
+                if filter_value:
+                    text = f"ไม่พบรายการ{filter_desc}ค่ะ"
+                    return f"{text} {outstanding_note}" if outstanding_note else text
                 continue
-            amounts = [r.get(amount_key) for r in records if isinstance(r.get(amount_key), (int, float))]
-            if not amounts:
-                continue
-            total = sum(amounts)
-
+            # A count-only question ("มีกี่บิล") never needs a real
+            # per-item amount to answer, so it is not gated on
+            # `amounts` the way a sum is — this is what let messages 2
+            # and 3 (no requested sum) fall through un-answered before.
             if agg_request.get("wants_sum"):
-                if limit and actual_count < limit:
-                    return (f"พบข้อมูลจริงเพียง {actual_count} รายการ (จากที่ขอ {limit} รายการล่าสุด) "
-                            f"มียอดรวม {total:,.2f} บาทค่ะ")
-                return f"{actual_count} รายการล่าสุด มียอดรวมทั้งหมด {total:,.2f} บาทค่ะ"
+                amounts = [r.get(amount_key) for r in records if isinstance(r.get(amount_key), (int, float))]
+                if not amounts:
+                    continue
+                total = sum(amounts)
+            else:
+                total = None
 
-            # limit-only (no explicit sum request) — a short, real,
+            if agg_request.get("wants_sum") or agg_request.get("wants_count"):
+                if agg_request.get("wants_sum"):
+                    if limit and actual_count < limit:
+                        text = (f"พบข้อมูลจริงเพียง {actual_count} รายการ{filter_desc} (จากที่ขอ {limit} รายการล่าสุด) "
+                                f"มียอดรวม {total:,.2f} บาทค่ะ")
+                    elif filter_desc:
+                        text = f"พบทั้งหมด {actual_count} รายการ{filter_desc}ค่ะ ยอดรวม {total:,.2f} บาทค่ะ"
+                    else:
+                        text = f"{actual_count} รายการล่าสุด มียอดรวมทั้งหมด {total:,.2f} บาทค่ะ"
+                else:
+                    text = f"พบทั้งหมด {actual_count} รายการ{filter_desc}ค่ะ"
+                return f"{text} {outstanding_note}" if outstanding_note else text
+
+            # limit-only (no explicit sum/count word) — a short, real,
             # per-record summary, never the raw list dump.
             code_key = _sibling_key(lambda lbl: (metadata_by_label.get(lbl, {}) or {}).get("identity_concept"))
-            lines = [f"{actual_count} รายการล่าสุดค่ะ"]
+            lines = [f"{actual_count} รายการล่าสุด{filter_desc}ค่ะ"]
             for r in records:
                 code = r.get(code_key) if code_key else None
                 amt = r.get(amount_key)
@@ -2063,7 +2165,8 @@ class DecisionEngine:
                     piece = f"{piece} ({amt:,.2f} บาท)" if piece else f"{amt:,.2f} บาท"
                 if piece:
                     lines.append(f"- {piece}")
-            return "\n".join(lines)
+            text = "\n".join(lines)
+            return f"{text}\n{outstanding_note}" if outstanding_note else text
         return None
 
     # ── Human Handoff ──────────────────────────────────────────────────────
@@ -2290,7 +2393,7 @@ class DecisionEngine:
                         mapped = select_requested_mapped_fields(erp_sub_question, mapped, full_action.get("response_mapping"),
                                                                   input_param_names=collected.keys())
                     agg_request = _detect_aggregation_request(erp_sub_question)
-                    agg_answer = (self._aggregate_list_reply(full_mapped, full_action.get("response_mapping"), agg_request)
+                    agg_answer = (self._aggregate_list_reply(full_mapped, full_action.get("response_mapping"), agg_request, erp_sub_question)
                                   if agg_request and full_mapped else None)
                     erp_answer = agg_answer or self._compose_natural_reply(
                         mapped if mapped else erp_exec_result.get("result"), full_action.get("response_mapping"),

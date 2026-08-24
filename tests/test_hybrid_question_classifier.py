@@ -270,6 +270,15 @@ class TestShipmentAddressChangeDisambiguation(unittest.TestCase):
                 "ถูกที่สุด", "ถูกกว่า", "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "ถึงหรือยัง",
                 "มาถึงหรือยัง", "ของถึงไหนแล้ว", "พัสดุล่าสุด", "การจัดส่งล่าสุด",
                 "มาถึง", "จะมาถึง",
+                # Added 2026-08-24 (Shipment Filter/Count/Sum Aggregation
+                # fix) — confirmed live: "มีกี่บิลที่เข้าไทย" and "ต้องการ
+                # เช็คบิลที่สถานะรับเข้าไทย..." matched NO existing keyword
+                # at all (score 0.125, purely from weak Identifier Memory
+                # scoring), never reaching this action -- falling through
+                # to RAG entirely rather than answering wrong. This closes
+                # the gap without colliding with requestshippingaddresschange
+                # (verified: none of its own keywords contain these terms).
+                "กี่บิล", "เข้าไทย", "ถึงไทย", "สถานะรับเข้าไทย",
             ],
         )
         self.reg.replace_parameters(self.shipment_id, [
@@ -341,6 +350,19 @@ class TestShipmentAddressChangeDisambiguation(unittest.TestCase):
         result = classify_question("ที่อยู่โกดังจีนอยู่ที่ไหน", self.reg)
         self.assertEqual(result["classification"], "RAG_ONLY")
         self.assertIsNone(result["selected_action_id"])
+
+    # Shipment Filter/Count/Sum Aggregation fix (2026-08-24) — the two
+    # customer phrasings that previously matched NO Business Action at
+    # all (score 0.125, never reaching searchdatashipmentlist).
+    def test_shipment_count_question_reaches_shipment_list(self):
+        result = classify_question("มีกี่บิลที่เข้าไทย", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.shipment_id)
+
+    def test_shipment_status_count_and_sum_question_reaches_shipment_list(self):
+        result = classify_question("ต้องการเช็คบิลที่สถานะรับเข้าไทย ว่ามีทั้งหมดกี่บิล และค่าขนส่งรวมเท่าไหร่", self.reg)
+        self.assertEqual(result["classification"], "ERP_ONLY")
+        self.assertEqual(result["selected_action_id"], self.shipment_id)
 
 
 class TestLooseMarkerSegmentation(unittest.TestCase):
