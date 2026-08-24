@@ -2764,8 +2764,18 @@ def _seed_generic_routing_matrix(reg):
     Phase 3 of this fix exercise a real competing candidate, not an
     empty registry."""
     cust_pattern = r"^[A-Za-z]{2}\d+$"
+    # P2 Order/Tracking Keyword Ambiguity fix (2026-08-24) — "รายละเอียด
+    # order" (without) removed: it blindly matched code-less "latest"
+    # phrasing too ("ขอรายละเอียด order ล่าสุด"), forcing a false tie
+    # against searchdataorderlist even though searchdataorder's own
+    # required OrderCode can never be satisfied from "ล่าสุด" alone. A
+    # genuine OrderCode-bearing message still wins searchdataorder
+    # decisively via identifier-pattern score alone (see
+    # test_po_prefixed_order_code_detail_lookup_selects_order_detail and
+    # this class's own PO-code tests) — the keyword was redundant there
+    # and actively harmful here.
     _seed_action(reg, key="searchdataorder", action_type="API", category="Customer Order Retrieval",
-                 keywords=["เลขคำสั่งซื้อ", "PO เดียว", "order detail", "รายละเอียดคำสั่งซื้อ", "รายละเอียด order"],
+                 keywords=["เลขคำสั่งซื้อ", "PO เดียว", "order detail", "รายละเอียดคำสั่งซื้อ"],
                  params=[
                      {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
                      {"name": "OrderCode", "display_name": "เลขที่คำสั่งซื้อ", "required": True,
@@ -2792,9 +2802,18 @@ def _seed_generic_routing_matrix(reg):
                            "กี่บิล", "เข้าไทย", "ถึงไทย", "สถานะรับเข้าไทย"],
                  params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
                           "validation_pattern": cust_pattern}])
+    # P2 Order/Tracking Keyword Ambiguity fix (2026-08-24) — bare
+    # "tracking" removed: searchdatatracking's own required Tracking
+    # parameter (an actual China tracking number) can never be derived
+    # from "ล่าสุด", so this over-broad keyword only ever created a false
+    # tie against searchdatashipmentlist (which already maps a "latest
+    # tracking number" via its own TrackingCH/TH response_mapping) for
+    # number-less "latest" questions. Every real tracking-by-number
+    # message below still matches via a MORE specific remaining keyword
+    # ("เลขพัสดุจีน", "ค้นหาด้วยเลข tracking", "tracking จีน", ...).
     _seed_action(reg, key="searchdatatracking", action_type="API", category="Customer Shipment Retrieval",
                  priority=1,
-                 keywords=["tracking จีน", "เลข tracking", "tracking", "ค้นหาด้วยเลข tracking", "เลข tracking จีน",
+                 keywords=["tracking จีน", "เลข tracking", "ค้นหาด้วยเลข tracking", "เลข tracking จีน",
                            "เลขพัสดุจีน", "เลขจีน", "พัสดุจีน", "หมายเลขพัสดุจีน"],
                  params=[
                      {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
@@ -2957,31 +2976,35 @@ class TestGenericIdentifierScoreImbalanceFix(unittest.TestCase):
         self.assertEqual(self._selected_action_key("SP1008 order ล่าสุด"), "searchdataorderlist")
 
     def test_order_latest_detail_question(self):
-        """This exact phrasing carries GENUINELY tied keyword evidence in
-        real production (confirmed live, 2026-08-24): searchdataorder's
-        own "รายละเอียด order" keyword and searchdataorderlist's own
-        "order"/"order list" keywords both match equally, and the shared
-        CustCode is non-discriminating either way — a SEPARATE,
-        pre-existing keyword-overlap ambiguity, not the identifier-
-        pattern-imbalance bug this fix targets. A safe clarification
-        request is the correct, non-hijacking outcome here; the only
-        hard requirement is that it never silently picks the WRONG,
-        unrelated action (address-change) or executes anything."""
-        result, mock_req = self._decide("SP1008 ขอรายละเอียด order ล่าสุด")
-        selected = self._selected_action_key_from_result(result)
-        self.assertNotEqual(selected, "requestshippingaddresschange")
-        mock_req.assert_not_called()
+        """P2 Order/Tracking Keyword Ambiguity fix (2026-08-24) — this
+        phrasing has no OrderCode at all ("ล่าสุด" = latest, not a named
+        PO), so searchdataorder's own required OrderCode parameter can
+        never be satisfied from it; searchdataorderlist's own "Latest"
+        parameter and per-latest-record response_mapping (Code/Status/
+        Total/Tracking) are the actual semantic match. searchdataorder's
+        "รายละเอียด order" keyword — added for genuinely code-bearing
+        DETAIL phrasing (migration 043) — also blindly matched this
+        code-less "latest" phrasing, causing a false tie; removed as a
+        keyword (config-only) since a real OrderCode already wins
+        searchdataorder decisively via identifier-pattern score alone,
+        with no keyword needed (see test_a/e/f/PO-prefixed tests below)."""
+        self.assertEqual(self._selected_action_key("SP1008 ขอรายละเอียด order ล่าสุด"), "searchdataorderlist")
 
     # TRACKING
     def test_tracking_latest_question(self):
-        """Same genuine, pre-existing keyword-overlap ambiguity as above
-        (both searchdatatracking and searchdatashipmentlist configure
-        "tracking" as a keyword) — confirmed live against real
-        production. Must never hijack to address-change or execute."""
-        result, mock_req = self._decide("SP1008 tracking ล่าสุด")
-        selected = self._selected_action_key_from_result(result)
-        self.assertNotEqual(selected, "requestshippingaddresschange")
-        mock_req.assert_not_called()
+        """P2 Order/Tracking Keyword Ambiguity fix (2026-08-24) —
+        searchdatatracking's own required Tracking parameter (an actual
+        China tracking number) can never be derived from "ล่าสุด";
+        searchdatashipmentlist already maps "TrackingCH/TH ล่าสุด" and
+        supports a Latest count — the real semantic match for "my latest
+        tracking number". searchdatatracking's bare "tracking" keyword —
+        redundant whenever a real tracking number is present (every
+        tracking-by-number regression test below already matches via a
+        MORE specific keyword: "เลขพัสดุจีน", "ค้นหาด้วยเลข tracking",
+        "tracking จีน", etc.) — removed (config-only) since it only ever
+        created a false tie against shipmentlist for number-less
+        "latest" questions."""
+        self.assertEqual(self._selected_action_key("SP1008 tracking ล่าสุด"), "searchdatashipmentlist")
 
     def test_tracking_china_number_question(self):
         self.assertEqual(self._selected_action_key("เลขพัสดุจีน testlineOnNut007 ถึงไหนแล้ว"), "searchdatatracking")
