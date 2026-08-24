@@ -3719,6 +3719,184 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertNotIn("CustCode", collected)
         mock_req.assert_not_called()
 
+    # ── Generic Collection Status Query (Address Change Full UAT —
+    # Status Query fix, 2026-08-24) — reuses this same fixture since the
+    # feature itself lives generically in _handle_dynamic_collection
+    # (services/decision_engine.py), not in anything address-specific;
+    # TestGenericCollectionStatusQuery below proves it works identically
+    # for an unrelated Business Action too. ──
+
+    def _status_query_setup(self):
+        """Turns 1-4 of the normal flow, stopping right before District/
+        PostalCode are supplied — the exact shape the task's own required
+        tests use."""
+        self._seed_address_change_action()
+        history = []
+        with patch("services.action_executor.requests.request"):
+            for msg in ("ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "SP1008", "SP100820260716001",
+                        "ชื่อผู้รับ: สมชาย ใจดี\nเบอร์โทร: 0812345678\nที่อยู่: 99/12 หมู่ 4\n"
+                        "ตำบล: บางแก้ว\nจังหวัด: สมุทรปราการ"):
+                result = self.engine.decide(msg, history=history, context={"developer_mode": True})
+                history += [{"role": "user", "content": msg}, {"role": "assistant", "content": result["reply"]["text"]}]
+        return history
+
+    # TEST 22 — "มีข้อมูลอะไรบ้าง" summarizes collected + missing accurately.
+    def test_22_status_query_summarizes_collected_and_missing(self):
+        history = self._status_query_setup()
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide("มีข้อมูลอะไรบ้าง", history=history, context={"developer_mode": True})
+        text = result["reply"]["text"]
+        for expected in ("SP1008", "SP100820260716001", "สมชาย ใจดี", "0812345678",
+                          "99/12 หมู่ 4", "บางแก้ว", "สมุทรปราการ"):
+            self.assertIn(expected, text)
+        self.assertIn("อำเภอ/เขต", text)
+        self.assertIn("รหัสไปรษณีย์", text)
+        # never fabricated: District/PostalCode never show a VALUE, only appear in the missing list
+        self.assertNotIn("อำเภอ/เขต:", text)
+        self.assertNotIn("รหัสไปรษณีย์:", text)
+        self.assertNotEqual(result["routing"]["type"], "RAG")
+        self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+        mock_req.assert_not_called()
+
+    # TEST 23 — "ขาดอะไรอีก" — missing-only phrasing still shows both
+    # halves (the composer always includes both; the exact wording
+    # variant only needs to be RECOGNIZED, not change the response shape).
+    def test_23_missing_only_phrasing_recognized(self):
+        history = self._status_query_setup()
+        result = self.engine.decide("ขาดอะไรอีก", history=history, context={"developer_mode": True})
+        self.assertIn("อำเภอ/เขต", result["reply"]["text"])
+        self.assertIn("รหัสไปรษณีย์", result["reply"]["text"])
+        self.assertNotEqual(result["routing"]["type"], "RAG")
+
+    # TEST 24 — "ผมให้ข้อมูลอะไรไปแล้วบ้าง" — collected-oriented phrasing.
+    def test_24_collected_oriented_phrasing_recognized(self):
+        history = self._status_query_setup()
+        result = self.engine.decide("ผมให้ข้อมูลอะไรไปแล้วบ้าง", history=history, context={"developer_mode": True})
+        self.assertIn("SP1008", result["reply"]["text"])
+        self.assertNotEqual(result["routing"]["type"], "RAG")
+
+    # TEST 25 — flow continues normally from the SAME state after a status query.
+    def test_25_flow_continues_after_status_query(self):
+        history = self._status_query_setup()
+        with patch("services.action_executor.requests.request") as mock_req:
+            status_result = self.engine.decide("มีข้อมูลอะไรบ้าง", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "มีข้อมูลอะไรบ้าง"},
+                        {"role": "assistant", "content": status_result["reply"]["text"]}]
+            final = self.engine.decide("อำเภอ: บางพลี\nรหัสไปรษณีย์: 10540", history=history,
+                                        context={"developer_mode": True})
+        collected = final["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("CustCode"), "SP1008")
+        self.assertEqual(collected.get("ShipmentCode"), "SP100820260716001")
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย ใจดี")
+        self.assertEqual(collected.get("District"), "บางพลี")
+        self.assertEqual(collected.get("PostalCode"), "10540")
+        self.assertIn("ยืนยัน", final["reply"]["text"])
+        mock_req.assert_not_called()
+
+    # TEST 26 — status query never increments retry_count.
+    def test_26_status_query_never_increments_retry_count(self):
+        history = self._status_query_setup()
+        with patch("services.action_executor.requests.request") as mock_req:
+            for _ in range(3):
+                result = self.engine.decide("มีข้อมูลอะไรบ้าง", history=history, context={"developer_mode": True})
+                history += [{"role": "user", "content": "มีข้อมูลอะไรบ้าง"},
+                            {"role": "assistant", "content": result["reply"]["text"]}]
+            self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+            final = self.engine.decide("อำเภอ: บางพลี\nรหัสไปรษณีย์: 10540", history=history,
+                                        context={"developer_mode": True})
+        self.assertEqual(final["developer"]["information_collection_status"].get("retry_count"), 0)
+        self.assertNotEqual(final["routing"]["type"], "HUMAN_HANDOFF")
+        mock_req.assert_not_called()
+
+    # TEST 27 — status query never triggers HUMAN_HANDOFF (covered by 26's
+    # 3x-repeat + assertion above; this asserts it standalone too).
+    def test_27_status_query_never_triggers_human_handoff(self):
+        history = self._status_query_setup()
+        result = self.engine.decide("มีข้อมูลอะไรบ้าง", history=history, context={"developer_mode": True})
+        self.assertNotEqual(result["routing"]["type"], "HUMAN_HANDOFF")
+
+    # TEST 28 — status query never executes/notifies (SendLineNotiCS).
+    def test_28_status_query_never_executes(self):
+        history = self._status_query_setup()
+        with patch("services.action_executor.requests.request") as mock_req:
+            self.engine.decide("มีข้อมูลอะไรบ้าง", history=history, context={"developer_mode": True})
+        mock_req.assert_not_called()
+
+    # TEST 29 — a field correction sent right after a status query still works.
+    def test_29_correction_after_status_query_still_works(self):
+        history = self._status_query_setup()
+        with patch("services.action_executor.requests.request"):
+            status_result = self.engine.decide("มีข้อมูลอะไรบ้าง", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "มีข้อมูลอะไรบ้าง"},
+                        {"role": "assistant", "content": status_result["reply"]["text"]}]
+            corrected = self.engine.decide("จังหวัดผิดครับ เปลี่ยนเป็นชลบุรี", history=history,
+                                            context={"developer_mode": True})
+        collected = corrected["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("Province"), "ชลบุรี")
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย ใจดี")  # untouched
+
+    # TEST 30 — the confirmation summary itself is completely unaffected
+    # (a normal completing message never matches the status-query regex).
+    def test_30_confirmation_summary_unaffected(self):
+        history = self._status_query_setup()
+        with patch("services.action_executor.requests.request") as mock_req:
+            final = self.engine.decide("อำเภอ: บางพลี\nรหัสไปรษณีย์: 10540", history=history,
+                                        context={"developer_mode": True})
+        self.assertIn("ยืนยัน", final["reply"]["text"])
+        self.assertIn("รหัสไปรษณีย์: 10540", final["reply"]["text"])
+        mock_req.assert_not_called()
+
+    # TEST 31 — a status-query-shaped message OUTSIDE any active
+    # collection must never be hardcoded into the address flow; ordinary
+    # routing (RAG/fallback, since it matches no Business Action) applies.
+    def test_31_status_query_outside_active_collection_uses_ordinary_routing(self):
+        self._seed_address_change_action()
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="RAG answer")):
+            result = self.engine.decide("มีข้อมูลอะไรบ้าง", history=[], context={"developer_mode": True})
+        self.assertNotEqual(result["developer"].get("selected_business_action"), "requestshippingaddresschange")
+        info = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(info.get("selected_business_action"), "requestshippingaddresschange")
+
+
+class TestGenericCollectionStatusQuery(unittest.TestCase):
+    """Proves the Collection Status Query fix (2026-08-24) is genuinely
+    generic — lives in _handle_dynamic_collection, the SAME Slot Filling/
+    Dynamic Collection entry point every Business Action already goes
+    through — using an unrelated, non-address action with its own
+    multi-parameter collection, never requestshippingaddresschange."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+        self.action_id = _seed_action(
+            self.reg, key="submit_support_ticket", action_type="API", category="Customer Support",
+            ai_description="รับเรื่องแจ้งปัญหาจากลูกค้า", keywords=["แจ้งปัญหา"])
+        self.reg.update(self.action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"}})
+        self.reg.replace_parameters(self.action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+            {"name": "Subject", "display_name": "หัวข้อปัญหา", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty"},
+            {"name": "Detail", "display_name": "รายละเอียดปัญหา", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty"},
+        ])
+        self.reg.upsert_execution(self.action_id, {"endpoint": "https://example.test/ticket", "http_method": "POST"})
+
+    def test_status_query_on_unrelated_action_summarizes_generically(self):
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide("แจ้งปัญหา", history=[], context={"developer_mode": True})
+            history = [{"role": "user", "content": "แจ้งปัญหา"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+            turn2 = self.engine.decide("SP1008", history=history, context={"developer_mode": True})
+            history += [{"role": "user", "content": "SP1008"}, {"role": "assistant", "content": turn2["reply"]["text"]}]
+            with patch("services.action_executor.requests.request") as mock_req:
+                status = self.engine.decide("มีข้อมูลอะไรบ้าง", history=history, context={"developer_mode": True})
+        self.assertIn("SP1008", status["reply"]["text"])
+        self.assertIn("หัวข้อปัญหา", status["reply"]["text"])  # in the missing list
+        self.assertNotEqual(status["routing"]["type"], "RAG")
+        self.assertNotEqual(status["routing"]["type"], "HUMAN_HANDOFF")
+        mock_req.assert_not_called()
+
 
 class TestGenericContinuationIntentGuard(unittest.TestCase):
     """Generic Continuation Intent Guard fix (2026-08-24) — proves the fix

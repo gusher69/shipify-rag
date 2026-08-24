@@ -110,6 +110,47 @@ def _generate_parameter_question(param: Dict) -> str:
     return f"กรุณาแจ้ง{display}ค่ะ"
 
 
+# Generic Collection Status Query (Address Change Full UAT — Status
+# Query fix, 2026-08-24) — a customer asking "what do you have so far /
+# what's still missing" mid-collection, deterministic and Registry-
+# driven like every other conversation-intelligence signal here; never
+# tied to one Business Action. Kept intentionally narrow (explicit
+# "ข้อมูล"/"ขาด" phrasing) so it can never fire on an ordinary answer
+# that happens to share a word with it.
+_COLLECTION_STATUS_QUERY_RE = re.compile(
+    r"มีข้อมูลอะไร|ข้อมูลที่ให้ไปมีอะไร|ขาดอะไร|ต้องการข้อมูลอะไรอีก|ให้ข้อมูล.{0,15}ไปแล้ว",
+    re.IGNORECASE)
+
+
+def _compose_collection_status_reply(action: Dict, registry, collected: Dict) -> Optional[str]:
+    """Answers a Collection Status Query from the SAME real `collected`
+    dict and `registry.validate_can_execute()` result every other step
+    of this flow already trusts — reuses _compose_field_summary (the
+    exact composer the confirmation summary itself calls) for the "have"
+    half, and validate_can_execute's own missing-parameter/group list for
+    the "still need" half, so it can never invent a value or a field
+    name that isn't genuinely present or genuinely missing. Returns None
+    only when there is truly nothing to report (no customer_message
+    parameters collected AND nothing missing) — the caller falls back to
+    ordinary handling in that case."""
+    have_summary = _compose_field_summary(action, collected)
+    validation = registry.validate_can_execute(action["id"], collected)
+    askable = _askable_parameters_by_name(action)
+    missing_names = list(validation.get("missing_required") or [])
+    for group in validation.get("failed_groups") or []:
+        missing_names.extend(m for m in (group.get("members") or []) if m not in collected)
+    missing_lines = [f"- {askable[n].get('display_name') or n}" for n in missing_names if n in askable]
+    if not have_summary and not missing_lines:
+        return None
+    parts = [f"ข้อมูลที่ได้รับตอนนี้ค่ะ\n\n{have_summary}" if have_summary else "ยังไม่ได้รับข้อมูลใดๆ ค่ะ"]
+    if missing_lines:
+        parts.append("ข้อมูลที่ยังขาด:\n" + "\n".join(missing_lines))
+    next_after = _next_expected_parameter(action, registry, collected)
+    if next_after:
+        parts.append(_generate_parameter_question(next_after))
+    return "\n\n".join(parts)
+
+
 def _compose_field_summary(action: Dict, collected: Dict) -> str:
     """Generic, config-driven summary composer (2026-08-20) — used both
     to enrich the confirmation-gate question below and to build the
@@ -458,6 +499,19 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
                 if param_name and param_name not in working:
                     working[param_name] = value
                     used_values.add(value)
+                    # Status Query fix companion (2026-08-24) — also
+                    # exclude any structural sub-token WITHIN this
+                    # value (e.g. the house-number "99/12" inside a full
+                    # Address value "99/12 หมู่ 4") from the generic
+                    # required-parameter loop below. Confirmed live: when
+                    # a DIFFERENT geo field (e.g. District) has no marker
+                    # in the message at all, that same sub-token was
+                    # picked up FRESH from the raw message — via its own,
+                    # independent, shorter structural-candidate match —
+                    # and bound to the unrelated missing field, since only
+                    # the FULL address string had been recorded as used,
+                    # never the sub-token also living inside it.
+                    used_values.update(_extract_structural_candidates(value))
 
     ambiguous_candidates: List[str] = []
     while True:
@@ -554,8 +608,22 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
             continue
         collected_so_far = _replay_business_action_collection(full_action, registry, history[:-1])
         next_param = _next_expected_parameter(full_action, registry, collected_so_far)
-        if next_param and _generate_parameter_question(next_param) == last_text:
-            matches.append(full_action)
+        # Status Query companion fix (2026-08-24) — a Collection Status
+        # Query reply ("ข้อมูลที่ได้รับตอนนี้ค่ะ...\n\n{same question}")
+        # always ENDS with this exact same generated question/
+        # confirmation text (see _compose_collection_status_reply), but
+        # is never IDENTICAL to it — confirmed live: continuation
+        # resolution went straight to None after a status-query turn
+        # (an exact-equality check only), so the very next reply (a
+        # correction, or any answer with no identifier/keyword of its
+        # own to win fresh selection by coincidence) fell through to RAG
+        # entirely. Accepting "ends with" alongside exact-equality only
+        # ever ADDS a recognized match; every existing exact-match case
+        # is completely unaffected.
+        if next_param:
+            expected_q = _generate_parameter_question(next_param)
+            if last_text == expected_q or last_text.endswith("\n\n" + expected_q):
+                matches.append(full_action)
         elif (next_param is None and _requires_confirmation(full_action)
               and _generate_confirmation_question(full_action, collected_so_far) == last_text):
             # The last assistant turn was THIS action's confirmation-gate
@@ -1724,6 +1792,33 @@ class DecisionEngine:
         if context.get("pending_action_id") == action_id:
             for name, value in (context.get("pending_parameters") or {}).items():
                 collected.setdefault(name, value)
+
+        # Generic Collection Status Query (Address Change Full UAT —
+        # Status Query fix, 2026-08-24) — checked BEFORE this message is
+        # ever bound to any parameter, so a question like "มีข้อมูลอะไร
+        # บ้าง"/"ขาดอะไรอีก" can never be mistaken for a free-text answer
+        # to whatever happens to be pending (confirmed live: an address-
+        # component-tagged field is already protected from this by its
+        # own structural-candidate-only binding, but this guards EVERY
+        # Business Action generically, including a plain non_empty field
+        # that would otherwise swallow it). Never binds, never touches
+        # retry/escalation, never executes — this turn's reply text is
+        # never `_generate_parameter_question`'s own bare text, so a
+        # later _count_genuine_retries pass naturally never counts it as
+        # a repeated, unanswered question.
+        if _COLLECTION_STATUS_QUERY_RE.search(message or ""):
+            status_reply = _compose_collection_status_reply(full_action, self.registry, collected)
+            if status_reply:
+                developer_trace["information_collection_status"] = {
+                    "source": "business_action_registry",
+                    "selected_business_action": full_action.get("action_key"),
+                    "collected_parameters": dict(collected),
+                    "status_query": True,
+                }
+                return self._finalize(reply=_build_response(text=status_reply), routing_type="WORKFLOW",
+                                       workflow=workflow_hint, developer_trace=developer_trace,
+                                       context=context, start=start, alert=_detect_alert(message, context))
+
         result = _bind_all_from_message(full_action, self.registry, collected, message)
         collected = result["collected"]
         ambiguous_candidates = result["ambiguous_candidates"]

@@ -134,6 +134,17 @@ class TestParseThaiAddressNoMarkers(unittest.TestCase):
         self.assertEqual(parse_thai_address("เปลี่ยนที่อยู่รับของ SP100820260716001"), {})
         self.assertEqual(parse_thai_address("เปลี่ยนที่อยู่รับสินค้า SP100820260716001"), {})
 
+    def test_general_leading_thai_descriptor_before_any_code_never_becomes_a_false_address(self):
+        # Status Query companion fix (2026-08-24) — a generalization of
+        # the two tests above: ANY short Thai-only descriptor word
+        # immediately before a bare code is stripped before the
+        # bare-identifier check, not just the specific phrases already
+        # covered by compound labels. Confirmed live: this exact
+        # phrasing ("ที่อยู่ของบิล", not one of the previously-listed
+        # compound labels) surfaced only after a companion fix made
+        # structural-candidate exclusion more precise elsewhere.
+        self.assertEqual(parse_thai_address("ต้องการเปลี่ยนที่อยู่ของบิล SP100820260716001"), {})
+
     def test_postal_code_immediately_after_thai_text_no_space_still_recognized(self):
         # Thai-script adjacency (no space before the digits) must remain
         # unaffected by the ASCII-only boundary guard above.

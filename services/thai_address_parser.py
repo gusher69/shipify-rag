@@ -98,6 +98,16 @@ _ADDRESS_LABEL_RE = re.compile(
 # is never a real street address by itself, no matter what label
 # preceded it. See the plausibility check this guards, below.
 _BARE_IDENTIFIER_RE = re.compile(r"^[A-Za-z]{1,4}\d+$")
+# A short run of Thai-only text (no digit, no ASCII letter of its own)
+# immediately followed by an ASCII letter — the start of a code — is a
+# left-over descriptor word from the trigger phrase's OWN label (e.g.
+# "ของบิล" in "ที่อยู่ของบิล SP100820260716001", "บิลขนส่ง" in
+# "ที่อยู่บิลขนส่ง SP1008..."), never part of the real address, no
+# matter which specific descriptor word an admin's or customer's exact
+# phrasing happens to use. Generalizes the compound-label list below
+# (kept for the phrases already explicitly documented there) instead of
+# needing every future descriptor word enumerated one at a time.
+_LEADING_THAI_DESCRIPTOR_RE = re.compile(r"^[ก-๙\s]{1,20}(?=[A-Za-z])")
 # A customer using a label+colon layout ("ตำบล: ตาขัน", "จังหวัด :ระยอง",
 # "จังหวัด : ระยอง", full-width "：" included) leaves the colon and any
 # surrounding spaces sitting right after a matched marker/label — never
@@ -207,8 +217,10 @@ def parse_thai_address(text: str) -> Dict[str, str]:
     # (the same generic identifier shape CustCode/OrderCode/ShipmentCode
     # etc. all share) is never a real address on its own, regardless of
     # whether a geo marker happened to follow.
-    if address_value and _BARE_IDENTIFIER_RE.fullmatch(address_value):
-        address_value = ""
+    if address_value:
+        stripped = _LEADING_THAI_DESCRIPTOR_RE.sub("", address_value)
+        if _BARE_IDENTIFIER_RE.fullmatch(stripped or address_value):
+            address_value = ""
     if address_value:
         result["address"] = address_value
 
