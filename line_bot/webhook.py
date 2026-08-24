@@ -324,8 +324,18 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             # pending row is superseded (PendingConfirmationService.create
             # below cancels it) and this message runs as a fresh turn,
             # reusing the SAME selection/collection/confirmation pipeline
-            # — no per-action revision logic.
-            result = engine.decide(question, history=recent_history, context=decide_context)
+            # — no per-action revision logic. pending_action_id/
+            # pending_parameters (Address Change Full UAT fix,
+            # 2026-08-24) let decide() recognize this as a continuation
+            # of the SAME still-pending action even when history-replay
+            # alone can't reconstruct it (e.g. a field correction after
+            # an Identifier-Memory-sourced parameter) — a genuine topical
+            # diversion still overrides this via the Generic Continuation
+            # Intent Guard.
+            result = engine.decide(question, history=recent_history,
+                                    context={**decide_context,
+                                             "pending_action_id": pending["pending_action_id"],
+                                             "pending_parameters": pending.get("pending_parameters") or {}})
     else:
         reply_kind_for_expired_check = classify_confirmation_reply(question)
         if reply_kind_for_expired_check in ("confirm", "cancel"):

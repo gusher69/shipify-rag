@@ -1402,6 +1402,33 @@ class DecisionEngine:
             # schema — drive what gets asked.
             continuation_action = _resolve_continuation_action(self.registry, history, workflow_hint)
 
+            # Reliable Pending-Confirmation Continuation (Address Change
+            # Full UAT fix, 2026-08-24) — _resolve_continuation_action
+            # only recognizes continuation by re-generating the exact
+            # question/confirmation text from a PURE history-replay and
+            # string-comparing it to the last assistant turn; that replay
+            # can never recover a parameter that was originally filled
+            # from Identifier Memory / customer_context rather than a
+            # literal "you asked, I answered" history pair (confirmed
+            # live: a field correction — "จังหวัดผิดครับ เปลี่ยนเป็นชลบุรี"
+            # — sent while a confirmation was genuinely pending fell
+            # through to RAG entirely, because CustCode had been supplied
+            # several turns earlier via Identifier Memory and the replay
+            # could never reconstruct the SAME confirmation text to match
+            # against). A caller that already knows — via services/
+            # pending_confirmation_service.py, the single source of truth
+            # for "is a confirmation genuinely pending", never re-derived
+            # here — passes that action's id directly; the Generic
+            # Continuation Intent Guard immediately below still applies
+            # in full, so a genuine topical diversion overrides this
+            # exactly as it would any other continuation.
+            if not continuation_action:
+                pending_action_id = context.get("pending_action_id")
+                if pending_action_id:
+                    pending_full_action = self.registry.get_full(pending_action_id, mask_secrets=False)
+                    if pending_full_action and pending_full_action.get("enabled"):
+                        continuation_action = pending_full_action
+
             # Generic Continuation Intent Guard (Confirmation/Collection
             # Continuation Correctness fix, 2026-08-24) — confirmed live:
             # once an action asks a follow-up question, _resolve_
@@ -1687,6 +1714,16 @@ class DecisionEngine:
         full_action = action if action.get("parameters") is not None else self.registry.get_full(action_id, mask_secrets=False)
 
         collected = _replay_business_action_collection(full_action, self.registry, history)
+        # Reliable Pending-Confirmation Seed (Address Change Full UAT
+        # fix, 2026-08-24) — companion to the continuation fallback
+        # above: fills in whatever the fragile history replay couldn't
+        # recover, from the SAME caller-supplied, already-validated
+        # pending_parameters (never overriding anything replay already
+        # found — that's always at least as fresh). Only trusted for
+        # THIS exact action id, never applied to a different one.
+        if context.get("pending_action_id") == action_id:
+            for name, value in (context.get("pending_parameters") or {}).items():
+                collected.setdefault(name, value)
         result = _bind_all_from_message(full_action, self.registry, collected, message)
         collected = result["collected"]
         ambiguous_candidates = result["ambiguous_candidates"]

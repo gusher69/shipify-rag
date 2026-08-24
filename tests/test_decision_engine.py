@@ -3505,6 +3505,44 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         sent_body = mock_req.call_args.kwargs.get("json") or mock_req.call_args.kwargs.get("data") or {}
         self.assertEqual(sent_body.get("CustCode"), "SP1008")
 
+    # TEST 15b — Address Change Full UAT fix (2026-08-24): a field
+    # correction sent WHILE a confirmation is genuinely pending must
+    # apply, even when history-replay alone can never reconstruct the
+    # confirmation text to match against (the SAME truncated-history gap
+    # TEST 15 proves for an actual "ยืนยัน" reply — this proves the
+    # analogous fix for a "revise a field" reply instead). Without
+    # pending_action_id/pending_parameters in context, this exact
+    # truncated history falls through to RAG entirely (confirmed live
+    # and via _resolve_continuation_action returning None for this
+    # shape) — the caller-supplied pending state is what recovers it.
+    def test_15b_pending_parameters_recovers_correction_when_replay_cannot(self):
+        action_id = self._seed_address_change_action()
+        address_message = (f"บิล SP100820260716001 ผู้รับ ทดสอบ 0812345678 ที่อยู่ {self.FULL_ADDRESS}")
+        confirmation_question = "รบกวนตรวจสอบข้อมูลอีกครั้งนะคะ... ยืนยันการดำเนินการหรือไม่คะ?"
+        truncated_history = [
+            {"role": "user", "content": address_message},
+            {"role": "assistant", "content": confirmation_question},
+        ]
+        pending_parameters = {
+            "CustCode": "SP1008", "ShipmentCode": "SP100820260716001",
+            "ReceiverName": "ทดสอบ", "ReceiverPhone": "0812345678",
+            "Address": "8/7 ม.8", "Subdistrict": "ตาขัน", "District": "บ้านค่าย",
+            "Province": "ระยอง", "PostalCode": "21120",
+        }
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide(
+                "จังหวัดผิดครับ เปลี่ยนเป็นชลบุรี", history=truncated_history,
+                context={"developer_mode": True,
+                          "pending_action_id": action_id, "pending_parameters": pending_parameters})
+        self.assertNotEqual(result["routing"]["type"], "RAG")
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("Province"), "ชลบุรี")
+        self.assertEqual(collected.get("CustCode"), "SP1008")
+        self.assertEqual(collected.get("District"), "บ้านค่าย")
+        self.assertEqual(collected.get("PostalCode"), "21120")
+        self.assertIn("ชลบุรี", result["reply"]["text"])
+        mock_req.assert_not_called()  # revised summary shown again, never auto-executes
+
     def _seed_customer_lookup_action(self):
         """A second, unrelated Business Action ('ข้อมูลลูกค้า' really is
         its own real production intent, getdatacustomer) seeded alongside
