@@ -81,7 +81,18 @@ _RECEIVER_NAME_RE = re.compile(
 # count as a real address value" plausibility check below protects
 # against a stray, unrelated "อยู่" (e.g. "...ข้อมูลอยู่เลยครับ") ever
 # fabricating a false address.
-_ADDRESS_LABEL_RE = re.compile(r"ที่อยู่จัดส่ง|ที่อยู่|อยู่")
+# "ที่อยู่บิลขนส่ง"/"ที่อยู่รับของ"/"ที่อยู่รับสินค้า" (Address Change
+# Full UAT fix, 2026-08-24) — these mirror requestshippingaddresschange's
+# OWN real configured trigger phrase vocabulary ("ต้องการเปลี่ยนที่อยู่
+# บิลขนส่ง", "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า"). Without
+# them recognized as ONE compound label, only the shorter "ที่อยู่" prefix
+# matched, leaving the descriptor word itself ("บิลขนส่ง"/"รับของ"/
+# "รับสินค้า") sitting in front of whatever followed — confirmed live:
+# "ต้องการเปลี่ยนที่อยู่บิลขนส่ง SP100820260716001" produced Address=
+# "บิลขนส่ง SP100820260716001" (the bare-identifier guard below only
+# catches a trailing code with NOTHING else in front of it).
+_ADDRESS_LABEL_RE = re.compile(
+    r"ที่อยู่บิลขนส่ง|ที่อยู่รับของ|ที่อยู่รับสินค้า|ที่อยู่จัดส่ง|ที่อยู่|อยู่")
 # A bare short-letters-then-digits token — the SAME generic shape every
 # platform identifier (CustCode, OrderCode, ShipmentCode, ...) shares —
 # is never a real street address by itself, no matter what label

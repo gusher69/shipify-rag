@@ -121,6 +121,19 @@ class TestParseThaiAddressNoMarkers(unittest.TestCase):
         self.assertEqual(parse_thai_address("ต้องการเปลี่ยนที่อยู่จัดส่ง SP1008"), {})
         self.assertEqual(parse_thai_address("ที่อยู่ SP1008"), {})
 
+    def test_trigger_phrase_and_descriptor_word_with_trailing_shipmentcode_never_becomes_a_false_address(self):
+        # Address Change Full UAT fix (2026-08-24) — the SAME class of
+        # bug as the CustCode case above, for a different real trigger
+        # phrase: "ที่อยู่บิลขนส่ง" (the "billing/shipment" descriptor
+        # word) must be recognized as ONE compound label, not just the
+        # shorter "ที่อยู่" prefix -- otherwise "บิลขนส่ง" itself sits in
+        # front of a trailing ShipmentCode and neither the digit check
+        # nor the bare-identifier guard alone can catch it.
+        self.assertEqual(
+            parse_thai_address("SP1008 ต้องการเปลี่ยนที่อยู่บิลขนส่ง SP100820260716001"), {})
+        self.assertEqual(parse_thai_address("เปลี่ยนที่อยู่รับของ SP100820260716001"), {})
+        self.assertEqual(parse_thai_address("เปลี่ยนที่อยู่รับสินค้า SP100820260716001"), {})
+
     def test_postal_code_immediately_after_thai_text_no_space_still_recognized(self):
         # Thai-script adjacency (no space before the digits) must remain
         # unaffected by the ASCII-only boundary guard above.
