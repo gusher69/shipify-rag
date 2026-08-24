@@ -255,17 +255,32 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
                                                         if p.get("required")]
                     id_scores: Dict[str, float] = {a["id"]: 0.0 for a in close}
                     for v in structural_candidates:
-                        tier1_patterns = {
-                            aid: [p.get("validation_pattern") for p in params
+                        # Generic Business Action Routing Score Imbalance
+                        # fix (2026-08-24) — grouped by the literal
+                        # validation_pattern STRING here, exactly like
+                        # services/decision_engine.py's own
+                        # _identifier_pattern_score used to (see that
+                        # function's docstring for the full root-cause
+                        # writeup). Two actions' "CustCode" parameter
+                        # spelled with a slightly different regex looked
+                        # like unrelated, mutually-exclusive identifiers,
+                        # so a candidate whose admin happened to type a
+                        # narrower pattern for the SAME concept could look
+                        # artificially unique here too. Grouped by the
+                        # parameter's NAME instead — the identifier
+                        # CONCEPT the customer supplied a value for, not
+                        # incidental regex spelling.
+                        tier1_names = {
+                            aid: [p.get("name") for p in params
                                   if p.get("validation_pattern") and _bind_candidate_to_parameter([v], p)["status"] == "bound"]
                             for aid, params in required_by_action.items()
                         }
-                        pattern_sharers: Dict[str, set] = {}
-                        for aid, patterns in tier1_patterns.items():
-                            for pat in patterns:
-                                pattern_sharers.setdefault(pat, set()).add(aid)
-                        tier1_scores = {aid: sum(1.0 / len(pattern_sharers[pat]) for pat in patterns)
-                                        for aid, patterns in tier1_patterns.items()}
+                        name_sharers: Dict[str, set] = {}
+                        for aid, names in tier1_names.items():
+                            for nm in names:
+                                name_sharers.setdefault(nm, set()).add(aid)
+                        tier1_scores = {aid: sum(1.0 / len(name_sharers[nm]) for nm in names)
+                                        for aid, names in tier1_names.items()}
                         if max(tier1_scores.values(), default=0.0) > 0:
                             for aid, s in tier1_scores.items():
                                 id_scores[aid] += s

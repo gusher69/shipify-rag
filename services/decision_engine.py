@@ -1090,26 +1090,47 @@ _TOKEN_SPLIT_RE = re.compile(r"[\s,;]+")
 
 
 def _identifier_pattern_score(registry, action: Dict, message: str, *,
-                               pattern_action_counts: Optional[Dict[str, int]] = None) -> float:
-    """`pattern_action_counts` (built once per search_candidate_actions()
-    call, see there) maps each validation_pattern string to how many of
-    THIS TURN'S candidate actions configure that same pattern. A pattern
-    genuinely unique to one action (e.g. OrderCode's `^POS\\d+$`) is
-    strong, discriminating evidence and keeps the full weight. A pattern
-    shared by many candidates (e.g. CustCode, configured near-identically
-    on most ERP actions) matches ALL of them equally, so it can never
-    actually discriminate between them — full weight there would let a
-    bare customer code alone tip the choice via nothing more meaningful
-    than each action's own priority tiebreaker (confirmed live, 2026-08-15
-    AI Playground Real User Journey UAT: a bare CustCode-shaped message
-    with no other context was winning on SearchDataTracking purely
-    because it happened to have priority=1 while five other equally-
-    matching actions sat at priority=0 — not because tracking was ever
-    actually implied). Dividing by the sharer count makes a fully-shared
-    pattern contribute a small, non-decisive amount instead — the same
-    "shared evidence is weak evidence for any ONE candidate" principle
+                               param_action_counts: Optional[Dict[str, int]] = None) -> float:
+    """`param_action_counts` (built once per search_candidate_actions()
+    call, see there — the SAME dict `_parameter_availability_score`
+    already uses) maps each PARAMETER NAME to how many of THIS TURN'S
+    candidate actions configure a parameter with that name. A name
+    genuinely unique to one action (e.g. "OrderCode") is strong,
+    discriminating evidence and keeps the full weight. A name shared by
+    many candidates (e.g. "CustCode", configured on nearly every ERP
+    action) matches ALL of them equally, so it can never actually
+    discriminate between them — full weight there would let a bare
+    customer code alone tip the choice via nothing more meaningful than
+    each action's own priority tiebreaker (confirmed live, 2026-08-15 AI
+    Playground Real User Journey UAT: a bare CustCode-shaped message with
+    no other context was winning on SearchDataTracking purely because it
+    happened to have priority=1 while five other equally-matching actions
+    sat at priority=0 — not because tracking was ever actually implied).
+    Dividing by the sharer count makes a fully-shared name contribute a
+    small, non-decisive amount instead — the same "shared evidence is
+    weak evidence for any ONE candidate" principle
     services/hybrid_question_classifier.py's own ambiguity-ratio check
-    already applies to keyword scoring."""
+    already applies to keyword scoring.
+
+    Generic Business Action Routing Score Imbalance fix (2026-08-24) —
+    this used to dilute by the literal validation_pattern STRING instead
+    of the parameter's NAME, so two actions whose "CustCode" parameter
+    happened to be spelled with a slightly different regex (one admin
+    wrote `^[A-Za-z]{2}\\d{4,6}$`, another `^[A-Za-z]{2}\\d+$`) were
+    treated as having completely unrelated, mutually-exclusive
+    identifiers — the narrower-pattern action's match then looked
+    artificially "unique" (undiluted) and could outscore every
+    keyword/example-backed candidate on nothing but a bare customer code,
+    for ANY action, not just one (confirmed live: "SP1008 ข้อมูลลูกค้า"
+    — literally getdatacustomer's own purpose — still lost to an
+    unrelated address-change action on identifier score alone). Grouping
+    by name instead — reusing the exact dict `_parameter_availability_score`
+    already builds and trusts for the identical purpose — means the SAME
+    semantic identifier concept dilutes consistently no matter how many
+    slightly-different regex spellings admins gave it across actions,
+    without weakening a genuinely unique identifier's own discriminating
+    power (a name only one action configures, e.g. "OrderCode", is
+    unaffected)."""
     try:
         params = registry.get_parameters(action["id"])
     except Exception:
@@ -1125,7 +1146,7 @@ def _identifier_pattern_score(registry, action: Dict, message: str, *,
         except re.error:
             continue
         if any(regex.match(tok) for tok in tokens):
-            sharers = (pattern_action_counts or {}).get(pattern, 1)
+            sharers = (param_action_counts or {}).get(p.get("name"), 1)
             score += _IDENTIFIER_PATTERN_WEIGHT / max(sharers, 1)
     return score
 
@@ -1148,12 +1169,17 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
     if action_types:
         candidates = [a for a in candidates if a.get("action_type") in action_types]
 
-    # Pre-pass for _identifier_pattern_score's discriminating-power
-    # weighting (see that function's own docstring) — how many of THIS
-    # turn's candidates configure each validation_pattern string. Costs
-    # one extra get_parameters() call per candidate, same "small action
-    # count" tradeoff already accepted for the per-candidate calls below.
-    pattern_action_counts: Dict[str, int] = {}
+    # Pre-pass for _identifier_pattern_score's AND _parameter_availability_
+    # score's shared discriminating-power weighting (see either function's
+    # own docstring) — how many of THIS turn's candidates configure a
+    # parameter with each NAME (never the literal validation_pattern
+    # string — two actions' "CustCode" params can be spelled with
+    # slightly different regexes and still mean the same identifier
+    # concept; grouping by name instead of pattern text is what the
+    # Generic Business Action Routing Score Imbalance fix, 2026-08-24,
+    # relies on). Costs one extra get_parameters() call per candidate,
+    # same "small action count" tradeoff already accepted for the
+    # per-candidate calls below.
     param_action_counts: Dict[str, int] = {}
     params_by_action_id: Dict[str, List[Dict]] = {}
     for action in candidates:
@@ -1162,8 +1188,6 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
         except Exception:
             action_params = []
         params_by_action_id[action["id"]] = action_params
-        for pattern in {p.get("validation_pattern") for p in action_params if p.get("validation_pattern")}:
-            pattern_action_counts[pattern] = pattern_action_counts.get(pattern, 0) + 1
         for name in {p.get("name") for p in action_params if p.get("name")}:
             param_action_counts[name] = param_action_counts.get(name, 0) + 1
 
@@ -1185,7 +1209,7 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
         # a same-category list/summary action's generic keyword happens to
         # match instead. The registry call this costs is cheap relative to
         # the rest of this loop and the action count here is small.
-        id_score = _identifier_pattern_score(registry, action, message, pattern_action_counts=pattern_action_counts)
+        id_score = _identifier_pattern_score(registry, action, message, param_action_counts=param_action_counts)
         if id_score:
             score += id_score
             reasons.append(f"message contains a value matching this action's own "

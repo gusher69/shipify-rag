@@ -2749,6 +2749,301 @@ class TestOrderShipmentTrackingRoutingPrecision(unittest.TestCase):
         return selected
 
 
+def _seed_generic_routing_matrix(reg):
+    """Generic Business Action Routing Score Imbalance fix (2026-08-24) —
+    mirrors the REAL production registry's shipment/order/tracking/
+    customer/address-change actions (confirmed via a live, read-only
+    check the same day), specifically INCLUDING requestshippingaddress-
+    change's own narrower CustCode validation_pattern
+    (`^[A-Za-z]{2}\\d{4,6}$` vs every other action's `^[A-Za-z]{2}\\d+$`)
+    — the exact configuration asymmetry that let it win on identifier-
+    pattern score alone. TestOrderShipmentTrackingRoutingPrecision's own
+    fixture never included this action, which is why this specific bug
+    was never caught by that (still entirely valid, still passing)
+    fixture. Also adds one RAG action so the RAG-regression scenarios in
+    Phase 3 of this fix exercise a real competing candidate, not an
+    empty registry."""
+    cust_pattern = r"^[A-Za-z]{2}\d+$"
+    _seed_action(reg, key="searchdataorder", action_type="API", category="Customer Order Retrieval",
+                 keywords=["เลขคำสั่งซื้อ", "PO เดียว", "order detail", "รายละเอียดคำสั่งซื้อ", "รายละเอียด order"],
+                 params=[
+                     {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "OrderCode", "display_name": "เลขที่คำสั่งซื้อ", "required": True,
+                      "validation_pattern": r"^POS?\d+$"},
+                 ])
+    _seed_action(reg, key="searchdataorderlist", action_type="API", category="Customer Order Retrieval",
+                 keywords=["คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "order list", "PO", "ออเดอร์", "order"],
+                 params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                          "validation_pattern": cust_pattern}])
+    _seed_action(reg, key="searchdatashipment", action_type="API", category="Customer Shipment Retrieval",
+                 keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"],
+                 params=[
+                     {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True,
+                      "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+                 ])
+    # Real, current production search_keywords (post the 2026-08-24
+    # "SHIPMENT FILTER / COUNT / SUM AGGREGATION" fix's keyword additions).
+    _seed_action(reg, key="searchdatashipmentlist", action_type="API", category="Customer Shipment Retrieval",
+                 keywords=["พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ", "ค่าขนส่งเท่าไหร่",
+                           "ค่าส่งเท่าไหร่", "ค่าส่งล่าสุด", "บิลขนส่งล่าสุด", "ถูกที่สุด", "ถูกกว่า",
+                           "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "ถึงหรือยัง", "มาถึงหรือยัง", "ของถึงไหนแล้ว",
+                           "พัสดุล่าสุด", "การจัดส่งล่าสุด", "มาถึง", "จะมาถึง",
+                           "กี่บิล", "เข้าไทย", "ถึงไทย", "สถานะรับเข้าไทย"],
+                 params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                          "validation_pattern": cust_pattern}])
+    _seed_action(reg, key="searchdatatracking", action_type="API", category="Customer Shipment Retrieval",
+                 priority=1,
+                 keywords=["tracking จีน", "เลข tracking", "tracking", "ค้นหาด้วยเลข tracking", "เลข tracking จีน",
+                           "เลขพัสดุจีน", "เลขจีน", "พัสดุจีน", "หมายเลขพัสดุจีน"],
+                 params=[
+                     {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "validation_pattern": cust_pattern},
+                     {"name": "Tracking", "display_name": "เลข Tracking จีน", "required": True},
+                 ])
+    _seed_action(reg, key="getdatacustomer", action_type="API", category="Customer Data Retrieval",
+                 keywords=["ข้อมูลลูกค้า", "Wallet", "คูปอง", "ยอดเงิน", "ข้อมูลทั้งหมด"],
+                 params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False,
+                          "validation_pattern": cust_pattern}])
+    # requestshippingaddresschange — the actual real production
+    # validation_pattern for CustCode (deliberately narrower than every
+    # other action's, so the two structurally disambiguate from
+    # ShipmentCode within THIS action's own message parsing). This is
+    # the exact configuration that exposed the bug.
+    addr_id = _seed_action(
+        reg, key="requestshippingaddresschange", action_type="API", category="Customer Support Request",
+        ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
+        keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
+                   "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล",
+                   "แก้ไขที่อยู่จัดส่ง", "เปลี่ยนที่อยู่ของผม", "เปลี่ยนที่อยู่จัดส่งในไทย", "เปลี่ยนที่อยู่จัดส่ง"])
+    reg.update(addr_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
+                          "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
+    reg.replace_parameters(addr_id, [
+        {"name": "SecretCode", "required": True, "input_source": "credential_store",
+         "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+        {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+         "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        {"name": "ShipmentCode", "display_name": "เลขที่บิล/Shipment", "required": True,
+         "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+        {"name": "ReceiverName", "display_name": "ชื่อผู้รับ", "required": True,
+         "input_source": "customer_message", "validation_type": "non_empty",
+         "field_metadata": {"address_component": "receiver_name"}},
+        {"name": "ReceiverPhone", "display_name": "เบอร์โทรผู้รับ", "required": True,
+         "input_source": "customer_message", "validation_type": "phone_number",
+         "field_metadata": {"address_component": "receiver_phone"}},
+        {"name": "Address", "display_name": "ที่อยู่", "required": True,
+         "input_source": "customer_message", "validation_type": "non_empty",
+         "field_metadata": {"address_component": "address"}},
+        {"name": "Subdistrict", "display_name": "ตำบล/แขวง", "required": True,
+         "input_source": "customer_message", "validation_type": "non_empty",
+         "field_metadata": {"address_component": "subdistrict"}},
+        {"name": "District", "display_name": "อำเภอ/เขต", "required": True,
+         "input_source": "customer_message", "validation_type": "non_empty",
+         "field_metadata": {"address_component": "district"}},
+        {"name": "Province", "display_name": "จังหวัด", "required": True,
+         "input_source": "customer_message", "validation_type": "non_empty",
+         "field_metadata": {"address_component": "province"}},
+        {"name": "PostalCode", "display_name": "รหัสไปรษณีย์", "required": True,
+         "input_source": "customer_message", "validation_pattern": r"^\d{5}$",
+         "field_metadata": {"address_component": "postal_code"}},
+        {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": False,
+         "input_source": "system_generated"},
+    ])
+    reg.upsert_execution(addr_id, {
+        "endpoint": "https://fasttrade.in.th/web-service/ai-chat/SendLineNotiCS", "http_method": "POST"})
+    # A RAG action so Phase-3's RAG scenarios have a real, generic
+    # competing candidate rather than testing against an empty registry.
+    _seed_action(reg, key="kb_general", action_type="RAG", keywords=["CBM", "โกดังจีน", "คลังจีน"])
+    return addr_id
+
+
+class TestGenericIdentifierScoreImbalanceFix(unittest.TestCase):
+    """Generic Business Action Routing Score Imbalance fix (2026-08-24) —
+    a P0 customer-facing defect: any message carrying a bare CustCode
+    could be silently misrouted into requestshippingaddresschange (a
+    NOTIFICATION workflow asking for 8 more fields, including one that
+    would eventually reach a real Human/CS handoff) even with ZERO
+    keyword/semantic relevance to an address change, because
+    _identifier_pattern_score's "how many candidates share this
+    evidence" dilution grouped by the literal validation_pattern STRING
+    instead of the parameter's NAME — so an action whose admin happened
+    to type a slightly narrower regex for the SAME "CustCode" concept
+    looked artificially unique (undiluted weight 3.0) against every
+    other action's identically-named but differently-spelled pattern
+    (diluted). Confirmed live against the real production registry
+    (2026-08-24): "SP1008 ข้อมูลลูกค้า" — literally getdatacustomer's
+    own configured purpose — still lost to address-change on identifier
+    score alone before this fix.
+
+    The fix (see _identifier_pattern_score's own docstring) groups the
+    sharer-count by parameter NAME instead — the same key
+    _parameter_availability_score already uses successfully — so it
+    requires no new metadata field, no schema change, and (per this
+    class's own tests) does not weaken a genuinely unique identifier's
+    (OrderCode, ShipmentCode, Tracking) discriminating power at all."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        _seed_generic_routing_matrix(self.reg)
+        self.engine = _engine_with_registry(self.reg)
+
+    def _decide(self, message, history=None):
+        with patch("services.action_executor.requests.request") as mock_req:
+            mock_req.return_value = MagicMock(status_code=200, json=lambda: {"status": "success"})
+            with patch("services.playground_orchestrator.run_playground_turn",
+                       return_value=_fake_playground_result(answer="RAG answer text")):
+                result = self.engine.decide(message, history=history or [], context={"developer_mode": True})
+        return result, mock_req
+
+    def _selected_action_key(self, message):
+        result, _ = self._decide(message)
+        return self._selected_action_key_from_result(result)
+
+    def _selected_action_key_from_result(self, result):
+        dev = result.get("developer") or {}
+        selected = (dev.get("selected_business_action")
+                    or (dev.get("information_collection_status") or {}).get("selected_business_action"))
+        return selected
+
+    # ---- Phase 1: score breakdown proof (identifier-only never beats keyword-backed) ----
+
+    def test_identifier_only_candidate_no_longer_beats_keyword_backed_candidate(self):
+        from services.decision_engine import search_candidate_actions
+        candidates = search_candidate_actions(self.reg, workflow=None,
+                                               message="SP1008 บิลขนส่งล่าสุดค่าส่งเท่าไหร่", collected_slots={})
+        by_key = {c["action_key"]: c["_score"] for c in candidates}
+        self.assertGreater(by_key["searchdatashipmentlist"], by_key["requestshippingaddresschange"])
+
+    def test_unique_identifier_evidence_stays_undiluted(self):
+        """The fix must NOT weaken a genuinely unique identifier
+        (OrderCode) — it should still decisively win its own detail
+        action over the list action sharing only the diluted CustCode."""
+        from services.decision_engine import search_candidate_actions
+        candidates = search_candidate_actions(self.reg, workflow=None,
+                                               message="ขอรายละเอียด PO POS100820260809001", collected_slots={})
+        by_key = {c["action_key"]: c["_score"] for c in candidates}
+        self.assertGreater(by_key["searchdataorder"], by_key["searchdataorderlist"])
+
+    # ---- Phase 3 regression matrix ----
+
+    # SHIPMENT
+    def test_shipment_plain_shipping_cost_question(self):
+        self.assertEqual(self._selected_action_key("SP1008 บิลขนส่งล่าสุดค่าส่งเท่าไหร่"), "searchdatashipmentlist")
+
+    def test_shipment_arrival_question(self):
+        self.assertEqual(self._selected_action_key("SP1008 พัสดุล่าสุดถึงไหนแล้ว"), "searchdatashipmentlist")
+
+    def test_shipment_status_count_question(self):
+        self.assertEqual(self._selected_action_key("SP1008 มีบิลที่รับเข้าไทยกี่บิล"), "searchdatashipmentlist")
+
+    def test_shipment_status_sum_question(self):
+        self.assertEqual(self._selected_action_key("SP1008 บิลที่รับเข้าไทยค่าขนส่งรวมเท่าไหร่"),
+                          "searchdatashipmentlist")
+
+    # ADDRESS CHANGE — must still win decisively on its OWN real trigger phrasing.
+    def test_address_change_trigger_one(self):
+        self.assertEqual(self._selected_action_key("SP1008 ต้องการเปลี่ยนที่อยู่บิลขนส่ง"),
+                          "requestshippingaddresschange")
+
+    def test_address_change_trigger_two(self):
+        self.assertEqual(self._selected_action_key("SP1008 ช่วยเปลี่ยนที่อยู่จัดส่งให้หน่อย"),
+                          "requestshippingaddresschange")
+
+    # CUSTOMER
+    def test_customer_data_question(self):
+        self.assertEqual(self._selected_action_key("SP1008 ข้อมูลลูกค้า"), "getdatacustomer")
+
+    # ORDER
+    def test_order_latest_question(self):
+        self.assertEqual(self._selected_action_key("SP1008 order ล่าสุด"), "searchdataorderlist")
+
+    def test_order_latest_detail_question(self):
+        """This exact phrasing carries GENUINELY tied keyword evidence in
+        real production (confirmed live, 2026-08-24): searchdataorder's
+        own "รายละเอียด order" keyword and searchdataorderlist's own
+        "order"/"order list" keywords both match equally, and the shared
+        CustCode is non-discriminating either way — a SEPARATE,
+        pre-existing keyword-overlap ambiguity, not the identifier-
+        pattern-imbalance bug this fix targets. A safe clarification
+        request is the correct, non-hijacking outcome here; the only
+        hard requirement is that it never silently picks the WRONG,
+        unrelated action (address-change) or executes anything."""
+        result, mock_req = self._decide("SP1008 ขอรายละเอียด order ล่าสุด")
+        selected = self._selected_action_key_from_result(result)
+        self.assertNotEqual(selected, "requestshippingaddresschange")
+        mock_req.assert_not_called()
+
+    # TRACKING
+    def test_tracking_latest_question(self):
+        """Same genuine, pre-existing keyword-overlap ambiguity as above
+        (both searchdatatracking and searchdatashipmentlist configure
+        "tracking" as a keyword) — confirmed live against real
+        production. Must never hijack to address-change or execute."""
+        result, mock_req = self._decide("SP1008 tracking ล่าสุด")
+        selected = self._selected_action_key_from_result(result)
+        self.assertNotEqual(selected, "requestshippingaddresschange")
+        mock_req.assert_not_called()
+
+    def test_tracking_china_number_question(self):
+        self.assertEqual(self._selected_action_key("เลขพัสดุจีน testlineOnNut007 ถึงไหนแล้ว"), "searchdatatracking")
+
+    # RAG
+    def test_rag_cbm_question(self):
+        result, mock_req = self._decide("CBM คืออะไร")
+        self.assertEqual(result["routing"]["type"], "RAG")
+        mock_req.assert_not_called()
+
+    def test_rag_china_warehouse_location_question(self):
+        result, mock_req = self._decide("ที่อยู่โกดังจีนอยู่ที่ไหน")
+        self.assertEqual(result["routing"]["type"], "RAG")
+        mock_req.assert_not_called()
+
+    # PURE IDENTIFIER — a bare CustCode alone must never silently
+    # auto-execute an arbitrary action (e.g. quietly starting the
+    # address-change workflow); it should ask a clarifying/context
+    # question instead.
+    def test_pure_identifier_alone_never_executes_an_action(self):
+        result, mock_req = self._decide("SP1008")
+        mock_req.assert_not_called()
+        self.assertNotEqual(result["routing"]["type"], "API")
+
+    # ---- Phase 4: amount traceback within an established shipment context ----
+
+    def test_amount_traceback_identifies_the_matching_shipment_record(self):
+        """Once a shipment list result is already in context, "112.46
+        เอามาจากบิลไหน" must identify the record(s) that actually carry
+        that amount — never misread the number as a record count, a
+        CustCode, or a ShipmentCode, and never let the routing-imbalance
+        bug hijack this into requestshippingaddresschange asking for a
+        ShipmentCode the customer never offered to supply."""
+        history = [
+            {"role": "user", "content": "SP1008 บิลขนส่งล่าสุดค่าส่งเท่าไหร่"},
+            {"role": "assistant", "content": "บิลขนส่ง SP100820260817001 ค่าขนส่งล่าสุด 112.46 บาทค่ะ"},
+        ]
+        result, mock_req = self._decide("112.46 เอามาจากบิลไหน", history=history)
+        dev = result.get("developer") or {}
+        selected = (dev.get("selected_business_action")
+                    or (dev.get("information_collection_status") or {}).get("selected_business_action"))
+        self.assertNotEqual(selected, "requestshippingaddresschange")
+
+    # ---- Phase 5: safety ----
+
+    def test_no_raw_json_in_any_routed_reply(self):
+        for message in ("SP1008 บิลขนส่งล่าสุดค่าส่งเท่าไหร่", "SP1008 ข้อมูลลูกค้า", "SP1008 order ล่าสุด"):
+            result, _ = self._decide(message)
+            text = result["reply"]["text"]
+            self.assertNotIn("{", text)
+            self.assertNotIn("[", text)
+
+    def test_cross_session_no_identifier_leakage(self):
+        result_a, _ = self._decide("SP1008 ข้อมูลลูกค้า")
+        result_b, mock_req_b = self._decide("ข้อมูลลูกค้า")
+        # A fresh session with no CustCode anywhere must not inherit
+        # SP1008 from a prior, unrelated session's own turn.
+        collected_b = (result_b.get("developer") or {}).get("information_collection_status", {}).get(
+            "collected_parameters", {})
+        self.assertNotEqual(collected_b.get("CustCode"), "SP1008")
+
+
 class TestKeywordMatchesAsciiBoundary(unittest.TestCase):
     """_keyword_matches / _keyword_score (services/action_selection_
     primitives.py) — a short, pure-ASCII search_keyword like "PO" must
