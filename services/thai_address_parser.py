@@ -82,6 +82,11 @@ _RECEIVER_NAME_RE = re.compile(
 # against a stray, unrelated "อยู่" (e.g. "...ข้อมูลอยู่เลยครับ") ever
 # fabricating a false address.
 _ADDRESS_LABEL_RE = re.compile(r"ที่อยู่จัดส่ง|ที่อยู่|อยู่")
+# A bare short-letters-then-digits token — the SAME generic shape every
+# platform identifier (CustCode, OrderCode, ShipmentCode, ...) shares —
+# is never a real street address by itself, no matter what label
+# preceded it. See the plausibility check this guards, below.
+_BARE_IDENTIFIER_RE = re.compile(r"^[A-Za-z]{1,4}\d+$")
 # A customer using a label+colon layout ("ตำบล: ตาขัน", "จังหวัด :ระยอง",
 # "จังหวัด : ระยอง", full-width "：" included) leaves the colon and any
 # surrounding spaces sitting right after a matched marker/label — never
@@ -178,6 +183,20 @@ def parse_thai_address(text: str) -> Dict[str, str]:
     # safe, minimal plausibility check that rejects this false positive
     # without rejecting any address that actually has a house number.
     if address_value and not geo_matches and not any(ch.isdigit() for ch in address_value):
+        address_value = ""
+    # Address Change Full UAT fix (2026-08-24) — confirmed live: "ต้องการ
+    # เปลี่ยนที่อยู่จัดส่ง SP1008" (the trigger phrase, with the customer's
+    # own CustCode tacked on in the SAME message) has its own trigger
+    # phrase literally CONTAIN the "ที่อยู่จัดส่ง" label, so the trailing
+    # "SP1008" passed the digit check above and was claimed as the street
+    # address, silently discarding the real identifier. A real Thai
+    # address always has more shape than one bare alphanumeric code (a
+    # house-number/slash, a Mu/Soi/Thanon word, multiple words); a
+    # value that is ITSELF nothing but one short letters+digits token
+    # (the same generic identifier shape CustCode/OrderCode/ShipmentCode
+    # etc. all share) is never a real address on its own, regardless of
+    # whether a geo marker happened to follow.
+    if address_value and _BARE_IDENTIFIER_RE.fullmatch(address_value):
         address_value = ""
     if address_value:
         result["address"] = address_value

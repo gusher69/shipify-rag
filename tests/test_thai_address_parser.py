@@ -111,6 +111,16 @@ class TestParseThaiAddressNoMarkers(unittest.TestCase):
             "district": "บางพลี", "province": "สมุทรปราการ", "postal_code": "10540",
         })
 
+    def test_trigger_phrase_with_trailing_custcode_never_becomes_a_false_address(self):
+        # Address Change Full UAT fix (2026-08-24) — the trigger phrase
+        # itself contains the literal "ที่อยู่จัดส่ง" label, so a customer
+        # combining it with their own code in one message ("ต้องการเปลี่ยน
+        # ที่อยู่จัดส่ง SP1008") had "SP1008" pass the old "must contain a
+        # digit" plausibility check and get claimed as the street address,
+        # silently discarding the real CustCode.
+        self.assertEqual(parse_thai_address("ต้องการเปลี่ยนที่อยู่จัดส่ง SP1008"), {})
+        self.assertEqual(parse_thai_address("ที่อยู่ SP1008"), {})
+
     def test_postal_code_immediately_after_thai_text_no_space_still_recognized(self):
         # Thai-script adjacency (no space before the digits) must remain
         # unaffected by the ASCII-only boundary guard above.
