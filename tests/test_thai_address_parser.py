@@ -88,6 +88,94 @@ class TestParseThaiAddressNoMarkers(unittest.TestCase):
         self.assertEqual(result, {"postal_code": "21120"})
 
 
+class TestParseThaiAddressColonLabeled(unittest.TestCase):
+    """Colon-labeled format fix (2026-08-24, Production Safety Check) —
+    confirmed live: a customer typing "ตำบล: ตาขัน" style labels (rather
+    than the compact "ต.ตาขัน" form) got a leading ": " left in every geo
+    value, and Province (the last geo marker, with nothing recognized to
+    bound it) swallowed the next field's own "รหัสไปรษณีย์:" label text
+    whole. Covers cases A-H from the fix's own requirement list."""
+
+    FULL_ADDRESS_COLON = (
+        "เลขที่บิล: SP100820260716001\n"
+        "ผู้รับ: ทดสอบระบบ\n"
+        "เบอร์โทร: 0616807329\n"
+        "ที่อยู่: 8/7 ม.8\n"
+        "ตำบล: ตาขัน\n"
+        "อำเภอ: บ้านค่าย\n"
+        "จังหวัด: ระยอง\n"
+        "รหัสไปรษณีย์: 21120"
+    )
+
+    # A — full multiline colon-labeled address.
+    def test_A_full_multiline_colon_labeled_address(self):
+        result = parse_thai_address(self.FULL_ADDRESS_COLON)
+        self.assertEqual(result["receiver_name"], "ทดสอบระบบ")
+        self.assertEqual(result["receiver_phone"], "0616807329")
+        self.assertEqual(result["address"], "8/7 ม.8")
+        self.assertEqual(result["subdistrict"], "ตาขัน")
+        self.assertEqual(result["district"], "บ้านค่าย")
+        self.assertEqual(result["province"], "ระยอง")
+        self.assertEqual(result["postal_code"], "21120")
+        # No leading ":" garbage and no swallowed next-field label on any value.
+        for value in result.values():
+            self.assertFalse(value.startswith(":"), f"leading colon leaked into: {value!r}")
+            self.assertNotIn("รหัสไปรษณีย์", value)
+
+    # B — colon with no spaces on either side.
+    def test_B_colon_no_spaces(self):
+        result = parse_thai_address("ที่อยู่:8/7 ม.8\nตำบล:ตาขัน\nอำเภอ:บ้านค่าย\nจังหวัด:ระยอง\nรหัสไปรษณีย์:21120")
+        self.assertEqual(result["address"], "8/7 ม.8")
+        self.assertEqual(result["subdistrict"], "ตาขัน")
+        self.assertEqual(result["district"], "บ้านค่าย")
+        self.assertEqual(result["province"], "ระยอง")
+        self.assertEqual(result["postal_code"], "21120")
+
+    # C — spaces around the colon, both sides and colon-with-leading-space-only.
+    def test_C_spaces_around_colon(self):
+        result = parse_thai_address("ตำบล : ตาขัน\nอำเภอ :บ้านค่าย\nจังหวัด: ระยอง")
+        self.assertEqual(result["subdistrict"], "ตาขัน")
+        self.assertEqual(result["district"], "บ้านค่าย")
+        self.assertEqual(result["province"], "ระยอง")
+
+    # D — Province immediately followed by a labeled PostalCode line must
+    # never bleed into one value.
+    def test_D_province_followed_by_postal_code_label(self):
+        result = parse_thai_address("จังหวัด: ระยอง\nรหัสไปรษณีย์: 21120")
+        self.assertEqual(result["province"], "ระยอง")
+        self.assertEqual(result["postal_code"], "21120")
+        self.assertNotIn("รหัสไปรษณีย์", result["province"])
+
+    # E — existing compact space-separated format must still work
+    # unchanged (no regression from the colon-handling fix).
+    def test_E_existing_compact_format_unaffected(self):
+        result = parse_thai_address("8/7 ม.8 ต.ตาขัน อ.บ้านค่าย จ.ระยอง 21120")
+        self.assertEqual(result, {
+            "address": "8/7 ม.8", "subdistrict": "ตาขัน", "district": "บ้านค่าย",
+            "province": "ระยอง", "postal_code": "21120",
+        })
+
+    # F — partial colon-labeled address (only some fields given) must
+    # still parse cleanly, never inventing the missing ones.
+    def test_F_partial_colon_labeled_address(self):
+        result = parse_thai_address("ที่อยู่: 8/7 ม.8\nตำบล: ตาขัน")
+        self.assertEqual(result["address"], "8/7 ม.8")
+        self.assertEqual(result["subdistrict"], "ตาขัน")
+        self.assertNotIn("district", result)
+        self.assertNotIn("province", result)
+        self.assertNotIn("postal_code", result)
+
+    # G — field correction must be unaffected by this fix (detect_field_
+    # correction is a separate function from parse_thai_address).
+    def test_G_field_correction_unaffected(self):
+        self.assertEqual(detect_field_correction("จังหวัดผิด เป็นชลบุรี"), ("province", "ชลบุรี"))
+
+    # H — the intent phrase itself must never be parsed as an address,
+    # colon-handling change included.
+    def test_H_intent_phrase_never_parsed_as_address(self):
+        self.assertEqual(parse_thai_address("ต้องการเปลี่ยนที่อยู่บิลขนส่ง"), {})
+
+
 class TestDetectFieldCorrection(unittest.TestCase):
     def test_province_correction(self):
         self.assertEqual(detect_field_correction("จังหวัดผิด เป็นชลบุรี"), ("province", "ชลบุรี"))

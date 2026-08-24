@@ -50,6 +50,27 @@ _RECEIVER_NAME_RE = re.compile(
     r"(?=\n|ที่อยู่จัดส่ง|ที่อยู่|ตำบล|แขวง|ต\.|อำเภอ|เขต|อ\.|จังหวัด|กรุงเทพมหานคร|กทม\.|จ\.|$)"
 )
 _ADDRESS_LABEL_RE = re.compile(r"ที่อยู่จัดส่ง|ที่อยู่")
+# A customer using a label+colon layout ("ตำบล: ตาขัน", "จังหวัด :ระยอง",
+# "จังหวัด : ระยอง", full-width "：" included) leaves the colon and any
+# surrounding spaces sitting right after a matched marker/label — never
+# part of the real value. Stripped once, immediately after the marker,
+# everywhere a marker's own value is sliced out of the raw text (geo
+# markers below, and the "ที่อยู่" label). _RECEIVER_NAME_RE has its own
+# equivalent `[:\-]?\s*` built directly into the pattern; this shared
+# helper exists for the two call sites that slice value text out
+# separately instead of matching it inline.
+_COLON_AFTER_MARKER_RE = re.compile(r"^\s*[:：]?\s*")
+# The postal code's own digits are found and removed via _POSTAL_CODE_RE
+# (a trailing 5-digit run) BEFORE the geo-marker loop runs, but a
+# colon-labeled message's "รหัสไปรษณีย์:" label text is left behind —
+# confirmed live (2026-08-24, Production Safety Check): with nothing
+# recognized to bound it, this label text got silently swallowed into
+# Province's own greedy value (the LAST geo marker always captures to
+# end-of-text), producing "ระยอง\nรหัสไปรษณีย์:" instead of "ระยอง". This
+# label is never itself a captured field (postal_code is already handled
+# above) -- only ever stripped so it can't pollute whatever geo value
+# happens to precede it.
+_POSTAL_LABEL_RE = re.compile(r"รหัสไปรษณีย์\s*[:：]?\s*$")
 
 
 def parse_thai_address(text: str) -> Dict[str, str]:
@@ -68,6 +89,9 @@ def parse_thai_address(text: str) -> Dict[str, str]:
     if postal_match:
         result["postal_code"] = postal_match.group(1)
         text = text[:postal_match.start()].rstrip()
+        label_match = _POSTAL_LABEL_RE.search(text)
+        if label_match:
+            text = text[:label_match.start()].rstrip()
 
     phone_match = _PHONE_RE.search(text)
     if phone_match:
@@ -103,7 +127,8 @@ def parse_thai_address(text: str) -> Dict[str, str]:
     leading = text[:geo_matches[0].start()] if geo_matches else text
     label_matches = list(_ADDRESS_LABEL_RE.finditer(leading))
     if label_matches:
-        address_value = leading[label_matches[-1].end():].strip()
+        raw_address = leading[label_matches[-1].end():]
+        address_value = _COLON_AFTER_MARKER_RE.sub("", raw_address, count=1).strip()
     elif geo_matches:
         address_value = leading.strip()
     else:
@@ -126,7 +151,8 @@ def parse_thai_address(text: str) -> Dict[str, str]:
         component = m.lastgroup
         value_start = m.end()
         value_end = geo_matches[i + 1].start() if i + 1 < len(geo_matches) else len(text)
-        value = text[value_start:value_end].strip()
+        raw_value = text[value_start:value_end]
+        value = _COLON_AFTER_MARKER_RE.sub("", raw_value, count=1).strip()
         if not value and m.group(0) in ("กรุงเทพมหานคร", "กทม."):
             # Unlike "จ./จังหวัด", these two markers ARE the province value
             # itself (Bangkok), not a prefix before a separate name.
