@@ -1783,15 +1783,26 @@ class DecisionEngine:
 
         collected = _replay_business_action_collection(full_action, self.registry, history)
         # Reliable Pending-Confirmation Seed (Address Change Full UAT
-        # fix, 2026-08-24) — companion to the continuation fallback
-        # above: fills in whatever the fragile history replay couldn't
-        # recover, from the SAME caller-supplied, already-validated
-        # pending_parameters (never overriding anything replay already
-        # found — that's always at least as fresh). Only trusted for
-        # THIS exact action id, never applied to a different one.
+        # fix, 2026-08-24; corrected 2026-08-25, Correction-Persistence
+        # P1 audit finding) — `pending_parameters` (the caller's own
+        # persisted, already-validated snapshot as of the last turn) now
+        # OVERRIDES whatever replay re-derives for the same field, not
+        # the other way around. Replay always reprocesses turn 0 of
+        # `history` fresh (see _replay_business_action_collection's own
+        # "the very first user turn is always processed fresh" rule), so
+        # for any field the ORIGINAL message already mentioned, replay
+        # keeps re-deriving that ORIGINAL value on every single turn —
+        # it is never "at least as fresh" once the customer has since
+        # corrected that field. Confirmed live: a Province correction
+        # applied at the confirmation stage was silently discarded on
+        # the very next turn because replay's stale re-derivation of the
+        # original address block still "found" a Province value, so the
+        # old setdefault() below always kept that stale value instead of
+        # the customer's own correction. Only trusted for THIS exact
+        # action id, never applied to a different one.
         if context.get("pending_action_id") == action_id:
             for name, value in (context.get("pending_parameters") or {}).items():
-                collected.setdefault(name, value)
+                collected[name] = value
 
         # Generic Collection Status Query (Address Change Full UAT —
         # Status Query fix, 2026-08-24) — checked BEFORE this message is

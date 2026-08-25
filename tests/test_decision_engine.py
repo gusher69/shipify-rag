@@ -1016,6 +1016,40 @@ class TestShipmentFilterCountSumAggregation(unittest.TestCase):
         self.assertNotIn("{", text)
         self.assertNotIn("[", text)
 
+    # Combined count+sum aggregation must reach the real ERP sum via the
+    # FULL decide() pipeline, not just _aggregate_list_reply in isolation
+    # (Shipment Count+Sum Aggregation Routing fix, P1 audit finding) --
+    # confirmed live: "SP1008 มีกี่บิลที่เข้าไทยแล้ว รวมเท่าไหร่" was being
+    # classified HYBRID by services/hybrid_question_classifier.py's loose
+    # "แล้ว" segmentation (treating "รวมเท่าไหร่" as an unrelated, separate
+    # RAG question) and answered with a generic shipping-rate explanation
+    # instead of the customer's own real filtered total.
+    def test_combined_count_sum_reaches_real_erp_total_via_full_decide(self):
+        reg = BusinessActionRegistry(_FakeSupabase())
+        engine = _engine_with_registry(reg)
+        action_id = _seed_action(
+            reg, key="searchdatashipmentlist", action_type="API", category="Customer Shipment Retrieval",
+            ai_description="ดูรายการบิลขนส่งของลูกค้า", keywords=["บิลขนส่ง", "shipment", "พัสดุ"])
+        reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        reg.upsert_execution(action_id, {
+            "endpoint": "https://fasttrade.in.th/web-service/ai-chat/SearchDataShipmentList", "http_method": "POST"})
+        reg.replace_response_mapping(action_id, self.RESPONSE_MAPPING)
+        records = self._payload()["รายการบิลขนส่งทั้งหมด"]
+        mock_response = MagicMock(status_code=200, json=lambda: {"data": records})
+        for message in ("SP1008 มีกี่บิลที่เข้าไทยแล้ว รวมเท่าไหร่",
+                        "SP1008 มีกี่บิลที่เข้าไทยแล้ว ยอดค่าขนส่งทั้งหมดเท่าไหร่"):
+            with patch("services.action_executor.requests.request", return_value=mock_response):
+                result = engine.decide(message, history=[], context={"developer_mode": True})
+            self.assertNotEqual(result["routing"]["type"], "HYBRID")
+            self.assertNotEqual(result["routing"]["type"], "RAG")
+            reply = result["reply"]["text"]
+            self.assertIn("3", reply)
+            self.assertIn("662.96", reply)
+            self.assertNotIn("บาทต่อหยวน", reply)  # never the generic RAG shipping-rate answer
+
 
 class TestFallbackAndUnknownIntent(unittest.TestCase):
     def setUp(self):
@@ -3548,6 +3582,82 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertIn("ชลบุรี", result["reply"]["text"])
         mock_req.assert_not_called()  # revised summary shown again, never auto-executes
 
+    # TEST 15c — Correction-Persistence fix (P1 audit finding). A field
+    # correction applied at the confirmation stage must survive a LATER,
+    # unrelated correction turn, not silently revert to the ORIGINAL
+    # (pre-correction) value. Mirrors exactly how the real caller
+    # (admin/routes.py / line_bot/webhook.py) persists `collected_
+    # parameters` as the next turn's `pending_parameters` after every
+    # still-confirmation-required turn.
+    def test_15c_correction_survives_a_later_unrelated_correction_turn(self):
+        action_id = self._seed_address_change_action()
+        address_message = ("SP1008 SP100820260817001 ผู้รับสมชาย ใจดี เบอร์ 0812345678 "
+                            "ที่อยู่ 99/12 หมู่ 4 ต.บางแก้ว อ.บางพลี จ.สมุทรปราการ 10540")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(address_message, history=[], context={"developer_mode": True})
+        turn1_collected = turn1["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(turn1_collected.get("Province"), "สมุทรปราการ")
+        history = [{"role": "user", "content": address_message}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+        # Turn 2: correct Province. The caller would persist turn1_collected
+        # as pending_parameters before this call.
+        with patch("services.action_executor.requests.request"):
+            turn2 = self.engine.decide(
+                "จังหวัดผิด ขอแก้เป็นนนทบุรี", history=history,
+                context={"developer_mode": True, "pending_action_id": action_id,
+                          "pending_parameters": turn1_collected})
+        turn2_collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(turn2_collected.get("Province"), "นนทบุรี")
+        history2 = history + [{"role": "user", "content": "จังหวัดผิด ขอแก้เป็นนนทบุรี"},
+                               {"role": "assistant", "content": turn2["reply"]["text"]}]
+
+        # Turn 3: a DIFFERENT, unrelated correction (phone). The caller
+        # would persist turn2_collected (WITH the province fix) as the
+        # next pending_parameters. Province must NOT revert to "สมุทรปราการ".
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn3 = self.engine.decide(
+                "เบอร์โทรผิด เปลี่ยนเป็น 0899998888", history=history2,
+                context={"developer_mode": True, "pending_action_id": action_id,
+                          "pending_parameters": turn2_collected})
+        turn3_collected = turn3["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(turn3_collected.get("Province"), "นนทบุรี")  # must NOT revert
+        self.assertEqual(turn3_collected.get("ReceiverPhone"), "0899998888")
+        self.assertEqual(turn3_collected.get("CustCode"), "SP1008")  # unrelated fields still intact
+        self.assertEqual(turn3_collected.get("Address"), "99/12 หมู่ 4")
+        mock_req.assert_not_called()
+
+    # TEST 15d — Correction-Persistence fix companion: a status query
+    # ("มีข้อมูลอะไรบ้าง") sent right after a confirmation-stage correction
+    # must show the CORRECTED value, never silently revert it back to the
+    # original.
+    def test_15d_status_query_after_correction_does_not_revert_it(self):
+        action_id = self._seed_address_change_action()
+        address_message = ("SP1008 SP100820260817001 ผู้รับสมชาย ใจดี เบอร์ 0812345678 "
+                            "ที่อยู่ 99/12 หมู่ 4 ต.บางแก้ว อ.บางพลี จ.สมุทรปราการ 10540")
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(address_message, history=[], context={"developer_mode": True})
+        turn1_collected = turn1["developer"]["information_collection_status"]["collected_parameters"]
+        history = [{"role": "user", "content": address_message}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+        with patch("services.action_executor.requests.request"):
+            turn2 = self.engine.decide(
+                "จังหวัดผิด ขอแก้เป็นนนทบุรี", history=history,
+                context={"developer_mode": True, "pending_action_id": action_id,
+                          "pending_parameters": turn1_collected})
+        turn2_collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
+        history2 = history + [{"role": "user", "content": "จังหวัดผิด ขอแก้เป็นนนทบุรี"},
+                               {"role": "assistant", "content": turn2["reply"]["text"]}]
+
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn3 = self.engine.decide(
+                "มีข้อมูลอะไรบ้าง", history=history2,
+                context={"developer_mode": True, "pending_action_id": action_id,
+                          "pending_parameters": turn2_collected})
+        turn3_collected = turn3["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(turn3_collected.get("Province"), "นนทบุรี")
+        self.assertIn("นนทบุรี", turn3["reply"]["text"])
+        mock_req.assert_not_called()
+
     def _seed_customer_lookup_action(self):
         """A second, unrelated Business Action ('ข้อมูลลูกค้า' really is
         its own real production intent, getdatacustomer) seeded alongside
@@ -3886,6 +3996,51 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertNotEqual(result["developer"].get("selected_business_action"), "requestshippingaddresschange")
         info = (result.get("developer") or {}).get("information_collection_status") or {}
         self.assertNotEqual(info.get("selected_business_action"), "requestshippingaddresschange")
+
+    # TEST 32 — Compact One-Shot Address fix (P1 audit finding). A single
+    # message with CustCode, ShipmentCode, AND a labeled address block all
+    # together, no separator turns — CustCode/ShipmentCode must never be
+    # swallowed into the free-form Address value.
+    def test_32_compact_one_shot_message_never_loses_identifiers_to_address(self):
+        self._seed_address_change_action()
+        message = ("SP1008 SP100820260817001 ผู้รับสมชาย ใจดี เบอร์ 0812345678 "
+                    "ที่อยู่ 99/12 หมู่ 4 ต.บางแก้ว อ.บางพลี จ.สมุทรปราการ 10540")
+        with patch("services.action_executor.requests.request") as mock_req:
+            result = self.engine.decide(message, history=[], context={"developer_mode": True})
+        collected = result["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("CustCode"), "SP1008")
+        self.assertEqual(collected.get("ShipmentCode"), "SP100820260817001")
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย ใจดี")
+        self.assertEqual(collected.get("ReceiverPhone"), "0812345678")
+        self.assertEqual(collected.get("Address"), "99/12 หมู่ 4")
+        self.assertEqual(collected.get("Subdistrict"), "บางแก้ว")
+        self.assertEqual(collected.get("District"), "บางพลี")
+        self.assertEqual(collected.get("Province"), "สมุทรปราการ")
+        self.assertEqual(collected.get("PostalCode"), "10540")
+        self.assertIn("ยืนยัน", result["reply"]["text"])
+        mock_req.assert_not_called()
+
+    # TEST 33 — Bangkok Stuck-Loop fix (P1 audit finding). A direct answer
+    # of the bare colloquial "กรุงเทพ" to a "which province?" question must
+    # be accepted, never repeat the identical question.
+    def test_33_bare_bangkok_answer_is_accepted_not_reasked(self):
+        self._seed_address_change_action()
+        message1 = ("บิล SP100820260716001 ผู้รับ หญิง 0616807329 "
+                     "ที่อยู่ 8/7 ม.8 ต.ตาขัน อ.บ้านค่าย")  # no province, no postal code
+        with patch("services.action_executor.requests.request"):
+            turn1 = self.engine.decide(message1, history=[],
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        self.assertIn("จังหวัด", turn1["reply"]["text"])
+        history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request") as mock_req:
+            turn2 = self.engine.decide("กรุงเทพ", history=history,
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008"}})
+        collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
+        self.assertEqual(collected.get("Province"), "กรุงเทพมหานคร")
+        self.assertNotIn("จังหวัด", turn2["reply"]["text"])  # must not re-ask the same question
+        mock_req.assert_not_called()
 
 
 class TestGenericCollectionStatusQuery(unittest.TestCase):
