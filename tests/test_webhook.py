@@ -23,11 +23,12 @@ with patch("config.LINE_CHANNEL_SECRET", "test_channel_secret"), \
     import line_bot.webhook as webhook_module
 
 
-def _fake_event(text="สวัสดีค่ะ", user_id="U_test_user"):
+def _fake_event(text="สวัสดีค่ะ", user_id="U_test_user", webhook_event_id="test-webhook-event-id"):
     event = MagicMock()
     event.source.user_id = user_id
     event.message.text = text
     event.reply_token = "test_reply_token"
+    event.webhook_event_id = webhook_event_id
     return event
 
 
@@ -55,7 +56,9 @@ class TestRolloutFlagDispatch(unittest.TestCase):
         event = _fake_event()
         with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", False), \
              patch.object(webhook_module, "_handle_message_legacy") as mock_legacy, \
-             patch.object(webhook_module, "_handle_message_via_decision_engine") as mock_de:
+             patch.object(webhook_module, "_handle_message_via_decision_engine") as mock_de, \
+             patch("services.webhook_event_dedup_service.get_webhook_event_dedup_service") as mock_get_dedup:
+            mock_get_dedup.return_value.claim_event.return_value = True
             webhook_module.handle_message(event)
         mock_legacy.assert_called_once_with(event)
         mock_de.assert_not_called()
@@ -64,10 +67,69 @@ class TestRolloutFlagDispatch(unittest.TestCase):
         event = _fake_event()
         with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", True), \
              patch.object(webhook_module, "_handle_message_legacy") as mock_legacy, \
-             patch.object(webhook_module, "_handle_message_via_decision_engine") as mock_de:
+             patch.object(webhook_module, "_handle_message_via_decision_engine") as mock_de, \
+             patch("services.webhook_event_dedup_service.get_webhook_event_dedup_service") as mock_get_dedup:
+            mock_get_dedup.return_value.claim_event.return_value = True
             webhook_module.handle_message(event)
         mock_de.assert_called_once_with(event)
         mock_legacy.assert_not_called()
+
+
+class TestWebhookRedeliveryDedup(unittest.TestCase):
+    """Webhook Redelivery Dedup fix (Rapid-Message Concurrency
+    investigation, 2026-08-25) — a redelivered event (same
+    webhookEventId) must never re-run a full turn a second time,
+    regardless of which rollout branch is active. The dedup check itself
+    is real (WebhookEventDedupService against a fake Supabase enforcing
+    the real migration's UNIQUE constraint) — only the two downstream
+    handler functions are mocked, so this proves the DISPATCHER wiring,
+    not the dedup logic itself (see test_webhook_event_dedup_service.py
+    for that)."""
+
+    def setUp(self):
+        from tests.test_webhook_event_dedup_service import _FakeSupabaseWithUniqueConstraint
+        from services.webhook_event_dedup_service import WebhookEventDedupService
+        self.dedup_service = WebhookEventDedupService(_FakeSupabaseWithUniqueConstraint())
+        self.dedup_patcher = patch("services.webhook_event_dedup_service.get_webhook_event_dedup_service",
+                                    return_value=self.dedup_service)
+        self.dedup_patcher.start()
+
+    def tearDown(self):
+        self.dedup_patcher.stop()
+
+    def test_first_delivery_processes_normally(self):
+        event = _fake_event(webhook_event_id="evt-first")
+        with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", True), \
+             patch.object(webhook_module, "_handle_message_via_decision_engine") as mock_de:
+            webhook_module.handle_message(event)
+        mock_de.assert_called_once_with(event)
+
+    def test_redelivered_same_event_id_is_skipped_entirely(self):
+        event1 = _fake_event(webhook_event_id="evt-redelivered")
+        event2 = _fake_event(webhook_event_id="evt-redelivered")  # same id, e.g. LINE's own retry
+        with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", True), \
+             patch.object(webhook_module, "_handle_message_via_decision_engine") as mock_de:
+            webhook_module.handle_message(event1)
+            webhook_module.handle_message(event2)
+        mock_de.assert_called_once_with(event1)  # second delivery never reaches the handler
+
+    def test_different_event_ids_both_process(self):
+        event1 = _fake_event(webhook_event_id="evt-A")
+        event2 = _fake_event(webhook_event_id="evt-B")
+        with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", True), \
+             patch.object(webhook_module, "_handle_message_via_decision_engine") as mock_de:
+            webhook_module.handle_message(event1)
+            webhook_module.handle_message(event2)
+        self.assertEqual(mock_de.call_count, 2)
+
+    def test_redelivery_skip_applies_to_legacy_branch_too(self):
+        event1 = _fake_event(webhook_event_id="evt-legacy-redelivered")
+        event2 = _fake_event(webhook_event_id="evt-legacy-redelivered")
+        with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", False), \
+             patch.object(webhook_module, "_handle_message_legacy") as mock_legacy:
+            webhook_module.handle_message(event1)
+            webhook_module.handle_message(event2)
+        mock_legacy.assert_called_once_with(event1)
 
 
 class TestDecisionEngineAdapter(unittest.TestCase):

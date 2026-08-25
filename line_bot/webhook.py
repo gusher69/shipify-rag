@@ -95,7 +95,28 @@ def handle_message(event: MessageEvent):
     and the modern Decision Engine path. Both branches are isolated
     functions below — no shared mutable state, no interleaved logic — so
     removing the legacy branch later (once LINE OA UAT passes, per the
-    sprint's explicit plan) is a clean deletion, not an untangling."""
+    sprint's explicit plan) is a clean deletion, not an untangling.
+
+    Webhook Redelivery Dedup (Rapid-Message Concurrency investigation,
+    2026-08-25) — checked here, once, before EITHER branch, so a
+    redelivered event (LINE resending the same webhookEventId because it
+    didn't get an HTTP response before its own timeout) never re-runs a
+    full turn a second time. Confirmed live: this process is a single,
+    fully synchronous worker, so two DIFFERENT events can never overlap —
+    this fix is about DUPLICATE processing of the SAME event, not
+    concurrency."""
+    from services.webhook_event_dedup_service import get_webhook_event_dedup_service
+    import config as _config
+    dedup = get_webhook_event_dedup_service()
+    claimed = dedup.claim_event(
+        tenant_id=_config.DEFAULT_TENANT_ID, channel="line",
+        webhook_event_id=getattr(event, "webhook_event_id", None),
+        conversation_key=event.source.user_id if event.source else None,
+    )
+    if not claimed:
+        print(f"[webhook] duplicate webhookEventId {event.webhook_event_id} — skipping reprocessing")
+        return
+
     if DECISION_ENGINE_LIVE_ROUTING:
         _handle_message_via_decision_engine(event)
     else:
