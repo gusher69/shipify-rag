@@ -1297,7 +1297,29 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
                             f"parameter identifier pattern ({id_score})")
         param_score = _parameter_availability_score(params_by_action_id.get(action["id"], []), collected_slots or {},
                                                       param_action_counts=param_action_counts)
-        if param_score:
+        # Stale-Memory Hijack Guard (Continuation Precedence fix,
+        # 2026-08-25) — parameter availability alone (i.e. this action's
+        # required params happen to be satisfiable purely from
+        # Identifier Memory carried over from an EARLIER turn) is never,
+        # by itself, sufficient evidence that THIS message is about this
+        # action. Only counted as a corroborating booster once the
+        # candidate already has SOME independent evidence of its own
+        # (category match, a keyword/example hit, or an identifier
+        # PATTERN actually present in this turn's own message) — exactly
+        # mirroring why _identifier_pattern_score's own docstring already
+        # treats a widely-shared bare identifier as weak evidence on its
+        # own. Confirmed live: after "SP1008 order ล่าสุด" remembers
+        # CustCode+OrderCode, a completely unrelated fresh question with
+        # zero topical connection to orders ("คูปองใช้ยังไง", a RAG-only
+        # policy question) was still selecting searchdataorder purely
+        # because OrderCode happened to still be satisfiable from memory
+        # — the message itself contributed no keyword, no identifier
+        # pattern, no category match at all. Genuine continuation
+        # ("แล้วสถานะตอนนี้ล่ะ", "ขอรายละเอียดอันล่าสุด") is unaffected —
+        # that is resolved earlier and separately by _resolve_
+        # conversation_reference's own marker/field matching, never by
+        # this fresh-search scoring path at all.
+        if param_score and score:
             score += param_score
             reasons.append(f"{int(param_score)} collected slot(s) match this action's parameters")
         sem = _semantic_score(action, message)

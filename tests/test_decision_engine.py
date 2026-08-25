@@ -261,19 +261,45 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
         self.assertEqual(result["routing"]["type"], "WORKFLOW")
         self.assertIn("SP1014", result["reply"]["text"])
 
-    def test_identifier_memory_boosts_fresh_search_scoring(self):
-        """The _parameter_availability_score fix (2026-08-15) — a
-        remembered identifier now genuinely counts as evidence during a
-        fresh (non-continuation) search, exactly like a slot bound THIS
-        turn already did before the fix."""
-        action_id = _seed_action(self.reg, key="customer_lookup_scored", action_type="API", category="customer")
+    def test_identifier_memory_alone_no_longer_hijacks_a_topic_free_message(self):
+        """Stale-Memory Hijack Guard (Continuation Precedence fix,
+        2026-08-25) — supersedes the old (2026-08-15) assumption that a
+        remembered identifier alone was sufficient evidence during a
+        fresh search. Confirmed live on the real LINE production
+        registry: "SP1008 order ล่าสุด" then a completely unrelated,
+        topic-free "คูปองใช้ยังไง" still selected searchdataorder purely
+        because OrderCode remained satisfiable from Identifier Memory —
+        the message itself carried zero keyword/category/identifier-
+        pattern evidence of its own. A bare, topic-free message with only
+        remembered-identifier "evidence" must therefore score BELOW the
+        selection bar, never hijacking an unrelated action."""
+        action_id = _seed_action(self.reg, key="customer_lookup_scored", action_type="API", category="customer",
+                                  keywords=["ข้อมูลลูกค้า"])
         self.reg.replace_parameters(action_id, [
             {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
         ])
-        candidates = search_candidate_actions(self.reg, workflow=None, message="สวัสดีค่ะ",
-                                               collected_slots={"CustCode": "SP1014"})
-        match = next(a for a in candidates if a["id"] == action_id)
-        self.assertGreaterEqual(match["_score"], 1.0)
+        bare_candidates = search_candidate_actions(self.reg, workflow=None, message="สวัสดีค่ะ",
+                                                     collected_slots={"CustCode": "SP1014"})
+        bare_match = next(a for a in bare_candidates if a["id"] == action_id)
+        self.assertLess(bare_match["_score"], 1.0)
+
+    def test_identifier_memory_still_boosts_a_message_with_its_own_evidence(self):
+        """Companion to the guard above — Identifier Memory remains a
+        genuine corroborating BOOSTER once the message already carries
+        SOME independent evidence of its own (here, a keyword hit); only
+        standalone memory with zero other evidence is disqualified."""
+        action_id = _seed_action(self.reg, key="customer_lookup_scored2", action_type="API", category="customer",
+                                  keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        keyword_only = search_candidate_actions(self.reg, workflow=None, message="ข้อมูลลูกค้า",
+                                                 collected_slots={})
+        keyword_only_match = next(a for a in keyword_only if a["id"] == action_id)
+        boosted = search_candidate_actions(self.reg, workflow=None, message="ข้อมูลลูกค้า",
+                                            collected_slots={"CustCode": "SP1014"})
+        boosted_match = next(a for a in boosted if a["id"] == action_id)
+        self.assertGreater(boosted_match["_score"], keyword_only_match["_score"])
 
     def test_known_cust_code_reused_on_follow_up_order_question(self):
         """User instruction (2026-08-15, continuation of Final
@@ -3509,18 +3535,28 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
 
     # TEST 6 — a correction before confirmation changes ONLY that field.
     def test_6_correction_before_confirmation_changes_only_that_field(self):
-        self._seed_address_change_action()
+        action_id = self._seed_address_change_action()
         message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
         with patch("services.action_executor.requests.request"):
             turn1 = self.engine.decide(message1, history=[],
                                         context={"developer_mode": True,
                                                   "customer_context": {"cust_code": "SP1008"}})
         self.assertIn("ยืนยัน", turn1["reply"]["text"])  # already at confirmation step
+        turn1_collected = turn1["developer"]["information_collection_status"]["collected_parameters"]
         history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        # CustCode here came from customer_context/Identifier Memory, not
+        # literal message text — pure history-replay can never recover it
+        # (see the Reliable Pending-Confirmation Continuation fix,
+        # 2026-08-24), so the caller-supplied pending state (exactly what
+        # admin/routes.py/line_bot/webhook.py persist via
+        # pending_confirmation_service.py) is required here, same as
+        # TEST 15b/15c/15d.
         with patch("services.action_executor.requests.request") as mock_req:
             turn2 = self.engine.decide("จังหวัดผิด เป็นชลบุรี", history=history,
                                         context={"developer_mode": True,
-                                                  "customer_context": {"cust_code": "SP1008"}})
+                                                  "customer_context": {"cust_code": "SP1008"},
+                                                  "pending_action_id": action_id,
+                                                  "pending_parameters": turn1_collected})
         collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
         self.assertEqual(collected.get("Province"), "ชลบุรี")
         self.assertEqual(collected.get("District"), "บ้านค่าย")  # untouched
@@ -3559,19 +3595,28 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
 
     # TEST 9 — confirm -> exactly one (mocked) CS notification.
     def test_9_confirmation_sends_exactly_one_notification(self):
-        self._seed_address_change_action()
+        action_id = self._seed_address_change_action()
         message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
         with patch("services.action_executor.requests.request"):
             turn1 = self.engine.decide(message1, history=[],
                                         context={"developer_mode": True,
                                                   "customer_context": {"cust_code": "SP1008"}})
+        turn1_collected = turn1["developer"]["information_collection_status"]["collected_parameters"]
         history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        # CustCode came from customer_context/Identifier Memory, not
+        # literal message text — history-replay alone can never recover it
+        # (see TEST 15's identical truncated-history proof), so the
+        # caller-supplied confirmed_action_id/confirmed_parameters
+        # (exactly what a real caller persists via
+        # pending_confirmation_service.py) is required here.
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req, \
              self._mock_secret():
             turn2 = self.engine.decide("ยืนยัน", history=history,
                                         context={"developer_mode": True, "confirmed": True,
-                                                  "customer_context": {"cust_code": "SP1008"}})
+                                                  "customer_context": {"cust_code": "SP1008"},
+                                                  "confirmed_action_id": action_id,
+                                                  "confirmed_parameters": turn1_collected})
         self.assertEqual(turn2["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
@@ -3616,17 +3661,24 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
 
     # TEST 11 — cancellation never sends a notification.
     def test_11_cancellation_never_notifies(self):
-        self._seed_address_change_action()
+        action_id = self._seed_address_change_action()
         message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
         with patch("services.action_executor.requests.request"):
             turn1 = self.engine.decide(message1, history=[],
                                         context={"developer_mode": True,
                                                   "customer_context": {"cust_code": "SP1008"}})
+        turn1_collected = turn1["developer"]["information_collection_status"]["collected_parameters"]
         history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        # Same CustCode-from-Identifier-Memory gap as TEST 6/9/15b — the
+        # caller-supplied pending state is required for continuation to
+        # resolve to this action at all (a bare "ยกเลิก" carries no
+        # topical evidence of its own for fresh routing to find it).
         with patch("services.action_executor.requests.request") as mock_req:
             result = self.engine.decide("ยกเลิก", history=history,
                                          context={"developer_mode": True,
-                                                   "customer_context": {"cust_code": "SP1008"}})
+                                                   "customer_context": {"cust_code": "SP1008"},
+                                                   "pending_action_id": action_id,
+                                                   "pending_parameters": turn1_collected})
         mock_req.assert_not_called()
         self.assertEqual(result["routing"]["type"], "WORKFLOW")
 
@@ -4187,7 +4239,7 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
     # of the bare colloquial "กรุงเทพ" to a "which province?" question must
     # be accepted, never repeat the identical question.
     def test_33_bare_bangkok_answer_is_accepted_not_reasked(self):
-        self._seed_address_change_action()
+        action_id = self._seed_address_change_action()
         message1 = ("บิล SP100820260716001 ผู้รับ หญิง 0616807329 "
                      "ที่อยู่ 8/7 ม.8 ต.ตาขัน อ.บ้านค่าย")  # no province, no postal code
         with patch("services.action_executor.requests.request"):
@@ -4195,11 +4247,19 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
                                         context={"developer_mode": True,
                                                   "customer_context": {"cust_code": "SP1008"}})
         self.assertIn("จังหวัด", turn1["reply"]["text"])
+        turn1_collected = turn1["developer"]["information_collection_status"]["collected_parameters"]
         history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        # Same CustCode-from-Identifier-Memory replay gap as TEST 6/9/11 —
+        # without the caller-supplied pending state, replay would compute
+        # CustCode (not Province) as next_param, generate the WRONG
+        # expected question, and fail to match turn1's real (Province)
+        # question at all.
         with patch("services.action_executor.requests.request") as mock_req:
             turn2 = self.engine.decide("กรุงเทพ", history=history,
                                         context={"developer_mode": True,
-                                                  "customer_context": {"cust_code": "SP1008"}})
+                                                  "customer_context": {"cust_code": "SP1008"},
+                                                  "pending_action_id": action_id,
+                                                  "pending_parameters": turn1_collected})
         collected = turn2["developer"]["information_collection_status"]["collected_parameters"]
         self.assertEqual(collected.get("Province"), "กรุงเทพมหานคร")
         self.assertNotIn("จังหวัด", turn2["reply"]["text"])  # must not re-ask the same question
@@ -4405,6 +4465,140 @@ class TestGenericContinuationIntentGuard(unittest.TestCase):
         self.assertEqual(collected.get("OrderCode"), "PO100820260815001")
         self.assertEqual(collected.get("Email"), "test@example.com")
         mock_req.assert_called_once()
+
+
+class TestStaleIdentifierMemoryNeverHijacksFreshUnrelatedQuestion(unittest.TestCase):
+    """Real LINE Production Defect fix (Continuation Precedence,
+    2026-08-25): "SP1008 order ล่าสุด" (order action completes and
+    replies with final data -- no pending question, nothing "active")
+    followed by a completely unrelated, generic policy question
+    ("คูปองใช้ยังไง") was still selecting searchdataorder and returning
+    stale order data, because Identifier Memory (OrderCode/CustCode
+    remembered from the finished turn) alone was sufficient to clear
+    search_candidate_actions' selection bar during FRESH routing -- no
+    pending continuation, no diversion guard involved at all (that guard
+    only fires when _resolve_continuation_action is non-None, i.e. an
+    action is still mid-collection/awaiting confirmation; here the prior
+    action had already finished). Distinguishes this from
+    TestGenericContinuationIntentGuard, which covers the DIFFERENT,
+    already-fixed mid-collection-diversion case. Regression matrix below
+    mirrors the production defect report's scenarios A, D, E, I -- built
+    from generic order/shipment/customer actions, never a hardcoded
+    "coupon" keyword or Order->Coupon special case."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+        self.order_id = _seed_action(
+            self.reg, key="order_lookup", action_type="API", category="order",
+            ai_description="ค้นหาคำสั่งซื้อของลูกค้า", keywords=["order", "คำสั่งซื้อ"])
+        self.reg.replace_parameters(self.order_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(self.order_id, {"endpoint": "https://example.test/orders", "http_method": "GET"})
+
+        self.shipment_id = _seed_action(
+            self.reg, key="shipment_lookup", action_type="API", category="shipment",
+            ai_description="ค้นหาพัสดุของลูกค้า", keywords=["พัสดุ", "shipment"])
+        self.reg.replace_parameters(self.shipment_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(self.shipment_id, {"endpoint": "https://example.test/shipments", "http_method": "GET"})
+
+        self.customer_id = _seed_action(
+            self.reg, key="customer_lookup", action_type="API", category="customer",
+            ai_description="ข้อมูลลูกค้า", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(self.customer_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(self.customer_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+
+    def _finish_order_turn(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"orders": [{"OrderCode": "PO1"}]})):
+            turn1 = self.engine.decide("SP1008 order ล่าสุด", history=[], context={"developer_mode": True})
+        self.assertEqual(turn1["routing"]["type"], "API")
+        history = [{"role": "user", "content": "SP1008 order ล่าสุด"},
+                   {"role": "assistant", "content": turn1["reply"]["text"]}]
+        return history
+
+    # A — Order (completed) -> a generic policy question with zero
+    # keyword/category/identifier-pattern evidence of its own must fall
+    # through to RAG, never stale order data.
+    def test_A_completed_order_then_unrelated_policy_question_goes_to_rag(self):
+        history = self._finish_order_turn()
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="policy answer")) as mock_rag, \
+             patch.object(self.engine.executor, "execute") as mock_exec:
+            result = self.engine.decide("นโยบายการคืนสินค้าเป็นอย่างไร", history=history,
+                                          context={"developer_mode": True,
+                                                    "customer_context": {"cust_code": "SP1008",
+                                                                          "last_business_action": "order_lookup"}})
+        self.assertEqual(result["routing"]["type"], "RAG")
+        mock_exec.assert_not_called()
+        mock_rag.assert_called_once()
+
+    # D — Order (completed) -> a decisively-keyworded, different action
+    # (shipment) must be selected on its own topical merit, unaffected by
+    # the remembered OrderCode/CustCode from the finished order turn.
+    def test_D_completed_order_then_shipment_keyword_selects_shipment(self):
+        history = self._finish_order_turn()
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"shipments": []})) as mock_req:
+            result = self.engine.decide("พัสดุล่าสุดถึงไหนแล้ว", history=history,
+                                          context={"developer_mode": True,
+                                                    "customer_context": {"cust_code": "SP1008",
+                                                                          "last_business_action": "order_lookup"}})
+        self.assertEqual(result["routing"]["type"], "API")
+        self.assertEqual((result.get("developer") or {}).get("information_collection_status", {})
+                          .get("selected_business_action"), "shipment_lookup")
+        mock_req.assert_called_once()
+
+    # E — Shipment (completed) -> a decisively-keyworded customer-lookup
+    # question must be selected on its own merit too, same principle as D
+    # in the other direction.
+    def test_E_completed_shipment_then_customer_keyword_selects_customer(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"shipments": [{"ShipmentCode": "SP1"}]})):
+            turn1 = self.engine.decide("SP1008 พัสดุล่าสุดถึงไหนแล้ว", history=[], context={"developer_mode": True})
+        history = [{"role": "user", "content": "SP1008 พัสดุล่าสุดถึงไหนแล้ว"},
+                   {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"customer": {}})) as mock_req:
+            result = self.engine.decide("ข้อมูลลูกค้าของผมมีอะไรบ้าง", history=history,
+                                          context={"developer_mode": True,
+                                                    "customer_context": {"cust_code": "SP1008",
+                                                                          "last_business_action": "shipment_lookup"}})
+        self.assertEqual(result["routing"]["type"], "API")
+        self.assertEqual((result.get("developer") or {}).get("information_collection_status", {})
+                          .get("selected_business_action"), "customer_lookup")
+        mock_req.assert_called_once()
+
+    # I — a pure RAG conversation's own natural follow-up must stay RAG,
+    # never get pulled into an unrelated Business Action purely because
+    # SOME identifier happens to be in Identifier Memory from an earlier,
+    # unrelated turn in the same session.
+    def test_I_rag_follow_up_after_unrelated_order_context_stays_rag(self):
+        history = self._finish_order_turn()
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="CBM explanation")):
+            turn2 = self.engine.decide("CBM คืออะไร", history=history,
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008",
+                                                                        "last_business_action": "order_lookup"}})
+        self.assertEqual(turn2["routing"]["type"], "RAG")
+        history2 = history + [{"role": "user", "content": "CBM คืออะไร"},
+                               {"role": "assistant", "content": turn2["reply"]["text"]}]
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="CBM calculation follow-up")) as mock_rag, \
+             patch.object(self.engine.executor, "execute") as mock_exec:
+            turn3 = self.engine.decide("แล้วคำนวณยังไง", history=history2,
+                                        context={"developer_mode": True,
+                                                  "customer_context": {"cust_code": "SP1008",
+                                                                        "last_business_action": "order_lookup"}})
+        self.assertEqual(turn3["routing"]["type"], "RAG")
+        mock_exec.assert_not_called()
+        mock_rag.assert_called_once()
 
 
 if __name__ == "__main__":
