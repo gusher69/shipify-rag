@@ -848,5 +848,241 @@ class TestHumanHandoffNotification(unittest.TestCase):
         self.assertNotIn("REAL-SECRET", message)
 
 
+class TestZeroQuotaInteractiveReplyOnly(unittest.TestCase):
+    """LINE Messaging Cost Audit (2026-08-25) — proves every response
+    directly triggered by a LINE webhook event uses ONLY the free Reply
+    Message API (never Push/Multicast/Broadcast/Narrowcast, never a
+    fallback to one of those on Reply failure, never a reused
+    replyToken), for every interactive chat shape. Confirmed by static
+    audit: line_bot/webhook.py is the ONLY module in this codebase that
+    ever calls a linebot.v3.messaging.MessagingApi method at all, and the
+    only method it ever calls is reply_message (2 call sites: the legacy
+    adapter and the Decision Engine adapter) -- these tests prove that
+    holds behaviorally too, and stay red if a future change ever adds a
+    push_message/multicast/broadcast/narrowcast call to an interactive
+    path."""
+
+    def setUp(self):
+        self.profile_patcher = patch.object(webhook_module, "get_profile", return_value={"display_name": "Test"})
+        self.upsert_patcher = patch.object(webhook_module, "upsert_profile")
+        self.reply_patcher = patch.object(webhook_module, "MessagingApi")
+        self.profile_patcher.start()
+        self.upsert_patcher.start()
+        self.mock_messaging_api_cls = self.reply_patcher.start()
+        self.mock_line_bot_api = MagicMock()
+        self.mock_messaging_api_cls.return_value = self.mock_line_bot_api
+
+        self.session_service_patcher = patch.object(webhook_module, "get_session_service")
+        self.update_profile_patcher = patch.object(webhook_module, "update_profile_from_turn")
+        self.update_tier_patcher = patch.object(webhook_module, "update_tier_for_profile")
+        mock_get_session_service = self.session_service_patcher.start()
+        self.update_profile_patcher.start()
+        self.update_tier_patcher.start()
+        self.mock_session_service = MagicMock()
+        self.mock_session_service.get_or_create_active_conversation.return_value = {"id": "fake-session-id", "message_count": 0}
+        self.mock_session_service.get_recent_history.return_value = []
+        self.mock_session_service.get_handoff_status.return_value = "NONE"
+        mock_get_session_service.return_value = self.mock_session_service
+
+        self.dedup_patcher = patch("services.webhook_event_dedup_service.get_webhook_event_dedup_service")
+        mock_get_dedup = self.dedup_patcher.start()
+        mock_get_dedup.return_value.claim_event.return_value = True
+
+    def tearDown(self):
+        self.profile_patcher.stop()
+        self.upsert_patcher.stop()
+        self.reply_patcher.stop()
+        self.session_service_patcher.stop()
+        self.update_profile_patcher.stop()
+        self.update_tier_patcher.stop()
+        self.dedup_patcher.stop()
+
+    @staticmethod
+    def _decide_result(*, text="answer text", routing_type="RAG", images=None, files=None):
+        return {
+            "reply": {"text": text, "images": images or [], "files": files or []},
+            "routing": {"type": routing_type},
+            "handoff_payload": None, "alert": None, "error": None, "developer": None,
+        }
+
+    def _assert_reply_only(self, expected_calls=1):
+        self.assertEqual(self.mock_line_bot_api.reply_message.call_count, expected_calls)
+        self.mock_line_bot_api.push_message.assert_not_called()
+        self.mock_line_bot_api.multicast.assert_not_called()
+        self.mock_line_bot_api.broadcast.assert_not_called()
+        self.mock_line_bot_api.narrowcast.assert_not_called()
+
+    # TEST 1 — normal user chat.
+    def test_1_normal_chat_is_reply_only(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(text="สวัสดีค่ะ")
+            webhook_module._handle_message_via_decision_engine(_fake_event("สวัสดี"))
+        self._assert_reply_only()
+
+    # TEST 2 — customer lookup.
+    def test_2_customer_lookup_is_reply_only(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(
+                text="ข้อมูลลูกค้าค่ะ", routing_type="API")
+            webhook_module._handle_message_via_decision_engine(_fake_event("ข้อมูลลูกค้าของผมมีอะไรบ้าง"))
+        self._assert_reply_only()
+
+    # TEST 3 — order lookup.
+    def test_3_order_lookup_is_reply_only(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(
+                text="รายการคำสั่งซื้อค่ะ", routing_type="API")
+            webhook_module._handle_message_via_decision_engine(_fake_event("SP1008 order ล่าสุด"))
+        self._assert_reply_only()
+
+    # TEST 4 — shipment lookup.
+    def test_4_shipment_lookup_is_reply_only(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(
+                text="สถานะพัสดุค่ะ", routing_type="API")
+            webhook_module._handle_message_via_decision_engine(_fake_event("SP1008 พัสดุล่าสุดถึงไหนแล้ว"))
+        self._assert_reply_only()
+
+    # TEST 5 — RAG answer.
+    def test_5_rag_answer_is_reply_only(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(
+                text="CBM คือปริมาตรสินค้าค่ะ", routing_type="RAG")
+            webhook_module._handle_message_via_decision_engine(_fake_event("CBM คืออะไร"))
+        self._assert_reply_only()
+
+    # TEST 6 — confirmation flow (the confirmation QUESTION itself, sent
+    # directly in response to the webhook event that triggered it).
+    def test_6_confirmation_flow_question_is_reply_only(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             patch("services.pending_confirmation_service.get_pending_confirmation_service") as mock_get_pending:
+            mock_get_pending.return_value.get_active.return_value = None
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(
+                text="ยืนยันการดำเนินการหรือไม่คะ?", routing_type="WORKFLOW")
+            webhook_module._handle_message_via_decision_engine(_fake_event("เปลี่ยนที่อยู่จัดส่ง SP100820260810006"))
+        self._assert_reply_only()
+
+    # TEST 7 — error / fallback response.
+    def test_7_error_response_is_reply_only(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(
+                text="ขออภัยค่ะ ระบบไม่สามารถตอบคำถามนี้ได้ในขณะนี้", routing_type="SAFE_FALLBACK")
+            webhook_module._handle_message_via_decision_engine(_fake_event("คำถามที่ระบบตอบไม่ได้"))
+        self._assert_reply_only()
+
+    # TEST 8 — Reply API failure must NEVER trigger an automatic Push
+    # fallback. The exception is expected to propagate (caught further up
+    # by webhook()'s broad except -> HTTP 400, which is LINE's own signal
+    # to consider redelivery -- itself now protected by Task 01's
+    # webhookEventId dedup) rather than being silently absorbed into a
+    # paid Push send.
+    def test_8_reply_failure_never_falls_back_to_push(self):
+        self.mock_line_bot_api.reply_message.side_effect = RuntimeError("LINE API error")
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(text="คำตอบค่ะ")
+            with self.assertRaises(RuntimeError):
+                webhook_module._handle_message_via_decision_engine(_fake_event("คำถามทดสอบ"))
+        self.mock_line_bot_api.push_message.assert_not_called()
+        self.mock_line_bot_api.multicast.assert_not_called()
+        self.mock_line_bot_api.broadcast.assert_not_called()
+        self.mock_line_bot_api.narrowcast.assert_not_called()
+
+    # TEST 9 — multi-bubble answer: several images + text still becomes
+    # ONE reply_message() call carrying <= 5 message objects, never
+    # separate push calls per bubble.
+    def test_9_multi_bubble_answer_is_a_single_reply_call(self):
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(
+                text="นี่คือข้อมูลสินค้าค่ะ",
+                images=["https://example.test/a.jpg", "https://example.test/b.jpg", "https://example.test/c.jpg"])
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอรูปสินค้า"))
+        self._assert_reply_only()
+        sent_messages = self.mock_line_bot_api.reply_message.call_args.args[0].messages
+        self.assertLessEqual(len(sent_messages), 5)
+        self.assertGreater(len(sent_messages), 1)
+
+    # TEST 10 — duplicate webhook event (Task 01 webhookEventId dedup):
+    # exactly one logical Reply, never two.
+    def test_10_duplicate_webhook_event_produces_one_reply(self):
+        with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", True), \
+             patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(text="คำตอบค่ะ")
+            event1 = _fake_event("คำถามซ้ำ", webhook_event_id="evt-dup-quota-check")
+            event2 = _fake_event("คำถามซ้ำ", webhook_event_id="evt-dup-quota-check")
+            # First delivery genuinely claims the event (real dedup logic,
+            # not the blanket True stub setUp installs) -- redeliveries of
+            # the SAME id must be rejected the second time.
+            from tests.test_webhook_event_dedup_service import _FakeSupabaseWithUniqueConstraint
+            from services.webhook_event_dedup_service import WebhookEventDedupService
+            real_dedup = WebhookEventDedupService(_FakeSupabaseWithUniqueConstraint())
+            with patch("services.webhook_event_dedup_service.get_webhook_event_dedup_service",
+                       return_value=real_dedup):
+                webhook_module.handle_message(event1)
+                webhook_module.handle_message(event2)
+        self.assertEqual(self.mock_line_bot_api.reply_message.call_count, 1)
+        self.mock_line_bot_api.push_message.assert_not_called()
+
+    # TEST 11 — same message text, different webhookEventId: each real
+    # event still gets its own Reply (dedup must never merge genuinely
+    # distinct events just because their text is identical).
+    def test_11_same_text_different_event_id_each_gets_own_reply(self):
+        with patch.object(webhook_module, "DECISION_ENGINE_LIVE_ROUTING", True), \
+             patch("services.decision_engine.DecisionEngine") as mock_engine_cls:
+            mock_engine_cls.return_value.decide.return_value = self._decide_result(text="คำตอบค่ะ")
+            event1 = _fake_event("สวัสดี", webhook_event_id="evt-A-quota-check")
+            event2 = _fake_event("สวัสดี", webhook_event_id="evt-B-quota-check")
+            from tests.test_webhook_event_dedup_service import _FakeSupabaseWithUniqueConstraint
+            from services.webhook_event_dedup_service import WebhookEventDedupService
+            real_dedup = WebhookEventDedupService(_FakeSupabaseWithUniqueConstraint())
+            with patch("services.webhook_event_dedup_service.get_webhook_event_dedup_service",
+                       return_value=real_dedup):
+                webhook_module.handle_message(event1)
+                webhook_module.handle_message(event2)
+        self.assertEqual(self.mock_line_bot_api.reply_message.call_count, 2)
+        self.mock_line_bot_api.push_message.assert_not_called()
+
+
+class TestProactiveNotificationNeverMasqueradesAsReply(unittest.TestCase):
+    """TEST 12 — a proactive notification (e.g. SendLineNotiCS, the
+    configured NOTIFY/NOTIFICATION Business Action Human Handoff uses)
+    must be clearly classified as its own thing, never routed through
+    MessagingApi.reply_message/push_message as if it were a free reply.
+    In this codebase it is, structurally, a completely different
+    mechanism: a generic HTTP POST to the customer's OWN configured
+    endpoint via ActionExecutor (services/action_executor.py) -- never
+    the LINE Messaging API at all, so it consumes no LINE Messaging API
+    quota from this account's perspective (whatever the CUSTOMER's own
+    downstream system does with it is outside this codebase)."""
+
+    def test_handoff_notification_never_touches_line_messaging_api(self):
+        from tests.test_business_action_registry import _FakeSupabase
+        from tests.test_decision_engine import _seed_action
+        from services.business_action_registry import BusinessActionRegistry
+        from services.action_executor import ActionExecutor
+        from services.human_handoff_service import send_handoff_notification
+
+        fake_sb = _FakeSupabase()
+        reg = BusinessActionRegistry(fake_sb)
+        action_id = _seed_action(reg, key="sendlinenotics", action_type="API",
+                                  category="notification", keywords=["แจ้งเตือน"])
+        reg.update(action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"}})
+        reg.replace_parameters(action_id, [
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty"},
+        ])
+        reg.upsert_execution(action_id, {"endpoint": "https://example.test/notify", "http_method": "POST"})
+        executor = ActionExecutor(fake_sb)
+
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req, \
+             patch("linebot.v3.messaging.MessagingApi") as mock_messaging_api_cls:
+            result = send_handoff_notification(
+                reason="user_requested_human", line_user_id="U1", customer_message="ขอคุยกับเจ้าหน้าที่",
+                registry=reg, executor=executor)
+        self.assertTrue(result["sent"])
+        mock_req.assert_called_once()  # the real, generic HTTP call this mechanism actually uses
+        mock_messaging_api_cls.assert_not_called()  # never LINE's own Messaging API client at all
+
+
 if __name__ == "__main__":
     unittest.main()
