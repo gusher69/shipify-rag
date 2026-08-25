@@ -73,6 +73,29 @@ _QUESTION_MARKER_RE = re.compile(
 # deterministically UNKNOWN rather than a low-confidence guess either way.
 _GREETING_RE = re.compile(r"^(สวัสดี|หวัดดี|hello|hi|hey)[\sครับค่ะ!.]*$", re.IGNORECASE)
 
+# A generic "just asking for the total" fragment -- "รวมเท่าไหร่", "ยอด
+# ค่าขนส่งทั้งหมดเท่าไหร่", "total", "sum" and close variants, with no
+# other independent TOPIC of its own (Shipment Count+Sum Aggregation fix,
+# P1 audit finding). When the loose "แล้ว" split's RAG-side clause is
+# NOTHING BUT this fragment, it is virtually never an independent, topic-
+# bearing RAG question on its own -- it is the tail half of a SINGLE
+# combined count+sum analytical question the loose split severed apart.
+# Confirmed live: "มีกี่บิลที่เข้าไทยแล้ว รวมเท่าไหร่" (a customer asking,
+# in ONE breath, how many of their shipments have a status and what the
+# total is) was being segmented into an ERP "count" clause and a RAG
+# "รวมเท่าไหร่" clause, the latter then answered as an unrelated generic
+# shipping-rate calculation instead of the customer's own ERP aggregate.
+# Deliberately the SAME broad "ยอด...(up to 15 chars)...เท่าไหร่" shape as
+# services/decision_engine.py's own _SUM_INTENT_RE (that module cannot be
+# imported here without a circular import -- see this file's own module
+# docstring -- so the shape is intentionally kept in sync by hand, not
+# shared code) -- anchored start-to-end so it only ever matches a clause
+# that IS nothing but a total/sum inquiry, never a genuinely separate
+# topic that merely happens to mention a total in passing.
+_SUM_ONLY_FRAGMENT_RE = re.compile(
+    r"^(?:ยอด(?:รวม)?|รวม)(?:.{0,15})?(?:เท่าไหร่|เท่าไร|เท่าใด)$|^(?:total|sum)$",
+    re.IGNORECASE)
+
 # A candidate action within 80% of the top score is "comparably strong"
 # — genuinely ambiguous, not just a distant runner-up. Fixed, documented,
 # never per-customer.
@@ -129,6 +152,11 @@ def _segment_by_value(message: str, matched_value: str) -> Optional[Dict[str, st
     if not erp_clauses or not rag_clauses:
         return None
     if not any(_QUESTION_MARKER_RE.search(c) for c in rag_clauses):
+        return None
+    if len(rag_clauses) == 1 and _SUM_ONLY_FRAGMENT_RE.match(rag_clauses[0]):
+        # A bare "total?" fragment with no topic of its own is the tail
+        # half of a single combined count+sum question, not an
+        # independent RAG question — never force a split here.
         return None
     return {"erp_sub_question": " ".join(erp_clauses), "rag_sub_question": " ".join(rag_clauses)}
 
