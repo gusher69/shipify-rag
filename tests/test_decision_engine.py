@@ -4601,5 +4601,291 @@ class TestStaleIdentifierMemoryNeverHijacksFreshUnrelatedQuestion(unittest.TestC
         mock_rag.assert_called_once()
 
 
+class TestTask02SlotFillingStateConsistency(unittest.TestCase):
+    """Task 02 — Conversation State / Repeated Questions / Slot Filling
+    (2026-08-25). Real customer defect: CustCode resolved via Identifier
+    Memory (customer_context) rather than typed literally -> a validly
+    accepted, later slot (ShipmentCode) got silently dropped from
+    collected_parameters once history needed to be replayed through more
+    than one exchange, because _replay_business_action_collection's own
+    step-by-step "next expected parameter" tracking had no visibility
+    into Identifier Memory, desyncing from the REAL conversation's actual
+    question sequence the moment an earlier turn's real next-question was
+    influenced by a remembered identifier. Root cause fix:
+    _replay_business_action_collection (and _resolve_continuation_action)
+    now seed/consult customer_context via the new _apply_identifier_memory
+    helper -- the SAME Identifier Memory _handle_dynamic_collection's own
+    live turn already used, just now ALSO available to the replay/
+    continuation-matching that reconstructs prior turns. A companion fix
+    makes the Collection Status Query reply append the confirmation
+    question (not just the next parameter question) once nothing else is
+    missing, and _resolve_continuation_action's confirmation-matching
+    branch accepts a reply ending with that question -- mirroring the
+    pre-existing 2026-08-24 fix for the parameter-question case exactly."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+        self.action_id = _seed_action(
+            self.reg, key="requestshippingaddresschange", action_type="API",
+            category="Customer Support Request",
+            ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
+            keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
+                       "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล", "เปลี่ยนที่อยู่"])
+        self.reg.update(self.action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
+                                          "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
+        self.reg.replace_parameters(self.action_id, [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิล/Shipment", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+            {"name": "ReceiverName", "display_name": "ชื่อผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "receiver_name"}},
+            {"name": "ReceiverPhone", "display_name": "เบอร์โทรผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "phone_number",
+             "field_metadata": {"address_component": "receiver_phone"}},
+            {"name": "Address", "display_name": "ที่อยู่", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "address"}},
+            {"name": "Subdistrict", "display_name": "ตำบล/แขวง", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "subdistrict"}},
+            {"name": "District", "display_name": "อำเภอ/เขต", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "district"}},
+            {"name": "Province", "display_name": "จังหวัด", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "province"}},
+            {"name": "PostalCode", "display_name": "รหัสไปรษณีย์", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^\d{5}$",
+             "field_metadata": {"address_component": "postal_code"}},
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": False,
+             "input_source": "system_generated"},
+        ])
+        self.reg.upsert_execution(self.action_id, {
+            "endpoint": "https://fasttrade.in.th/web-service/ai-chat/SendLineNotiCS", "http_method": "POST"})
+        self.ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self.history = []
+        self.TRIGGER = "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย"
+        self.SHIPMENT_CODE = "SP100820260810006"
+
+    def _turn(self, message, context=None):
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide(message, history=self.history, context=context or self.ctx)
+        self.history = self.history + [{"role": "user", "content": message},
+                                        {"role": "assistant", "content": result["reply"]["text"]}]
+        return result
+
+    @staticmethod
+    def _ics(result):
+        return (result.get("developer") or {}).get("information_collection_status") or {}
+
+    # TEST 01 — Original repeated Shipment defect: valid Shipment accepted,
+    # then further turns must never ask for Shipment again.
+    def test_01_accepted_shipment_never_asked_again(self):
+        self._turn(self.TRIGGER)
+        t2 = self._turn(self.SHIPMENT_CODE)
+        ics2 = self._ics(t2)
+        self.assertEqual(ics2.get("collected_parameters", {}).get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertNotIn("ShipmentCode", ics2.get("missing_parameters") or [])
+        self.assertNotIn("Shipment", t2["reply"]["text"])
+        # The ORIGINAL defect: a later multi-slot turn used to silently
+        # drop ShipmentCode from collected_parameters, re-asking for it.
+        t3 = self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                          "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        ics3 = self._ics(t3)
+        self.assertEqual(ics3.get("collected_parameters", {}).get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertNotIn("ShipmentCode", ics3.get("missing_parameters") or [])
+        self.assertNotIn("Shipmentค่ะ", t3["reply"]["text"])
+
+    # TEST 02 — standalone bare identifier while Shipment is pending.
+    def test_02_standalone_identifier_accepted_into_pending_slot(self):
+        self._turn(self.TRIGGER)
+        t2 = self._turn(self.SHIPMENT_CODE)
+        self.assertEqual(self._ics(t2).get("collected_parameters", {}).get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 03 — full-sentence identifier must produce the SAME structured
+    # result as the bare standalone case.
+    def test_03_full_sentence_identifier_same_result_as_standalone(self):
+        self._turn(self.TRIGGER)
+        t2 = self._turn(f"Shipment คือ {self.SHIPMENT_CODE}")
+        self.assertEqual(self._ics(t2).get("collected_parameters", {}).get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 04 — existing slot preservation across a later, unrelated slot.
+    def test_04_shipment_preserved_after_recipient_supplied(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        t3 = self._turn("ผู้รับชื่อสมชาย")
+        ics3 = self._ics(t3)
+        self.assertEqual(ics3.get("collected_parameters", {}).get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(ics3.get("collected_parameters", {}).get("ReceiverName"), "สมชาย")
+
+    # TEST 05 — multiple slots supplied together must all merge in ONE turn.
+    def test_05_multiple_slots_in_one_turn_all_merge(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        t3 = self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                          "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        collected = self._ics(t3).get("collected_parameters", {})
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+        self.assertEqual(collected.get("ReceiverPhone"), "0812345678")
+        self.assertEqual(collected.get("Subdistrict"), "บางแก้ว")
+        self.assertEqual(collected.get("District"), "บางพลี")
+        self.assertEqual(collected.get("Province"), "สมุทรปราการ")
+        self.assertEqual(collected.get("PostalCode"), "10540")
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 06 — a turn with no relevant extraction must not erase an
+    # already-collected value.
+    def test_06_empty_extraction_does_not_erase_existing_slot(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        t3 = self._turn("ผู้รับชื่อสมชาย")
+        # A turn that supplies nothing NEW and structurally binds to
+        # nothing (just an ack) must not erase ShipmentCode/ReceiverName.
+        t4 = self._turn("มีข้อมูลอะไรบ้าง")
+        collected = self._ics(t4).get("collected_parameters", {})
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+
+    # TEST 07 — explicit correction replaces the old value; nothing else
+    # is lost.
+    def test_07_explicit_correction_replaces_old_value(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                    "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        self._turn("มีข้อมูลอะไรบ้าง")  # status query at confirmation stage
+        t5 = self._turn("เบอร์โทรผิด แก้เป็น 0899999999")
+        collected = self._ics(t5).get("collected_parameters", {})
+        self.assertEqual(collected.get("ReceiverPhone"), "0899999999")
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(collected.get("Province"), "สมุทรปราการ")
+
+    # TEST 08 — an invalid value MAY legitimately be asked again (this is
+    # NOT the same defect as re-asking for an already-VALID value).
+    def test_08_invalid_value_may_be_asked_again(self):
+        self._turn(self.TRIGGER)
+        t2 = self._turn("abc")  # not a valid ShipmentCode shape
+        self.assertNotIn("ShipmentCode", self._ics(t2).get("collected_parameters", {}))
+        self.assertIn("Shipment", t2["reply"]["text"])
+
+    # TEST 09 — "session reload": re-running decide() from the same
+    # persisted history/context (as a fresh caller would after reloading
+    # a session) must preserve already-filled slots, never re-ask.
+    def test_09_session_reload_preserves_filled_slots(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        saved_history = list(self.history)
+        # Simulate a fresh process picking this conversation back up with
+        # only the persisted history + context (no in-memory state).
+        reloaded = self.engine.decide("ผู้รับชื่อสมชาย", history=saved_history, context=self.ctx)
+        collected = self._ics(reloaded).get("collected_parameters", {})
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+
+    # TEST 10 — cancel clears the pending workflow's own state.
+    def test_10_cancel_clears_pending_workflow(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide("ยกเลิก", history=self.history,
+                                         context={**self.ctx, "pending_action_id": self.action_id,
+                                                    "pending_parameters": {"CustCode": "SP1008",
+                                                                            "ShipmentCode": self.SHIPMENT_CODE}})
+        self.assertNotEqual(result["routing"]["type"], "API")
+
+    # TEST 11 — a brand new, unrelated workflow must not inherit this
+    # action's leftover slots.
+    def test_11_new_workflow_not_contaminated_by_old_slots(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        order_id = _seed_action(self.reg, key="order_lookup_t02", action_type="API", category="order",
+                                  keywords=["order", "คำสั่งซื้อ"])
+        self.reg.replace_parameters(order_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(order_id, {"endpoint": "https://example.test/orders", "http_method": "GET"})
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"orders": []})):
+            fresh_history = []  # brand new conversation, unrelated to the address-change flow
+            result = self.engine.decide("order ล่าสุด", history=fresh_history,
+                                         context={"developer_mode": True, "customer_context": {"cust_code": "SP1008"}})
+        collected = self._ics(result).get("collected_parameters", {})
+        self.assertNotIn("ShipmentCode", collected)
+
+    # TEST 12 — two users' state must never cross.
+    def test_12_two_users_state_isolated(self):
+        engine_a = _engine_with_registry(self.reg)
+        engine_b = _engine_with_registry(self.reg)
+        ctx_a = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        ctx_b = {"developer_mode": True, "customer_context": {"cust_code": "SP2099"}}
+        with patch("services.action_executor.requests.request"):
+            turn1_a = engine_a.decide(self.TRIGGER, history=[], context=ctx_a)
+        history_a = [{"role": "user", "content": self.TRIGGER},
+                     {"role": "assistant", "content": turn1_a["reply"]["text"]}]
+        with patch("services.action_executor.requests.request"):
+            turn2_a = engine_a.decide("SP100820260810006", history=history_a, context=ctx_a)
+
+        with patch("services.action_executor.requests.request"):
+            turn1_b = engine_b.decide(self.TRIGGER, history=[], context=ctx_b)
+        history_b = [{"role": "user", "content": self.TRIGGER},
+                     {"role": "assistant", "content": turn1_b["reply"]["text"]}]
+        with patch("services.action_executor.requests.request"):
+            turn2_b = engine_b.decide("SP200920260810099", history=history_b, context=ctx_b)
+
+        collected_a = self._ics(turn2_a).get("collected_parameters", {})
+        collected_b = self._ics(turn2_b).get("collected_parameters", {})
+        self.assertEqual(collected_a.get("CustCode"), "SP1008")
+        self.assertEqual(collected_a.get("ShipmentCode"), "SP100820260810006")
+        self.assertEqual(collected_b.get("CustCode"), "SP2099")
+        self.assertEqual(collected_b.get("ShipmentCode"), "SP200920260810099")
+
+    # TEST 13 — confirmation preserves every collected parameter.
+    def test_13_confirmation_preserves_all_collected_parameters(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        t3 = self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                          "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        self.assertIn("ยืนยัน", t3["reply"]["text"])
+        gate = (t3.get("developer") or {}).get("confirmation_gate")
+        collected_at_gate = self._ics(t3).get("collected_parameters", {})
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})), \
+             patch("services.credential_store.CredentialStore.resolve",
+                   return_value={"ok": True, "value": "FAKE-SECRET", "error": None}):
+            confirmed = self.engine.decide(
+                "ยืนยัน", history=self.history,
+                context={**self.ctx, "confirmed": True, "confirmed_action_id": self.action_id,
+                          "confirmed_parameters": collected_at_gate})
+        self.assertEqual(confirmed["routing"]["type"], "API")
+
+    # TEST 14 — original customer flow end-to-end: no accepted slot is
+    # ever requested twice, from trigger through to confirmation.
+    def test_14_full_customer_flow_no_slot_asked_twice(self):
+        questions_asked = []
+
+        def record_and_get(msg):
+            result = self._turn(msg)
+            questions_asked.append(result["reply"]["text"])
+            return result
+
+        record_and_get(self.TRIGGER)
+        record_and_get(self.SHIPMENT_CODE)
+        record_and_get("ผู้รับชื่อสมชาย")
+        record_and_get("เบอร์ 0812345678")
+        final = record_and_get("อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        self.assertIn("ยืนยัน", final["reply"]["text"])
+        # No two replies asked for the exact same follow-up question.
+        self.assertEqual(len(questions_asked), len(set(questions_asked)))
+        collected = self._ics(final).get("collected_parameters", {})
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+        self.assertEqual(collected.get("ReceiverPhone"), "0812345678")
+
+
 if __name__ == "__main__":
     unittest.main()

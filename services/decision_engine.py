@@ -148,6 +148,18 @@ def _compose_collection_status_reply(action: Dict, registry, collected: Dict) ->
     next_after = _next_expected_parameter(action, registry, collected)
     if next_after:
         parts.append(_generate_parameter_question(next_after))
+    elif not missing_lines and _requires_confirmation(action):
+        # Status Query at the confirmation stage (Task 02, 2026-08-25) —
+        # everything askable is already collected, so there is no next
+        # PARAMETER question to append, but a confirmation is still
+        # genuinely pending. Without this, the status-query reply never
+        # mentions (or ends with) the confirmation question at all, so
+        # _resolve_continuation_action's own confirmation-matching branch
+        # can never recognize the customer's NEXT reply (e.g. a
+        # correction, or "ยืนยัน" itself) as continuing this action —
+        # mirrors exactly why the parameter-question branch above already
+        # needed the same treatment (2026-08-24 fix).
+        parts.append(_generate_confirmation_question(action, collected))
     return "\n\n".join(parts)
 
 
@@ -527,7 +539,29 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
     return {"collected": working, "ambiguous_candidates": ambiguous_candidates}
 
 
-def _replay_business_action_collection(action: Dict, registry, history: List[Dict]) -> Dict[str, str]:
+def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Optional[Dict]) -> Dict[str, str]:
+    """Fills any still-missing ASKABLE parameter from Identifier Memory
+    (a value the customer already established earlier — this
+    conversation or a prior one — persisted onto their profile by
+    profiles/manager.py::update_profile_from_turn, keyed by
+    IDENTIFIER_MEMORY_FIELDS). Never overrides a value already present in
+    `collected` — an explicit/fresher value always wins. Returns a NEW
+    dict; never mutates the one passed in."""
+    if not customer_context:
+        return collected
+    working = dict(collected)
+    askable = _askable_parameters_by_name(action)
+    for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
+        if param_name in working or param_name not in askable:
+            continue
+        remembered = customer_context.get(profile_field)
+        if remembered:
+            working[param_name] = remembered
+    return working
+
+
+def _replay_business_action_collection(action: Dict, registry, history: List[Dict],
+                                        customer_context: Optional[Dict] = None) -> Dict[str, str]:
     """Reconstructs 'Collected Parameters' purely from `history` — no
     separate persistence table, same convention every other
     conversation-intelligence module in this codebase already follows.
@@ -537,8 +571,25 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     is bound as that parameter's answer. This generalizes the legacy
     engine's own "does the prior assistant turn match my follow-up
     question" continuation trick to an arbitrary number of dynamically-
-    ordered parameters instead of one fixed schema question."""
-    collected: Dict[str, str] = {}
+    ordered parameters instead of one fixed schema question.
+
+    Identifier-Memory Replay Desync fix (Task 02, 2026-08-25) —
+    `customer_context` seeds `collected` with Identifier-Memory values
+    BEFORE the walk begins, exactly like _handle_dynamic_collection's own
+    live turn already does. Without this, replay's internal "next
+    expected parameter" tracking silently desyncs from the REAL
+    conversation the moment an earlier turn's actual next-question was
+    influenced by an Identifier-Memory fill-in the pure-text replay can
+    never see (e.g. CustCode resolved from the profile rather than typed)
+    — every SUBSEQUENT turn's `preceding.content != expected_question`
+    check then mismatches, silently discarding that turn's real, already-
+    accepted answer (e.g. a validly supplied ShipmentCode) from every
+    later reconstruction. Confirmed live: SP1008 (Identifier Memory) ->
+    "อยากเปลี่ยนที่อยู่..." (asks ShipmentCode) -> "SP100820260810006"
+    (accepted, correctly bound) -> a later turn needing to replay through
+    that point reconstructed collected={} instead of {ShipmentCode:...},
+    re-asking for a field the customer had already supplied."""
+    collected: Dict[str, str] = _apply_identifier_memory(action, {}, customer_context)
     for i, turn in enumerate(history):
         if turn.get("role") != "user":
             continue
@@ -567,7 +618,8 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     return collected
 
 
-def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: Optional[str] = None) -> Optional[Dict]:
+def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: Optional[str] = None,
+                                  customer_context: Optional[Dict] = None) -> Optional[Dict]:
     """Conversation Continuation without a persistence layer: if the
     LAST assistant turn is exactly the question some enabled, parameter-
     having API/WEBHOOK Business Action would currently ask (given what
@@ -606,7 +658,7 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
         full_action = registry.get_full(action["id"], mask_secrets=False)
         if not (full_action.get("parameters") or full_action.get("parameter_groups")):
             continue
-        collected_so_far = _replay_business_action_collection(full_action, registry, history[:-1])
+        collected_so_far = _replay_business_action_collection(full_action, registry, history[:-1], customer_context)
         next_param = _next_expected_parameter(full_action, registry, collected_so_far)
         # Status Query companion fix (2026-08-24) — a Collection Status
         # Query reply ("ข้อมูลที่ได้รับตอนนี้ค่ะ...\n\n{same question}")
@@ -624,13 +676,20 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
             expected_q = _generate_parameter_question(next_param)
             if last_text == expected_q or last_text.endswith("\n\n" + expected_q):
                 matches.append(full_action)
-        elif (next_param is None and _requires_confirmation(full_action)
-              and _generate_confirmation_question(full_action, collected_so_far) == last_text):
+        elif next_param is None and _requires_confirmation(full_action):
             # The last assistant turn was THIS action's confirmation-gate
             # question (2026-08-09, SendLineNotiCS enablement) — the
-            # customer's reply this turn (e.g. "ยืนยัน"/"ยกเลิก") is an
-            # answer to it, not a fresh, independently-routable message.
-            matches.append(full_action)
+            # customer's reply this turn (e.g. "ยืนยัน"/"ยกเลิก", or a
+            # correction) is an answer to it, not a fresh, independently-
+            # routable message. Also accepts a Collection Status Query
+            # reply ending with this same confirmation question (Task 02,
+            # 2026-08-25 companion to the 2026-08-24 parameter-question
+            # fix above) — mirrors that fix exactly, for the same reason:
+            # a status-query turn at the confirmation stage must not
+            # silently break continuation for whatever comes next.
+            expected_confirmation_q = _generate_confirmation_question(full_action, collected_so_far)
+            if last_text == expected_confirmation_q or last_text.endswith("\n\n" + expected_confirmation_q):
+                matches.append(full_action)
 
     if not matches:
         return None
@@ -655,7 +714,8 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
     # identifier (e.g. a just-supplied OrderCode) from being silently
     # discarded by switching to an unrelated sibling action that merely
     # scores higher on a short, coincidentally-matching keyword.
-    collected_counts = [(a, len(_replay_business_action_collection(a, registry, history[:-1]))) for a in matches]
+    collected_counts = [(a, len(_replay_business_action_collection(a, registry, history[:-1], customer_context)))
+                        for a in matches]
     max_collected = max(c for _, c in collected_counts)
     if max_collected > 0:
         matches = [a for a, c in collected_counts if c == max_collected]
@@ -1490,7 +1550,8 @@ class DecisionEngine:
             # happens BEFORE information collection, so the Registry's
             # own parameter definitions — not a separate intent-keyed
             # schema — drive what gets asked.
-            continuation_action = _resolve_continuation_action(self.registry, history, workflow_hint)
+            continuation_action = _resolve_continuation_action(
+                self.registry, history, workflow_hint, context.get("customer_context"))
 
             # Reliable Pending-Confirmation Continuation (Address Change
             # Full UAT fix, 2026-08-24) — _resolve_continuation_action
@@ -1803,7 +1864,8 @@ class DecisionEngine:
         action_id = action["id"]
         full_action = action if action.get("parameters") is not None else self.registry.get_full(action_id, mask_secrets=False)
 
-        collected = _replay_business_action_collection(full_action, self.registry, history)
+        customer_context = context.get("customer_context") or {}
+        collected = _replay_business_action_collection(full_action, self.registry, history, customer_context)
         # Reliable Pending-Confirmation Seed (Address Change Full UAT
         # fix, 2026-08-24; corrected 2026-08-25, Correction-Persistence
         # P1 audit finding) — `pending_parameters` (the caller's own
@@ -1865,16 +1927,12 @@ class DecisionEngine:
         # concept name, so the customer is never asked to repeat an
         # identifier they already gave two turns ago. Never overrides a
         # value THIS turn's own message (or history replay) already
-        # bound — an explicit, fresher value always wins.
-        customer_context = context.get("customer_context") or {}
-        if customer_context:
-            askable = _askable_parameters_by_name(full_action)
-            for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
-                if param_name in collected or param_name not in askable:
-                    continue
-                remembered = customer_context.get(profile_field)
-                if remembered:
-                    collected[param_name] = remembered
+        # bound — an explicit, fresher value always wins. (`customer_context`
+        # already seeded replay's OWN reconstruction above; re-applying it
+        # here too covers a value THIS turn's live binding still left
+        # missing, and is a no-op for anything replay already carried
+        # through.)
+        collected = _apply_identifier_memory(full_action, collected, customer_context)
 
         validation = self.registry.validate_can_execute(action_id, collected)
         next_after = None if validation["ok"] else _next_expected_parameter(full_action, self.registry, collected)
