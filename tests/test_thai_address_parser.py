@@ -39,6 +39,115 @@ class TestParseThaiAddressBangkok(unittest.TestCase):
         self.assertEqual(result["postal_code"], "10500")
 
 
+class TestParseThaiAddressBangkokAliases(unittest.TestCase):
+    """Bangkok Stuck-Loop fix (P1 audit finding) — the short colloquial
+    "กรุงเทพ"/"กรุงเทพฯ" forms, not just the full "กรุงเทพมหานคร" and the
+    abbreviation "กทม.", must be recognized and canonicalized so a
+    customer answering "which province?" with plain "กรุงเทพ" is never
+    asked the identical question again."""
+
+    def test_bare_krungthep_canonicalizes(self):
+        self.assertEqual(parse_thai_address("กรุงเทพ"), {"province": "กรุงเทพมหานคร"})
+
+    def test_krungthep_with_tilde_canonicalizes(self):
+        self.assertEqual(parse_thai_address("กรุงเทพฯ"), {"province": "กรุงเทพมหานคร"})
+
+    def test_bare_krungthep_with_postal_code(self):
+        result = parse_thai_address("กรุงเทพ 10110")
+        self.assertEqual(result["province"], "กรุงเทพมหานคร")
+        self.assertEqual(result["postal_code"], "10110")
+
+    def test_district_before_bare_krungthep_is_not_swallowed(self):
+        # Confirmed live: without "กรุงเทพ" recognized as its own marker,
+        # the district's greedy value ran all the way to end-of-text and
+        # absorbed "กรุงเทพ" too ("เขตคลองเตย กรุงเทพ" as ONE district
+        # value). It must now be split into two separate fields.
+        result = parse_thai_address("แขวงคลองตัน เขตคลองเตย กรุงเทพ 10110")
+        self.assertEqual(result["subdistrict"], "คลองตัน")
+        self.assertEqual(result["district"], "คลองเตย")
+        self.assertEqual(result["province"], "กรุงเทพมหานคร")
+        self.assertEqual(result["postal_code"], "10110")
+
+    def test_province_correction_to_bare_krungthep(self):
+        self.assertEqual(detect_field_correction("จังหวัดผิด เปลี่ยนเป็นกรุงเทพ"), ("province", "กรุงเทพ"))
+
+
+class TestParseThaiAddressReceiverNameConnectors(unittest.TestCase):
+    """Receiver-Name Field-Stealing fix (P1 audit finding) — a connector
+    word directly glued to the "ชื่อผู้รับ"/"ผู้รับ" label with no space
+    ("ชื่อผู้รับใหม่คือ สมชาย ใจดี") must never leak into the captured
+    name."""
+
+    def test_newkhue_connector(self):
+        result = parse_thai_address("ชื่อผู้รับใหม่คือ สมชาย ใจดี")
+        self.assertEqual(result["receiver_name"], "สมชาย ใจดี")
+
+    def test_khue_connector(self):
+        result = parse_thai_address("ชื่อผู้รับคือ สมชาย ใจดี")
+        self.assertEqual(result["receiver_name"], "สมชาย ใจดี")
+
+    def test_pen_connector(self):
+        result = parse_thai_address("ชื่อผู้รับเป็น สมชาย ใจดี")
+        self.assertEqual(result["receiver_name"], "สมชาย ใจดี")
+
+    def test_change_pen_connector(self):
+        result = parse_thai_address("ชื่อผู้รับเปลี่ยนเป็น สมชาย ใจดี")
+        self.assertEqual(result["receiver_name"], "สมชาย ใจดี")
+
+    def test_no_connector_still_works(self):
+        # Regression guard: the normal, connector-less case must be
+        # completely unaffected by this fix.
+        result = parse_thai_address("ชื่อผู้รับ: สมชาย ใจดี")
+        self.assertEqual(result["receiver_name"], "สมชาย ใจดี")
+        result2 = parse_thai_address("ชื่อผู้รับ สมชาย ใจดี")
+        self.assertEqual(result2["receiver_name"], "สมชาย ใจดี")
+
+
+class TestParseThaiAddressTrailingPoliteness(unittest.TestCase):
+    """Postal-Code Trailing-Politeness fix (P1 audit finding) — a trailing
+    sentence-final particle ("ครับ", "ค่ะ", "นะครับ", "นะคะ") after the
+    postal code must never be swallowed into Province along with the
+    digits, and the postal code must still be recognized as its own
+    field."""
+
+    def test_trailing_krub(self):
+        result = parse_thai_address("จังหวัดสมุทรปราการ 10540 ครับ")
+        self.assertEqual(result["province"], "สมุทรปราการ")
+        self.assertEqual(result["postal_code"], "10540")
+
+    def test_trailing_kha(self):
+        result = parse_thai_address("จังหวัดสมุทรปราการ 10540 ค่ะ")
+        self.assertEqual(result["province"], "สมุทรปราการ")
+        self.assertEqual(result["postal_code"], "10540")
+
+    def test_trailing_na_krub(self):
+        result = parse_thai_address("จังหวัดสมุทรปราการ 10540 นะครับ")
+        self.assertEqual(result["province"], "สมุทรปราการ")
+        self.assertEqual(result["postal_code"], "10540")
+
+    def test_trailing_na_kha(self):
+        result = parse_thai_address("จังหวัดสมุทรปราการ 10540 นะคะ")
+        self.assertEqual(result["province"], "สมุทรปราการ")
+        self.assertEqual(result["postal_code"], "10540")
+
+    def test_trailing_particle_on_its_own_line_colon_labeled(self):
+        result = parse_thai_address("จังหวัด: สมุทรปราการ\nรหัสไปรษณีย์: 10540\nครับ")
+        self.assertEqual(result["province"], "สมุทรปราการ")
+        self.assertEqual(result["postal_code"], "10540")
+
+    def test_correction_with_trailing_particle(self):
+        # detect_field_correction must strip the same trailing particles
+        # so they never leak into the corrected value either.
+        self.assertEqual(detect_field_correction("จังหวัดผิด เปลี่ยนเป็นชลบุรีค่ะ"), ("province", "ชลบุรี"))
+
+    def test_no_trailing_particle_still_works(self):
+        # Regression guard: a message with no trailing particle at all
+        # must be completely unaffected.
+        result = parse_thai_address("จังหวัดสมุทรปราการ 10540")
+        self.assertEqual(result["province"], "สมุทรปราการ")
+        self.assertEqual(result["postal_code"], "10540")
+
+
 class TestParseThaiAddressFullRequestBlock(unittest.TestCase):
     def test_receiver_name_and_phone_with_leading_intent_phrase(self):
         # "เปลี่ยนที่อยู่จัดส่ง" in the leading intent phrase must never be

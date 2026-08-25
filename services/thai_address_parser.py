@@ -35,10 +35,19 @@ from typing import Dict, Optional, Tuple
 # Geographic component name -> ordered list of marker phrases a customer
 # might use. Longer/more specific phrases first so e.g. "กรุงเทพมหานคร" is
 # tried before any accidental partial match.
+# "กรุงเทพ"/"กรุงเทพฯ" (Bangkok Stuck-Loop fix, P1 audit finding) -- the
+# short colloquial form is how the overwhelming majority of real Bangkok
+# customers actually write it; only the full "กรุงเทพมหานคร" and the
+# abbreviation "กทม." were previously recognized, so a customer answering
+# a direct "which province?" question with plain "กรุงเทพ" was silently
+# ignored and asked the identical question again forever. Longer/more
+# specific aliases still come first (กรุงเทพมหานคร, กรุงเทพฯ) so they are
+# never partially shadowed by the shorter "กรุงเทพ".
+_BANGKOK_PROVINCE_ALIASES = ("กรุงเทพมหานคร", "กรุงเทพฯ", "กทม.", "กรุงเทพ")
 _GEO_MARKERS = (
     ("subdistrict", ("ตำบล", "แขวง", "ต.")),
     ("district", ("อำเภอ", "เขต", "อ.")),
-    ("province", ("กรุงเทพมหานคร", "กทม.", "จังหวัด", "จ.")),
+    ("province", _BANGKOK_PROVINCE_ALIASES + ("จังหวัด", "จ.")),
 )
 _GEO_MARKER_RE = re.compile(
     "|".join(f"(?P<{name}>{'|'.join(re.escape(m) for m in markers)})" for name, markers in _GEO_MARKERS)
@@ -65,13 +74,22 @@ _PHONE_RE = re.compile(r"(?<!\d)0\d{8,9}(?!\d)")
 # field (confirmed live, Address Change Full UAT 2026-08-24: leftover
 # "เบอร์" text was bleeding into the receiver name / address value).
 _PHONE_LABEL_RE = re.compile(r"เบอร์(?:โทร)?\s*[:：]?\s*$")
+# Connector words a customer may place directly after the receiver-name
+# label with no space/colon at all -- "ชื่อผู้รับใหม่คือ สมชาย ใจดี",
+# "ชื่อผู้รับคือ สมชาย ใจดี" (Receiver-Name Field-Stealing fix, P1 audit
+# finding) -- reuses the same "เป็น/คือ" value-introducing vocabulary
+# _CORRECTION_VALUE_RE below already recognizes, so the label match never
+# leaves this connector phrase stuck to the front of the captured name.
+# Longer/more specific alternatives first, same convention as every other
+# marker list in this file.
+_LABEL_CONNECTOR_RE = r"(?:ใหม่คือ|เปลี่ยนเป็น|แก้เป็น|คือ|เป็น)?"
 _RECEIVER_NAME_RE = re.compile(
     # Longest/most specific marker first: casual "ผู้รับชื่อสมชาย" (no
     # space) reverses the usual "ชื่อผู้รับ" word order — both are
     # genuinely used by real customers (Address Change Full UAT,
     # 2026-08-24) and must resolve to the same field.
-    r"(?:ผู้รับชื่อ|ชื่อผู้รับ|ผู้รับ)\s*[:\-]?\s*(.+?)"
-    r"(?=\n|ที่อยู่จัดส่ง|ที่อยู่|อยู่|เบอร์|ตำบล|แขวง|ต\.|อำเภอ|เขต|อ\.|จังหวัด|กรุงเทพมหานคร|กทม\.|จ\.|$)"
+    r"(?:ผู้รับชื่อ|ชื่อผู้รับ|ผู้รับ)\s*[:\-]?\s*" + _LABEL_CONNECTOR_RE + r"\s*(.+?)"
+    r"(?=\n|ที่อยู่จัดส่ง|ที่อยู่|อยู่|เบอร์|ตำบล|แขวง|ต\.|อำเภอ|เขต|อ\.|จังหวัด|กรุงเทพมหานคร|กรุงเทพฯ|กทม\.|กรุงเทพ|จ\.|$)"
 )
 # Bare "อยู่" (no "ที่" prefix) is also a genuine, commonly-used address
 # label in casual phrasing ("...อยู่ 99/12 หมู่ 4 ตำบล...") — always
@@ -98,6 +116,20 @@ _ADDRESS_LABEL_RE = re.compile(
 # is never a real street address by itself, no matter what label
 # preceded it. See the plausibility check this guards, below.
 _BARE_IDENTIFIER_RE = re.compile(r"^[A-Za-z]{1,4}\d+$")
+# The SAME identifier shape as _BARE_IDENTIFIER_RE above, but matched as a
+# standalone TOKEN anywhere in the raw message rather than requiring the
+# whole captured value to be nothing else (Compact One-Shot Address fix,
+# P1 audit finding). Found and removed from this parser's own local
+# working copy BEFORE address/name extraction even runs -- exactly the
+# same "find this token, remove it, then look for the next piece"
+# convention _POSTAL_CODE_RE and _PHONE_RE already follow below -- so a
+# customer supplying CustCode/ShipmentCode/Tracking in the SAME message
+# as the address, with no label of their own, is never glued into the
+# free-form Address value. Never touches the ORIGINAL `message` the
+# generic per-parameter binding loop runs against afterwards, so these
+# identifiers are still bound normally by their own validation_pattern --
+# this only stops them being MISTAKEN for address text.
+_STANDALONE_IDENTIFIER_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]{1,4}\d{4,}(?![A-Za-z0-9])")
 # A short run of Thai-only text (no digit, no ASCII letter of its own)
 # immediately followed by an ASCII letter — the start of a code — is a
 # left-over descriptor word from the trigger phrase's OWN label (e.g.
@@ -129,6 +161,17 @@ _COLON_AFTER_MARKER_RE = re.compile(r"^\s*[:：]?\s*")
 # above) -- only ever stripped so it can't pollute whatever geo value
 # happens to precede it.
 _POSTAL_LABEL_RE = re.compile(r"รหัสไปรษณีย์\s*[:：]?\s*$")
+# Trailing Thai sentence-final politeness particles a customer commonly
+# appends after providing information -- "...10540 ครับ", "...10540
+# นะคะ" (Postal-Code Trailing-Politeness fix, P1 audit finding). Same
+# vocabulary services/pending_confirmation_service.py's own
+# _TRAILING_PARTICLES_RE already recognizes for confirmation replies,
+# reused here (not a fresh one-off list) and stripped ONLY from the very
+# end of the whole message -- never mid-text -- so it can never be
+# mistaken for part of whatever value immediately precedes it (confirmed
+# live: "...รหัสไปรษณีย์: 10540\nครับ" swallowed the postal code AND the
+# particle both into Province instead of the two ever being told apart).
+_TRAILING_PARTICLES_RE = re.compile(r"\s*(?:(?:นะคะ|นะครับ|ค่ะ|ครับ|น่ะ|จ้า|จ้ะ|นะ)\s*)+$")
 
 
 def parse_thai_address(text: str) -> Dict[str, str]:
@@ -141,6 +184,8 @@ def parse_thai_address(text: str) -> Dict[str, str]:
     text = (text or "").strip()
     if not text:
         return {}
+    text = _TRAILING_PARTICLES_RE.sub("", text)
+    text = _STANDALONE_IDENTIFIER_RE.sub(" ", text)
     result: Dict[str, str] = {}
 
     postal_match = _POSTAL_CODE_RE.search(text)
@@ -230,9 +275,11 @@ def parse_thai_address(text: str) -> Dict[str, str]:
         value_end = geo_matches[i + 1].start() if i + 1 < len(geo_matches) else len(text)
         raw_value = text[value_start:value_end]
         value = _COLON_AFTER_MARKER_RE.sub("", raw_value, count=1).strip()
-        if not value and m.group(0) in ("กรุงเทพมหานคร", "กทม."):
-            # Unlike "จ./จังหวัด", these two markers ARE the province value
-            # itself (Bangkok), not a prefix before a separate name.
+        if not value and m.group(0) in _BANGKOK_PROVINCE_ALIASES:
+            # Unlike "จ./จังหวัด", every Bangkok alias IS the province
+            # value itself (never a prefix before a separate name) --
+            # canonicalized to the one full official form regardless of
+            # which alias the customer actually typed.
             value = "กรุงเทพมหานคร"
         if value:
             result[component] = value
@@ -247,7 +294,7 @@ def parse_thai_address(text: str) -> Dict[str, str]:
 _CORRECTION_CONCEPT_TERMS = {
     "subdistrict": ("ตำบล", "แขวง"),
     "district": ("อำเภอ", "เขต"),
-    "province": ("จังหวัด", "กรุงเทพมหานคร", "กทม."),
+    "province": ("จังหวัด",) + _BANGKOK_PROVINCE_ALIASES,
     "postal_code": ("รหัสไปรษณีย์",),
     "address": ("ที่อยู่",),
     "receiver_name": ("ชื่อผู้รับ",),
@@ -265,6 +312,7 @@ def detect_field_correction(message: str) -> Optional[Tuple[str, str]]:
     found, returns None rather than fabricating what the new value might
     be."""
     message = (message or "").strip()
+    message = _TRAILING_PARTICLES_RE.sub("", message)
     if not message or not _CORRECTION_CUE_RE.search(message):
         return None
 
