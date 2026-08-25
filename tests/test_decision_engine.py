@@ -2479,6 +2479,103 @@ class TestRequestedFieldFilteringEndToEnd(unittest.TestCase):
         self.assertNotIn("ชื่อลูกค้า", result["reply"]["text"])
 
 
+class TestGenericPolicyVsCustomerSpecificCouponRouting(unittest.TestCase):
+    """Coupon Policy vs Customer Coupon Routing fix (P1, 2026-08-25) —
+    CONFIG-ONLY. Root cause: a customer-lookup action's search_keywords
+    legitimately included the bare word "คูปอง" (needed so a genuine
+    customer-specific lookup like "ลูกค้าชื่อจันทร์มีคูปองอะไรบ้าง" can be
+    found at all), but that same bare keyword alone was enough to route a
+    purely generic policy/how-to question ("คูปองใช้ยังไง", no customer
+    reference of any kind) to the SAME action, demanding a customer code
+    for a question that has nothing to do with any one account.
+
+    Confirmed NOT a code-level bug: services.action_selection_primitives.
+    _keyword_score never reads response_mapping, and neither _semantic_
+    score nor _embedding_score are implemented (always 0.0) — every
+    routing signal here is a literal substring match against
+    search_keywords/examples/ai_description. The fix is therefore
+    replacing the single broad bare keyword with intent-bearing phrases
+    that only appear in a genuine personal/customer reference ("มีคูปอง",
+    "คูปองของ") — never requiring a digit, a CustCode, or any hardcoded
+    per-keyword special case in the Decision Engine itself. This proves
+    the GENERIC scorer's behavior against a representative config shape;
+    it never asserts on the word "คูปอง" specifically as a magic string
+    in any source file other than this test's own fixture data."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.action_id = _seed_action(
+            self.reg, key="getdatacustomer", action_type="API", category="Customer Data Retrieval",
+            ai_description="ดึงข้อมูลลูกค้า, Wallet, คูปอง โดยค้นหาจากรหัสลูกค้า, อีเมล, ชื่อ-นามสกุล หรือเบอร์โทร",
+            # The actual production replacement: bare "คูปอง" removed,
+            # replaced with two intent-bearing phrases that only appear
+            # in a genuine personal/customer-specific coupon reference.
+            keywords=["ข้อมูลลูกค้า", "Wallet", "ยอดเงิน", "ข้อมูลทั้งหมด", "กระเป๋าเงิน", "มีคูปอง", "คูปองของ"],
+            params=[{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False,
+                     "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
+                    {"name": "CustName", "display_name": "ชื่อลูกค้า", "required": False,
+                     "input_source": "customer_message", "validation_type": "non_empty"}])
+        self.engine = _engine_with_registry(self.reg)
+
+    def _selected_action_key(self, message, collected_slots=None):
+        candidates = search_candidate_actions(self.reg, workflow=None, message=message,
+                                               collected_slots=collected_slots or {})
+        selected = select_best_action(candidates, minimum_score=1.0)
+        return selected.get("action_key") if selected else None
+
+    # Generic policy questions must NEVER select the customer-lookup action.
+    def test_generic_policy_question_does_not_select_customer_action(self):
+        for message in ("คูปองใช้ยังไง", "วิธีใช้คูปอง", "คูปองใช้งานอย่างไร",
+                        "เงื่อนไขการใช้คูปอง", "คูปองหมดอายุไหม"):
+            self.assertIsNone(self._selected_action_key(message),
+                              f"{message!r} incorrectly selected a Business Action")
+
+    def test_generic_policy_question_never_requests_custcode_via_full_decide(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="คูปองใช้ได้ที่หน้าชำระเงินค่ะ")):
+            result = self.engine.decide("คูปองใช้ยังไง", history=[], context={"developer_mode": True})
+        self.assertEqual(result["routing"]["type"], "RAG")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+
+    # Customer-specific references, in every phrasing shape the customer
+    # reference matrix requires, must select the action.
+    def test_customer_specific_phrasings_select_the_action(self):
+        for message in ("SP1008 มีคูปองอะไรบ้าง", "ลูกค้า SP1008 มีคูปองอะไรบ้าง",
+                        "คูปองของ SP1008 มีอะไรบ้าง", "คูปองของผมมีอะไรบ้าง", "ผมมีคูปองอะไรบ้าง",
+                        "ลูกค้าชื่อจันทร์มีคูปองอะไรบ้าง", "มีคูปองสำหรับลูกค้าเบอร์ 0987654321 ไหม"):
+            self.assertEqual(self._selected_action_key(message), "getdatacustomer",
+                              f"{message!r} failed to select the customer-lookup action")
+
+    # A remembered CustCode from earlier in the conversation (Identifier
+    # Memory) must still work for a personal-reference follow-up, exactly
+    # like every other identifier-requiring action already does.
+    def test_customer_specific_with_identifier_memory(self):
+        self.assertEqual(
+            self._selected_action_key("ผมมีคูปองอะไรบ้าง", collected_slots={"CustCode": "SP1008"}),
+            "getdatacustomer")
+
+    # Hybrid: both clause orders must combine ERP + RAG naturally.
+    def test_hybrid_combines_erp_and_rag_both_clause_orders(self):
+        for message in ("SP1008 มีคูปองอะไรบ้าง แล้วคูปองใช้งานยังไง",
+                        "คูปองใช้งานยังไง แล้ว SP1008 มีคูปองอะไรบ้าง"):
+            with patch.object(self.engine.executor, "execute",
+                              return_value=_fake_exec_result(
+                                  result={"mapped_fields": {"รหัสลูกค้า": "SP1008"}})) as mock_erp, \
+                 patch("services.playground_orchestrator.run_playground_turn",
+                      return_value=_fake_playground_result(answer="คูปองใช้ได้ที่หน้าชำระเงินค่ะ")):
+                result = self.engine.decide(message, history=[], context={"developer_mode": True})
+            self.assertEqual(result["routing"]["type"], "HYBRID", f"failed for {message!r}")
+            mock_erp.assert_called_once()
+            self.assertIn("คูปองใช้ได้ที่หน้าชำระเงินค่ะ", result["reply"]["text"])
+
+    # Regression: unrelated, pre-existing customer-profile keywords on the
+    # SAME action must be completely unaffected by removing bare "คูปอง".
+    def test_unrelated_customer_keywords_unaffected(self):
+        for message in ("SP1008 ข้อมูลลูกค้า", "SP1008 กระเป๋าเงินเหลือเท่าไหร่", "SP1008 Wallet เท่าไหร่"):
+            self.assertEqual(self._selected_action_key(message), "getdatacustomer",
+                              f"{message!r} regressed")
+
+
 def _seed_order_shipment_tracking_actions(reg):
     """Mirrors production's real category / search_keywords / parameter
     config for these 6 Business Actions (confirmed via a live, read-only
