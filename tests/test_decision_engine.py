@@ -4887,5 +4887,307 @@ class TestTask02SlotFillingStateConsistency(unittest.TestCase):
         self.assertEqual(collected.get("ReceiverPhone"), "0812345678")
 
 
+class TestTask02BCrossTopicContaminationPrevention(unittest.TestCase):
+    """Task 02B — Prevent Unrelated Conversation History From
+    Contaminating New Workflow Slots (2026-08-25). Confirmed defect:
+    _replay_business_action_collection's "the very first user turn in
+    `history` is always processed fresh" rule unconditionally trusted
+    array index 0 as the CURRENT action's own trigger message — but
+    `history` is the full recent SESSION window (session_service.
+    get_recent_history), not a per-action transcript, so an EARLIER,
+    unrelated topic's message (e.g. "SP1008 order ล่าสุด") sitting at
+    history[0] got its content wrongly bound to a LATER, unrelated
+    action's own loosely-validated (non_empty) parameter (e.g.
+    ReceiverName = "SP1008") purely because nothing was checked before
+    binding it. Fix: the first-turn special case now only trusts
+    history[0] if the very NEXT assistant turn is consistent with THIS
+    action having generated it (one of its own parameter questions given
+    a tentative binding, or its confirmation question) -- the SAME
+    exact-question-match signal every OTHER turn in replay already uses,
+    just now also gating turn 0 instead of exempting it unconditionally.
+    Trusted, structured Identifier Memory (customer_context) is a
+    completely separate mechanism (Task 02) and is NOT affected -- it
+    legitimately continues to prefill reusable identifiers across topics,
+    proven not to regress by several tests below."""
+
+    def _seed_address_change(self):
+        action_id = _seed_action(
+            self.reg, key="requestshippingaddresschange", action_type="API",
+            category="Customer Support Request",
+            ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
+            keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
+                       "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล", "เปลี่ยนที่อยู่"])
+        self.reg.update(action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
+                                     "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
+        self.reg.replace_parameters(action_id, [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิล/Shipment", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+            {"name": "ReceiverName", "display_name": "ชื่อผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "receiver_name"}},
+            {"name": "ReceiverPhone", "display_name": "เบอร์โทรผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "phone_number",
+             "field_metadata": {"address_component": "receiver_phone"}},
+            {"name": "Address", "display_name": "ที่อยู่", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "address"}},
+            {"name": "Subdistrict", "display_name": "ตำบล/แขวง", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "subdistrict"}},
+            {"name": "District", "display_name": "อำเภอ/เขต", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "district"}},
+            {"name": "Province", "display_name": "จังหวัด", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "province"}},
+            {"name": "PostalCode", "display_name": "รหัสไปรษณีย์", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^\d{5}$",
+             "field_metadata": {"address_component": "postal_code"}},
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": False,
+             "input_source": "system_generated"},
+        ])
+        self.reg.upsert_execution(action_id, {
+            "endpoint": "https://fasttrade.in.th/web-service/ai-chat/SendLineNotiCS", "http_method": "POST"})
+        return action_id
+
+    def _seed_order_lookup(self):
+        order_id = _seed_action(self.reg, key="order_lookup_t02b", action_type="API", category="order",
+                                  ai_description="ค้นหาคำสั่งซื้อของลูกค้า", keywords=["order", "คำสั่งซื้อ", "ล่าสุด"])
+        self.reg.replace_parameters(order_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        self.reg.upsert_execution(order_id, {"endpoint": "https://example.test/orders", "http_method": "GET"})
+        return order_id
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+        self.action_id = self._seed_address_change()
+        self.ctx = {"developer_mode": True, "customer_context": {}}
+        self.history = []
+        self.TRIGGER = "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย"
+        self.SHIPMENT_CODE = "SP100820260810006"
+
+    def _turn(self, message, context=None, order_mock=False):
+        mock_return = MagicMock(status_code=200, json=lambda: {"orders": []}) if order_mock else None
+        with patch("services.action_executor.requests.request", return_value=mock_return):
+            result = self.engine.decide(message, history=self.history, context=context or self.ctx)
+        self.history = self.history + [{"role": "user", "content": message},
+                                        {"role": "assistant", "content": result["reply"]["text"]}]
+        return result
+
+    @staticmethod
+    def _ics(result):
+        return (result.get("developer") or {}).get("information_collection_status") or {}
+
+    # TEST 01 — confirmed SP1008 contamination case.
+    def test_01_sp1008_contamination_case(self):
+        self._seed_order_lookup()
+        self._turn("SP1008 order ล่าสุด", order_mock=True)
+        t2 = self._turn(self.TRIGGER)
+        collected = self._ics(t2).get("collected_parameters", {})
+        self.assertNotEqual(collected.get("ReceiverName"), "SP1008")
+        self.assertNotEqual(collected.get("Address"), "SP1008")
+        self.assertNotEqual(collected.get("ReceiverPhone"), "SP1008")
+
+    # TEST 02 — old natural-language name must not auto-bind to a LATER
+    # action's ReceiverName. Hand-constructs the "unrelated topic" history
+    # (rather than sending it live first) so the test is not itself
+    # dependent on how that earlier, unrelated turn happens to get routed
+    # — it only needs to prove that turn is never attributed to a LATER,
+    # different action's slot.
+    def test_02_old_natural_name_not_contaminating(self):
+        history = [{"role": "user", "content": "สมชาย"},
+                   {"role": "assistant", "content": "ขอโทษด้วยค่ะ ไม่พบข้อมูลที่เกี่ยวข้องในฐานความรู้"}]
+        with patch("services.action_executor.requests.request"):
+            t2 = self.engine.decide(self.TRIGGER, history=history, context=self.ctx)
+        collected = self._ics(t2).get("collected_parameters", {})
+        self.assertNotEqual(collected.get("ReceiverName"), "สมชาย")
+
+    # TEST 03 — old phone number must not auto-bind to a later phone slot.
+    def test_03_old_phone_not_contaminating(self):
+        history = [{"role": "user", "content": "0812345678"},
+                   {"role": "assistant", "content": "ขอโทษด้วยค่ะ ไม่พบข้อมูลที่เกี่ยวข้องในฐานความรู้"}]
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        with patch("services.action_executor.requests.request"):
+            t1 = self.engine.decide(self.TRIGGER, history=history, context=ctx)
+        history2 = history + [{"role": "user", "content": self.TRIGGER}, {"role": "assistant", "content": t1["reply"]["text"]}]
+        with patch("services.action_executor.requests.request"):
+            t2 = self.engine.decide(self.SHIPMENT_CODE, history=history2, context=ctx)
+        history3 = history2 + [{"role": "user", "content": self.SHIPMENT_CODE}, {"role": "assistant", "content": t2["reply"]["text"]}]
+        with patch("services.action_executor.requests.request"):
+            t3 = self.engine.decide("ผู้รับชื่อสมชาย", history=history3, context=ctx)
+        collected = self._ics(t3).get("collected_parameters", {})
+        self.assertNotEqual(collected.get("ReceiverPhone"), "0812345678")
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 04 — old postal code must not auto-bind to a later postal slot.
+    def test_04_old_postal_code_not_contaminating(self):
+        history = [{"role": "user", "content": "10540"},
+                   {"role": "assistant", "content": "ขอโทษด้วยค่ะ ไม่พบข้อมูลที่เกี่ยวข้องในฐานความรู้"}]
+        with patch("services.action_executor.requests.request"):
+            t2 = self.engine.decide(self.TRIGGER, history=history, context=self.ctx)
+        collected = self._ics(t2).get("collected_parameters", {})
+        self.assertNotEqual(collected.get("PostalCode"), "10540")
+
+    # TEST 05 — the CURRENT action's own question/answer still binds
+    # correctly (the i>=1 path, unaffected by this fix). CustCode is
+    # already known via Identifier Memory so the flow actually reaches
+    # the ReceiverName-asking stage before this turn. ReceiverName is an
+    # address-component field (structural-candidates-only, filled via the
+    # Thai address parser's own labeled-marker recognition — a BARE,
+    # unlabeled name is a separate, pre-existing, unrelated behavior, not
+    # this fix's concern), so the labeled form is used here, exactly as
+    # TEST 08's own multi-slot message already does.
+    def test_05_current_action_answer_still_binds(self):
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self._turn(self.TRIGGER, context=ctx)
+        self._turn(self.SHIPMENT_CODE, context=ctx)
+        t3 = self._turn("ผู้รับชื่อสมชาย", context=ctx)
+        self.assertEqual(self._ics(t3).get("collected_parameters", {}).get("ReceiverName"), "สมชาย")
+
+    # TEST 06 — current-action standalone Shipment still accepted.
+    def test_06_current_action_standalone_shipment_accepted(self):
+        self._turn(self.TRIGGER)
+        t2 = self._turn(self.SHIPMENT_CODE)
+        self.assertEqual(self._ics(t2).get("collected_parameters", {}).get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 07 — trusted Identifier Memory prefill still works (Task 02
+    # regression check) even with an unrelated topic beforehand.
+    def test_07_identifier_memory_prefill_still_works(self):
+        self._seed_order_lookup()
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self._turn("SP1008 order ล่าสุด", context=ctx, order_mock=True)
+        t2 = self._turn(self.TRIGGER, context=ctx)
+        collected = self._ics(t2).get("collected_parameters", {})
+        self.assertEqual(collected.get("CustCode"), "SP1008")
+        self.assertNotEqual(collected.get("ReceiverName"), "SP1008")
+
+    # TEST 08 — Task 02's original bug must remain fixed: Shipment
+    # accepted, then a multi-slot message must never lose/re-ask it.
+    def test_08_task_02_original_bug_remains_fixed(self):
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self._turn(self.TRIGGER, context=ctx)
+        self._turn(self.SHIPMENT_CODE, context=ctx)
+        t3 = self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                          "อำเภอบางพลี จังหวัดสมุทรปราการ 10540", context=ctx)
+        collected = self._ics(t3).get("collected_parameters", {})
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertNotIn("Shipmentค่ะ", t3["reply"]["text"])
+
+    # TEST 09 — topic interruption + resume: the pending action's OWN
+    # already-collected state must survive an interruption uncontaminated
+    # by the interrupting turn's own content, when the caller correctly
+    # tracks pending state (the same existing pending_action_id/
+    # pending_parameters mechanism already used at the confirmation
+    # stage) -- automatic conversational re-recognition of an interrupted
+    # MID-COLLECTION action with no caller-side pending tracking at all
+    # is a separate, pre-existing gap, not this fix's concern (see the
+    # Task 02B final report's out-of-scope findings).
+    def test_09_interruption_state_preserved_via_pending_tracking(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        history_after_interruption = self.history + [
+            {"role": "user", "content": "พัสดุล่าสุดถึงไหนแล้ว"},
+            {"role": "assistant", "content": "สถานะพัสดุ: กำลังจัดส่ง"},
+        ]
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide(
+                "ผู้รับชื่อสมชาย", history=history_after_interruption,
+                context={"developer_mode": True, "customer_context": {},
+                          "pending_action_id": self.action_id,
+                          "pending_parameters": {"ShipmentCode": self.SHIPMENT_CODE}})
+        collected = self._ics(result).get("collected_parameters", {})
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+
+    # TEST 10 — a completed old action must not contaminate a new one.
+    def test_10_completed_old_action_no_contamination(self):
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self._turn(self.TRIGGER, context=ctx)
+        self._turn(self.SHIPMENT_CODE, context=ctx)
+        self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                    "อำเภอบางพลี จังหวัดสมุทรปราการ 10540", context=ctx)
+        # A brand new, unrelated action starts a FRESH conversation.
+        order_id = self._seed_order_lookup()
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"orders": []})):
+            fresh = self.engine.decide("order ล่าสุด", history=[],
+                                        context={"developer_mode": True, "customer_context": {"cust_code": "SP1008"}})
+        collected = self._ics(fresh).get("collected_parameters", {})
+        self.assertNotIn("ShipmentCode", collected)
+        self.assertNotIn("ReceiverName", collected)
+
+    # TEST 11 — a cancelled old action must not contaminate a new one.
+    def test_11_cancelled_old_action_no_contamination(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        with patch("services.action_executor.requests.request"):
+            self.engine.decide("ยกเลิก", history=self.history,
+                                context={**self.ctx, "pending_action_id": self.action_id,
+                                          "pending_parameters": {"ShipmentCode": self.SHIPMENT_CODE}})
+        order_id = self._seed_order_lookup()
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"orders": []})):
+            fresh = self.engine.decide("order ล่าสุด", history=[],
+                                        context={"developer_mode": True, "customer_context": {"cust_code": "SP1008"}})
+        collected = self._ics(fresh).get("collected_parameters", {})
+        self.assertNotIn("ShipmentCode", collected)
+
+    # TEST 12 — multiple unrelated topics before the new action; none
+    # contaminate.
+    def test_12_multiple_unrelated_topics_no_contamination(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="CBM คือปริมาตรสินค้าค่ะ")):
+            self._seed_order_lookup()
+            self._turn("SP1008 order ล่าสุด", order_mock=True)
+            self._turn("CBM คืออะไร")
+        t3 = self._turn(self.TRIGGER)
+        collected = self._ics(t3).get("collected_parameters", {})
+        self.assertNotEqual(collected.get("ReceiverName"), "SP1008")
+        self.assertNotIn("CBM", str(collected.get("ReceiverName") or ""))
+
+    # TEST 13 — two users must never cross-contaminate.
+    def test_13_two_users_no_cross_contamination(self):
+        self._seed_order_lookup()
+        engine_a = _engine_with_registry(self.reg)
+        engine_b = _engine_with_registry(self.reg)
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"orders": []})):
+            turn1_a = engine_a.decide("SP1008 order ล่าสุด", history=[],
+                                        context={"developer_mode": True, "customer_context": {}})
+        history_a = [{"role": "user", "content": "SP1008 order ล่าสุด"},
+                     {"role": "assistant", "content": turn1_a["reply"]["text"]}]
+        with patch("services.action_executor.requests.request"):
+            turn2_a = engine_a.decide(self.TRIGGER, history=history_a,
+                                        context={"developer_mode": True, "customer_context": {}})
+        with patch("services.action_executor.requests.request"):
+            turn1_b = engine_b.decide(self.TRIGGER, history=[],
+                                        context={"developer_mode": True, "customer_context": {}})
+        collected_a = self._ics(turn2_a).get("collected_parameters", {})
+        collected_b = self._ics(turn1_b).get("collected_parameters", {})
+        self.assertNotEqual(collected_a.get("ReceiverName"), "SP1008")
+        self.assertEqual(collected_b, {})
+
+    # TEST 14 — Task 02's correction-after-status-query companion
+    # behavior must remain PASS.
+    def test_14_correction_after_status_query_still_works(self):
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self._turn(self.TRIGGER, context=ctx)
+        self._turn(self.SHIPMENT_CODE, context=ctx)
+        self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                    "อำเภอบางพลี จังหวัดสมุทรปราการ 10540", context=ctx)
+        self._turn("มีข้อมูลอะไรบ้าง", context=ctx)
+        t5 = self._turn("เบอร์โทรผิด แก้เป็น 0899999999", context=ctx)
+        collected = self._ics(t5).get("collected_parameters", {})
+        self.assertEqual(collected.get("ReceiverPhone"), "0899999999")
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+
+
 if __name__ == "__main__":
     unittest.main()
