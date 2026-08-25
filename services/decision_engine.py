@@ -2157,10 +2157,31 @@ class DecisionEngine:
         metadata_by_label = {r.get("mapped_label"): (r.get("field_metadata") or {}) for r in rows}
         json_path_by_label = {r.get("mapped_label"): (r.get("json_path") or "") for r in rows}
         currency_keywords = ("ยอดเงิน", "ราคา", "ค่าขนส่ง", "total", "บาท")
+        # Empty Requested Field fix (P1) — `payload` differs from
+        # `fallback_payload` (a DIFFERENT dict object, not just "happens
+        # to have the same keys") only when Requested-Field Filtering
+        # (select_requested_mapped_fields) actually narrowed the reply
+        # down to the specific field(s) the customer's own question named
+        # — see that function's own "safe by construction" default, which
+        # returns the SAME `mapped_fields` object unchanged whenever
+        # nothing in the question matched anything. That object-identity
+        # check is the generic signal (no field name, no config) for
+        # "the customer specifically asked about this field" vs. "this is
+        # an unfiltered, general profile dump" — reused here so an
+        # honestly-empty field the customer specifically asked about is
+        # answered honestly (below) instead of being silently dropped and
+        # falling through to the fully-unfiltered fallback three empty
+        # cases below (which then substituted unrelated fields the
+        # customer never asked about). A general/broad question keeps
+        # today's behavior unchanged: an empty field just isn't worth
+        # mentioning among everything else that DOES have data.
+        is_narrowed = fallback_payload is not None and payload is not fallback_payload
         lines = []
         unflattened_list_lines = []
         for label, value in payload.items():
             if value in (None, ""):
+                if is_narrowed:
+                    lines.append(f"ไม่พบข้อมูล{label}ค่ะ")
                 continue
             if isinstance(value, dict):
                 continue
@@ -2185,6 +2206,15 @@ class DecisionEngine:
                     continue
                 value = ", ".join(str(v) for v in value) if value else None
                 if not value:
+                    # An EMPTY list ("คูปอง": []) falls through to here —
+                    # it is neither a non-empty list of records (handled
+                    # above) nor a non-empty scalar list; without this,
+                    # it silently vanished with NEITHER a labeled count
+                    # NOR an honest "no data" line, which is exactly what
+                    # let a narrowed, single-field reply fall through to
+                    # the fully-unfiltered fallback below.
+                    if is_narrowed:
+                        lines.append(f"ไม่พบข้อมูล{label}ค่ะ")
                     continue
             keywords = [str(k).lower() for k in (metadata_by_label.get(label, {}).get("keywords") or [])]
             is_currency = isinstance(value, (int, float)) and any(

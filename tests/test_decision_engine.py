@@ -2436,6 +2436,72 @@ class TestRequestedFieldFilteringEndToEnd(unittest.TestCase):
         self.assertIn("ยอดเงิน Wallet", text)
         self.assertIn("คูปอง", text)
 
+    # Empty Requested Field fix (P1) — an empty/null/[] value for the
+    # SPECIFIC field the customer asked about must be answered honestly
+    # ("no data for X"), never silently substituted with unrelated
+    # fields the customer never asked about.
+    def test_requested_field_empty_list_gets_honest_answer_not_unrelated_fields(self):
+        self._seed_customer_lookup()
+        payload = {"ชื่อลูกค้า": "สมชาย", "ยอดเงิน Wallet": "100.00", "คูปอง": []}
+        with patch.object(self.engine.executor, "execute",
+                           return_value=_fake_exec_result(result={"mapped_fields": payload})):
+            result = self.engine.decide("คูปองของลูกค้า SP1014 มีอะไรบ้าง", history=[])
+        text = result["reply"]["text"]
+        self.assertIn("คูปอง", text)
+        self.assertNotIn("ชื่อลูกค้า", text)
+        self.assertNotIn("ยอดเงิน Wallet", text)
+        self.assertNotIn("100.00", text)
+
+    def test_requested_field_null_gets_honest_answer_not_unrelated_fields(self):
+        self._seed_customer_lookup()
+        payload = {"ชื่อลูกค้า": "สมชาย", "ยอดเงิน Wallet": "100.00", "คูปอง": None}
+        with patch.object(self.engine.executor, "execute",
+                           return_value=_fake_exec_result(result={"mapped_fields": payload})):
+            result = self.engine.decide("คูปองของลูกค้า SP1014 มีอะไรบ้าง", history=[])
+        text = result["reply"]["text"]
+        self.assertIn("คูปอง", text)
+        self.assertNotIn("ชื่อลูกค้า", text)
+        self.assertNotIn("ยอดเงิน Wallet", text)
+
+    def test_requested_field_empty_string_gets_honest_answer_not_unrelated_fields(self):
+        self._seed_customer_lookup()
+        payload = {"ชื่อลูกค้า": "สมชาย", "ยอดเงิน Wallet": "100.00", "คูปอง": ""}
+        with patch.object(self.engine.executor, "execute",
+                           return_value=_fake_exec_result(result={"mapped_fields": payload})):
+            result = self.engine.decide("คูปองของลูกค้า SP1014 มีอะไรบ้าง", history=[])
+        text = result["reply"]["text"]
+        self.assertIn("คูปอง", text)
+        self.assertNotIn("ชื่อลูกค้า", text)
+        self.assertNotIn("ยอดเงิน Wallet", text)
+
+    def test_requested_field_with_real_data_still_shown_normally(self):
+        # Regression guard: the fix must not turn a genuinely non-empty
+        # requested field into an "empty" answer.
+        self._seed_customer_lookup()
+        payload = {"ชื่อลูกค้า": "สมชาย", "ยอดเงิน Wallet": "100.00", "คูปอง": ["A10", "B20"]}
+        with patch.object(self.engine.executor, "execute",
+                           return_value=_fake_exec_result(result={"mapped_fields": payload})):
+            result = self.engine.decide("คูปองของลูกค้า SP1014 มีอะไรบ้าง", history=[])
+        text = result["reply"]["text"]
+        self.assertIn("คูปอง", text)
+        self.assertNotIn("ไม่พบข้อมูล", text)
+
+    def test_broad_profile_question_still_returns_multiple_fields_even_with_one_empty(self):
+        # Distinguishes a SPECIFIC field question (above) from a GENERAL
+        # profile question — an empty field among several must NOT
+        # clutter a broad answer with a "no data" line; it should simply
+        # be omitted, exactly like before this fix, while the fields that
+        # DO have data still all appear.
+        self._seed_customer_lookup()
+        payload = {"ชื่อลูกค้า": "สมชาย", "ยอดเงิน Wallet": "100.00", "คูปอง": []}
+        with patch.object(self.engine.executor, "execute",
+                           return_value=_fake_exec_result(result={"mapped_fields": payload})):
+            result = self.engine.decide("ดูข้อมูลทั้งหมดของลูกค้า SP1014", history=[])
+        text = result["reply"]["text"]
+        self.assertIn("ชื่อลูกค้า", text)
+        self.assertIn("ยอดเงิน Wallet", text)
+        self.assertNotIn("ไม่พบข้อมูล", text)
+
     def test_action_without_response_mapping_keeps_unfiltered_behavior(self):
         # Backward compatibility — an action with no configured
         # response_mapping at all must keep returning every mapped field,
