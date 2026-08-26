@@ -22,21 +22,76 @@ class ConfidenceResult:
     reason: str
 
 
+def _has_reliable_evidence(c: Dict) -> bool:
+    """Answerability Gate (Task 04B, 2026-08-26) — `classification` /
+    `evidence_label` (rag/hybrid_scoring.py) are RANKING signals: they can
+    legitimately be "direct_evidence" for a chunk that doesn't answer the
+    question at all, via a generic query-expansion term
+    (expand_company_intent_terms's fixed vocabulary, injected whenever a
+    message contains "บริษัท" regardless of what else it asks) or a bare
+    Tags-line word ("ขนส่ง"/"นโยบาย" — broad categorical labels shared by
+    nearly every FAQ row in the domain). Confirmed live: "บริษัทชดเชย
+    คาร์บอนจากการขนส่งหรือไม่" (carbon offset — genuinely absent) and
+    "มีนโยบายบริจาคกำไร...ไหม" (profit donation — genuinely absent) both
+    got a PERFECT keyword_score, and "direct_evidence"/"direct_answer" at
+    0.9 confidence, against completely unrelated FAQ rows.
+
+    Answerability requires evidence that survives EXCLUDING those two
+    contamination sources: `has_literal_evidence` (computed with the raw
+    literal question only, no expansion, Tags line stripped — see
+    rag/hybrid_scoring.py::apply_hybrid_ranking), or an intent-specific
+    evidence signal that's independently reliable by construction
+    (duration_evidence/log_time_evidence — a real day-count or timestamp
+    pattern found directly in the chunk's own text), or a deterministic
+    structured/calculated result (never a similarity guess at all)."""
+    return bool(
+        c.get("has_literal_evidence")
+        or c.get("duration_evidence")
+        or c.get("log_time_evidence")
+        or c.get("is_structured")
+        or c.get("is_calculated")
+        or c.get("classification") == "structured_deterministic"
+    )
+
+
 def _classify_answerability(chunks: List[Dict], is_calculated: bool) -> str:
     if is_calculated:
         return "direct_answer"
     if not chunks:
         return "no_information"
-    has_direct = any(c.get("classification") == "direct_evidence" for c in chunks)
-    has_any_support = any(c.get("classification") in
-                           ("direct_evidence", "supporting_evidence", "structured_deterministic")
-                           for c in chunks)
+    has_direct = any(c.get("classification") == "direct_evidence" and _has_reliable_evidence(c) for c in chunks)
+    has_any_support = any(
+        c.get("classification") in ("direct_evidence", "supporting_evidence", "structured_deterministic")
+        and _has_reliable_evidence(c) for c in chunks)
     if has_direct:
         return "direct_answer"
     if has_any_support:
         return "partial_answer"
-    # Only weak_semantic (or nothing) survived — no real evidence.
-    return "partial_answer" if chunks else "no_information"
+    # Evidence Agreement (customer-demo P0 fix, preserved) — several
+    # retrieved chunks that all survived retrieval on the same topic are
+    # still a real corroborating signal for a broad question (e.g.
+    # "summarize the company"), even with no single chunk individually
+    # carrying reliable evidence by the stricter definition above. Task
+    # 04B fix: this must only apply to a genuinely UNIFORM weak_semantic
+    # pool (the original 2026-07-20 fixture's own scenario — several
+    # chunks with NO lexical claim at all, agreeing purely on vector
+    # similarity) — never a pool where chunks are already (falsely)
+    # LABELED "direct_evidence"/"supporting_evidence" by the contaminated
+    # keyword/heading match this Answerability Gate exists to distrust.
+    # Confirmed live: "บริษัทมีนโยบายเรื่องการรีไซเคิลกล่องพัสดุอย่างไร"
+    # retrieved exactly 3 chunks, ALL mislabeled "direct_evidence" via the
+    # same company-intent-expansion contamination — the old unconditional
+    # `len(chunks) >= 3` check let that "agreement" through as if it were
+    # genuine corroboration, when every member was independently
+    # unreliable for the identical reason.
+    all_weak_semantic = all(c.get("classification") == "weak_semantic" for c in chunks)
+    if len(chunks) >= 3 and all_weak_semantic:
+        return "partial_answer"
+    # Only weak_semantic (or nothing) survived, and no reliable evidence
+    # anywhere in the pool — genuinely no_information, regardless of
+    # whether retrieval happened to return SOME chunks (Top-K being
+    # non-empty is never the same thing as the question being answerable).
+    return "no_information"
 
 
 def compute_confidence(chunks: List[Dict]) -> ConfidenceResult:

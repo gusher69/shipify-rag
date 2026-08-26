@@ -665,6 +665,34 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
+    elif conf_result.answerability == "no_information":
+        # Answerability Gate (Task 04B, 2026-08-26) — retrieval returning
+        # a non-empty Top-K is never the same thing as the question being
+        # answerable (confirmed live: "บริษัทมีนโยบายเรื่องการรีไซเคิล
+        # กล่องพัสดุอย่างไร" — genuinely absent from the knowledge base —
+        # retrieved several shipping-related FAQ chunks that scored a
+        # "perfect" keyword match purely via generic company-intent-
+        # expansion terms or a bare Tags-line word, none of which actually
+        # answers the question asked; the LLM then answered confidently
+        # using that unrelated pricing/service content). Once
+        # rag/confidence.py's stricter _classify_answerability determines
+        # no chunk carries reliable (literal/intent/structured) evidence,
+        # reject BEFORE the LLM ever sees the chunks — never rely on the
+        # system prompt's own "don't answer if irrelevant" instruction
+        # alone when deterministic retrieval evidence can reject it first
+        # (Phase 11). The exact wording already exists as the product's
+        # own approved fallback phrasing (services/prompt_builder.py's
+        # "## กรณีไม่มีข้อมูล (Fallback Tone)" section) — reused verbatim so
+        # this deterministic path sounds identical to what the LLM would
+        # have said anyway, never an infrastructure-sounding message.
+        answer_text = "ตอนนี้ยังไม่พบข้อมูลนี้ในฐานความรู้ค่ะ"
+        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                             "no chunk carries reliable evidence for this question (Answerability Gate) — "
+                             "deterministic safe-fallback used, no LLM call, no chunks used as evidence"))
+        services_used.append({"name": "LLMService", "status": "skipped"})
+        input_tokens = output_tokens = 0
+        llm_latency = 0.0
+        llm_failed = False
     else:
         try:
             llm = get_llm_service()
@@ -705,6 +733,14 @@ def run_playground_turn(
         attachment_plan = {"should_send": False, "selected_attachments": [], "attachment_order": [],
                             "selection_reason": "slot filling turn (follow-up question, escalation, or pending "
                                                  "ERP acknowledgement) — never an evidence-chunk attachment",
+                            "omitted_attachments": []}
+    elif conf_result.answerability == "no_information":
+        # Answerability Gate (Task 04B, 2026-08-26) — a safe-fallback
+        # answer must never carry an attachment sourced from the very
+        # chunks just judged insufficient to answer the question.
+        attachment_plan = {"should_send": False, "selected_attachments": [], "attachment_order": [],
+                            "selection_reason": "no reliable evidence for this question (Answerability Gate) — "
+                                                 "safe fallback, no evidence-chunk attachment",
                             "omitted_attachments": []}
     else:
         attachment_plan = plan_attachments(

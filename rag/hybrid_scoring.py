@@ -146,6 +146,19 @@ _LONG_TOKEN_THRESHOLD = 10
 # is the more robust signal — one real 6+ character shared phrase counts,
 # however many scattered 3-character syllables merely happen to coincide.
 _MIN_SHARED_SUBSTRING_LEN = 8
+# Task 04B fix (2026-08-26) — an ABSOLUTE length floor alone punishes a
+# short but genuinely SPECIFIC domain word once stopwords are stripped
+# down to just that word (e.g. "คูปองใช้ยังไง" -> stripped "คูปอง", 5
+# chars — a 100% match against the chunk's own content, confirmed live to
+# wrongly score 0.0 and break the KNOWN-GOOD coupon query). A match also
+# counts when it covers a HIGH PROPORTION of the (stripped) query's own
+# remaining content, even if shorter than the absolute floor — one real
+# shared word that IS most of what the customer actually asked is strong
+# evidence, unlike a short coincidental morpheme (e.g. "เกี่ยว", shared by
+# "เกี่ยวกับ"/"เกี่ยวข้อง" with no topical relation) which only ever makes
+# up a SMALL fraction of a longer, still-mostly-unmatched query.
+_MIN_PROPORTIONAL_SHARED_LEN = 4
+_MIN_SHARED_PROPORTION = 0.6
 # Reuses the SAME generic stopword vocabulary tokenize() already strips
 # post-tokenization (so a spaced query never gets credit for matching
 # only a filler word) — here applied as substring removal INSIDE a long
@@ -192,19 +205,26 @@ def _thai_ngram_overlap_score(q_token: str, hay_tokens: List[str]) -> float:
     """Graded partial-credit score for a long, glued Thai token that
     whole-token substring containment (_thai_substring_hit) already
     failed to match either direction. Finds the longest genuinely shared
-    substring against any haystack token; below _MIN_SHARED_SUBSTRING_LEN
-    it's treated as coincidental noise (0.0) — a real match only counts
-    once it's long enough to represent an actual shared word/phrase, not
-    a common short syllable. Score is that shared length as a fraction of
-    the (stopword-stripped) token's own length, so a chunk sharing MOST of
-    the query's real content scores higher than one sharing only a small
-    fragment of it."""
+    substring against any haystack token; counts as real evidence only
+    when it's either ABSOLUTELY long enough (_MIN_SHARED_SUBSTRING_LEN —
+    a real shared phrase regardless of how long the rest of the query is,
+    e.g. "ส่งทางรถ" out of a long sentence) OR covers a HIGH PROPORTION of
+    the (stripped) query's own remaining content (_MIN_SHARED_PROPORTION —
+    a short but essentially COMPLETE match, e.g. "คูปอง" once filler words
+    are stripped away). Neither alone is safe: a pure absolute floor
+    punishes short, specific domain words once stopwords strip everything
+    else away; a pure proportion would let a short coincidental syllable
+    through on a short query. Score is the shared length as a fraction of
+    the stripped token's own length either way, so a chunk sharing MORE of
+    the query's real content still scores higher than one sharing less."""
     q_token = _strip_glued_stopwords(q_token).replace(" ", "")
-    if len(q_token) < _MIN_SHARED_SUBSTRING_LEN:
+    if not q_token:
         return 0.0
     best_len = max((_longest_common_substring_len(q_token, ht) for ht in hay_tokens), default=0)
     if best_len < _MIN_SHARED_SUBSTRING_LEN:
-        return 0.0
+        proportion = best_len / len(q_token)
+        if best_len < _MIN_PROPORTIONAL_SHARED_LEN or proportion < _MIN_SHARED_PROPORTION:
+            return 0.0
     return best_len / len(q_token)
 
 
@@ -220,8 +240,31 @@ def _thai_ngram_overlap_score(q_token: str, hay_tokens: List[str]) -> float:
 SYNONYM_VARIANT_WEIGHT = 0.85
 
 
+_TAGS_LINE_RE = re.compile(r"(?im)^\s*tags\s*:.*$")
+
+
+def _strip_tags_line(text: str) -> str:
+    """Removes a "Tags: ..." line (case-insensitive, generic label — not
+    tied to any specific tag value) from a chunk's raw text. Used ONLY by
+    the Answerability Gate's literal-evidence scoring (Task 04B,
+    2026-08-26), never by the existing ranking score. Confirmed live: a
+    chunk's Tags line is a broad, categorical label shared by nearly
+    every FAQ row on the same general topic (e.g. "ขนส่ง" — shipping —
+    tagged on almost every row in a logistics company's entire knowledge
+    base) — matching it alone proves the chunk is IN THE SAME BROAD
+    DOMAIN, never that it answers the SPECIFIC fact the customer asked
+    about. Confirmed false positives: "บริษัทชดเชยคาร์บอน...หรือไม่" (carbon
+    offset — a genuinely absent topic) matched only via the "ขนส่ง" Tag on
+    an unrelated "มีบริการอะไรบ้าง" chunk; "มีนโยบายบริจาคกำไร...ไหม" (profit
+    donation) matched only via the "นโยบาย" (policy) Tag on an unrelated
+    "มีขั้นต่ำในการสั่งไหม" chunk. Neither word appears anywhere in either
+    chunk's actual Question/Answer/Alternative-phrasings content."""
+    return _TAGS_LINE_RE.sub("", text)
+
+
 def compute_keyword_score(question: str, chunk: Dict, query_variants: Optional[List[str]] = None,
-                           synonym_variant_keys: Optional[set] = None) -> float:
+                           synonym_variant_keys: Optional[set] = None, *,
+                           exclude_tags_line: bool = False) -> float:
     """Fraction of the question's meaningful tokens that appear literally
     (or, for Thai, as a substring — see _thai_substring_hit) in the
     chunk's text/heading/section — computed across the ORIGINAL question
@@ -239,10 +282,20 @@ def compute_keyword_score(question: str, chunk: Dict, query_variants: Optional[L
     Knowledge Synonym Engine specifically; their contribution is
     discounted by SYNONYM_VARIANT_WEIGHT before the max() below, so they
     can never outrank a match the original question (or an existing
-    glossary variant) already found."""
+    glossary variant) already found.
+
+    `exclude_tags_line` (Task 04B, Answerability Gate, 2026-08-26) — when
+    True, strips the chunk's "Tags: ..." line before scoring (see
+    _strip_tags_line). Only ever passed True by the answerability-only
+    literal-evidence computation; the existing ranking score (every other
+    caller) is completely unaffected, so Task 04's ranking fix is
+    unchanged."""
     variants = query_variants if query_variants else [question]
+    chunk_text = chunk.get("text") or ""
+    if exclude_tags_line:
+        chunk_text = _strip_tags_line(chunk_text)
     haystack = " ".join(filter(None, [
-        chunk.get("text") or "",
+        chunk_text,
         chunk.get("section_title") or "",
         " ".join(chunk.get("heading_path") or []),
         chunk.get("file_name") or chunk.get("source") or "",
@@ -929,6 +982,34 @@ def apply_hybrid_ranking(question: str, chunks: List[Dict], return_excluded: boo
         c["has_lexical_evidence"] = has_lexical_evidence
         c["log_time_evidence"] = log_time_evidence
         c["duration_evidence"] = duration_evidence
+
+        # Answerability Gate evidence (Task 04B, 2026-08-26) — a SEPARATE,
+        # additive signal from `keyword_score`/`heading_score` above,
+        # computed using ONLY the raw literal question (no query-expansion
+        # variants, no company-intent-expansion terms, no synonym
+        # expansion) and a Tags-line-stripped haystack. Confirmed live:
+        # `keyword_score` above can legitimately be 1.0 for a completely
+        # unrelated chunk via (a) expand_company_intent_terms's fixed
+        # generic vocabulary ("บริการ" etc., injected whenever the message
+        # contains "บริษัท", regardless of what else it asks) or (b) a
+        # bare Tags-line word ("ขนส่ง"/"นโยบาย" — broad categorical labels
+        # shared by nearly every FAQ row in the domain) — genuinely useful
+        # signals for RANKING among already-plausible candidates (Task 04's
+        # own fix relies on exactly this generosity), but NOT reliable
+        # proof the chunk answers the customer's actual specific question.
+        # `literal_evidence` answers a narrower, stricter question: does
+        # the customer's own words show real overlap with this chunk's
+        # actual Question/Answer content? Used only by the Answerability
+        # Gate (rag/confidence.py) — `keyword_score`/`heading_score`/
+        # `hybrid_score`/`evidence_label`/`classification` above are
+        # completely unaffected, so Task 04's ranking fix is unchanged.
+        literal_keyword_score = compute_keyword_score(question, c, query_variants=[question],
+                                                        exclude_tags_line=True)
+        literal_heading_score = compute_heading_score(question, c, query_variants=[question],
+                                                        settings=settings) if settings.heading_boost_enabled else 0.0
+        c["literal_keyword_score"] = round(literal_keyword_score, 4)
+        c["literal_heading_score"] = round(literal_heading_score, 4)
+        c["has_literal_evidence"] = literal_keyword_score >= 0.5 or literal_heading_score >= 0.5
 
         # Legacy `classification` tier — kept for backward compatibility
         # with existing callers/tests/UI; derived from evidence_label so
