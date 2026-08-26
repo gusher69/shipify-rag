@@ -30,6 +30,30 @@ class TestLexicalSearchQueriesMetadataJsonPath(unittest.TestCase):
         filter_arg = mock_chain.or_.call_args[0][0]
         self.assertIn("metadata->>section_title.ilike", filter_arg)
 
+    def test_multi_token_query_issues_exactly_one_round_trip(self):
+        """Task 05 latency fix (2026-08-26) — confirmed live: a company-
+        intent-expanded query variant set tokenizing into 11 distinct
+        tokens previously issued 11 SEPARATE, sequential Supabase
+        round-trips (one per token), measured at ~3.2s total — the single
+        largest contributor to that turn's latency. All tokens' OR
+        conditions must now be combined into ONE query, so .execute() is
+        called exactly once regardless of how many tokens are involved."""
+        mock_sb = MagicMock()
+        mock_chain = mock_sb.table.return_value.select.return_value.eq.return_value
+        mock_chain.or_.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+
+        with patch("admin.routes.get_sb", return_value=mock_sb):
+            lexical_search(["บริษัทมีนโยบายรีไซเคิลบรรจุภัณฑ์ไหม", "องค์กรมีนโยบายรีไซเคิลบรรจุภัณฑ์ไหม",
+                             "ธุรกิจมีนโยบายรีไซเคิลบรรจุภัณฑ์ไหม", "company overview policy"])
+
+        self.assertEqual(mock_chain.or_.return_value.limit.return_value.execute.call_count, 1)
+        # Every token's own 4-field OR condition must still be present in
+        # the single combined filter string — batching must never drop a
+        # token's evidence, only combine it into one round-trip.
+        filter_arg = mock_chain.or_.call_args[0][0]
+        self.assertIn("content.ilike", filter_arg)
+        self.assertIn("metadata->>section_title.ilike", filter_arg)
+
     def test_returned_chunk_shape_prefers_metadata_over_null_top_level_column(self):
         mock_sb = MagicMock()
         mock_chain = mock_sb.table.return_value.select.return_value.eq.return_value

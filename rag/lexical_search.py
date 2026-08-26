@@ -47,49 +47,58 @@ def lexical_search(query_variants: List[str], limit: int = 15) -> List[Dict]:
     seen_ids = set()
     results: List[Dict] = []
     try:
-        for token in tokens:
-            like = f"%{token}%"
-            # section_title/chunk_index/heading_path live in the `metadata`
-            # JSONB column, NOT the (unused, always-NULL) top-level
-            # section_title column — see ingestion/ingest.py's chunk dict
-            # shape. Filtering only on the top-level column silently never
-            # matched anything (the exact bug that made "Our Mission"
-            # invisible to lexical search even after its content/heading
-            # were correct), so metadata->>section_title is queried too.
-            res = sb.table("knowledge_chunks").select(
-                "id,file_id,content,source,intent,is_active,metadata,page_number,section_title,version"
-            ).eq("is_active", True).or_(
-                f"content.ilike.{like},section_title.ilike.{like},source.ilike.{like},"
-                f"metadata->>section_title.ilike.{like}"
-            ).limit(limit).execute()
-            for r in (res.data or []):
-                if r["id"] in seen_ids:
-                    continue
-                seen_ids.add(r["id"])
-                meta = r.get("metadata") or {}
-                results.append({
-                    "text": r["content"], "source": r.get("source") or meta.get("file_name", ""),
-                    "intent": r.get("intent", ""), "score": None,  # no vector score — lexical-only candidate
-                    "citation": f"Source: {meta.get('file_name') or r.get('source')}",
-                    "file_name": meta.get("file_name"), "file_id": r.get("file_id"),
-                    "chunk_id": r["id"], "page_number": meta.get("page_number") or r.get("page_number"),
-                    "section_title": meta.get("section_title") or r.get("section_title"),
-                    "chunk_index": meta.get("chunk_index"), "version": meta.get("version") or r.get("version"),
-                    "category": meta.get("category"), "language": meta.get("language"),
-                    "is_structured": False, "attachments": [],
-                    "knowledge_type": meta.get("knowledge_type"), "chunk_strategy": meta.get("chunk_strategy"),
-                    "heading_path": meta.get("heading_path"), "step_index": meta.get("step_index"),
-                    "suggested_questions": meta.get("suggested_questions"),
-                    "embedding_provider": meta.get("embedding_provider"),
-                    "embedding_model": meta.get("embedding_model"),
-                    "embedding_version": meta.get("embedding_version"),
-                    "embedding_dimensions": meta.get("embedding_dimensions"),
-                    "document_purpose": meta.get("document_purpose"),
-                    "content_signals": meta.get("content_signals"),
-                    "from_lexical_search": True,
-                })
-                if len(results) >= limit:
-                    return results
+        # Latency fix (Task 05, 2026-08-26) — confirmed live: this used to
+        # issue ONE SEPARATE Supabase round-trip PER token, sequentially
+        # (11 tokens -> 11 network round-trips -> ~3.2s measured for a
+        # single company-intent-expanded query, the single largest
+        # contributor to that turn's total latency). The overall contract
+        # was already "at most `limit` distinct chunks matching ANY token
+        # in ANY field" (the early-return below already capped the total
+        # this way regardless of how many tokens were involved) — batching
+        # every token's OR-conditions into ONE combined `.or_()` string,
+        # queried once, preserves that exact same contract (same matching
+        # criteria, same final `limit` cap) while requiring exactly one
+        # round-trip regardless of token count. The only behavior
+        # difference is which specific `limit`-sized subset of matching
+        # rows Postgrest returns when more than `limit` rows match overall
+        # — never a correctness change, since every returned row still
+        # genuinely matches the same criteria as before.
+        or_conditions = ",".join(
+            f"content.ilike.%{token}%,section_title.ilike.%{token}%,source.ilike.%{token}%,"
+            f"metadata->>section_title.ilike.%{token}%"
+            for token in tokens
+        )
+        res = sb.table("knowledge_chunks").select(
+            "id,file_id,content,source,intent,is_active,metadata,page_number,section_title,version"
+        ).eq("is_active", True).or_(or_conditions).limit(limit).execute()
+        for r in (res.data or []):
+            if r["id"] in seen_ids:
+                continue
+            seen_ids.add(r["id"])
+            meta = r.get("metadata") or {}
+            results.append({
+                "text": r["content"], "source": r.get("source") or meta.get("file_name", ""),
+                "intent": r.get("intent", ""), "score": None,  # no vector score — lexical-only candidate
+                "citation": f"Source: {meta.get('file_name') or r.get('source')}",
+                "file_name": meta.get("file_name"), "file_id": r.get("file_id"),
+                "chunk_id": r["id"], "page_number": meta.get("page_number") or r.get("page_number"),
+                "section_title": meta.get("section_title") or r.get("section_title"),
+                "chunk_index": meta.get("chunk_index"), "version": meta.get("version") or r.get("version"),
+                "category": meta.get("category"), "language": meta.get("language"),
+                "is_structured": False, "attachments": [],
+                "knowledge_type": meta.get("knowledge_type"), "chunk_strategy": meta.get("chunk_strategy"),
+                "heading_path": meta.get("heading_path"), "step_index": meta.get("step_index"),
+                "suggested_questions": meta.get("suggested_questions"),
+                "embedding_provider": meta.get("embedding_provider"),
+                "embedding_model": meta.get("embedding_model"),
+                "embedding_version": meta.get("embedding_version"),
+                "embedding_dimensions": meta.get("embedding_dimensions"),
+                "document_purpose": meta.get("document_purpose"),
+                "content_signals": meta.get("content_signals"),
+                "from_lexical_search": True,
+            })
+            if len(results) >= limit:
+                return results
     except Exception as e:
         print(f"[lexical_search] query failed: {e}")
     return results
