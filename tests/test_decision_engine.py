@@ -5465,6 +5465,49 @@ class TestTask03IntentUnderstandingClarificationMultiIntent(unittest.TestCase):
         self.assertEqual(result["routing"]["type"], "WORKFLOW")
         self.assertIn("พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการ", result["reply"]["text"])
 
+    # TEST 14 — Production UAT finding (2026-08-26): a returning customer
+    # ALWAYS has Identifier Memory (a remembered CustCode) on their very
+    # first message of a new conversation -- `collected` is therefore
+    # non-empty from that seed alone, even with empty `history`. The
+    # trigger-turn gate must key off `history` (truly empty only on a
+    # genuine first message), never off `collected` (which Identifier
+    # Memory populates before the gate is ever checked) -- otherwise this
+    # detection silently never fires for the realistic case a customer
+    # with a known identifier sends a compound message.
+    def test_14_multi_intent_detected_even_with_identifier_memory_prefilled(self):
+        self._seed_address_change()
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide(
+                "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย",
+                history=[], context={"developer_mode": True, "customer_context": {"cust_code": "SP1008"}})
+        self.assertEqual(result["developer"].get("secondary_intent_detected"),
+                          "ช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย")
+        self.assertIn("รับทราบอีกเรื่อง", result["reply"]["text"])
+
+    # TEST 15 — Production UAT finding (2026-08-26): the acknowledgment
+    # sentence appended to a compound trigger's reply must not break every
+    # LATER turn's history-replay reconstruction, which recognizes "this
+    # assistant turn asked for parameter X" via an exact-text comparison
+    # against the generated question. Proves a full, multi-turn collection
+    # started from a compound (multi-intent) trigger still completes
+    # correctly end-to-end.
+    def test_15_ack_suffix_does_not_break_downstream_replay(self):
+        self._seed_address_change()
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        with patch("services.action_executor.requests.request"):
+            t1 = self.engine.decide(
+                "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย", history=[], context=ctx)
+            self.assertIn("รับทราบอีกเรื่อง", t1["reply"]["text"])
+            h = [{"role": "user", "content": "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย"},
+                 {"role": "assistant", "content": t1["reply"]["text"]}]
+            t2 = self.engine.decide("SP100820260810006", history=h, context=ctx)
+            h += [{"role": "user", "content": "SP100820260810006"},
+                  {"role": "assistant", "content": t2["reply"]["text"]}]
+            t3 = self.engine.decide("ผู้รับชื่อสมชาย", history=h, context=ctx)
+        collected = self._ics(t3).get("collected_parameters", {})
+        self.assertEqual(collected.get("ShipmentCode"), "SP100820260810006")
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+
 
 if __name__ == "__main__":
     unittest.main()
