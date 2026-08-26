@@ -40,7 +40,16 @@ ERP_INTENTS = ("tracking", "order", "customer", "warranty", "invoice", "payment"
 
 _INTENT_KEYWORD_PATTERNS: Dict[str, re.Pattern] = {
     "tracking": re.compile(r"ของถึงไหน|เช็คสถานะ|ติดตามพัสดุ|พัสดุถึงไหน|สินค้าถึงไหน|tracking", re.IGNORECASE),
-    "warranty": re.compile(r"รับประกัน|เคลมสินค้า|ประกันสินค้า|warranty", re.IGNORECASE),
+    # Task 03B (2026-08-26): broadened from "รับประกัน|เคลมสินค้า|
+    # ประกันสินค้า|warranty" to bare "ประกัน" (a superset — anything
+    # containing "รับประกัน"/"ประกันสินค้า" already contains "ประกัน" too,
+    # so this never narrows what used to match) so genuine warranty
+    # phrasings without the "รับ" prefix ("สินค้าอยู่ในประกันไหม", "ยังอยู่
+    # ในประกันหรือเปล่า") are recognized at all. Safe to broaden ONLY
+    # because detect_erp_intent() below now runs _is_genuine_product_
+    # warranty() as a second gate — a bare "ประกัน"/"warranty" match alone
+    # is never enough on its own (see that function's docstring).
+    "warranty": re.compile(r"ประกัน|เคลมสินค้า|warranty", re.IGNORECASE),
     "invoice": re.compile(r"ใบกำกับภาษี|ใบเสร็จ|invoice", re.IGNORECASE),
     "payment": re.compile(r"ชำระเงิน|จ่ายเงิน|ค้างชำระ|ยอดค้าง|payment", re.IGNORECASE),
     "order": re.compile(r"สถานะออเดอร์|เช็คออเดอร์|ออเดอร์ถึงไหน|order status", re.IGNORECASE),
@@ -51,6 +60,75 @@ _INTENT_KEYWORD_PATTERNS: Dict[str, re.Pattern] = {
 # broader "order" pattern.
 _INTENT_ORDER = ["tracking", "warranty", "invoice", "payment", "order", "customer"]
 
+# Warranty/Guarantee Intent Collision fix (Task 03B, 2026-08-26) —
+# confirmed live: the bare "รับประกัน" alternative in the warranty
+# pattern above matches ANY message containing that word, with no
+# requirement that a PRODUCT is what's actually being guaranteed — "รับ
+# ประกันไหมว่าจะถึงภายใน 7 วัน" (a delivery-time guarantee question) matched
+# it identically to "เช็คประกันสินค้าให้หน่อย" (a genuine product-warranty
+# lookup), triggering the Serial Number follow-up question for a customer
+# who never asked about their product at all. "เคลมสินค้า"/"ประกันสินค้า"
+# already name a product explicitly and are unaffected by this fix (both
+# also match _WARRANTY_PRODUCT_CONTEXT_RE below via "สินค้า"); only the
+# bare "รับประกัน"/"warranty" alternative needed disambiguating.
+_WARRANTY_PRODUCT_CONTEXT_RE = re.compile(
+    # \bSN — leading boundary only (never a trailing one): a real serial
+    # number is almost always glued straight to "SN" with no space
+    # ("SN123456"), so a trailing \b would never match at all (digits and
+    # letters share no word-boundary between them).
+    r"สินค้า|เครื่อง|อุปกรณ์|serial\s*number|\bserial\b|\bSN|S/N|ระยะเวลาประกัน|หมดประกัน|ยังอยู่ในประกัน",
+    re.IGNORECASE)
+_DELIVERY_GUARANTEE_CONTEXT_RE = re.compile(
+    r"ถึงภายใน|ถึงตามกำหนด|ถึงก่อน|เวลาขนส่ง|เวลาจัดส่ง|ขนส่ง|จัดส่ง|ส่งถึง|delivery|transit|shipping|SLA|"
+    r"กำหนดส่ง|ปลายทาง|เวลา|ทางรถ|ทางเรือ|ทางอากาศ|\d+\s*วัน",
+    re.IGNORECASE)
+# A short, targeted negation guard — mirrors rag/query_resolution.py::
+# strip_negated_spans' "blank out marker + following window" technique,
+# but with markers/window sized for THIS module's own confirmed case
+# ("ไม่ได้ถามประกันสินค้า ผมถามว่ารับประกันเวลาขนส่งไหม" — a negated mention
+# of "ประกันสินค้า" must never itself count as positive product-warranty
+# evidence). Reusing query_resolution.py's own markers/window directly
+# would not help here — that list ("ไม่ใช่"/"ไม่เอา"/"ไม่ต้องการ"/"ยกเว้น")
+# was built for location/transport entity negation and doesn't cover
+# "ไม่ได้ถาม", the actual phrasing that needs stripping here.
+_WARRANTY_NEGATION_MARKERS = ["ไม่ได้ถาม", "ไม่ได้หมายถึง", "ไม่ใช่", "ไม่ต้อง", "ไม่เอา"]
+_WARRANTY_NEGATION_WINDOW_CHARS = 20
+
+
+def _strip_warranty_negation(text: str) -> str:
+    result = text
+    for marker in _WARRANTY_NEGATION_MARKERS:
+        idx = 0
+        while True:
+            pos = result.find(marker, idx)
+            if pos == -1:
+                break
+            end = min(len(result), pos + len(marker) + _WARRANTY_NEGATION_WINDOW_CHARS)
+            result = result[:pos] + (" " * (end - pos)) + result[end:]
+            idx = end
+    return result
+
+
+def _is_genuine_product_warranty(text: str) -> bool:
+    """Disambiguates a bare "รับประกัน"/"warranty" mention: genuine
+    PRODUCT warranty requires evidence that a PRODUCT/ITEM is what's
+    being guaranteed (สินค้า/เครื่อง/อุปกรณ์/serial number/...) — never the
+    word "รับประกัน"/"ประกัน" alone. A message carrying DELIVERY/SHIPPING
+    guarantee vocabulary instead (ถึงภายใน/ขนส่ง/จัดส่ง/delivery/SLA/...) is
+    a shipping question, not a product lookup. A message with NEITHER
+    signal (a genuinely context-free "มีรับประกันไหม") is ambiguous —
+    returns False (never confidently assume Product Warranty without
+    real evidence; the message falls through to the normal RAG/Decision
+    Engine path, which has its own clarification/answerability
+    mechanisms for exactly this case). Negation-aware: a negated mention
+    of "ประกันสินค้า" never counts as positive product evidence."""
+    stripped = _strip_warranty_negation(text)
+    if _WARRANTY_PRODUCT_CONTEXT_RE.search(stripped):
+        return True
+    if _DELIVERY_GUARANTEE_CONTEXT_RE.search(stripped):
+        return False
+    return False
+
 
 def detect_erp_intent(text: str) -> Optional[str]:
     """First-matching ERP intent, or None if the text doesn't ask about
@@ -60,6 +138,8 @@ def detect_erp_intent(text: str) -> Optional[str]:
         return None
     for intent in _INTENT_ORDER:
         if _INTENT_KEYWORD_PATTERNS[intent].search(text):
+            if intent == "warranty" and not _is_genuine_product_warranty(text):
+                continue
             return intent
     return None
 

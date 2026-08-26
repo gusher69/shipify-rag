@@ -372,5 +372,147 @@ class TestEscalation(unittest.TestCase):
         self.assertFalse(state["escalation_required"])
 
 
+class TestWarrantyGuaranteeIntentCollision(unittest.TestCase):
+    """Task 03B — Fix Warranty / Guarantee Intent Collision (2026-08-26).
+
+    Confirmed live root cause: _INTENT_KEYWORD_PATTERNS["warranty"]'s bare
+    "รับประกัน" alternative matched ANY message containing that word, with
+    no requirement that a PRODUCT is what's actually being guaranteed —
+    "รับประกันไหมว่าจะถึงภายใน 7 วัน" (a delivery-time guarantee question)
+    matched it identically to "เช็คประกันสินค้าให้หน่อย" (a genuine
+    product-warranty lookup), triggering the Serial Number follow-up
+    question for a customer who never asked about their product.
+
+    Fix: detect_erp_intent() now runs a second gate,
+    _is_genuine_product_warranty(), whenever the base "warranty" pattern
+    matches — it requires PRODUCT-context evidence (สินค้า/เครื่อง/serial/
+    SN/...) before confirming Product Warranty; delivery/shipping-context
+    evidence (ถึงภายใน/ขนส่ง/จัดส่ง/delivery/SLA/...) or the absence of
+    either signal both correctly fall through to None (this workflow
+    layer has nothing to do with the turn), letting the normal RAG/
+    Decision Engine path (and Task 04B's Answerability Gate) handle it.
+    The base pattern itself was also broadened from "รับประกัน|เคลมสินค้า|
+    ประกันสินค้า|warranty" to bare "ประกัน|เคลมสินค้า|warranty" (a superset,
+    safe only because of the new second gate) so genuine warranty
+    phrasings without the "รับ" prefix are recognized at all.
+
+    Never touches ranking (Task 04) or the Answerability Gate (Task 04B)
+    — a delivery-guarantee message simply never enters this workflow
+    layer in the first place; what happens to it afterward is entirely
+    unchanged."""
+
+    # ---- Genuine Product Warranty — must still route to warranty ----
+
+    def test_product_warranty_positive_examples(self):
+        cases = [
+            "สินค้าอยู่ในประกันไหม",
+            "เช็คประกันสินค้าให้หน่อย",
+            "ประกันเครื่องนี้หมดหรือยัง",
+            "Serial Number นี้เช็คประกันได้ไหม",
+            "เช็ค warranty SN123456",
+            "สินค้าเสีย ยังอยู่ในประกันหรือเปล่า",
+            "ขอเช็คระยะเวลาประกันของสินค้า",
+            "สินค้านี้รับประกันกี่ปี",
+            "warranty สินค้าเช็คยังไง",
+            "check warranty SN12345",
+            "อยากเคลมสินค้า",  # pre-existing case, must remain unaffected
+        ]
+        for text in cases:
+            self.assertEqual(detect_erp_intent(text), "warranty", text)
+
+    # ---- Delivery Guarantee — must NEVER route to Product Warranty ----
+
+    def test_delivery_guarantee_examples_not_product_warranty(self):
+        cases = [
+            "รับประกันไหมว่าจะถึงภายใน 7 วัน",  # the original confirmed defect
+            "รับประกันเวลาขนส่งไหม",
+            "มีรับประกันว่าของจะถึงตามกำหนดไหม",
+            "delivery guarantee มีไหม",
+            "guarantee transit time ไหม",
+            "ขนส่งทางรถรับประกันกี่วัน",
+            "มี SLA ระยะเวลาจัดส่งหรือเปล่า",
+            "รับประกันไหมว่าของจะถึงก่อนวันศุกร์",
+            "รับประกันส่งถึงกี่วัน",
+        ]
+        for text in cases:
+            self.assertNotEqual(detect_erp_intent(text), "warranty", text)
+
+    # TEST 01 — the original confirmed defect, as its own explicit test.
+    def test_01_original_defect_not_warranty(self):
+        self.assertIsNone(detect_erp_intent("รับประกันไหมว่าจะถึงภายใน 7 วัน"))
+
+    def test_02_shipping_wording_not_warranty(self):
+        self.assertIsNone(detect_erp_intent("รับประกันเวลาขนส่งไหม"))
+
+    def test_03_sla_wording_not_warranty(self):
+        self.assertIsNone(detect_erp_intent("มี SLA ระยะเวลาจัดส่งไหม"))
+
+    def test_04_delivery_english_not_warranty(self):
+        self.assertNotEqual(detect_erp_intent("delivery guarantee มีไหม"), "warranty")
+
+    def test_05_genuine_warranty(self):
+        self.assertEqual(detect_erp_intent("เช็คประกันสินค้าให้หน่อย"), "warranty")
+
+    def test_06_serial_warranty(self):
+        self.assertEqual(detect_erp_intent("เช็ค warranty SN123456"), "warranty")
+
+    def test_07_product_warranty_period(self):
+        self.assertEqual(detect_erp_intent("สินค้านี้รับประกันกี่ปี"), "warranty")
+
+    # TEST 08 — genuinely ambiguous, context-free mention: must not
+    # confidently assume Product Warranty without real evidence.
+    def test_08_ambiguous_standalone_not_confidently_warranty(self):
+        self.assertIsNone(detect_erp_intent("มีรับประกันไหม"))
+        self.assertIsNone(detect_erp_intent("รับประกันไหม"))
+
+    # TEST 09 — shipping-duration follow-up: a bare "รับประกัน" mention
+    # right after a duration answer must resolve as a delivery-guarantee
+    # question, never Product Warranty (the previous assistant turn is a
+    # RAG-generated duration answer, not this engine's own warranty
+    # follow-up question, so resolve_active_erp_intent falls through to
+    # detect_erp_intent on the current message alone).
+    def test_09_shipping_followup_not_warranty(self):
+        history = _hist(("user", "ทางรถกี่วัน"),
+                         ("assistant", "ระยะเวลาขนส่งทางรถประมาณ 7-10 วันค่ะ"))
+        self.assertIsNone(resolve_active_erp_intent(history, "แล้วรับประกันไหมว่าจะถึงในเวลานี้"))
+
+    # TEST 10 — product-context follow-up: once a genuine warranty flow
+    # is established (asked THIS engine's own follow-up question), a
+    # reply with no warranty keyword at all must still continue the SAME
+    # flow (resolve_active_erp_intent's pending-follow-up fallback,
+    # unrelated to and unaffected by this fix's keyword disambiguation).
+    def test_10_product_warranty_followup_context_preserved(self):
+        history = _hist(("user", "สินค้านี้มีประกัน 1 ปีใช่ไหม"),
+                         ("assistant", INTENT_SCHEMAS["warranty"]["follow_up_question"]))
+        self.assertEqual(resolve_active_erp_intent(history, "แล้วหมดเมื่อไหร่"), "warranty")
+
+    # TEST 11 — negation: an explicitly negated mention of product
+    # warranty must not count as positive evidence.
+    def test_11_negation_not_warranty(self):
+        self.assertIsNone(detect_erp_intent("ไม่ได้ถามประกันสินค้า ผมถามว่ารับประกันเวลาขนส่งไหม"))
+        self.assertIsNone(detect_erp_intent("ไม่ต้องเช็ค warranty ขอถามเวลาส่งแทน"))
+
+    # TEST 12 — Serial Number safety: the exact regression assertion the
+    # spec calls for — no delivery-guarantee query may ever produce the
+    # warranty follow-up question via build_collection_state.
+    def test_12_no_serial_number_request_for_delivery_guarantee(self):
+        text = "รับประกันไหมว่าจะถึงภายใน 7 วัน"
+        intent = detect_erp_intent(text)
+        self.assertIsNone(intent)
+        # Confirms the actual customer-facing follow-up text can never be
+        # produced for this input via this engine at all.
+        self.assertNotEqual(INTENT_SCHEMAS["warranty"]["follow_up_question"],
+                             "รับประกันไหมว่าจะถึงภายใน 7 วัน")
+
+    # ---- Thai + English mixed phrasing ----
+
+    def test_mixed_language_phrasing(self):
+        self.assertEqual(detect_erp_intent("warranty สินค้าเช็คยังไง"), "warranty")
+        self.assertIsNone(detect_erp_intent("delivery guarantee มีไหม"))
+        self.assertIsNone(detect_erp_intent("guarantee ว่าของจะถึง 7 วันไหม"))
+        self.assertEqual(detect_erp_intent("check warranty SN12345"), "warranty")
+        self.assertIsNone(detect_erp_intent("shipping SLA มีไหม"))
+
+
 if __name__ == "__main__":
     unittest.main()
