@@ -2267,6 +2267,13 @@ class DecisionEngine:
                 # this would make the Authorization Gate fail closed for
                 # Playground/admin tooling too, which is not the intent.
                 "channel": context.get("channel"),
+                # Task 06B — the verified-binding lookup key. Both are
+                # server-derived (webhook.py sets external_user_id from
+                # the LINE webhook's own HMAC-verified event), never from
+                # message text, so it's safe for authorization_service.py
+                # to trust them directly.
+                "tenant_id": context.get("tenant_id"),
+                "external_user_id": context.get("external_user_id"),
             }
             exec_start = time.time()
             try:
@@ -2691,6 +2698,7 @@ class DecisionEngine:
                 "customer_context": context.get("customer_context") or {}, "current_user": context.get("current_user"),
                 "developer_mode": bool(context.get("developer_mode")),
                 "channel": context.get("channel"),
+                "tenant_id": context.get("tenant_id"), "external_user_id": context.get("external_user_id"),
             }
             exec_result = self.executor.execute(selected["id"], exec_context)
             developer_trace["execution_result"] = exec_result
@@ -2884,6 +2892,7 @@ class DecisionEngine:
                     "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
                     "system_values": _extract_system_values(erp_sub_question, history=history),
                     "channel": context.get("channel"),
+                    "tenant_id": context.get("tenant_id"), "external_user_id": context.get("external_user_id"),
                 }
                 try:
                     erp_exec_result = self.executor.execute(action_id, exec_context)

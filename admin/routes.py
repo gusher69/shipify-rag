@@ -6776,3 +6776,66 @@ async def playground_status(request: Request):
         "status": overall,
         "health": health,
     })
+
+
+# ── Customer Channel Bindings (Task 06B, 2026-08-26) — Staff-Assisted
+# Account Linking ─────────────────────────────────────────────────────
+# No trusted self-service verification channel exists in this codebase
+# today (no OTP provider, no customer login/portal, no LINE Login — see
+# the Task 06B before-code investigation). These routes are the ONLY
+# way a verified customer_channel_bindings row gets created: an
+# authenticated admin (this SAME auth(request) session-cookie gate that
+# already protects the Credential Store and Business Action config)
+# records a binding after verifying the customer's identity themselves,
+# out-of-band. A real customer never reaches these routes — there is no
+# customer-facing self-service linking flow to spoof.
+
+@app.get("/admin/api/customer-bindings")
+async def api_list_customer_bindings(request: Request):
+    """Staff lookup only — never used for an authorization decision
+    (services/authorization_service.py queries the service directly)."""
+    if (r := auth(request)): return r
+    from config import DEFAULT_TENANT_ID
+    from services.customer_binding_service import get_customer_binding_service
+    external_user_id = request.query_params.get("external_user_id") or None
+    cust_code = request.query_params.get("cust_code") or None
+    bindings = get_customer_binding_service(get_sb()).list_bindings(
+        tenant_id=DEFAULT_TENANT_ID, external_user_id=external_user_id, cust_code=cust_code)
+    return JSONResponse({"ok": True, "bindings": bindings})
+
+
+@app.post("/admin/api/customer-bindings/link")
+async def api_link_customer_binding(request: Request):
+    """Creates (or replaces — Phase 23: explicit relink, never a silent
+    overwrite) a VERIFIED binding for one LINE user <-> one CustCode.
+    The admin is asserting they have already verified this customer's
+    identity out-of-band; this endpoint does not itself verify anything
+    (there is nothing automated to verify with — see module docstring)."""
+    if (r := auth(request)): return r
+    from config import DEFAULT_TENANT_ID
+    from services.customer_binding_service import get_customer_binding_service
+    body = await request.json()
+    external_user_id = (body.get("external_user_id") or "").strip()
+    cust_code = (body.get("cust_code") or "").strip()
+    channel = (body.get("channel") or "line").strip()
+    if not external_user_id or not cust_code:
+        return JSONResponse({"ok": False, "error": "external_user_id and cust_code are required"}, status_code=400)
+    binding = get_customer_binding_service(get_sb()).link_verified(
+        tenant_id=DEFAULT_TENANT_ID, channel=channel, external_user_id=external_user_id,
+        cust_code=cust_code, created_by=_current_admin_user(request))
+    return JSONResponse({"ok": True, "binding": binding})
+
+
+@app.post("/admin/api/customer-bindings/{binding_id}/revoke")
+async def api_revoke_customer_binding(request: Request, binding_id: str):
+    """Immediate revocation (Phase 24 unlink / Phase 25 admin
+    revocation) — the very next sensitive Business Action call for this
+    LINE user is denied again, since services/authorization_service.py
+    only ever matches status='verified'."""
+    if (r := auth(request)): return r
+    from services.customer_binding_service import get_customer_binding_service
+    body = await request.json() if await request.body() else {}
+    reason = body.get("reason") or "revoked_by_admin"
+    binding = get_customer_binding_service(get_sb()).revoke(
+        binding_id, reason=reason, revoked_by=_current_admin_user(request))
+    return JSONResponse({"ok": True, "binding": binding})

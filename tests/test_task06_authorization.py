@@ -26,7 +26,7 @@ from services.business_action_registry import BusinessActionRegistry
 from services.action_executor import ActionExecutor
 from services.authorization_service import (
     requires_verified_identity, check_authorization, _is_admin_context,
-    _has_verified_binding, AUTHORIZATION_DENIED_MESSAGE,
+    AUTHORIZATION_DENIED_MESSAGE,
 )
 from profiles.manager import update_profile_from_turn
 
@@ -113,14 +113,22 @@ class TestAdminContextRecognition(unittest.TestCase):
 
 
 class TestVerifiedBindingExtensionPoint(unittest.TestCase):
-    def test_no_verified_binding_exists_today(self):
-        """This is the load-bearing finding of the whole investigation:
-        no account-linking/OTP/verification mechanism exists anywhere in
-        this codebase. Confirmed here as a always-False extension point,
-        never silently satisfied by any context shape."""
-        self.assertFalse(_has_verified_binding({}))
-        self.assertFalse(_has_verified_binding({"customer_context": {"cust_code": "SP-A"}}))
-        self.assertFalse(_has_verified_binding({"confirmed": True, "confirmed_action_id": "x"}))
+    def test_no_binding_resolves_without_sb_or_identity_context(self):
+        """Task 06's finding ("no verified binding exists") was fixed by
+        Task 06B (2026-08-26, services/customer_binding_service.py) —
+        the extension point this test originally proved is now a real
+        lookup. What's still true, and still checked here: with no `sb`
+        or no tenant_id/external_user_id in context (every caller/test
+        that predates Task 06B), nothing can ever resolve as verified —
+        the exact same universal fail-closed behavior as before, never a
+        crash. See tests/test_task06b_account_linking.py for the full
+        verified-binding test suite."""
+        sensitive = {"parameters": [{"name": "CustCode", "required": False, "input_source": "customer_message"}]}
+        self.assertFalse(check_authorization(sensitive, {}, sb=None)["authorized"])
+        self.assertFalse(check_authorization(
+            sensitive, {"customer_context": {"cust_code": "SP-A"}}, sb=None)["authorized"])
+        self.assertFalse(check_authorization(
+            sensitive, {"confirmed": True, "confirmed_action_id": "x"}, sb=None)["authorized"])
 
 
 class TestCheckAuthorizationMatrix(unittest.TestCase):

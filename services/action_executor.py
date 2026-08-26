@@ -499,7 +499,7 @@ class ActionExecutor:
         # trusting a customer-supplied CustCode/OrderCode/ShipmentCode as
         # proof of ownership.
         from services.authorization_service import check_authorization, AUTHORIZATION_DENIED_MESSAGE
-        auth = check_authorization(action, context)
+        auth = check_authorization(action, context, sb=self.registry._sb)
         if not auth["authorized"]:
             return _result(
                 "denied",

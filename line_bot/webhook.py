@@ -271,6 +271,7 @@ def _handle_message_legacy(event: MessageEvent):
 def _handle_message_via_decision_engine(event: MessageEvent):
     from services.decision_engine import DecisionEngine
     from services.pending_confirmation_service import get_pending_confirmation_service, classify_confirmation_reply
+    from services.customer_binding_service import get_customer_binding_service
     import config as _config
 
     user_id = event.source.user_id
@@ -281,7 +282,31 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     pending_service = get_pending_confirmation_service()
     tenant_id = _config.DEFAULT_TENANT_ID
     channel = "line"
-    decide_context = {"channel": channel, "customer_context": profile or {}, "developer_mode": True}
+
+    # Task 06B — the ONLY trusted source of a customer's CustCode for
+    # this LINE user is a VERIFIED binding (services/
+    # customer_binding_service.py), re-resolved fresh every turn — never
+    # user_profiles.cust_code (Task 06's own root cause: a customer-typed
+    # convenience cache with no ownership proof). A stale pre-Task-06
+    # profile.cust_code value must never leak into customer_context, so
+    # it is explicitly dropped here rather than merely "not written
+    # anymore" (Task 06B Phase 22 legacy cleanup, code-level).
+    verified_binding = get_customer_binding_service().get_verified_binding(
+        tenant_id=tenant_id, channel=channel, external_user_id=user_id)
+    customer_context = dict(profile or {})
+    customer_context.pop("cust_code", None)
+    if verified_binding:
+        customer_context["cust_code"] = verified_binding["cust_code"]
+
+    decide_context = {
+        "channel": channel, "customer_context": customer_context, "developer_mode": True,
+        # Task 06B — passed through untouched to services/
+        # authorization_service.py via every exec_context construction in
+        # decision_engine.py; both are server-derived (external_user_id
+        # is the LINE webhook's own HMAC-verified user id), never from
+        # message text.
+        "tenant_id": tenant_id, "external_user_id": user_id,
+    }
 
     # Context Continuity (Customer Intelligence V1, 2026-08-15) -- a
     # bounded recent-message window for THIS user's own active

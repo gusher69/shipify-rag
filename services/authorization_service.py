@@ -1,40 +1,41 @@
-"""Authorization Service (Task 06, 2026-08-26) — the ONE place that
-answers "is this Business Action execution allowed to proceed?", enforced
-inside services/action_executor.py::ActionExecutor.execute() so it can
-never be bypassed by any caller (LINE webhook, Admin Playground, an admin
-route, or a hypothetical direct service call) — matching this project's
+"""Authorization Service (Task 06, 2026-08-26; verified binding wired in
+Task 06B, 2026-08-26) — the ONE place that answers "is this Business
+Action execution allowed to proceed?", enforced inside services/
+action_executor.py::ActionExecutor.execute() so it can never be
+bypassed by any caller (LINE webhook, Admin Playground, an admin route,
+or a hypothetical direct service call) — matching this project's
 existing "central, reusable check" convention (e.g. services/
 credential_store.py for secrets) rather than scattering per-action
 checks.
 
-CONFIRMED ROOT CAUSE (Task 06 investigation): there is currently no
-verified LINE-user-to-customer-account binding anywhere in this
-codebase — no account-linking table, no OTP/login flow, nothing. The
-only "identity" a chat message carries is `CustCode`/`OrderCode`/
-`ShipmentCode`/`Tracking` typed by the customer (or silently inherited
-from services/action_selection_primitives.py::IDENTIFIER_MEMORY_FIELDS,
-which was itself a convenience cache with no ownership verification —
-see profiles/manager.py's own fix). Every Business Action that reads or
-mutates customer-specific data (GetDataCustomer, order/shipment lookup,
-requestshippingaddresschange, ...) treated a correctly-FORMATTED
-identifier as sufficient proof of ownership, which it never was
-(IDENTIFIER != AUTHORIZATION).
+CONFIRMED ROOT CAUSE (Task 06 investigation): a customer-typed
+`CustCode`/`OrderCode`/`ShipmentCode`/`Tracking` (or one silently
+inherited from services/action_selection_primitives.py::
+IDENTIFIER_MEMORY_FIELDS, a convenience cache with no ownership
+verification — see profiles/manager.py's own fix) was previously
+treated as sufficient proof of ownership for GetDataCustomer, order/
+shipment lookup, requestshippingaddresschange, etc. IDENTIFIER !=
+AUTHORIZATION.
 
-Given no verified binding exists, and per this task's own explicit
-instruction not to invent a homemade OTP/verification flow, the correct
-behavior for a customer-facing (LINE) request to any action requiring a
-customer/order/shipment identifier is to FAIL CLOSED — deny with a safe,
-neutral message — rather than silently execute on an unverified claim.
-Admin/Playground contexts (channel == "playground") are staff tooling,
-session-cookie-authenticated separately by admin/routes.py, and are
-exempt: this module only gates the customer-facing channel.
+Task 06 fixed this by failing closed unconditionally (no verified
+binding existed anywhere). Task 06B replaces `_has_verified_binding`
+with a real lookup against services/customer_binding_service.py's
+`customer_channel_bindings` table — the dedicated, persistent source of
+truth, never `user_profiles`. A verified binding existing is not, by
+itself, sufficient either: `check_authorization` also enforces RESOURCE
+OWNERSHIP — the CustCode this action is actually about to execute with
+must match the verified binding's own CustCode, so a verified customer
+typing a DIFFERENT customer's CustCode is still denied (never treated
+as an identity switch). Admin/Playground contexts (channel in
+{"playground", "admin"}) are staff tooling, session-cookie-
+authenticated separately by admin/routes.py, and remain exempt — this
+module only gates the customer-facing channel.
 
-This is deliberately the SMALLEST viable fix, and deliberately an
-explicit extension point: once real account-linking infrastructure
-exists (a separate, dedicated project), `_has_verified_binding` below is
-the ONE function to update — everything else in this module (the
-sensitivity classification, the channel check, the deny response) stays
-unchanged.
+Every check re-queries the database on every call via the `sb` passed
+in from ActionExecutor.execute() (self.registry._sb) — never trusts a
+caller-supplied "verified" flag or a pre-resolved context dict, which
+would reintroduce exactly the spoofing risk this module exists to
+close (Phase 32/33 of the Task 06B spec).
 """
 from typing import Dict, Optional
 
@@ -93,36 +94,89 @@ def _is_admin_context(context: Dict) -> bool:
     return (context or {}).get("channel") in _ADMIN_CHANNELS
 
 
-def _has_verified_binding(context: Dict) -> bool:
-    """Extension point: returns True only when the requesting principal
-    has been through a REAL, verified account-linking/authentication
-    flow for the customer account the request names — always False
-    today, since no such flow exists anywhere in this codebase (confirmed
-    via Task 06's investigation: no account-linking table, no OTP/login
-    mechanism). Update THIS function alone once real account-linking
-    infrastructure is built; nothing else in this module should need to
-    change."""
-    return False
+def _find_custcode_param_name(action: Dict) -> Optional[str]:
+    """Returns the actual parameter NAME this action uses for CustCode
+    (original case, e.g. "CustCode"), or None if it has none. Every
+    real, currently-enabled sensitive action (GetDataCustomer, order/
+    shipment lookup, GetUrlProductDetail, RequestShippingAddressChange)
+    has one — confirmed live against the production registry during
+    Task 06B. A hypothetical future action with an identifier-shaped
+    parameter but NO CustCode parameter at all has no locally-checkable
+    resource owner and is handled by the caller (see check_authorization
+    below: fails closed even with a verified binding)."""
+    for p in action.get("parameters") or []:
+        if (p.get("input_source") or "customer_message") != "customer_message":
+            continue
+        if (p.get("name") or "").strip().lower() == "custcode":
+            return p.get("name")
+    return None
 
 
-def check_authorization(action: Dict, context: Optional[Dict] = None) -> Dict:
+def _resolve_verified_binding(context: Dict, sb) -> Optional[Dict]:
+    """Re-queries services/customer_binding_service.py directly — never
+    trusts a pre-resolved "verified" claim handed in by the caller.
+    Requires `sb` (passed from ActionExecutor.execute()'s own registry)
+    plus tenant_id/channel/external_user_id in `context` — all three are
+    server-derived (webhook.py sets external_user_id from the LINE
+    webhook's own HMAC-verified event, never from message text), so this
+    is safe to trust. Returns None (never authorized) if any of these is
+    missing, e.g. an old test/caller that predates Task 06B."""
+    if sb is None:
+        return None
+    tenant_id = context.get("tenant_id")
+    channel = context.get("channel")
+    external_user_id = context.get("external_user_id")
+    if not (tenant_id and channel and external_user_id):
+        return None
+    from services.customer_binding_service import get_customer_binding_service
+    return get_customer_binding_service(sb).get_verified_binding(
+        tenant_id=tenant_id, channel=channel, external_user_id=external_user_id)
+
+
+def check_authorization(action: Dict, context: Optional[Dict] = None, sb=None) -> Dict:
     """Returns {"authorized": bool, "reason": str}. Called once, from
     inside ActionExecutor.execute() — the single choke point every
     caller (LINE, Playground, admin routes, any future direct service
     call) must go through to actually run a Business Action — so this
-    can never be bypassed by routing around the conversational layer."""
+    can never be bypassed by routing around the conversational layer.
+
+    `sb` is optional so every pre-Task-06B caller/test keeps working
+    unchanged (no sb -> no binding can ever be resolved -> same
+    universal fail-closed behavior Task 06 already shipped); ActionExecutor
+    always passes its own registry's sb."""
     context = context or {}
     if _is_admin_context(context):
         return {"authorized": True, "reason": "admin/playground context — staff tooling, separately authenticated"}
     if not requires_verified_identity(action):
         return {"authorized": True, "reason": "action does not require a customer/order/shipment identifier"}
-    if _has_verified_binding(context):
-        return {"authorized": True, "reason": "verified customer binding present"}
-    return {
-        "authorized": False,
-        "reason": "no verified customer binding exists for this channel — failing closed "
-                   "(see services/authorization_service.py module docstring)",
-    }
+
+    binding = _resolve_verified_binding(context, sb)
+    if not binding:
+        return {
+            "authorized": False,
+            "reason": "no verified customer binding exists for this channel — failing closed "
+                       "(see services/authorization_service.py module docstring)",
+        }
+
+    custcode_param = _find_custcode_param_name(action)
+    if not custcode_param:
+        return {
+            "authorized": False,
+            "reason": "action has no CustCode-scoped parameter — resource ownership cannot be "
+                      "locally verified, failing closed even with a verified binding",
+        }
+
+    requested_custcode = (context.get("collected_slots") or {}).get(custcode_param)
+    if requested_custcode and requested_custcode != binding.get("cust_code"):
+        # Phase 15/17/18: a verified customer typing a DIFFERENT
+        # customer's CustCode is never treated as an identity switch —
+        # denied exactly like an unverified request would be.
+        return {
+            "authorized": False,
+            "reason": "requested CustCode does not match the verified binding — identity switch rejected",
+        }
+
+    return {"authorized": True, "reason": "verified customer binding present and resource CustCode matches"}
 
 
 # Neutral, existing-product-tone denial — never confirms or denies

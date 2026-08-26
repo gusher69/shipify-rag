@@ -1213,6 +1213,25 @@ class TestTask02CInterruptedWorkflowAutoResume(unittest.TestCase):
         self.sb_patcher.start()
         self.addCleanup(self.sb_patcher.stop)
 
+        # Task 06B — this suite's fixed profile mock ({"cust_code":
+        # "SP1008"}, below) simulates an already-known customer for EVERY
+        # user_id this class uses ("Utest02c"/"Utest02c_A"/"Utest02c_B"),
+        # so the verified-binding stub matches that same convention
+        # (blanket, not per-user) rather than testing binding accuracy --
+        # an orthogonal concern already covered by tests/
+        # test_task06b_account_linking.py. Without this, webhook.py's
+        # real get_customer_binding_service() singleton would try to
+        # reach the actual configured Supabase client, which these tests
+        # never set up.
+        import services.customer_binding_service as cbs_mod
+        self.fake_binding_service = MagicMock()
+        self.fake_binding_service.get_verified_binding.return_value = {
+            "cust_code": "SP1008", "status": "verified"}
+        self.cbs_patcher = patch.object(cbs_mod, "get_customer_binding_service",
+                                          return_value=self.fake_binding_service)
+        self.cbs_patcher.start()
+        self.addCleanup(self.cbs_patcher.stop)
+
         real_decision_engine_cls = de_mod.DecisionEngine
 
         def _de_factory(*a, **kw):
