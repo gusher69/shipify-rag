@@ -248,6 +248,28 @@ class TestPromptBuilderDBIntegration(unittest.TestCase):
         template = pb.get_active_prompt_for_channel("LINE OA")  # never assigned
         self.assertEqual(template.name, "Global Default")
 
+    def test_internal_line_channel_resolves_the_line_oa_assignment(self):
+        """CS-02 (2026-08-26) regression: the real LINE webhook's runtime
+        channel value is the raw string "line" (line_bot/webhook.py), never
+        the admin-facing Prompt Studio label "LINE OA" — confirmed live that
+        before this fix, an admin's "LINE OA" assignment could never take
+        effect for real production traffic. get_active_prompt_for_channel
+        must resolve "line" to whatever is assigned under "LINE OA"."""
+        p = self.svc.create_prompt({"name": "Human CS Style", "system_prompt": "Be human."})
+        self.svc.assign_channel("LINE OA", p["id"])
+        template = pb.get_active_prompt_for_channel("line")
+        self.assertEqual(template.name, "Human CS Style")
+        self.assertEqual(template.system_prompt, "Be human.")
+
+    def test_internal_line_channel_mapping_never_leaks_to_other_channels(self):
+        """The "line" -> "LINE OA" mapping must be specific to this one
+        value — an unrelated channel string must still resolve literally,
+        never accidentally redirected."""
+        p = self.svc.create_prompt({"name": "Website Prompt", "system_prompt": "Website text."})
+        self.svc.assign_channel("Website", p["id"])
+        template = pb.get_active_prompt_for_channel("Website")
+        self.assertEqual(template.name, "Website Prompt")
+
     def test_build_prompt_includes_response_and_safety_rules(self):
         p = self.svc.create_prompt({
             "name": "Rules Test", "system_prompt": "Base prompt.",

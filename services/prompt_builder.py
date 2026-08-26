@@ -243,15 +243,33 @@ def get_default_template() -> PromptTemplate:
     return _FALLBACK_TEMPLATES[DEFAULT_TEMPLATE_ID]
 
 
+# CS-02 (2026-08-26) — confirmed live: the real LINE webhook's own runtime
+# channel VALUE (line_bot/webhook.py: `channel = "line"`, propagated through
+# services/decision_engine.py's context plumbing and ALSO used for
+# authorization/session/customer-binding scoping — see Task 06/06B) does not
+# match the admin-facing Prompt Studio channel LABEL
+# (services/prompt_studio_service.py::CHANNELS, e.g. "LINE OA") that an admin
+# actually picks when assigning a prompt template. Before this fix, an
+# admin's "LINE OA" assignment could never take effect for real production
+# LINE traffic — get_active_prompt_for_channel("line") queried assignments
+# for channel="line", a value the admin UI can never create (assign_channel()
+# validates against CHANNELS, which only contains "LINE OA"). This mapping is
+# deliberately local to PROMPT RESOLUTION ONLY — it must never be reused for
+# authorization/session/binding scoping, which correctly keep using the raw
+# internal channel value ("line") unchanged.
+_INTERNAL_CHANNEL_TO_PROMPT_STUDIO_LABEL = {"line": "LINE OA"}
+
+
 def get_active_prompt_for_channel(channel: str) -> PromptTemplate:
     """The routing rule the whole feature is built around: real customer
     traffic (LINE OA, Website, etc.) always resolves its system prompt
     through here — never a hardcoded string. Falls back to Global Default,
     then to the in-memory fallback, so a misconfigured/missing assignment
     never breaks the channel."""
+    prompt_studio_channel = _INTERNAL_CHANNEL_TO_PROMPT_STUDIO_LABEL.get(channel, channel)
     try:
         ares = _get_sb().table("ai_prompt_assignments").select("prompt_template_id") \
-            .eq("channel", channel).eq("is_active", True).limit(1).execute()
+            .eq("channel", prompt_studio_channel).eq("is_active", True).limit(1).execute()
         if ares.data:
             tres = _get_sb().table("ai_prompt_templates").select("*") \
                 .eq("id", ares.data[0]["prompt_template_id"]).is_("deleted_at", "null").execute()
