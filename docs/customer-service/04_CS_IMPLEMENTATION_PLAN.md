@@ -238,3 +238,30 @@ alongside any real personal detail.
 - Unrelated refactor: **NO**
 - Recommendations incremental: **YES**
 - Scope remained customer-service response quality only: **YES**
+
+## CS-02 / CS-03 FINAL STATUS (added after implementation closed)
+
+- **CS-02** (`tools/seed_cs02_human_style_prompt.py`) implemented this plan's
+  recommended "smallest safe place" (Prompt Studio's LINE OA system prompt +
+  `response_rules`, no new subsystem). One pre-existing code defect was found
+  and fixed along the way: the real LINE webhook's runtime channel value
+  (`"line"`) never matched the admin-facing Prompt Studio channel label
+  (`"LINE OA"`), so channel-specific prompt assignment had never been able to
+  take effect for real traffic — fixed in `services/prompt_builder.py` via a
+  narrowly-scoped resolution-only mapping.
+- **CS-03** (`tools/seed_cs03_human_style_prompt_v2.py`) ran a 53-scenario
+  live evaluation (single-turn + multi-turn) through the real activated
+  prompt-resolution path and found four reproducible wording gaps, fixed with
+  minimal `response_rules` reinforcement only (no business fact changed):
+  natural "no information" phrasing (dropped the internal-sounding
+  "ฐานความรู้" term), broadened urgency acknowledgement to cover indirect
+  signals, broadened complaint-tone acknowledgement to cover inconvenience
+  complaints (not just formal complaints), and strengthened the
+  customer-reported-vs-verified rule to explicitly cover multi-item cases.
+  All four fixes were confirmed via reproducibility testing and a live
+  production-safe UAT before activation.
+- **Both versions remain in Prompt Studio's version history** (CS-02 as v1,
+  CS-03 as v2, both versioned from the same lineage) and are rollback-able
+  via `assign_channel("LINE OA", <version id>)` at any time.
+- Human Customer Service Style work (CS-01 → CS-02 → CS-03) is considered
+  **complete** as of CS-03's final report.
