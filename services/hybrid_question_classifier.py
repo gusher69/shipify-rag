@@ -234,6 +234,35 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
         if scored:
             top_score = scored[0]["_kw_score"]
             close = [a for a in scored if a["_kw_score"] >= top_score * _AMBIGUITY_RATIO]
+            # Weak Tie Guard (Task 03C, 2026-08-26) — confirmed live:
+            # "รับประกันไหมว่าจะถึงภายใน 7 วัน" tied searchdataorderlist and
+            # searchdatashipmentlist at an identical _keyword_score of
+            # 0.25 each, forcing CLARIFICATION_REQUIRED — but NEITHER
+            # candidate's evidence survives excluding the generic,
+            # low-specificity ai_description-word credit (see
+            # services/action_selection_primitives.py::
+            # _keyword_score_breakdown's own docstring for the exact
+            # mechanism: "วัน" is a substring of both actions' descriptions
+            # purely because both legitimately support date-range
+            # filtering, not because either actually answers the
+            # question). A tie where NO candidate has any "strong"
+            # (search_keywords/example) evidence at all is not a genuine
+            # ambiguity between two plausible actions — it's zero real
+            # evidence for either, which must fall through exactly like
+            # an empty `scored` list would (below, to the RAG/Wrong-
+            # Intent-Prevention path), never a forced clarification.
+            # Deliberately scoped to the TIE case only (len(close) > 1) —
+            # a single, non-tied weak match is unaffected, since Task 03C
+            # is specifically about the two-action collision, not a
+            # broader re-litigation of _keyword_score's own generosity
+            # (confirmed live: narrowing that further caused its own
+            # regression in an unrelated Task 02B scenario relying on
+            # relative ranking between two candidates).
+            if len(close) > 1:
+                from services.action_selection_primitives import _keyword_score_breakdown
+                if not any(_keyword_score_breakdown(a, message)["strong"] > 0 for a in close):
+                    close = []
+                    scored = []
             if len(close) > 1:
                 # Final Conversational Correctness (2026-08-15) — a tied
                 # KEYWORD score alone (e.g. SearchDataTracking and
@@ -362,8 +391,9 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
                          f"({', '.join(a.get('action_key') or a.get('name') or a['id'] for a in close)})"],
                         candidate_action_ids=[a["id"] for a in close],
                     )
-            matched_action = registry.get_full(close[0]["id"], mask_secrets=True)
-            candidate_ids = [close[0]["id"]]
+            if close:
+                matched_action = registry.get_full(close[0]["id"], mask_secrets=True)
+                candidate_ids = [close[0]["id"]]
 
     if not matched_action:
         # Wrong-Intent Prevention fix (Task 03, 2026-08-25) — confirmed

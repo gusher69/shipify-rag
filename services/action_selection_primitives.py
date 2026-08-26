@@ -200,6 +200,17 @@ def _keyword_matches(kw: str, message_l: str) -> bool:
     return kw_l in message_l
 
 
+# Generic, low-specificity words that recur across MANY unrelated
+# actions' ai_description text (any action that mentions a date range,
+# quantity, or "recent" concept at all) — used ONLY by
+# _keyword_score_breakdown's separate "strong_score" below (Task 03C,
+# 2026-08-26), never by _keyword_score itself, so every EXISTING caller
+# of _keyword_score (candidate ranking/selection throughout decision_
+# engine.py) keeps its exact prior behavior. See _keyword_score_breakdown
+# for why this distinction exists and where it's actually used.
+_AI_DESCRIPTION_GENERIC_WORDS = {"วัน", "เวลา", "จำนวน", "รายการ", "ล่าสุด", "ข้อมูล"}
+
+
 def _keyword_score(action: Dict, message: str) -> float:
     message_l = (message or "").lower()
     score = 0.0
@@ -213,6 +224,55 @@ def _keyword_score(action: Dict, message: str) -> float:
     if ai_desc and any(word in ai_desc for word in message_l.split() if len(word) > 2):
         score += 0.25
     return score
+
+
+def _keyword_score_breakdown(action: Dict, message: str) -> Dict[str, float]:
+    """Business Action Registry Collision fix (Task 03C, 2026-08-26) —
+    confirmed live: "รับประกันไหมว่าจะถึงภายใน 7 วัน" tied searchdataorderlist
+    and searchdatashipmentlist at an identical _keyword_score of 0.25
+    each, forcing hybrid_question_classifier.py::classify_question into
+    CLARIFICATION_REQUIRED instead of reaching RAG/the Task 04B
+    Answerability Gate — even though NEITHER action's search_keywords
+    contains "รับประกัน" or anything related to it. Root cause: the
+    ai_description word-match check in _keyword_score splits the message
+    on WHITESPACE ONLY — Thai has no spaces, so a natural Thai sentence
+    collapses into one long, un-matchable blob, and the only isolated
+    "word" the split actually produces is whatever happens to sit next to
+    a literal space (here, the digit "7" before "วัน"). "วัน" (day) is a
+    common substring of ANY action's ai_description that mentions a date
+    range at all ("ช่วงวันที่..."), which both these real production
+    actions' descriptions legitimately do — so it matched both equally,
+    contributing zero real evidence about which action (if either) the
+    customer meant.
+
+    Returns {"full": <same value _keyword_score returns>, "strong": <full
+    score, but excluding a "won by ai_description-generic-word-only"
+    contribution>} — "strong" is used ONLY by classify_question's own
+    tie-detection (a "close" set is a genuine ambiguity only when at
+    least one candidate's evidence survives excluding this weak,
+    low-specificity signal); "full" preserves the EXACT existing
+    _keyword_score behavior for every other caller (candidate ranking/
+    selection elsewhere in decision_engine.py), which legitimately still
+    benefits from the generosity of the ai_description credit when
+    picking the single best candidate among several plausible ones —
+    changing that separately-tuned behavior is out of this fix's scope
+    and confirmed live to cause its own regression (Task 02B's
+    cross-topic-contamination protection relies on the existing relative
+    ranking between two candidates in at least one scenario)."""
+    full = _keyword_score(action, message)
+    message_l = (message or "").lower()
+    strong = 0.0
+    for kw in action.get("search_keywords") or []:
+        if _keyword_matches(kw, message_l):
+            strong += 1.0
+    for ex in (action.get("_examples_text") or []):
+        if ex and _keyword_matches(ex, message_l):
+            strong += 0.5
+    ai_desc = (action.get("ai_description") or "").lower()
+    if ai_desc and any(word in ai_desc for word in message_l.split()
+                        if len(word) > 2 and word not in _AI_DESCRIPTION_GENERIC_WORDS):
+        strong += 0.25
+    return {"full": full, "strong": strong}
 
 
 def select_requested_mapped_fields(question: str, mapped_fields: Optional[Dict], response_mapping: Optional[List[Dict]] = None,

@@ -3322,6 +3322,154 @@ class TestKeywordMatchesAsciiBoundary(unittest.TestCase):
         self.assertGreater(_keyword_score(action, "ขอดู PO ล่าสุด"), 0.0)
 
 
+class TestTask03CBusinessActionRegistryCollision(unittest.TestCase):
+    """Task 03C — Fix Business Action Registry Keyword Collision
+    (2026-08-26). Confirmed live: "รับประกันไหมว่าจะถึงภายใน 7 วัน" tied
+    searchdataorderlist and searchdatashipmentlist at an identical
+    _keyword_score of 0.25 each, forcing classify_question into
+    CLARIFICATION_REQUIRED instead of reaching RAG/the Task 04B
+    Answerability Gate — even though NEITHER action's search_keywords
+    contains "รับประกัน" or anything related to it.
+
+    Root cause: _keyword_score's ai_description word-match check splits
+    the message on WHITESPACE ONLY — a natural Thai sentence has no
+    spaces and collapses into one long, un-matchable blob, so the only
+    isolated "word" the split actually produces is whatever happens to
+    sit next to a literal space (here, the digit "7" before "วัน"). "วัน"
+    (day) is a generic substring of ANY action's ai_description that
+    mentions a date range — both these real production actions'
+    descriptions legitimately do ("ช่วงวันที่...") — so it matched both
+    equally, contributing zero real evidence about which action (if
+    either) the customer meant.
+
+    First-attempt fix: excluding these generic words from _keyword_score
+    itself directly caused its OWN regression — that function is SHARED
+    by decision_engine.py's own candidate ranking/selection elsewhere,
+    which relies on ai_description's existing generosity in at least one
+    scenario (a Task 02B cross-topic-contamination regression test
+    started failing once shipment_status's ai_description credit was
+    removed, changing which action won an otherwise-unrelated selection).
+
+    Actual fix, scoped narrower: services/action_selection_primitives.py
+    ::_keyword_score_breakdown returns {"full": ..., "strong": ...} —
+    "full" is the EXACT existing _keyword_score value (used everywhere
+    unchanged), "strong" excludes the generic-word-only ai_description
+    credit. hybrid_question_classifier.py::classify_question's OWN
+    tie-detection (len(close) > 1) now additionally requires at least one
+    tied candidate to have nonzero "strong" evidence — a tie where NO
+    candidate survives excluding the generic signal is not a genuine
+    ambiguity between two plausible actions; it falls through exactly
+    like an empty match (to RAG/Wrong-Intent-Prevention), never a forced
+    clarification. _keyword_score itself, and every other caller of it,
+    is completely unchanged."""
+
+    ORDER_AI_DESCRIPTION = "ค้นหารายการคำสั่งซื้อของลูกค้า โดยค้นหาจากรหัสลูกค้า พร้อมช่วงวันที่ สถานะ หรือจำนวนรายการล่าสุด"
+    SHIPMENT_AI_DESCRIPTION = ("ค้นหารายการบิลขนส่งของลูกค้า โดยค้นหาจากรหัสลูกค้า พร้อมช่วงวันที่รับเข้าจีน "
+                                "วันที่ส่งออก วันที่ถึงไทย สถานะบิล หรือจำนวนรายการล่าสุด")
+    ORDER_KEYWORDS = ["order", "order list", "PO", "คำสั่งซื้อ", "ประวัติการสั่งซื้อ", "ออเดอร์"]
+    SHIPMENT_KEYWORDS = ["พัสดุ", "tracking", "shipment list", "ติดตามพัสดุ", "ค่าขนส่งเท่าไหร่", "ค่าส่งเท่าไหร่",
+                          "ถึงไทยหรือยัง", "ถึงหรือยัง", "มาถึงหรือยัง", "ของถึงไหนแล้ว", "พัสดุล่าสุด", "มาถึง",
+                          "จะมาถึง", "เข้าไทย", "ถึงไทย", "สถานะรับเข้าไทย"]
+
+    def _order_action(self):
+        return {"search_keywords": self.ORDER_KEYWORDS, "_examples_text": [],
+                "ai_description": self.ORDER_AI_DESCRIPTION}
+
+    def _shipment_action(self):
+        return {"search_keywords": self.SHIPMENT_KEYWORDS, "_examples_text": [],
+                "ai_description": self.SHIPMENT_AI_DESCRIPTION}
+
+    # ---- _keyword_score itself is completely unchanged ----
+
+    def test_keyword_score_unchanged_still_credits_generic_ai_description_words(self):
+        """The ORIGINAL, existing _keyword_score behavior — used by every
+        OTHER caller throughout decision_engine.py — must be untouched by
+        this fix. "วัน" still contributes its existing +0.25."""
+        msg = "รับประกันไหมว่าจะถึงภายใน 7 วัน"
+        self.assertEqual(_keyword_score(self._order_action(), msg), 0.25)
+        self.assertEqual(_keyword_score(self._shipment_action(), msg), 0.25)
+
+    # ---- _keyword_score_breakdown's "strong" field is the new signal ----
+
+    def test_01_delivery_guarantee_has_zero_strong_evidence_for_both(self):
+        """The exact confirmed defect: neither action has any STRONG
+        (search_keywords/example) evidence for a delivery-guarantee
+        question mentioning a bare day-count, so classify_question's tie
+        check never treats their identical "full" score as genuine
+        ambiguity."""
+        from services.action_selection_primitives import _keyword_score_breakdown
+        msg = "รับประกันไหมว่าจะถึงภายใน 7 วัน"
+        self.assertEqual(_keyword_score_breakdown(self._order_action(), msg)["strong"], 0.0)
+        self.assertEqual(_keyword_score_breakdown(self._shipment_action(), msg)["strong"], 0.0)
+
+    def test_02_shipping_wording_has_zero_strong_evidence(self):
+        from services.action_selection_primitives import _keyword_score_breakdown
+        msg = "รับประกันเวลาขนส่งไหม"
+        self.assertEqual(_keyword_score_breakdown(self._order_action(), msg)["strong"], 0.0)
+
+    def test_03_sla_wording_has_zero_strong_evidence(self):
+        from services.action_selection_primitives import _keyword_score_breakdown
+        msg = "มี SLA ระยะเวลาจัดส่งไหม"
+        self.assertEqual(_keyword_score_breakdown(self._shipment_action(), msg)["strong"], 0.0)
+
+    # ---- Genuine order/shipment queries must remain fully answerable ----
+
+    def test_04_genuine_order_query_still_scores_via_own_keyword(self):
+        from services.action_selection_primitives import _keyword_score_breakdown
+        self.assertGreater(_keyword_score_breakdown(self._order_action(), "เช็คประวัติการสั่งซื้อหน่อย")["strong"], 0.0)
+        self.assertGreater(_keyword_score_breakdown(self._order_action(), "ขอดู order list")["strong"], 0.0)
+
+    def test_05_genuine_shipment_query_still_scores_via_own_keyword(self):
+        from services.action_selection_primitives import _keyword_score_breakdown
+        self.assertGreater(_keyword_score_breakdown(self._shipment_action(), "พัสดุถึงไทยหรือยัง")["strong"], 0.0)
+        self.assertGreater(_keyword_score_breakdown(self._shipment_action(), "ติดตามพัสดุให้หน่อย")["strong"], 0.0)
+        self.assertGreater(_keyword_score_breakdown(self._shipment_action(), "ของถึงไหนแล้ว")["strong"], 0.0)
+
+    # TEST 06 — a genuine order query that ALSO happens to mention a
+    # day-count must still score via its OWN keyword-based evidence.
+    def test_06_order_query_with_day_count_still_scores_via_keyword(self):
+        from services.action_selection_primitives import _keyword_score_breakdown
+        self.assertGreater(_keyword_score_breakdown(self._order_action(), "เช็คคำสั่งซื้อ 7 วันที่ผ่านมา")["strong"], 0.0)
+
+    # ---- Full classify_question() integration ----
+
+    def test_end_to_end_classify_question_no_longer_ties(self):
+        """The delivery-guarantee query must resolve to RAG_ONLY, never
+        CLARIFICATION_REQUIRED, once neither candidate's tie survives
+        excluding the generic ai_description-only signal."""
+        reg = BusinessActionRegistry(_FakeSupabase())
+        order_id = _seed_action(reg, key="searchdataorderlist", action_type="API",
+                                 category="Customer Order Retrieval", ai_description=self.ORDER_AI_DESCRIPTION,
+                                 keywords=self.ORDER_KEYWORDS)
+        shipment_id = _seed_action(reg, key="searchdatashipmentlist", action_type="API",
+                                    category="Customer Shipment Retrieval", ai_description=self.SHIPMENT_AI_DESCRIPTION,
+                                    keywords=self.SHIPMENT_KEYWORDS)
+        for aid in (order_id, shipment_id):
+            reg.replace_parameters(aid, [{"name": "CustCode", "required": True,
+                                           "input_source": "customer_message"}])
+        from services.hybrid_question_classifier import classify_question
+        result = classify_question("รับประกันไหมว่าจะถึงภายใน 7 วัน", reg)
+        self.assertEqual(result["classification"], "RAG_ONLY")
+
+    def test_end_to_end_genuine_tie_still_produces_clarification(self):
+        """Regression guard: a GENUINE tie (both candidates share real
+        search_keywords evidence, not just the weak ai_description
+        signal) must still correctly produce CLARIFICATION_REQUIRED —
+        this fix only rejects tie candidates with ZERO strong evidence at
+        all, never a real ambiguity."""
+        reg = BusinessActionRegistry(_FakeSupabase())
+        a_id = _seed_action(reg, key="searchdatatracking", action_type="API", category="tracking",
+                             ai_description="ตรวจสอบ tracking", keywords=["tracking", "ติดตามพัสดุ"])
+        b_id = _seed_action(reg, key="searchdatashipmentlist2", action_type="API", category="shipment",
+                             ai_description="ดูรายการ shipment", keywords=["tracking", "ติดตามพัสดุ"])
+        for aid in (a_id, b_id):
+            reg.replace_parameters(aid, [{"name": "CustCode", "required": True,
+                                           "input_source": "customer_message"}])
+        from services.hybrid_question_classifier import classify_question
+        result = classify_question("tracking ติดตามพัสดุ", reg)
+        self.assertEqual(result["classification"], "CLARIFICATION_REQUIRED")
+
+
 class TestResolveContinuationActionTieBreak(unittest.TestCase):
     """_resolve_continuation_action (services/decision_engine.py) — when
     several Business Actions generate an identical clarification
