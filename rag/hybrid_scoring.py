@@ -117,6 +117,97 @@ def _thai_substring_hit(q_token: str, hay_tokens: List[str]) -> bool:
     return False
 
 
+# Long-Glued-Query Partial Overlap fix (Task 04, 2026-08-26) — confirmed
+# live: a natural, punctuation-free Thai sentence ("ช่วงนี้ขนส่งทางรถใช้
+# เวลานานไหมครับ") has no internal spaces at all, so _TOKEN_RE lumps the
+# ENTIRE SENTENCE into ONE q_token. _thai_substring_hit's whole-token
+# containment then degenerates into an all-or-nothing coin flip: the
+# giant blob is too long/specific to ever be a substring of a short
+# haystack token, so the ONLY way it can still "hit" is if some haystack
+# token happens to recur verbatim inside it — rewarding whichever chunk
+# has a generic, common word as an isolated token (e.g. a bare "ขนส่ง" Tag,
+# shared by nearly every shipping-related FAQ row) while a chunk whose
+# OWN genuinely specific term ("ทางรถ") is merely GLUED to other
+# characters ("เรททางรถ", "ค่าส่งทางรถ" — never appearing as its own
+# isolated haystack token) gets ZERO credit despite containing the exact
+# topic phrase. A long q_token (LONG_TOKEN_THRESHOLD+) falls back to a
+# graded n-gram overlap score instead of the same binary check, so a
+# real shared sub-phrase between two glued strings (however each of them
+# happens to be segmented) still counts as partial evidence.
+_LONG_TOKEN_THRESHOLD = 10
+# A genuine shared WORD/PHRASE, not a coincidental syllable overlap
+# (Thai's short, high-frequency syllables recur across totally unrelated
+# compound words — e.g. "ข้อ" is the shared prefix of both "ข้อมูล" (data)
+# and "ข้อตกลง" (agreement), with no topical relation at all). Confirmed
+# live: a naive fixed-size n-gram window fraction let exactly this kind
+# of coincidence leak enough partial credit into an UNRELATED chunk to
+# nudge a genuinely-unanswerable log_event_time query's confidence up
+# past its low-confidence escalation threshold. Longest-common-substring
+# is the more robust signal — one real 6+ character shared phrase counts,
+# however many scattered 3-character syllables merely happen to coincide.
+_MIN_SHARED_SUBSTRING_LEN = 8
+# Reuses the SAME generic stopword vocabulary tokenize() already strips
+# post-tokenization (so a spaced query never gets credit for matching
+# only a filler word) — here applied as substring removal INSIDE a long
+# glued blob, where spaces never isolated these words into their own
+# tokens in the first place. Longer entries first, so e.g. "ได้ไหม" is
+# stripped whole rather than leaving a dangling "ไหม" match after a
+# partial strip. Purely noise reduction for the n-gram fallback below —
+# never applied to short tokens, never changes tokenize()'s own output.
+_STOPWORD_STRIP_TERMS = sorted(_STOPWORDS, key=len, reverse=True)
+
+
+def _strip_glued_stopwords(text: str) -> str:
+    """Removes known generic filler/particle substrings from a long,
+    space-free Thai blob before longest-common-substring scoring — see
+    _STOPWORD_STRIP_TERMS above. Shortens the blob so a genuine shared
+    sub-phrase (e.g. "ทางรถ") makes up a larger fraction of what remains,
+    instead of being diluted by connector/particle noise a spaced query
+    would never have glued onto it in the first place."""
+    result = text
+    for term in _STOPWORD_STRIP_TERMS:
+        result = result.replace(term, " ")
+    return result
+
+
+def _longest_common_substring_len(a: str, b: str) -> int:
+    """Length of the longest contiguous substring shared by `a` and `b`.
+    Dependency-free dynamic-programming solution (O(len(a)*len(b)),
+    fine for the short haystack/query tokens involved here)."""
+    if not a or not b:
+        return 0
+    prev = [0] * (len(b) + 1)
+    best = 0
+    for i in range(1, len(a) + 1):
+        curr = [0] * (len(b) + 1)
+        for j in range(1, len(b) + 1):
+            if a[i - 1] == b[j - 1]:
+                curr[j] = prev[j - 1] + 1
+                best = max(best, curr[j])
+        prev = curr
+    return best
+
+
+def _thai_ngram_overlap_score(q_token: str, hay_tokens: List[str]) -> float:
+    """Graded partial-credit score for a long, glued Thai token that
+    whole-token substring containment (_thai_substring_hit) already
+    failed to match either direction. Finds the longest genuinely shared
+    substring against any haystack token; below _MIN_SHARED_SUBSTRING_LEN
+    it's treated as coincidental noise (0.0) — a real match only counts
+    once it's long enough to represent an actual shared word/phrase, not
+    a common short syllable. Score is that shared length as a fraction of
+    the (stopword-stripped) token's own length, so a chunk sharing MOST of
+    the query's real content scores higher than one sharing only a small
+    fragment of it."""
+    q_token = _strip_glued_stopwords(q_token).replace(" ", "")
+    if len(q_token) < _MIN_SHARED_SUBSTRING_LEN:
+        return 0.0
+    best_len = max((_longest_common_substring_len(q_token, ht) for ht in hay_tokens), default=0)
+    if best_len < _MIN_SHARED_SUBSTRING_LEN:
+        return 0.0
+    return best_len / len(q_token)
+
+
 # Knowledge Synonym Engine (rag/synonym_service.py) variants carry LESS
 # weight than the original question or the pre-existing Thai-English
 # glossary (rag/query_expansion.py) variants — "original query always has
@@ -172,10 +263,18 @@ def compute_keyword_score(question: str, chunk: Dict, query_variants: Optional[L
         q_tokens = set(tokenize(strip_negated_spans(variant)))
         if not q_tokens:
             continue
-        hits = 0
+        hits = 0.0
         for qt in q_tokens:
             if qt in hay_tokens_set or _thai_substring_hit(qt, hay_tokens_list):
                 hits += 1
+            elif len(qt) >= _LONG_TOKEN_THRESHOLD:
+                # Long-Glued-Query Partial Overlap fix (Task 04,
+                # 2026-08-26) — whole-token containment already failed
+                # both directions; for a long, multi-concept glued token
+                # (the common case for a natural, space-free Thai
+                # sentence) fall back to graded n-gram overlap rather
+                # than counting this token as zero evidence outright.
+                hits += _thai_ngram_overlap_score(qt, hay_tokens_list)
         score = hits / len(q_tokens)
         if synonym_variant_keys and variant.strip().lower() in synonym_variant_keys:
             score *= SYNONYM_VARIANT_WEIGHT
@@ -372,6 +471,42 @@ def _strip_log_time_noise(text: str) -> str:
     for term in _LOG_TIME_NOISE_TERMS:
         result = re.sub(re.escape(term), " ", result, flags=re.IGNORECASE)
     return result
+
+
+# ── Duration-query evidence (generic: an explicit day-count/day-range in
+# the chunk text — no product/company name) ──────────────────────────
+# Task 04 (2026-08-26) — confirmed live: "ช่วงนี้ขนส่งทางรถใช้เวลานานไหม
+# ครับ" (a genuine "how long does shipping-by-truck take" question) did
+# NOT retrieve the chunk that actually answers it ("เรทเท่าไหร่คะ", a rate
+# FAQ row whose body ALSO states "ระยะเวลา 7-10วัน...") highly enough to
+# get cited — a DIFFERENT chunk whose HEADING literally contains the word
+# "ระยะเวลา" ("ระยะเวลาการส่งจากร้านจีน-โกดังจีน", answering a completely
+# different leg of the shipping process) outranked it purely because the
+# correct chunk's own heading is about "rate", not "duration", even though
+# its body carries the real answer. Mirrors has_log_time_evidence exactly:
+# a chunk containing an explicit numeric day-count/range is strong,
+# specific evidence for a duration_query regardless of its heading, and
+# must not be at the mercy of a heading-keyword mismatch. Deliberately a
+# pure text-pattern check — never a hardcoded shipping fact/number, and
+# never touches the knowledge source's own content — so it applies
+# equally to ANY future "how long does X take" question (warranty period,
+# processing time, etc.), not just shipping.
+_DURATION_PATTERN_RE = re.compile(
+    # No \b immediately after "วัน" — Thai has no spaces between words, so
+    # a trailing politeness particle ("วันค่ะ") shares no word-boundary
+    # with "วัน" at all (Python's \w treats Thai letters as word chars).
+    # "days?" still gets its own \b (English text does have real spaces)
+    # so this never matches inside an unrelated word like "Monday".
+    r"\d+\s*(?:[-–~]|to)\s*\d+\s*(?:วัน|days?\b)|\d+\s*(?:วัน|days?\b)", re.IGNORECASE)
+
+
+def has_duration_evidence(chunk: Dict) -> bool:
+    """True when a chunk's text contains an explicit day-count or
+    day-range (e.g. "7-10วัน", "2–4 วัน", "5 days") — see the module-level
+    comment above for why this exists and why it's a pure text-pattern
+    check, never a hardcoded fact."""
+    text = chunk.get("text") or ""
+    return bool(_DURATION_PATTERN_RE.search(text))
 
 
 _MONTHLY_QUERY_HINTS = ["รายเดือน", "ต่อเดือน", "monthly"]
@@ -662,6 +797,7 @@ def apply_hybrid_ranking(question: str, chunks: List[Dict], return_excluded: boo
         settings = get_active_settings()
     variants = query_variants if query_variants else [question]
     is_log_time_query = query_intent == "log_event_time"
+    is_duration_query = query_intent == "duration_query"
     # Noise-stripped variants used ONLY for keyword/heading scoring on a
     # log_event_time query — see _strip_log_time_noise's docstring. The
     # original `variants` (and `question`) are still used everywhere else
@@ -726,8 +862,14 @@ def apply_hybrid_ranking(question: str, chunks: List[Dict], return_excluded: boo
         # distributed, so it must not be at the mercy of relative-to-best
         # ratios computed over an otherwise-irrelevant candidate pool.
         log_time_boost = 0.5 if log_time_evidence else 0.0
+        duration_evidence = is_duration_query and has_duration_evidence(c)
+        # Same fixed, deterministic weight as log_time_boost above, for the
+        # same reason: an explicit day-count/range in the chunk's own text
+        # is decisive, specific evidence for a duration_query, regardless
+        # of whether its heading happens to contain "ระยะเวลา" or not.
+        duration_boost = 0.5 if duration_evidence else 0.0
         company_boost = compute_company_intent_boost(company_intent, c, actionable_intent=actionable_intent)
-        hybrid = pre_boost_hybrid + purpose_boost + log_time_boost + company_boost
+        hybrid = pre_boost_hybrid + purpose_boost + log_time_boost + duration_boost + company_boost
 
         excluded_term_hit = False
         if excluded_terms:
@@ -767,9 +909,9 @@ def apply_hybrid_ranking(question: str, chunks: List[Dict], return_excluded: boo
         # noise-stripped variants and may legitimately be 0 for a chunk
         # that's still the correct answer (a log line rarely repeats the
         # exact Thai question wording).
-        has_lexical_evidence = keyword_score > 0 or heading_score > 0 or log_time_evidence
+        has_lexical_evidence = keyword_score > 0 or heading_score > 0 or log_time_evidence or duration_evidence
         strong_lexical = keyword_score >= 0.5 or heading_score >= 0.5
-        if log_time_evidence:
+        if log_time_evidence or duration_evidence:
             evidence_label = "direct_keyword"
         elif strong_lexical and heading_info["match_type"] == "synonym_heading":
             evidence_label = "synonym_heading"
@@ -786,6 +928,7 @@ def apply_hybrid_ranking(question: str, chunks: List[Dict], return_excluded: boo
         c["evidence_label"] = evidence_label
         c["has_lexical_evidence"] = has_lexical_evidence
         c["log_time_evidence"] = log_time_evidence
+        c["duration_evidence"] = duration_evidence
 
         # Legacy `classification` tier — kept for backward compatibility
         # with existing callers/tests/UI; derived from evidence_label so

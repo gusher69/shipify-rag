@@ -320,5 +320,195 @@ class TestPurposeAwareRankingBoost(unittest.TestCase):
         self.assertEqual(compute_purpose_boost(None, chunk), 0.0)
 
 
+class TestTask04ShippingDurationGrounding(unittest.TestCase):
+    """Task 04 — Fix RAG / Knowledge Answer Accuracy (2026-08-26).
+
+    Confirmed live root cause of the reported customer defect
+    ("ช่วงนี้ขนส่งทางรถใช้เวลานานไหมครับ" answered "no specific info", even
+    though the customer said the info IS on the website): the correct
+    answer genuinely exists in the knowledge base — an FAQ row titled
+    "เรทเท่าไหร่คะ" (a RATE/PRICE question) whose body ALSO states "เรท
+    ทางรถ...ระยะเวลา 7-10วัน...ด่านเวียดนามยังตรวจสอบเข้มอยู่" — but never
+    outranked a DIFFERENT, wrong-topic chunk ("ระยะเวลาการส่งจากร้านจีน-
+    โกดังจีน", answering a different leg of the shipping process) for the
+    customer's exact natural phrasing.
+
+    Root cause was NOT missing/stale data, NOT a threshold, NOT prompt/
+    grounding instructions (the prompt already forbids fabrication) — it
+    was query TOKENIZATION: rag/hybrid_scoring.py's _TOKEN_RE lumps an
+    entire punctuation-free Thai sentence into ONE token (Thai has no
+    spaces), so compute_keyword_score degenerated into a binary "does any
+    haystack token happen to recur verbatim inside this one giant blob"
+    check — rewarding whichever chunk had a generic, common word as an
+    isolated token (a bare "ขนส่ง" Tag, shared by nearly every shipping FAQ
+    row) while the chunk whose own specific term ("ทางรถ") was merely
+    GLUED to other characters ("เรททางรถ", never its own isolated token)
+    got zero credit despite containing the exact topic phrase.
+
+    Two additive fixes, both dependency-free (no new NLP library):
+    (1) Long-Glued-Query Partial Overlap (_thai_ngram_overlap_score) —
+        when whole-token containment fails for a long q_token, falls back
+        to longest-common-substring scoring against haystack tokens,
+        gated at _MIN_SHARED_SUBSTRING_LEN=8 so a coincidental short,
+        generic Thai morpheme (e.g. "เกี่ยว", shared by both "เกี่ยวกับ"
+        and "เกี่ยวข้อง" with no topical relation at all — confirmed to
+        leak false partial credit at a lower threshold) never counts.
+    (2) duration_query intent (rag/intent_classifier.py) + has_duration_
+        evidence (rag/hybrid_scoring.py) — mirrors the existing
+        log_event_time / has_log_time_evidence mechanism exactly: a
+        generic "how long does X take" query intent, and a chunk-level
+        check for an explicit day-count/range in the TEXT (never a
+        hardcoded fact/number) — boosts any chunk carrying real duration
+        evidence regardless of its own heading wording, for ANY future
+        "how long" question (not just shipping).
+
+    Both fixes are pure text-pattern/scoring changes — no knowledge base
+    content was edited, no new dependency, no prompt rewrite."""
+
+    # ---- has_duration_evidence (generic day-count/range detector) ----
+
+    def test_has_duration_evidence_thai_range(self):
+        from rag.hybrid_scoring import has_duration_evidence
+        self.assertTrue(has_duration_evidence(_chunk("ระยะเวลา 7-10วัน นับจากวันที่สินค้าถึงโกดังจีน", 0.5)))
+
+    def test_has_duration_evidence_thai_single_count(self):
+        from rag.hybrid_scoring import has_duration_evidence
+        self.assertTrue(has_duration_evidence(_chunk("ใช้เวลาประมาณ 2-4 วันค่ะ", 0.5)))
+
+    def test_has_duration_evidence_english(self):
+        from rag.hybrid_scoring import has_duration_evidence
+        self.assertTrue(has_duration_evidence(_chunk("Processing takes 5-7 days depending on volume.", 0.5)))
+
+    def test_has_duration_evidence_absent(self):
+        from rag.hybrid_scoring import has_duration_evidence
+        self.assertFalse(has_duration_evidence(_chunk("สินค้าห้ามนำเข้ามีดังนี้ ของเหลว เครื่องสำอาง", 0.5)))
+
+    def test_has_duration_evidence_never_matches_english_word_containing_day(self):
+        from rag.hybrid_scoring import has_duration_evidence
+        self.assertFalse(has_duration_evidence(_chunk("Delivered on Monday as scheduled.", 0.5)))
+
+    # ---- duration_query intent classification ----
+
+    def test_duration_query_intent_detected(self):
+        from rag.intent_classifier import classify_query_intent
+        for q in ["ช่วงนี้ขนส่งทางรถใช้เวลานานไหมครับ", "ทางรถใช้เวลากี่วัน", "ขนส่งทางรถกี่วัน",
+                  "รถจากจีนมาไทยกี่วัน", "how long does shipping take"]:
+            self.assertEqual(classify_query_intent(q), "duration_query", q)
+
+    def test_duration_query_intent_not_misfired_for_unrelated_questions(self):
+        from rag.intent_classifier import classify_query_intent
+        self.assertNotEqual(classify_query_intent("CBM คืออะไร"), "duration_query")
+        self.assertNotEqual(classify_query_intent("คูปองใช้ยังไง"), "duration_query")
+        self.assertNotEqual(classify_query_intent("มีสินค้าอะไรห้ามนำเข้าบ้าง"), "duration_query")
+
+    def test_log_event_time_still_takes_priority_over_duration(self):
+        # Both clusters are checked early in classify_query_intent — a
+        # message with distinctive log/startup vocabulary must still
+        # resolve to log_event_time, not be shadowed by the new bucket.
+        from rag.intent_classifier import classify_query_intent
+        self.assertEqual(classify_query_intent("ระบบเริ่มทำงานกี่โมง"), "log_event_time")
+
+    # ---- The real customer scenario, reproduced with synthetic chunks
+    #      mirroring the actual production knowledge content ----
+
+    RATE_CHUNK_TEXT = (
+        "Question: เรทเท่าไหร่คะ\n"
+        "Answer: สวัสดีค่ะ เรทนำเข้าและฝากสั่งกับทางเรานะคะ\n\n"
+        "เรทฝากสั่ง 5.11 บาทต่อหยวน\n\n"
+        "เรททางรถ 35บาท/กิโลกรัม ปริมาตร 6900บาท/คิวค่ะ ระยะเวลา 7-10วัน "
+        "(ช่วงนี้เผื่อเวลาจากเดิมอีก 3-5 วัน เนื่องจาก ด่านเวียดนามยังตรวจสอบเข้มอยู่นะคะ) "
+        "นับจากวันที่สินค้าถึงโกดังจีนนะคะ\n\n"
+        "เรททางเรือ 19บาท/กิโลกรัม ปริมาตร 4500บาท/คิวค่ะ ระยะเวลา 14-20วัน "
+        "นับจากวันที่สินค้าถึงโกดังจีนนะคะ\n"
+        "Alternative phrasings: เรทนำเข้าเท่าไหร่ / เรทฝากสั่งกี่บาทต่อหยวน / ค่าส่งทางรถ"
+    )
+    WRONG_LEG_CHUNK_TEXT = (
+        "Question: ระยะเวลาการส่งจากร้านจีน -โกดังจีน\n"
+        "Answer: โดยปกติจะใช้เวลาประมาณ 2–4 วันค่ะ ทั้งนี้ขึ้นอยู่กับเวลาทำการของร้านค้าฝั่งจีนด้วยนะคะ\n"
+        "Alternative phrasings: ร้านจีนส่งถึงโกดังกี่วัน / จากร้านถึงโกดังจีนใช้เวลากี่วัน\n"
+        "Tags: ขนส่ง, นำเข้า, โกดัง, โกดังจีน"
+    )
+
+    def _seed_pool(self):
+        rate_chunk = _chunk(self.RATE_CHUNK_TEXT, score=0.4507, file_name="AI Knowledge Master.xlsx",
+                             section_title="Question: เรทเท่าไหร่คะ")
+        wrong_leg_chunk = _chunk(self.WRONG_LEG_CHUNK_TEXT, score=0.4301, file_name="AI Knowledge Master.xlsx",
+                                  section_title="Question: ระยะเวลาการส่งจากร้านจีน -โกดังจีน")
+        filler_chunk = _chunk("Question: ขนส่งเอกชนมีอะไรบ้าง\nAnswer: Nim, EMS, J&T, FLASH",
+                               score=0.3787, file_name="AI Knowledge Master.xlsx",
+                               section_title="Question: ขนส่งเอกชนมีอะไรบ้าง")
+        return [rate_chunk, wrong_leg_chunk, filler_chunk]
+
+    # TEST 01 — the exact reproduced customer query: the correct chunk
+    # (containing the real "ทางรถ...7-10วัน" answer) must rank within the
+    # top candidates sent to the LLM, not be silently pushed out by the
+    # wrong-leg chunk's generic "ขนส่ง" tag match.
+    def test_01_exact_customer_query_correct_chunk_ranks_in_top_results(self):
+        from rag.intent_classifier import classify_query_intent
+        question = "ช่วงนี้ขนส่งทางรถใช้เวลานานไหมครับ"
+        intent = classify_query_intent(question)
+        self.assertEqual(intent, "duration_query")
+        result = apply_hybrid_ranking(question, self._seed_pool(), query_intent=intent, settings=_NO_FLOOR)
+        top_2_files = [c["section_title"] for c in result[:2]]
+        self.assertIn("Question: เรทเท่าไหร่คะ", top_2_files)
+
+    # TEST 02 — short variant: the correct chunk must win outright.
+    def test_02_short_variant_correct_chunk_wins(self):
+        from rag.intent_classifier import classify_query_intent
+        question = "ทางรถใช้เวลากี่วัน"
+        intent = classify_query_intent(question)
+        result = apply_hybrid_ranking(question, self._seed_pool(), query_intent=intent, settings=_NO_FLOOR)
+        self.assertEqual(result[0]["section_title"], "Question: เรทเท่าไหร่คะ")
+
+    # TEST 03 — different phrasing: same authoritative knowledge is
+    # recoverable without requiring exact-string matching.
+    def test_03_different_phrasing_correct_chunk_in_top_results(self):
+        from rag.intent_classifier import classify_query_intent
+        question = "รถจากจีนมาไทยนานไหม"
+        intent = classify_query_intent(question)
+        result = apply_hybrid_ranking(question, self._seed_pool(), query_intent=intent, settings=_NO_FLOOR)
+        top_2_files = [c["section_title"] for c in result[:2]]
+        self.assertIn("Question: เรทเท่าไหร่คะ", top_2_files)
+
+    # TEST 07 — Semantic neighbor / no-irrelevant-dump protection: a
+    # duration_query must never boost an off-topic chunk (e.g. prohibited
+    # goods) that carries no duration evidence of its own.
+    def test_07_semantic_neighbor_without_duration_evidence_not_boosted(self):
+        from rag.hybrid_scoring import has_duration_evidence
+        prohibited_chunk = _chunk(
+            "Question: สินค้าที่ห้ามนำเข้ามีอะไรบ้าง\nAnswer: สินค้าผิดกฎหมาย ของเหลว เครื่องสำอาง",
+            score=0.3, file_name="x", section_title="Question: สินค้าที่ห้ามนำเข้ามีอะไรบ้าง")
+        self.assertFalse(has_duration_evidence(prohibited_chunk))
+        result = apply_hybrid_ranking("ทางรถกี่วัน", self._seed_pool() + [prohibited_chunk],
+                                       query_intent="duration_query", settings=_NO_FLOOR)
+        self.assertEqual(prohibited_chunk["duration_evidence"], False)
+        self.assertNotEqual(result[0]["section_title"], "Question: สินค้าที่ห้ามนำเข้ามีอะไรบ้าง")
+
+    # ---- Regression: the long-glued-query fallback must never leak
+    #      false-positive evidence for an unrelated, non-duration query ----
+
+    # TEST — confirmed false-positive found during implementation: a
+    # generic Thai morpheme shared by two otherwise-unrelated words
+    # ("เกี่ยว" in both "เกี่ยวกับ" and "เกี่ยวข้อง") must not count as real
+    # evidence — this is exactly why _MIN_SHARED_SUBSTRING_LEN exists.
+    def test_generic_short_morpheme_never_counts_as_keyword_evidence(self):
+        from rag.hybrid_scoring import compute_keyword_score
+        irrelevant_chunk = _chunk("เนื้อหาที่ไม่เกี่ยวข้องกันเลยเรื่องอื่นโดยสิ้นเชิง",
+                                   score=0.05, section_title="หัวข้ออื่น")
+        score = compute_keyword_score("บริษัทนี้ทำธุรกิจเกี่ยวกับอะไร", irrelevant_chunk)
+        self.assertEqual(score, 0.0)
+
+    # TEST 09 (regression guard) — a company-policy question genuinely
+    # unrelated to duration must never receive duration_evidence credit,
+    # confirming the new mechanism doesn't widen what counts as relevant
+    # for anything other than a genuine duration_query.
+    def test_09_non_duration_query_gets_no_duration_boost(self):
+        chunk_with_days = _chunk(self.RATE_CHUNK_TEXT, score=0.3, section_title="Question: เรทเท่าไหร่คะ")
+        result = apply_hybrid_ranking("บริษัทมีนโยบายเรื่องการรีไซเคิลกล่องพัสดุอย่างไร", [chunk_with_days],
+                                       query_intent="unknown", settings=_NO_FLOOR)
+        self.assertEqual(result[0]["duration_evidence"], False)
+        self.assertEqual(result[0]["purpose_boost"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

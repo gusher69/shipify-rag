@@ -11,7 +11,7 @@ tokenized matching) rather than introducing a second tokenization scheme.
 """
 from typing import List
 
-INTENTS = ("log_event_time", "coverage_benefit", "premium_price", "eligibility", "exclusion", "general_product", "unknown")
+INTENTS = ("log_event_time", "duration_query", "coverage_benefit", "premium_price", "eligibility", "exclusion", "general_product", "unknown")
 
 # Same bilingual-keyword-group philosophy as services/document_purpose.py
 # — generic concepts, not entity names.
@@ -31,6 +31,19 @@ _EXCLUSION_TERMS = ["ข้อยกเว้น", "ไม่คุ้มคร�
 _LOG_TIME_START_TERMS = ["เริ่มทำงาน", "เริ่มระบบ", "เริ่มต้นระบบ", "เริ่มตอนไหน", "เริ่มรอบ", "started", "startup",
                           "launched", "initialized", "scheduler"]
 _LOG_TIME_WHEN_TERMS = ["กี่โมง", "เวลาอะไร", "ตอนไหน", "เมื่อไหร่", "โมง", "timestamp"]
+
+# Duration cluster (generic — "how long does X take", no product/company
+# name; applies equally to a shipping question, a processing-time
+# question, a warranty period question, etc.). Checked BEFORE the
+# insurance-domain buckets below for the same reason log_event_time is:
+# distinctive enough not to collide with them, and this is a query-side
+# signal only (it never forces a topic — see hybrid_scoring.py's
+# has_duration_evidence, which still requires the CANDIDATE chunk to
+# carry its own explicit day-count evidence before any boost applies).
+_DURATION_TERMS = [
+    "กี่วัน", "นานไหม", "นานเท่าไหร่", "นานแค่ไหน", "ใช้เวลานาน", "ใช้เวลากี่วัน",
+    "ใช้เวลาเท่าไหร่", "ระยะเวลา", "เวลาในการ", "how long", "how many days", "transit time",
+]
 
 
 def _hit(haystack: str, terms: List[str]) -> bool:
@@ -53,6 +66,12 @@ def classify_query_intent(question: str) -> str:
     # generic "เกี่ยวกับระบบ..." question doesn't get misrouted here.
     if _hit(haystack, _LOG_TIME_START_TERMS) or _hit(haystack, _LOG_TIME_WHEN_TERMS):
         return "log_event_time"
+
+    # Checked before the insurance-domain buckets for the same reason —
+    # "ระยะเวลา"/"กี่วัน" wording is distinctive of "how long" questions and
+    # won't collide with premium/coverage/eligibility/exclusion terms.
+    if _hit(haystack, _DURATION_TERMS):
+        return "duration_query"
 
     has_premium = _hit(haystack, _PREMIUM_TERMS)
     has_coverage = _hit(haystack, _COVERAGE_TERMS)

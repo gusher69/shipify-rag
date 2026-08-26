@@ -252,9 +252,18 @@ class TestAdaptiveThresholdsUnchanged(unittest.TestCase):
 
     def test_hybrid_scoring_exclusion_logic_still_importable_and_functional(self):
         from rag.hybrid_scoring import apply_hybrid_ranking
-        chunks = [{"text": f"เนื้อหาที่ไม่เกี่ยวข้อง {i}", "section_title": f"หัวข้อ {i}",
+        # Deliberately shares NO vocabulary with the query below (a genuine
+        # topic mismatch, not just a differently-worded restatement of
+        # "irrelevant") — see Long-Glued-Query Partial Overlap fix
+        # (rag/hybrid_scoring.py, Task 04, 2026-08-26): both this fixture's
+        # old wording and the query used "เกี่ยวข้อง"/"ไม่เกี่ยวข้อง"
+        # literally, which is itself a genuine ~15-character shared
+        # substring — accidentally defeating the very exclusion this test
+        # means to prove still works, once long-glued-token scoring learned
+        # to recognize real shared substrings at all.
+        chunks = [{"text": f"สูตรทำขนมหวานไทยแบบดั้งเดิม {i}", "section_title": f"หัวข้อสูตรอาหาร {i}",
                    "score": 0.05 - i * 0.005, "chunk_index": 0, "file_name": "x"} for i in range(8)]
-        kept, excluded = apply_hybrid_ranking("คำถามที่ไม่เกี่ยวข้องเลย", chunks, return_excluded=True)
+        kept, excluded = apply_hybrid_ranking("รีวิวภาพยนตร์เรื่องล่าสุดเป็นอย่างไรบ้าง", chunks, return_excluded=True)
         self.assertGreater(len(excluded), 0)
 
 
