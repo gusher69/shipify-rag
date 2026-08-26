@@ -1978,6 +1978,16 @@ class DecisionEngine:
         collection_status = {
             "source": "business_action_registry",
             "selected_business_action": full_action.get("action_key"),
+            # Interrupted Workflow Auto-Resume fix (Task 02C, 2026-08-25) —
+            # the caller (line_bot/webhook.py, admin/routes.py's Auto Mode)
+            # needs this action's real id to persist a mid-collection
+            # pending row (reusing the SAME pending_confirmations
+            # mechanism already used at the confirmation-gate stage, just
+            # with confirmation_required=False) so a temporary diversion
+            # doesn't strand an otherwise-valid, incomplete collection
+            # with no structural way back. Mirrors confirmation_gate's
+            # own "action_id" field name below for the same concept.
+            "selected_action_id": full_action.get("id"),
             "required_parameters": [p["name"] for p in full_action.get("parameters") or [] if p.get("required")],
             "parameter_groups": full_action.get("parameter_groups") or [],
             "collected_parameters": dict(collected),

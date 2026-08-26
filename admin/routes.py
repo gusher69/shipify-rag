@@ -3792,6 +3792,28 @@ async def hybrid_playground_ask(request: Request):
                 )
             except Exception as e:
                 print(f"[playground] failed to persist pending confirmation (non-fatal): {e}")
+        elif routing_type == "WORKFLOW" and collection_status.get("selected_action_id") \
+                and not collection_status.get("is_complete"):
+            # Interrupted Workflow Auto-Resume fix (Task 02C, 2026-08-25) —
+            # mirrors line_bot/webhook.py's own identical fix exactly, so
+            # LINE and Playground share the same Decision Engine business
+            # state semantics (a temporary diversion mid-collection must
+            # not strand an otherwise-valid, incomplete action with no
+            # structural way back). See that file's own comment for the
+            # full mechanism explanation.
+            try:
+                full_action = engine.registry.get_full(collection_status["selected_action_id"], mask_secrets=False)
+                collected = collection_status.get("collected_parameters") or {}
+                pending_service.create(
+                    tenant_id=pg_tenant_id, channel=pg_channel, conversation_key=playground_user_id,
+                    action=full_action or {"id": collection_status["selected_action_id"],
+                                             "action_key": collection_status.get("selected_business_action")},
+                    parameters=collected, original_message=question,
+                    question_text=decide_result.get("reply", {}).get("text"),
+                    confirmation_required=False,
+                )
+            except Exception as e:
+                print(f"[playground] failed to persist mid-collection pending state (non-fatal): {e}")
 
         route_decision = {
             "route": routing_type.lower() if routing_type else "unknown",

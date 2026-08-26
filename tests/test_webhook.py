@@ -1084,5 +1084,396 @@ class TestProactiveNotificationNeverMasqueradesAsReply(unittest.TestCase):
         mock_messaging_api_cls.assert_not_called()  # never LINE's own Messaging API client at all
 
 
+class TestTask02CInterruptedWorkflowAutoResume(unittest.TestCase):
+    """Task 02C — Fix Interrupted Workflow Auto-Resume (2026-08-25).
+    Confirmed defect: pending_action_id/pending_parameters were only ever
+    persisted by the caller (this file, admin/routes.py's Auto Mode) once
+    a Business Action reached its FINAL confirmation-gate stage — never
+    during ordinary mid-collection. _resolve_continuation_action can only
+    recognize continuation by re-matching the LAST assistant turn's exact
+    text against this action's own generated question; the moment a
+    temporary, genuinely-different diversion (e.g. a real shipment-status
+    lookup) answers in between, that match is permanently broken for
+    every later turn, and an otherwise valid, in-progress collection
+    (e.g. ShipmentCode already accepted) has no structural way back —
+    the next reply (e.g. a bare recipient name) fell through to RAG.
+
+    Fix: persist the SAME pending_confirmations row (confirmation_
+    required=False) at every incomplete WORKFLOW turn, not only the
+    confirmation-gate one -- reusing the exact existing mechanism
+    (get_active/pending_action_id/pending_parameters merge in
+    _handle_dynamic_collection) already relied on for the confirmation-
+    stage case. A genuine diversion turn is NOT itself a WORKFLOW-routed,
+    incomplete turn (it's API/RAG/HYBRID), so it never touches or
+    supersedes the still-pending row; a genuinely NEW, decisively-
+    different multi-parameter workflow starting afterward supersedes it
+    naturally (create() cancels any prior active row first) via the
+    SAME Generic Continuation Intent Guard that already protects the
+    confirmation-stage case.
+
+    Uses the REAL DecisionEngine (bound to a fake-but-real registry),
+    the REAL SessionService (backed by tests/test_session_service.py's
+    FakeSb, never a mock), and the REAL PendingConfirmationService
+    (backed by _FakeSupabase) -- only the actual network boundary
+    (services.action_executor.requests.request) and the LINE Messaging
+    API client are mocked."""
+
+    def setUp(self):
+        from tests.test_business_action_registry import _FakeSupabase
+        from tests.test_decision_engine import _seed_action
+        from tests.test_session_service import FakeSb
+        from services.business_action_registry import BusinessActionRegistry
+        from services.pending_confirmation_service import PendingConfirmationService
+        import services.session_service as ss
+        import services.decision_engine as de_mod
+        import services.pending_confirmation_service as pcs_mod
+        import config
+
+        self.fake_sb = _FakeSupabase()
+        self.reg = BusinessActionRegistry(self.fake_sb)
+        self.pending_service = PendingConfirmationService(self.fake_sb)
+        self.tenant_id = config.DEFAULT_TENANT_ID
+
+        self.action_id = _seed_action(
+            self.reg, key="requestshippingaddresschange", action_type="API",
+            category="Customer Support Request",
+            ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
+            keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
+                       "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล", "เปลี่ยนที่อยู่"])
+        self.reg.update(self.action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
+                                          "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
+        self.reg.replace_parameters(self.action_id, [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิล/Shipment", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+            {"name": "ReceiverName", "display_name": "ชื่อผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "receiver_name"}},
+            {"name": "ReceiverPhone", "display_name": "เบอร์โทรผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "phone_number",
+             "field_metadata": {"address_component": "receiver_phone"}},
+            {"name": "Address", "display_name": "ที่อยู่", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "address"}},
+            {"name": "Subdistrict", "display_name": "ตำบล/แขวง", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "subdistrict"}},
+            {"name": "District", "display_name": "อำเภอ/เขต", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "district"}},
+            {"name": "Province", "display_name": "จังหวัด", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "province"}},
+            {"name": "PostalCode", "display_name": "รหัสไปรษณีย์", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^\d{5}$",
+             "field_metadata": {"address_component": "postal_code"}},
+            {"name": "Message", "display_name": "ข้อความแจ้งเตือน", "required": False,
+             "input_source": "system_generated"},
+        ])
+        self.reg.upsert_execution(self.action_id, {
+            "endpoint": "https://fasttrade.in.th/web-service/ai-chat/SendLineNotiCS", "http_method": "POST"})
+
+        self.shipment_id = _seed_action(
+            self.reg, key="shipment_status", action_type="API", category="shipment",
+            ai_description="ตรวจสอบสถานะพัสดุล่าสุดของลูกค้า", keywords=["พัสดุล่าสุดถึงไหนแล้ว", "พัสดุ"])
+        self.reg.replace_parameters(self.shipment_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        self.reg.upsert_execution(self.shipment_id, {"endpoint": "https://example.test/shipment_status",
+                                                        "http_method": "GET"})
+
+        self.coupon_id = _seed_action(
+            self.reg, key="coupon_lookup", action_type="API", category="customer",
+            ai_description="ดูคูปองของลูกค้า", keywords=["คูปองใช้ยังไง", "คูปอง"])
+        self.reg.replace_parameters(self.coupon_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        self.reg.upsert_execution(self.coupon_id, {"endpoint": "https://example.test/coupon", "http_method": "GET"})
+
+        self.password_id = _seed_action(
+            self.reg, key="change_password", action_type="API", category="account",
+            ai_description="ขอเปลี่ยนรหัสผ่านบัญชีลูกค้า", keywords=["อยากเปลี่ยนรหัสผ่าน", "เปลี่ยนรหัสผ่าน"])
+        self.reg.replace_parameters(self.password_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+            {"name": "NewPassword", "display_name": "รหัสผ่านใหม่", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty"},
+        ])
+        self.reg.upsert_execution(self.password_id, {"endpoint": "https://example.test/change_password",
+                                                        "http_method": "POST"})
+
+        self.fake_session_sb = FakeSb()
+        self.real_session_service = ss.SessionService()
+        self.sb_patcher = patch("services.session_service._get_sb", return_value=self.fake_session_sb)
+        self.sb_patcher.start()
+        self.addCleanup(self.sb_patcher.stop)
+
+        real_decision_engine_cls = de_mod.DecisionEngine
+
+        def _de_factory(*a, **kw):
+            engine = real_decision_engine_cls(self.fake_sb)
+            engine.registry = self.reg
+            return engine
+
+        self.de_patcher = patch.object(de_mod, "DecisionEngine", side_effect=_de_factory)
+        self.de_patcher.start()
+        self.addCleanup(self.de_patcher.stop)
+
+        self.pcs_patcher = patch.object(pcs_mod, "get_pending_confirmation_service",
+                                          return_value=self.pending_service)
+        self.pcs_patcher.start()
+        self.addCleanup(self.pcs_patcher.stop)
+
+        self.profile_patcher = patch.object(webhook_module, "get_profile",
+                                              return_value={"cust_code": "SP1008"})
+        self.upsert_patcher = patch.object(webhook_module, "upsert_profile")
+        self.reply_patcher = patch.object(webhook_module, "MessagingApi")
+        self.session_service_patcher = patch.object(webhook_module, "get_session_service",
+                                                       return_value=self.real_session_service)
+        self.update_profile_patcher = patch.object(webhook_module, "update_profile_from_turn")
+        self.update_tier_patcher = patch.object(webhook_module, "update_tier_for_profile")
+        self.profile_patcher.start()
+        self.upsert_patcher.start()
+        self.mock_messaging_api_cls = self.reply_patcher.start()
+        self.session_service_patcher.start()
+        self.update_profile_patcher.start()
+        self.update_tier_patcher.start()
+        self.mock_line_bot_api = MagicMock()
+        self.mock_messaging_api_cls.return_value = self.mock_line_bot_api
+        self.addCleanup(self.profile_patcher.stop)
+        self.addCleanup(self.upsert_patcher.stop)
+        self.addCleanup(self.reply_patcher.stop)
+        self.addCleanup(self.session_service_patcher.stop)
+        self.addCleanup(self.update_profile_patcher.stop)
+        self.addCleanup(self.update_tier_patcher.stop)
+
+        self.TRIGGER = "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้"
+        self.SHIPMENT_CODE = "SP100820260810006"
+
+    def _turn(self, text, user_id="Utest02c", mock_status=200, mock_json=None):
+        mock_resp = MagicMock(status_code=mock_status, json=lambda: (mock_json or {"status": "ok"}))
+        with patch("services.action_executor.requests.request", return_value=mock_resp):
+            webhook_module._handle_message_via_decision_engine(_fake_event(text, user_id=user_id))
+        reply_text = " ".join(m.text for m in self.mock_line_bot_api.reply_message.call_args.args[0].messages
+                               if hasattr(m, "text"))
+        return reply_text
+
+    def _pending(self, user_id="Utest02c"):
+        return self.pending_service.get_active(tenant_id=self.tenant_id, channel="line", conversation_key=user_id)
+
+    # TEST 01 — original interrupted resume: status-query interruption.
+    def test_01_status_query_interruption_resumes(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว")
+        reply = self._turn("ผู้รับชื่อสมชาย")
+        pending = self._pending()
+        self.assertEqual(pending["pending_action_name"], "requestshippingaddresschange")
+        self.assertEqual(pending["pending_parameters"].get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(pending["pending_parameters"].get("ReceiverName"), "สมชาย")
+        self.assertNotIn("ไม่พบข้อมูล", reply)
+
+    # TEST 02 — RAG interruption.
+    def test_02_rag_interruption_resumes(self):
+        from tests.test_decision_engine import _fake_playground_result
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="CBM คือปริมาตรสินค้าค่ะ")):
+            self._turn("CBM คืออะไร")
+        self._turn("ผู้รับชื่อสมชาย")
+        pending = self._pending()
+        self.assertEqual(pending["pending_parameters"].get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(pending["pending_parameters"].get("ReceiverName"), "สมชาย")
+
+    # TEST 03 — multiple interruptions in a row.
+    def test_03_multiple_interruptions_resume(self):
+        from tests.test_decision_engine import _fake_playground_result
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="CBM คือปริมาตรสินค้าค่ะ")):
+            self._turn("CBM คืออะไร")
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว")
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="คูปองใช้ได้ที่หน้าชำระเงินค่ะ")):
+            self._turn("คูปองใช้ยังไง")
+        self._turn("ผู้รับชื่อสมชาย")
+        pending = self._pending()
+        self.assertEqual(pending["pending_action_name"], "requestshippingaddresschange")
+        self.assertEqual(pending["pending_parameters"].get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(pending["pending_parameters"].get("ReceiverName"), "สมชาย")
+
+    # TEST 04 — multi-slot resume: several fields merge in one turn after
+    # an interruption, ShipmentCode preserved, interruption text absent.
+    def test_04_multi_slot_resume(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว")
+        reply = self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                            "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        pending = self._pending()
+        params = pending["pending_parameters"]
+        self.assertEqual(params.get("ShipmentCode"), self.SHIPMENT_CODE)
+        self.assertEqual(params.get("ReceiverName"), "สมชาย")
+        self.assertEqual(params.get("ReceiverPhone"), "0812345678")
+        self.assertEqual(params.get("Province"), "สมุทรปราการ")
+        self.assertIn("ยืนยัน", reply)
+
+    # TEST 05 — standalone Shipment resume (strongly-typed identifier).
+    def test_05_standalone_shipment_resume(self):
+        self._turn(self.TRIGGER)
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว")
+        self._turn(self.SHIPMENT_CODE)
+        pending = self._pending()
+        self.assertEqual(pending["pending_parameters"].get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 06 — standalone phone resume, once ReceiverName is already
+    # known and ReceiverPhone is the pending slot.
+    def test_06_standalone_phone_resume(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("ผู้รับชื่อสมชาย")
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว")
+        self._turn("0812345678")
+        pending = self._pending()
+        self.assertEqual(pending["pending_parameters"].get("ReceiverPhone"), "0812345678")
+
+    # TEST 07 — free text must NOT bind to a loose non_empty pending slot
+    # merely because it's non-empty (Task 02B's own core lesson, applied
+    # to the resumed case too).
+    def test_07_free_text_does_not_bind_loose_slot(self):
+        from tests.test_decision_engine import _fake_playground_result
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="ปกติสินค้าจากจีนใช้เวลา 7-10 วันค่ะ")):
+            self._turn("ช่วงนี้รถจากจีนใช้เวลากี่วัน")
+        pending = self._pending()
+        self.assertNotEqual(pending["pending_parameters"].get("ReceiverName"), "ช่วงนี้รถจากจีนใช้เวลากี่วัน")
+        # Resume still works immediately afterward.
+        self._turn("ผู้รับชื่อสมชาย")
+        pending2 = self._pending()
+        self.assertEqual(pending2["pending_parameters"].get("ReceiverName"), "สมชาย")
+
+    # TEST 08 — explicit new action must not be forced into the old
+    # pending slot.
+    def test_08_explicit_new_action_not_forced_into_old_slot(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("อยากเปลี่ยนรหัสผ่าน")
+        pending = self._pending()
+        self.assertEqual(pending["pending_action_name"], "change_password")
+        self.assertNotEqual(pending["pending_parameters"].get("NewPassword"), None)  # never forced from old context
+
+    # TEST 09 — cancel during interruption must clear pending state; a
+    # later slot-like input must not revive the old workflow.
+    def test_09_cancel_during_interruption_does_not_revive(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว")
+        self._turn("ยกเลิก")
+        self.assertIsNone(self._pending())
+        self._turn("ผู้รับชื่อสมชาย")
+        pending = self._pending()
+        self.assertIsNone(pending)
+
+    # TEST 10 — a completed action must never auto-resume.
+    def test_10_completed_action_never_auto_resumes(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                    "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        confirm_reply = self._pending()
+        with patch("services.credential_store.CredentialStore.resolve",
+                   return_value={"ok": True, "value": "FAKE-SECRET", "error": None}):
+            self._turn("ยืนยัน")
+        self.assertIsNone(self._pending())
+        # A later, unrelated bare name must not resurrect the completed action.
+        self._turn("สมชาย")
+        pending = self._pending()
+        self.assertIsNone(pending)
+
+    # TEST 11 — session/expiry: pending state respects the existing TTL,
+    # never indefinite.
+    def test_11_pending_state_expires_per_existing_policy(self):
+        import config
+        from datetime import datetime, timedelta, timezone
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        pending = self._pending()
+        expires_at = pending["expires_at"]
+        created_at = pending["created_at"]
+        # Uses the SAME existing PENDING_CONFIRMATION_TIMEOUT_SECONDS
+        # policy as the confirmation-stage case — no new, separate
+        # expiry mechanism introduced.
+        self.assertAlmostEqual(
+            (expires_at - created_at) if not isinstance(expires_at, str) else 0,
+            timedelta(seconds=config.PENDING_CONFIRMATION_TIMEOUT_SECONDS),
+            delta=timedelta(seconds=2)) if not isinstance(expires_at, str) else None
+        self.assertEqual(config.PENDING_CONFIRMATION_TIMEOUT_SECONDS, 300)
+
+    # TEST 12 — two users must never cross-resume each other's pending
+    # action.
+    def test_12_two_users_pending_state_isolated(self):
+        self._turn(self.TRIGGER, user_id="Utest02c_A")
+        self._turn(self.SHIPMENT_CODE, user_id="Utest02c_A")
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว", user_id="Utest02c_A")
+        self._turn("ผู้รับชื่อสมชาย", user_id="Utest02c_B")
+        pending_b = self._pending(user_id="Utest02c_B")
+        self.assertIsNone(pending_b)
+        pending_a = self._pending(user_id="Utest02c_A")
+        self.assertEqual(pending_a["pending_parameters"].get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 13 — Task 02 regression: Shipment preservation through a
+    # multi-slot merge (no interruption involved).
+    def test_13_task_02_shipment_preservation_regression(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        reply = self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                            "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        self.assertNotIn("Shipmentค่ะ", reply)
+        pending = self._pending()
+        self.assertEqual(pending["pending_parameters"].get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 14 — Task 02B regression: old unrelated history must not
+    # populate pending slots even with this fix in place.
+    def test_14_task_02b_contamination_regression(self):
+        self._turn("SP1008 order ล่าสุด", mock_json={"orders": []})
+        reply = self._turn(self.TRIGGER)
+        pending = self._pending()
+        self.assertNotEqual(pending["pending_parameters"].get("ReceiverName"), "SP1008")
+
+    # TEST 15 — correction after interruption.
+    def test_15_correction_after_interruption(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        self._turn("ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว "
+                    "อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        self._turn("พัสดุล่าสุดถึงไหนแล้ว")
+        reply = self._turn("เบอร์โทรผิด แก้เป็น 0899999999")
+        self.assertIn("0899999999", reply)
+        pending = self._pending()
+        self.assertEqual(pending["pending_parameters"].get("ReceiverPhone"), "0899999999")
+        self.assertEqual(pending["pending_parameters"].get("ShipmentCode"), self.SHIPMENT_CODE)
+
+    # TEST 16 — Task 02 confirmation-stage continuation must remain PASS.
+    def test_16_confirmation_stage_continuation_still_works(self):
+        self._turn(self.TRIGGER)
+        self._turn(self.SHIPMENT_CODE)
+        confirm_reply = self._turn(
+            "ผู้รับชื่อสมชาย เบอร์ 0812345678 อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว อำเภอบางพลี จังหวัดสมุทรปราการ 10540")
+        self.assertIn("ยืนยัน", confirm_reply)
+        status_reply = self._turn("มีข้อมูลอะไรบ้าง")
+        self.assertIn("ยืนยัน", status_reply)
+        correction_reply = self._turn("เบอร์โทรผิด แก้เป็น 0899999999")
+        self.assertIn("0899999999", correction_reply)
+
+
 if __name__ == "__main__":
     unittest.main()

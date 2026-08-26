@@ -390,10 +390,11 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # classification).
     dev = result.get("developer") or {}
     gate = dev.get("confirmation_gate")
+    ics = dev.get("information_collection_status") or {}
     if gate and gate.get("required") and not gate.get("confirmed") and gate.get("action_id"):
         try:
             full_action = engine.registry.get_full(gate["action_id"], mask_secrets=False)
-            collected = (dev.get("information_collection_status") or {}).get("collected_parameters") or {}
+            collected = ics.get("collected_parameters") or {}
             pending_service.create(
                 tenant_id=tenant_id, channel=channel, conversation_key=user_id,
                 action=full_action or {"id": gate["action_id"], "action_key": gate.get("action_key")},
@@ -401,6 +402,45 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             )
         except Exception as e:
             print(f"[webhook] failed to persist pending confirmation (non-fatal): {e}")
+    elif routing_type == "WORKFLOW" and ics.get("selected_action_id") and not ics.get("is_complete"):
+        # Interrupted Workflow Auto-Resume fix (Task 02C, 2026-08-25) —
+        # reuses the EXACT same pending_confirmations mechanism above,
+        # just persisted at every MID-collection turn too (confirmation_
+        # required=False), not only once the action is fully complete and
+        # ready to confirm. Confirmed live: without this, a temporary
+        # diversion (e.g. "พัสดุล่าสุดถึงไหนแล้ว" answered mid-address-
+        # change-collection) leaves NO structural trace of the still-
+        # incomplete action anywhere — _resolve_continuation_action can
+        # only match by re-generating the LAST assistant turn's exact
+        # question, which is now the diversion's own reply, not this
+        # action's — so the customer's next answer (e.g. "ผู้รับชื่อสมชาย")
+        # had nothing to bind against and fell through to RAG, losing an
+        # otherwise valid, in-progress collection. get_active() already
+        # returns this row on the very next turn regardless of
+        # confirmation_required's value; _handle_dynamic_collection
+        # already merges context["pending_parameters"] in whenever
+        # context["pending_action_id"] matches (used today only for the
+        # confirmation-stage correction case) — this is the same
+        # mechanism, just reaching one stage earlier. A genuine topical
+        # diversion still overrides it exactly as before (the Generic
+        # Continuation Intent Guard runs unconditionally on whatever
+        # continuation_action this resolves to, never bypassed here), and
+        # a decisively different NEW multi-parameter workflow starting
+        # afterward naturally supersedes this row the same way a fresh
+        # confirmation-stage pending row already does (create() cancels
+        # any prior active row for this conversation first).
+        try:
+            full_action = engine.registry.get_full(ics["selected_action_id"], mask_secrets=False)
+            collected = ics.get("collected_parameters") or {}
+            pending_service.create(
+                tenant_id=tenant_id, channel=channel, conversation_key=user_id,
+                action=full_action or {"id": ics["selected_action_id"],
+                                         "action_key": ics.get("selected_business_action")},
+                parameters=collected, original_message=question, question_text=reply_text,
+                confirmation_required=False,
+            )
+        except Exception as e:
+            print(f"[webhook] failed to persist mid-collection pending state (non-fatal): {e}")
 
     # Human Handoff (2026-08-13) — the escalation DECISION already
     # happened inside decide() (explicit human request, refusal, max-
