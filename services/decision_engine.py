@@ -67,7 +67,9 @@ from services.action_selection_primitives import (
 # implementation. Safe to import here (no cycle) because that module now
 # depends only on services/action_selection_primitives.py, not on this
 # module.
-from services.hybrid_question_classifier import classify_question
+from services.hybrid_question_classifier import (
+    classify_question, _QUESTION_MARKER_RE, _REQUEST_MARKER_RE, _split_clauses,
+)
 # Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
 # 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
 # mode already uses (services/hybrid_runtime_service.py); this module
@@ -1666,6 +1668,53 @@ class DecisionEngine:
                     "keyword/example/AI-description overlap" in r for r in (diversion_selected.get("_reasons") or []))
                 if diversion_has_topical_evidence and diversion_selected["id"] != continuation_action["id"]:
                     continuation_action = None
+                elif continuation_action:
+                    # Mid-Collection RAG Diversion fix (Task 03, 2026-08-25)
+                    # — the check above only recognizes a diversion to a
+                    # DIFFERENT Business Action; a genuine general/RAG
+                    # question (no Business Action evidence at all, e.g.
+                    # "CBM คืออะไร" while ReceiverName is pending) had no
+                    # way to override continuation, so _handle_dynamic_
+                    # collection tried to bind it to the pending slot,
+                    # failed (ReceiverName's own address-component
+                    # structural-only binding correctly rejects it — Task
+                    # 02B/02C's protections are untouched here), and
+                    # silently re-asked the same question instead of
+                    # answering it. Reuses classify_question fresh
+                    # (memory-free, same spirit as diversion_candidates
+                    # above) — only a confidently RAG_ONLY result counts;
+                    # CLARIFICATION_REQUIRED (the Wrong-Intent Prevention
+                    # fix just above) or anything else leaves continuation
+                    # untouched, since those are not decisive evidence the
+                    # customer abandoned the pending slot. ALSO requires a
+                    # genuine question marker (_QUESTION_MARKER_RE) — RAG_ONLY
+                    # is classify_question's own default fallback for ANY
+                    # non-Business-Action text, so without this a bare,
+                    # correct answer to the pending slot itself (e.g.
+                    # "ผู้รับชื่อสมชาย", which also matches no Business
+                    # Action) would be misread as a diversion and never
+                    # reach _handle_dynamic_collection at all. ALSO
+                    # excludes two further, already-established signals
+                    # that a question-shaped reply is still genuinely
+                    # ABOUT the pending flow, not a real topic change:
+                    # _COLLECTION_STATUS_QUERY_RE ("มีข้อมูลอะไรบ้าง" — its
+                    # own dedicated handling inside _handle_dynamic_
+                    # collection must get first refusal, never pre-empted
+                    # here) and _REFERENCE_MARKER_RE (e.g. "บิลนี้สถานะ
+                    # อะไร" continuing to ask about the SAME just-mentioned
+                    # record — "สถานะ" is already one of that pattern's own
+                    # referring-expression markers). Confirmed live: without
+                    # these exclusions, an ambiguous but still-on-topic
+                    # follow-up like "บิลนี้สถานะอะไร" (right after being
+                    # asked for CustCode) was wrongly swept into this same
+                    # diversion, losing the in-progress order lookup
+                    # entirely instead of continuing to wait for CustCode.
+                    if (_QUESTION_MARKER_RE.search(message or "")
+                            and not _COLLECTION_STATUS_QUERY_RE.search(message or "")
+                            and not _REFERENCE_MARKER_RE.search(message or "")):
+                        fresh_classification = classify_question(message, self.registry)
+                        if fresh_classification["classification"] == "RAG_ONLY":
+                            continuation_action = None
 
             detail_sibling_action = None
             if not continuation_action and customer_context.get("last_business_action") \
@@ -1903,6 +1952,15 @@ class DecisionEngine:
 
         customer_context = context.get("customer_context") or {}
         collected = _replay_business_action_collection(full_action, self.registry, history, customer_context)
+        # Multi-Intent Preservation fix (Task 03, 2026-08-25) — captured
+        # BEFORE this turn's own message is bound below, so it reflects
+        # "did this action have ANY history at all before now" — a proxy
+        # for "is this message the actual trigger" (a genuine continuation
+        # reply is virtually never a compound, multi-clause sentence with
+        # its own second conjunction-joined clause, so this stays a safe,
+        # self-limiting signal without needing to track turn index
+        # explicitly).
+        is_first_turn_for_this_action = not collected and not context.get("pending_action_id")
         # Reliable Pending-Confirmation Seed (Address Change Full UAT
         # fix, 2026-08-24; corrected 2026-08-25, Correction-Persistence
         # P1 audit finding) — `pending_parameters` (the caller's own
@@ -2029,6 +2087,43 @@ class DecisionEngine:
                 question = _generate_parameter_question(next_after)
             else:
                 question = "ขอข้อมูลเพิ่มเติมด้วยค่ะ"
+            # Multi-Intent Preservation fix (Task 03, 2026-08-25) —
+            # confirmed live: "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วย
+            # ประเมินค่าขนส่งถึงบ้านให้หน่อย" silently dropped its second
+            # clause entirely (classify_question's HYBRID segmentation
+            # only ever triggers once a parameter VALUE is bound — a bare
+            # trigger message with no identifier yet never reaches that
+            # check at all, so the second clause was never even
+            # evaluated). Reuses _split_clauses (the exact same fixed-
+            # conjunction segmentation HYBRID mode already uses) purely to
+            # DETECT a second, independent, question-shaped clause on the
+            # actual trigger turn — never to answer it here (that would
+            # mean invoking RAG/execution logic this fix does not touch).
+            # A short, generic acknowledgment is appended so the second
+            # intent is visibly NOT lost; developer_trace records it too,
+            # satisfying "recognized as multiple, no silent loss"
+            # structurally as well as conversationally. Gated to the
+            # actual trigger turn only (is_first_turn_for_this_action) —
+            # an ordinary continuation reply is never itself a compound,
+            # conjunction-joined sentence with its own separate question,
+            # so later turns are unaffected in practice.
+            if is_first_turn_for_this_action:
+                clauses = _split_clauses(message or "")
+                # A second clause proves it's a genuine, independent ask via
+                # EITHER a literal question word (_QUESTION_MARKER_RE, e.g.
+                # "CBM คืออะไร") OR a polite-request marker (_REQUEST_MARKER_RE,
+                # e.g. "ช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย" -- phrased as a
+                # request, not a question, but just as clearly a second,
+                # separate thing the customer wants). Either signal alone is
+                # sufficient; requiring BOTH would miss real compound
+                # messages that use only one phrasing style.
+                other_clauses = [
+                    c for c in clauses
+                    if c != message and (_QUESTION_MARKER_RE.search(c) or _REQUEST_MARKER_RE.search(c))
+                ]
+                if other_clauses:
+                    developer_trace["secondary_intent_detected"] = other_clauses[0]
+                    question += "\n\nรับทราบอีกเรื่องที่สอบถามมาด้วยนะคะ เดี๋ยวช่วยตอบให้หลังจากเรื่องนี้เสร็จค่ะ"
             reply = _build_response(text=question)
             return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
                                    developer_trace=developer_trace, context=context, start=start,
@@ -2795,13 +2890,27 @@ class DecisionEngine:
 
     def _route_clarification(self, classification: Dict, message: str, context: Dict,
                               developer_trace: Dict, start: float, *, workflow: Optional[str]) -> Dict:
-        """2+ Business Actions matched the message with comparably strong
-        evidence (services/hybrid_question_classifier.py) — genuinely
-        ambiguous which one the customer means. No execution of either
-        candidate; asks the customer to be more specific, same as the AI
+        """Two distinct CLARIFICATION_REQUIRED causes share this
+        classification value (services/hybrid_question_classifier.py) —
+        distinguished by whether any Business Action was even a candidate
+        (`candidate_action_ids`), never by re-deriving the reason here:
+        (1) 2+ Business Actions matched with comparably strong evidence —
+        genuinely ambiguous which one the customer means.
+        (2) Wrong-Intent Prevention fix (Task 03, 2026-08-25) — the
+        message expresses interest/intent but asks no concrete question
+        and matched no Business Action at all (candidate_action_ids is
+        empty); answering via RAG here risks a confident but unrelated
+        answer (confirmed live: "สนใจนำเข้าสินค้าครับ" retrieved the
+        closest-embedding KB chunk, "prohibited goods", despite asking
+        nothing about restrictions). No execution/RAG call either way —
+        asks the customer for the minimum detail needed, same as the AI
         Playground's Auto mode does for this classification."""
         alert = _detect_alert(message, context)
-        reply = _build_response(text="พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการค่ะ รบกวนระบุให้ชัดเจนขึ้นอีกนิดนะคะ")
+        if classification.get("candidate_action_ids"):
+            text = "พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการค่ะ รบกวนระบุให้ชัดเจนขึ้นอีกนิดนะคะ"
+        else:
+            text = "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ"
+        reply = _build_response(text=text)
         return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow,
                                developer_trace=developer_trace, context=context, start=start, alert=alert)
 

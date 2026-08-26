@@ -5189,5 +5189,282 @@ class TestTask02BCrossTopicContaminationPrevention(unittest.TestCase):
         self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
 
 
+class TestTask03IntentUnderstandingClarificationMultiIntent(unittest.TestCase):
+    """Task 03 — Fix Intent Understanding + Clarification + Multi-Intent +
+    Routing Precedence (2026-08-26).
+
+    Three independent, minimal fixes, all reusing existing infrastructure:
+
+    (A) Wrong-Intent fix (services/hybrid_question_classifier.py):
+        a message that expresses INTEREST ("สนใจนำเข้าสินค้าครับ") but asks
+        no concrete question, and matches no Business Action, previously
+        fell through to a confident RAG_ONLY guess -- which could answer
+        with unrelated content retrieved for the bare keyword "สินค้า"
+        (e.g. a prohibited-goods policy chunk). Reuses the EXISTING
+        _HOT_RE lead-signal regex (services/customer_tier_service.py,
+        already used for customer-tier scoring, zero circular-import
+        risk) together with the EXISTING _QUESTION_MARKER_RE to route
+        this narrow case to CLARIFICATION_REQUIRED instead of guessing.
+
+    (B) Mid-Collection RAG Diversion fix (services/decision_engine.py,
+        decide()): a genuine, unrelated RAG question asked WHILE a
+        Business Action's slot-filling is pending (e.g. "CBM คืออะไร"
+        while ShipmentCode/ReceiverName are still being collected) must
+        temporarily divert to RAG and preserve the pending state (Task
+        02C), not be swallowed as an attempted answer to the current
+        slot's question. Guarded to require a genuine question marker
+        AND independent confirmation from a fresh classify_question(...)
+        call, explicitly excluding the pre-existing status-query
+        (_COLLECTION_STATUS_QUERY_RE) and reference/continuation-marker
+        (_REFERENCE_MARKER_RE) cases so Task 02's own on-topic follow-up
+        behavior does not regress.
+
+    (C) Multi-Intent Preservation fix (services/decision_engine.py,
+        _handle_dynamic_collection): a compound trigger message with two
+        distinct asks joined by a fixed conjunction (_split_clauses, the
+        same segmentation HYBRID mode already uses) must not silently
+        drop the second one. Detection only -- never answered in the same
+        turn, so HYBRID's own execution flow is untouched. A second
+        clause proves it's independent via EITHER a literal question
+        marker (_QUESTION_MARKER_RE) OR a polite-request marker
+        (_REQUEST_MARKER_RE, new) since real customer phrasing mixes
+        both styles ("...และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย" has no
+        question word at all). Gated to the actual trigger turn only.
+
+    Explicitly OUT OF SCOPE (per Task 03 spec, left to Task 04/05): RAG
+    answer QUALITY/content correctness once routed to RAG; latency;
+    worker/process architecture.
+    """
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.engine = _engine_with_registry(self.reg)
+
+    def _seed_address_change(self):
+        action_id = _seed_action(
+            self.reg, key="requestshippingaddresschange", action_type="API",
+            category="Customer Support Request",
+            ai_description="รับคำขอเปลี่ยนที่อยู่จัดส่ง/ที่อยู่รับสินค้าจากลูกค้า แล้วแจ้งเจ้าหน้าที่ให้ดำเนินการแก้ไขใน ERP",
+            keywords=["ต้องการเปลี่ยนที่อยู่บิลขนส่ง", "อยากเปลี่ยนที่อยู่จัดส่ง", "แก้ที่อยู่จัดส่งยังไง",
+                       "เปลี่ยนที่อยู่รับของ", "เปลี่ยนที่อยู่รับสินค้า", "ขอเปลี่ยนที่อยู่บิล", "เปลี่ยนที่อยู่"])
+        self.reg.update(action_id, {"setup_metadata": {"operation_type": "NOTIFICATION"},
+                                     "display_name": "คำขอเปลี่ยนที่อยู่จัดส่ง"})
+        self.reg.replace_parameters(action_id, [
+            {"name": "SecretCode", "required": True, "input_source": "credential_store",
+             "credential_ref": "fake_secret", "visible_to_customer": False, "visible_in_developer_mode": False},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิล/Shipment", "required": True,
+             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d{10,}$"},
+            {"name": "ReceiverName", "display_name": "ชื่อผู้รับ", "required": True,
+             "input_source": "customer_message", "validation_type": "non_empty",
+             "field_metadata": {"address_component": "receiver_name"}},
+        ])
+        self.reg.upsert_execution(action_id, {
+            "endpoint": "https://fasttrade.in.th/web-service/ai-chat/SendLineNotiCS", "http_method": "POST"})
+        return action_id
+
+    def _ics(self, result):
+        return (result.get("developer") or {}).get("information_collection_status", {})
+
+    # ---- (A) Wrong-Intent fix ----
+
+    # TEST 01 — the exact reproduced customer defect: bare interest, no
+    # question, no Business Action match -> CLARIFICATION_REQUIRED, never
+    # a confident RAG guess that could answer with unrelated content.
+    def test_01_bare_interest_no_question_routes_to_clarification(self):
+        result = self.engine.decide("สนใจนำเข้าสินค้าครับ", history=[], context={"developer_mode": True})
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        self.assertIn("รบกวนขอรายละเอียดเพิ่มเติม", result["reply"]["text"])
+
+    # TEST 02 — a REAL question about the same topic must still reach RAG
+    # normally (has its own question marker "อะไร" -> not the ambiguous
+    # bare-interest case).
+    def test_02_real_question_same_topic_still_reaches_rag(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="สินค้าห้ามนำเข้า ได้แก่ ...", confidence=0.9)):
+            result = self.engine.decide("มีสินค้าอะไรห้ามนำเข้าบ้าง", history=[], context={"developer_mode": True})
+        self.assertEqual(result["reply"]["text"], "สินค้าห้ามนำเข้า ได้แก่ ...")
+
+    # TEST 03 — interest phrased TOGETHER with its own question in the
+    # same message must not be over-clarified; the question marker means
+    # there IS concrete content to answer.
+    def test_03_interest_plus_question_together_not_over_clarified(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="สินค้าห้ามนำเข้า ได้แก่ ...", confidence=0.9)):
+            result = self.engine.decide("สนใจนำเข้าสินค้า แต่ไม่รู้ว่าห้ามนำเข้าอะไรบ้าง", history=[],
+                                         context={"developer_mode": True})
+        self.assertEqual(result["reply"]["text"], "สินค้าห้ามนำเข้า ได้แก่ ...")
+
+    # TEST 04 — a matched Business Action still takes precedence; the
+    # interest-only fallback only applies once no action matched at all.
+    def test_04_matched_business_action_not_affected(self):
+        self._seed_address_change()
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide("อยากเปลี่ยนที่อยู่จัดส่ง", history=[], context={"developer_mode": True})
+        self.assertNotIn("รบกวนขอรายละเอียดเพิ่มเติม", result["reply"]["text"])
+
+    # TEST 04B — negation: a customer explicitly DECLINING interest (with
+    # a closing remark, no question) must not be swept into the "vague
+    # interest" clarification fallback -- the opposite of what a bare
+    # _HOT_RE match on "สนใจ" alone would suggest.
+    def test_04b_negated_interest_not_treated_as_vague_interest(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="ขอบคุณค่ะ", confidence=0.9)):
+            result = self.engine.decide("ไม่สนใจนำเข้าสินค้าครับ ขอบคุณ", history=[],
+                                         context={"developer_mode": True})
+        self.assertNotIn("รบกวนขอรายละเอียดเพิ่มเติม", result["reply"]["text"])
+
+    # ---- (B) Mid-Collection RAG Diversion fix ----
+
+    # TEST 05 — a genuine, unrelated RAG question mid-collection diverts
+    # to RAG and preserves the pending slots already collected.
+    def test_05_genuine_rag_question_mid_collection_diverts_and_preserves_state(self):
+        self._seed_address_change()
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        with patch("services.action_executor.requests.request"):
+            t1 = self.engine.decide("อยากเปลี่ยนที่อยู่จัดส่งบิลนี้", history=[], context=ctx)
+            h = [{"role": "user", "content": "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้"},
+                 {"role": "assistant", "content": t1["reply"]["text"]}]
+            t2 = self.engine.decide("SP100820260810006", history=h, context=ctx)
+            h += [{"role": "user", "content": "SP100820260810006"},
+                  {"role": "assistant", "content": t2["reply"]["text"]}]
+            with patch("services.playground_orchestrator.run_playground_turn",
+                       return_value=_fake_playground_result(answer="CBM คือปริมาตรของสินค้าค่ะ", confidence=0.9)):
+                t3 = self.engine.decide("CBM คืออะไร", history=h, context=ctx)
+        self.assertEqual(t3["reply"]["text"], "CBM คือปริมาตรของสินค้าค่ะ")
+        self.assertEqual(self._ics(t2).get("collected_parameters", {}).get("ShipmentCode"), "SP100820260810006")
+
+    # TEST 06 — after diverting, the NEXT turn resumes the same pending
+    # collection and correctly binds the next slot (Task 02C preserved).
+    def test_06_resumes_pending_collection_after_diversion(self):
+        # NOTE: _resolve_continuation_action's own signal (does the LAST
+        # assistant turn's text equal the pending action's question) is
+        # necessarily broken by design once that turn is a RAG answer
+        # instead -- that is exactly WHY Task 02C's persisted pending row
+        # exists, and why decide()'s own fallback (services/decision_engine.py
+        # ~line 1615) reads context["pending_action_id"]/["pending_parameters"]
+        # when history-replay alone can't recognize the continuation. The
+        # real webhook caller (line_bot/webhook.py) always threads these
+        # from PendingConfirmationService; a bare engine.decide() test must
+        # simulate that same contract to exercise the real resume path.
+        action_id = self._seed_address_change()
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        with patch("services.action_executor.requests.request"):
+            t1 = self.engine.decide("อยากเปลี่ยนที่อยู่จัดส่งบิลนี้", history=[], context=ctx)
+            h = [{"role": "user", "content": "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้"},
+                 {"role": "assistant", "content": t1["reply"]["text"]}]
+            t2 = self.engine.decide("SP100820260810006", history=h, context=ctx)
+            h += [{"role": "user", "content": "SP100820260810006"},
+                  {"role": "assistant", "content": t2["reply"]["text"]}]
+            pending_ctx = {**ctx, "pending_action_id": action_id,
+                           "pending_parameters": dict(self._ics(t2).get("collected_parameters", {}))}
+            with patch("services.playground_orchestrator.run_playground_turn",
+                       return_value=_fake_playground_result(answer="CBM คือปริมาตรของสินค้าค่ะ", confidence=0.9)):
+                t3 = self.engine.decide("CBM คืออะไร", history=h, context=pending_ctx)
+            h += [{"role": "user", "content": "CBM คืออะไร"}, {"role": "assistant", "content": t3["reply"]["text"]}]
+            t4 = self.engine.decide("ผู้รับชื่อสมชาย", history=h, context=pending_ctx)
+        collected = self._ics(t4).get("collected_parameters", {})
+        self.assertEqual(collected.get("ReceiverName"), "สมชาย")
+        self.assertEqual(collected.get("ShipmentCode"), "SP100820260810006")
+
+    # TEST 07 — a legitimate STATUS QUERY mid-collection (Task 02's own
+    # "มีข้อมูลอะไรบ้าง" behavior) must NOT be treated as a RAG diversion,
+    # even though it contains a question marker ("อะไร").
+    def test_07_status_query_mid_collection_not_treated_as_diversion(self):
+        self._seed_address_change()
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        with patch("services.action_executor.requests.request"):
+            t1 = self.engine.decide("อยากเปลี่ยนที่อยู่จัดส่งบิลนี้", history=[], context=ctx)
+            h = [{"role": "user", "content": "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้"},
+                 {"role": "assistant", "content": t1["reply"]["text"]}]
+            t2 = self.engine.decide("SP100820260810006", history=h, context=ctx)
+            h += [{"role": "user", "content": "SP100820260810006"},
+                  {"role": "assistant", "content": t2["reply"]["text"]}]
+            t3 = self.engine.decide("มีข้อมูลอะไรบ้าง", history=h, context=ctx)
+        self.assertEqual(self._ics(t3).get("collected_parameters", {}).get("ShipmentCode"), "SP100820260810006")
+        self.assertEqual(t3["routing"]["type"], "WORKFLOW")
+
+    # TEST 08 — an on-topic follow-up referencing "สถานะ" (a built-in
+    # _REFERENCE_MARKER_RE token) mid-collection must not be diverted
+    # either, even with a question marker present.
+    def test_08_reference_marker_followup_not_treated_as_diversion(self):
+        self._seed_address_change()
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        with patch("services.action_executor.requests.request"):
+            t1 = self.engine.decide("อยากเปลี่ยนที่อยู่จัดส่งบิลนี้", history=[], context=ctx)
+            h = [{"role": "user", "content": "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้"},
+                 {"role": "assistant", "content": t1["reply"]["text"]}]
+            t2 = self.engine.decide("บิลนี้สถานะอะไร", history=h, context=ctx)
+        self.assertEqual(self._ics(t2).get("collected_parameters", {}).get("CustCode"), "SP1008")
+        self.assertEqual(t2["routing"]["type"], "WORKFLOW")
+
+    # ---- (C) Multi-Intent Preservation fix ----
+
+    # TEST 09 — a compound trigger message with a polite-request-phrased
+    # second clause (no literal question word at all) must be detected,
+    # not silently dropped. The exact real customer example.
+    def test_09_multi_intent_polite_request_second_clause_detected(self):
+        self._seed_address_change()
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide(
+                "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย",
+                history=[], context={"developer_mode": True})
+        self.assertEqual(result["developer"].get("secondary_intent_detected"),
+                          "ช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย")
+        self.assertIn("รับทราบอีกเรื่อง", result["reply"]["text"])
+
+    # TEST 10 — a compound trigger message with a literal-question-phrased
+    # second clause is also detected (the other half of the OR).
+    def test_10_multi_intent_literal_question_second_clause_detected(self):
+        self._seed_address_change()
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide(
+                "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และ CBM คำนวณยังไง",
+                history=[], context={"developer_mode": True})
+        self.assertEqual(result["developer"].get("secondary_intent_detected"), "CBM คำนวณยังไง")
+
+    # TEST 11 — the detection is gated to the actual TRIGGER turn only; a
+    # later collection turn that happens to contain a conjunction must
+    # never be re-flagged (an ordinary continuation reply is not a
+    # compound ask).
+    def test_11_not_re_triggered_on_later_collection_turns(self):
+        self._seed_address_change()
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        with patch("services.action_executor.requests.request"):
+            t1 = self.engine.decide(
+                "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย", history=[], context=ctx)
+            h = [{"role": "user", "content": "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และช่วยประเมินค่าขนส่งถึงบ้านให้หน่อย"},
+                 {"role": "assistant", "content": t1["reply"]["text"]}]
+            t2 = self.engine.decide("SP100820260810006 และเบอร์ 0812345678", history=h, context=ctx)
+        self.assertIsNone(t2["developer"].get("secondary_intent_detected"))
+
+    # TEST 12 — a conjunction-joined trigger message where the SECOND
+    # clause carries no independent question/request evidence at all
+    # (e.g. it's just another slot value) must not be falsely flagged as
+    # a second intent.
+    def test_12_conjunction_without_independent_ask_not_flagged(self):
+        self._seed_address_change()
+        with patch("services.action_executor.requests.request"):
+            result = self.engine.decide(
+                "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และ SP100820260810006",
+                history=[], context={"developer_mode": True})
+        self.assertIsNone(result["developer"].get("secondary_intent_detected"))
+        self.assertNotIn("รับทราบอีกเรื่อง", result["reply"]["text"])
+
+    # TEST 13 — the pre-existing "multiple Business Actions matched"
+    # CLARIFICATION_REQUIRED wording must remain distinct from the new
+    # "bare interest, no match" wording (Problem A) -- proves the two
+    # causes stay separably labeled, not blurred into one message.
+    def test_13_multiple_actions_matched_clarification_wording_unchanged(self):
+        _seed_action(self.reg, key="searchdatatracking", action_type="API", category="tracking",
+                     ai_description="ตรวจสอบ tracking", keywords=["tracking", "ติดตามพัสดุ"])
+        _seed_action(self.reg, key="searchdatashipmentlist", action_type="API", category="shipment",
+                     ai_description="ดูรายการ shipment", keywords=["tracking", "ติดตามพัสดุ"])
+        result = self.engine.decide("tracking ติดตามพัสดุ", history=[], context={"developer_mode": True})
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        self.assertIn("พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการ", result["reply"]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()

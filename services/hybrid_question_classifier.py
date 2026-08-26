@@ -39,6 +39,14 @@ from services.action_selection_primitives import (
     _extract_structural_candidates,
     _keyword_score,
 )
+# Reused, never duplicated — services/customer_tier_service.py has no
+# imports of its own (a leaf module), so importing from it here carries
+# no circular-import risk. _HOT_RE is already the codebase's one generic,
+# non-domain-specific "customer is expressing interest/desire to engage"
+# signal (used for lead-stage scoring); reusing it here (Wrong-Intent
+# Prevention fix, Task 03, 2026-08-25) rather than inventing a second,
+# parallel "interest" pattern.
+from services.customer_tier_service import _HOT_RE
 
 # Generic, language-agnostic conjunction/clause markers — never a
 # customer-specific vocabulary. Used only to split a compound question
@@ -68,6 +76,28 @@ _LOOSE_SEGMENT_MARKERS = ("แล้ว",)
 _QUESTION_MARKER_RE = re.compile(
     r"(ยังไง|อย่างไร|อะไร|ทำไม|เท่าไหร่|เท่าไร|หรือไม่|ไหม|กี่|ที่ไหน)"
 )
+
+# A second, distinct kind of clause evidence: a genuine second ASK phrased
+# as a polite REQUEST rather than a literal question ("ช่วยประเมินค่าขนส่ง
+# ถึงบ้านให้หน่อย" -- no อะไร/ยังไง/กี่ anywhere, but unmistakably its own
+# separate ask). Requires BOTH a request verb (ช่วย/ขอ/รบกวน) AND a
+# politeness/request particle within a short span, so a bare "ขอบคุณครับ"
+# (which contains the substring "ขอ" alone) never qualifies -- mirrors the
+# same "two distinct signals required, not one" discipline as
+# _QUESTION_MARKER_RE's own use in _segment_by_value. Used only alongside
+# _QUESTION_MARKER_RE (never as a replacement for it) wherever a clause
+# needs to prove it carries its own independent request, not just any
+# text that happens to follow a conjunction.
+_REQUEST_MARKER_RE = re.compile(
+    r"(ช่วย|ขอ|รบกวน).{0,40}(หน่อย|ด้วย|ทีนะ|ทีค่ะ|ทีครับ)"
+)
+
+# A negator immediately before an interest/desire word ("ไม่สนใจ", "ไม่
+# อยาก", "ไม่ต้องการ") means the customer is DECLINING, not expressing
+# vague interest -- the opposite of what _HOT_RE alone signals. Used only
+# to EXCLUDE the Wrong-Intent Prevention fallback below, never to change
+# routing on its own.
+_NEGATED_INTEREST_RE = re.compile(r"ไม่\s*(สนใจ|อยาก|ต้องการ)")
 
 # A message that is ONLY a greeting has no actionable question content —
 # deterministically UNKNOWN rather than a low-confidence guess either way.
@@ -336,6 +366,51 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
             candidate_ids = [close[0]["id"]]
 
     if not matched_action:
+        # Wrong-Intent Prevention fix (Task 03, 2026-08-25) — confirmed
+        # live: "สนใจนำเข้าสินค้าครับ" (a bare expression of interest, no
+        # concrete question) matched no Business Action and was handed to
+        # RAG unconditionally exactly like a genuine, specific question
+        # (e.g. "CBM คืออะไร") would be — RAG's own embedding similarity
+        # then confidently retrieved the closest-matching chunk
+        # ("prohibited goods", the only KB article that also happens to
+        # repeat the word "นำเข้า" heavily) despite the customer never
+        # asking about restrictions. The classifier had no way to
+        # distinguish "genuine answerable question" from "vague interest,
+        # nothing concrete to answer yet" — both produced the identical
+        # RAG_ONLY result. _HOT_RE (interest/desire wording) present AND
+        # _QUESTION_MARKER_RE (a genuine question word) absent is a
+        # narrow, deterministic, two-signal intersection — NOT "any
+        # question-word-free message" (that would misfire on a
+        # perfectly legitimate imperative-phrased RAG question like
+        # "บอกเงื่อนไขการคืนสินค้าหน่อย", which matches neither pattern and
+        # is completely unaffected) and NOT "any สนใจ-containing message"
+        # alone (a message that ALSO asks a concrete question, e.g.
+        # "สนใจนำเข้าสินค้า แต่ไม่รู้ว่าห้ามนำเข้าอะไรบ้าง", still routes
+        # straight to RAG since it clears the question-marker check).
+        # Reuses CLARIFICATION_REQUIRED — the existing taxonomy value for
+        # "genuinely too ambiguous to answer with confidence" — rather
+        # than inventing a new classification; candidate_action_ids stays
+        # empty (unlike the 2+-tied-Business-Actions case above) so
+        # decision_engine.py::_route_clarification can tell the two
+        # apart and phrase its reply appropriately.
+        # Negation exclusion (Task 03, 2026-08-26) — confirmed live:
+        # "ไม่สนใจนำเข้าสินค้าครับ ขอบคุณ" (explicitly DECLINING, a closing
+        # remark) still contains the bare substring "สนใจ" that _HOT_RE
+        # matches on, and would otherwise be misread as the SAME "vague
+        # interest, ask for more detail" case as a genuine "สนใจนำเข้า
+        # สินค้าครับ" -- producing a nonsensical "please tell me what
+        # you're interested in" reply to a customer who just said the
+        # opposite. A negator immediately preceding the interest wording
+        # means the customer is declining, not expressing unclear
+        # interest; original behavior (RAG_ONLY fallback below) resumes.
+        if _HOT_RE.search(message) and not _QUESTION_MARKER_RE.search(message) \
+                and not _NEGATED_INTEREST_RE.search(message):
+            return _result(
+                "CLARIFICATION_REQUIRED", 0.4,
+                ["message expresses interest/intent but asks no concrete question, and matches no "
+                 "Business Action — answering via RAG here risks a confident but unrelated answer"],
+                rag_sub_question=message,
+            )
         return _result("RAG_ONLY", 0.6, ["no Business Action keyword/example/description overlap found"],
                         rag_sub_question=message)
 
