@@ -93,7 +93,10 @@ class TestDecisionEngineEitherOrderConversation(unittest.TestCase):
         self.assertEqual(s["missing_parameters"], [])
 
     def test_executor_blocks_safely_when_secret_missing(self):
-        r = self.engine.decide("เช็ค PO202601001 ของลูกค้า C00001", history=[], context={"developer_mode": True})
+        # channel="admin" (Task 06 Authorization Gate) -- this test proves
+        # a missing SecretCode blocks the call, not customer authorization.
+        r = self.engine.decide("เช็ค PO202601001 ของลูกค้า C00001", history=[],
+                                context={"developer_mode": True, "channel": "admin"})
         self.assertEqual(r["routing"]["type"], "API")
         self.assertIn("SecretCode", r["error"])
 

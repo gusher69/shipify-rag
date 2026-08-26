@@ -190,7 +190,10 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
 
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            turn2 = self.engine.decide("SP1014", history=history)
+            # channel="admin" (Task 06 Authorization Gate) -- this test
+            # proves parameter-binding/continuation mechanics, not customer
+            # authorization.
+            turn2 = self.engine.decide("SP1014", history=history, context={"channel": "admin"})
         self.assertEqual(turn2["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -317,7 +320,7 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"orders": []})) as mock_req:
             result = self.engine.decide("order ล่าสุดล่ะ", history=[],
-                                         context={"customer_context": {"cust_code": "FT3182"}})
+                                         context={"customer_context": {"cust_code": "FT3182"}, "channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -336,7 +339,7 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"shipments": []})) as mock_req:
             result = self.engine.decide("ขอดูพัสดุของผม", history=[],
-                                         context={"customer_context": {"cust_code": "FT1004"}})
+                                         context={"customer_context": {"cust_code": "FT1004"}, "channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -365,7 +368,7 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
 
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"status": "in_transit"})) as mock_req:
-            turn2 = self.engine.decide("FT3182", history=history)
+            turn2 = self.engine.decide("FT3182", history=history, context={"channel": "admin"})
         self.assertEqual(turn2["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -397,7 +400,7 @@ class TestConversationContinuationAndMissingParameters(unittest.TestCase):
 
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            result = self.engine.decide("ข้อมูลลูกค้ารหัส FT3182", history=[])
+            result = self.engine.decide("ข้อมูลลูกค้ารหัส FT3182", history=[], context={"channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertEqual(sent_params.get("CustCode"), "FT3182")
@@ -457,7 +460,8 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"data": {"CustName": "ใจเย็นๆ"}})) as mock_req:
             result = self.engine.decide("ข้อมูลลูกค้า", history=[],
-                                         context={"developer_mode": True, "customer_context": {"cust_code": "SP1014"}})
+                                         context={"developer_mode": True, "customer_context": {"cust_code": "SP1014"},
+                                                   "channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -498,7 +502,8 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
             result = self.engine.decide("มีคูปองไหม", history=[],
                                          context={"developer_mode": True,
                                                    "customer_context": {"last_business_action": "get_customer_full",
-                                                                         "cust_code": "SP1014"}})
+                                                                         "cust_code": "SP1014"},
+                                                   "channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -511,7 +516,7 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200,
                                            json=lambda: {"data": {"Wallet": 100, "Coupon": ["A10", "B20"]}})):
-            result = self.engine.decide("ข้อมูลลูกค้า SP1014", history=[])
+            result = self.engine.decide("ข้อมูลลูกค้า SP1014", history=[], context={"channel": "admin"})
         text = result["reply"]["text"]
         self.assertNotIn("{", text)
         self.assertNotIn("[", text)
@@ -586,7 +591,8 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
                        "data": {"Shipment": [{"Code": "FT999", "Status": "รับเข้าที่จีน"}]}})):
             result = self.engine.decide("ช่วยเช็ก tracking หน่อย", history=[],
                                          context={"customer_context": {"cust_code": "SP1014",
-                                                                        "last_tracking": "ABC123"}})
+                                                                        "last_tracking": "ABC123"},
+                                                   "channel": "admin"})
         text = result["reply"]["text"]
         self.assertNotIn("{", text)
         self.assertNotIn("[", text)
@@ -627,7 +633,8 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {
                        "data": [{"Code": "PO999", "Status": "ยกเลิก"}]})):
-            result = self.engine.decide("order ล่าสุด SP1014", history=[], context={"developer_mode": True})
+            result = self.engine.decide("order ล่าสุด SP1014", history=[],
+                                         context={"developer_mode": True, "channel": "admin"})
         dev = result.get("developer") or {}
         collected = (dev.get("information_collection_status") or {}).get("collected_parameters") or {}
         self.assertEqual(collected.get("OrderCode"), "PO999")
@@ -643,7 +650,7 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
             result = self.engine.decide(
                 "ขอรายละเอียดอันล่าสุด", history=[], context={"developer_mode": True,
                 "customer_context": {"last_business_action": "order_list", "cust_code": "SP1014",
-                                      "last_order_code": "PO999"}})
+                                      "last_order_code": "PO999"}, "channel": "admin"})
         dev = result.get("developer") or {}
         self.assertEqual(dev.get("selection_source"), "conversation_reference_detail")
         info = dev.get("information_collection_status") or {}
@@ -1068,7 +1075,7 @@ class TestShipmentFilterCountSumAggregation(unittest.TestCase):
         for message in ("SP1008 มีกี่บิลที่เข้าไทยแล้ว รวมเท่าไหร่",
                         "SP1008 มีกี่บิลที่เข้าไทยแล้ว ยอดค่าขนส่งทั้งหมดเท่าไหร่"):
             with patch("services.action_executor.requests.request", return_value=mock_response):
-                result = engine.decide(message, history=[], context={"developer_mode": True})
+                result = engine.decide(message, history=[], context={"developer_mode": True, "channel": "admin"})
             self.assertNotEqual(result["routing"]["type"], "HYBRID")
             self.assertNotEqual(result["routing"]["type"], "RAG")
             reply = result["reply"]["text"]
@@ -1492,7 +1499,7 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
         history += [{"role": "user", "content": "C00001"}, {"role": "assistant", "content": q2}]
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"status": "found"})) as mock_req:
-            turn3 = self.engine.decide("PO-99887", history=history)
+            turn3 = self.engine.decide("PO-99887", history=history, context={"channel": "admin"})
         self.assertEqual(turn3["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -1550,7 +1557,7 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
 
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            result = self.engine.decide("ข้อมูลลูกค้า somchai@example.com", history=[])
+            result = self.engine.decide("ข้อมูลลูกค้า somchai@example.com", history=[], context={"channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertIn("CustEmail", sent_params)
@@ -1588,7 +1595,7 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req, \
              patch("services.credential_store.CredentialStore.resolve",
                    return_value={"ok": True, "value": "resolved-secret", "error": None}):
-            result = self.engine.decide("ข้อมูลลูกค้ารหัส C00001", history=[])
+            result = self.engine.decide("ข้อมูลลูกค้ารหัส C00001", history=[], context={"channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -1617,7 +1624,7 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
 
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            result = self.engine.decide("คำสั่งซื้อของลูกค้ารหัส C00001", history=[])
+            result = self.engine.decide("คำสั่งซื้อของลูกค้ารหัส C00001", history=[], context={"channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         mock_req.assert_called_once()
         sent_params = mock_req.call_args.kwargs.get("params") or {}
@@ -1644,7 +1651,7 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
 
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            self.engine.decide("ข้อมูลลูกค้า somchai@example.com", history=[])
+            self.engine.decide("ข้อมูลลูกค้า somchai@example.com", history=[], context={"channel": "admin"})
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertIn("CustEmail", sent_params)
         self.assertNotIn("CustCode", sent_params)
@@ -1846,7 +1853,10 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
     # B. Natural phrase + URL + CustCode already known via customer_context (profile reuse)
     def test_b_natural_phrase_with_known_custcode_in_profile_executes_immediately(self):
         self._seed_geturlproductdetail()
-        context = {"customer_context": {"cust_code": "SP1014"}}
+        # channel="admin" (Task 06 Authorization Gate) -- this test proves
+        # cross-turn identifier reuse/binding mechanics, not customer
+        # authorization.
+        context = {"customer_context": {"cust_code": "SP1014"}, "channel": "admin"}
         with self._credential_patch(), \
              patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {
@@ -1882,7 +1892,7 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
              patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {
                        "status": "success", "data": {"Link": "https://www.shipify.co.th/x"}})) as mock_req:
-            turn2 = self.engine.decide("SP1014", history=history, context={})
+            turn2 = self.engine.decide("SP1014", history=history, context={"channel": "admin"})
         self.assertEqual(turn2["routing"]["type"], "API")
         sent_url = mock_req.call_args.args[1] if mock_req.call_args.args else mock_req.call_args.kwargs.get("url")
         self.assertIn("GetUrlProductDetail", sent_url)  # never silently switched to the Tracking sibling
@@ -1894,7 +1904,8 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
     def test_e_active_tracking_context_does_not_hijack_url_conversion_request(self):
         self._seed_geturlproductdetail()
         self._seed_tracking_sibling()
-        context = {"customer_context": {"cust_code": "SP1014", "last_business_action": "search_data_tracking"}}
+        context = {"customer_context": {"cust_code": "SP1014", "last_business_action": "search_data_tracking"},
+                   "channel": "admin"}
         with self._credential_patch(), \
              patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {
@@ -1914,7 +1925,7 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
     # G. Successful conversion reply is natural language, never raw JSON.
     def test_g_successful_conversion_reply_has_no_raw_json_leakage(self):
         self._seed_geturlproductdetail()
-        context = {"customer_context": {"cust_code": "FT1004"}}
+        context = {"customer_context": {"cust_code": "FT1004"}, "channel": "admin"}
         with self._credential_patch(), \
              patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {
@@ -1935,7 +1946,7 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
                    return_value=MagicMock(status_code=200, json=lambda: {
                        "status": "success", "data": {"Link": "https://www.shipify.co.th/user-a"}})) as mock_req:
             self.engine.decide("https://detail.1688.com/offer/1.html", history=[],
-                                context={"customer_context": {"cust_code": "SP1014"}})
+                                context={"customer_context": {"cust_code": "SP1014"}, "channel": "admin"})
             sent_a = mock_req.call_args.kwargs.get("data") or {}
         self.assertEqual(sent_a.get("CustCode"), "SP1014")
 
@@ -1980,7 +1991,7 @@ class TestSemanticParameterInference(unittest.TestCase):
         self._seed_shipment_search()
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            self.engine.decide("ขอดูพัสดุ SP1014 ที่ส่งออกจากจีนแล้ว", history=[])
+            self.engine.decide("ขอดูพัสดุ SP1014 ที่ส่งออกจากจีนแล้ว", history=[], context={"channel": "admin"})
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertEqual(sent_params.get("BillStatus"), "3")
 
@@ -1988,7 +1999,7 @@ class TestSemanticParameterInference(unittest.TestCase):
         self._seed_shipment_search()
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            self.engine.decide("ขอดู 3 พัสดุล่าสุดของ SP1014", history=[])
+            self.engine.decide("ขอดู 3 พัสดุล่าสุดของ SP1014", history=[], context={"channel": "admin"})
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertEqual(sent_params.get("Latest"), "3")
 
@@ -1996,7 +2007,7 @@ class TestSemanticParameterInference(unittest.TestCase):
         self._seed_shipment_search()
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            self.engine.decide("ขอดูพัสดุของ SP1014", history=[])
+            self.engine.decide("ขอดูพัสดุของ SP1014", history=[], context={"channel": "admin"})
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertEqual(sent_params.get("Latest"), "5")
 
@@ -2012,7 +2023,7 @@ class TestSemanticParameterInference(unittest.TestCase):
         self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/order", "http_method": "GET"})
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"ok": True})) as mock_req:
-            result = self.engine.decide("ใบสั่งซื้อ PO-1234 ล่าสุด 3 รายการ", history=[])
+            result = self.engine.decide("ใบสั่งซื้อ PO-1234 ล่าสุด 3 รายการ", history=[], context={"channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertEqual(sent_params.get("OrderCode"), "PO-1234")
@@ -3742,7 +3753,20 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertEqual(collected.get("ShipmentCode"), "SP100820260716001")
 
     # TEST 9 — confirm -> exactly one (mocked) CS notification.
-    def test_9_confirmation_sends_exactly_one_notification(self):
+    def test_9_confirmation_never_notifies_without_a_verified_customer_binding(self):
+        """Task 06 (2026-08-26) — SUPERSEDES the pre-Task-06 expectation
+        that a real customer's confirmed "ยืนยัน" over LINE sends the real
+        address-change notification. No verified LINE-user-to-customer-
+        account binding exists anywhere in this codebase; a self-typed/
+        remembered CustCode was never proof of ownership (IDENTIFIER !=
+        AUTHORIZATION). The Authorization Gate (services/
+        authorization_service.py, enforced inside ActionExecutor.execute())
+        now fails closed here: the confirmation flow still runs correctly
+        (routing/collection/confirmation mechanics unaffected — proven by
+        TEST 1-8/10-14/15b-20 above/below, all of which stop before
+        execution or run in an admin/Playground context), but the ACTUAL
+        mutation is denied, and the customer sees a neutral message with
+        no address/PII, never the ERP notification content."""
         action_id = self._seed_address_change_action()
         message1 = (f"เปลี่ยนที่อยู่บิล SP100820260716001 ผู้รับ หญิง 0616807329 ที่อยู่ {self.FULL_ADDRESS}")
         with patch("services.action_executor.requests.request"):
@@ -3751,12 +3775,10 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
                                                   "customer_context": {"cust_code": "SP1008"}})
         turn1_collected = turn1["developer"]["information_collection_status"]["collected_parameters"]
         history = [{"role": "user", "content": message1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
-        # CustCode came from customer_context/Identifier Memory, not
-        # literal message text — history-replay alone can never recover it
-        # (see TEST 15's identical truncated-history proof), so the
-        # caller-supplied confirmed_action_id/confirmed_parameters
-        # (exactly what a real caller persists via
-        # pending_confirmation_service.py) is required here.
+        # Deliberately NO "channel" here — this is exactly what a real,
+        # unauthenticated LINE customer's confirmed_action_id/
+        # confirmed_parameters (persisted by pending_confirmation_service.py)
+        # looks like, per TEST 15's own truncated-history proof.
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req, \
              self._mock_secret():
@@ -3765,13 +3787,11 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
                                                   "customer_context": {"cust_code": "SP1008"},
                                                   "confirmed_action_id": action_id,
                                                   "confirmed_parameters": turn1_collected})
-        self.assertEqual(turn2["routing"]["type"], "API")
-        mock_req.assert_called_once()
-        sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
-        sent_message = sent_body.get("Message") or ""
-        self.assertIn("ระยอง", sent_message)
-        self.assertIn("21120", sent_message)
-        self.assertIn("ลูกค้ายืนยันข้อมูลแล้ว", sent_message)
+        self.assertEqual(turn2["routing"]["type"], "API")  # routing reflects the action TYPE, not the auth outcome
+        mock_req.assert_not_called()  # the real ERP notification must never fire
+        reply_text = turn2["reply"]["text"]
+        self.assertNotIn("ระยอง", reply_text)  # no address/PII leakage in the denial
+        self.assertNotIn("21120", reply_text)
         self.assertNotIn("FAKE-SECRET", str(turn2))
 
     # TEST 10 — confirming twice must not send a duplicate notification.
@@ -3877,6 +3897,14 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
     # happening to be available/strong enough — the caller's own already-
     # collected, already-validated parameters are used directly.
     def test_15_confirmed_action_id_bypasses_history_replay_entirely(self):
+        """Task 06 (2026-08-26) — the continuation-matching claim this
+        test proves (a confirmed_action_id/confirmed_parameters caller-
+        supplied context resolves the action even when truncated history
+        alone never could) is UNCHANGED and still proven below: routing
+        never falls through to RAG/fallback. What changed is the
+        execution outcome — no verified customer binding exists, so the
+        real ERP call is now denied (never a fabricated success), exactly
+        like TEST 9 above."""
         action_id = self._seed_address_change_action()
         address_message = (f"บิล SP100820260716001 ผู้รับ ทดสอบ 0812345678 ที่อยู่ {self.FULL_ADDRESS}")
         confirmation_question = "รบกวนตรวจสอบข้อมูลอีกครั้งนะคะ... ยืนยันการดำเนินการหรือไม่คะ?"
@@ -3902,10 +3930,11 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
                 "ยืนยัน", history=truncated_history,
                 context={"developer_mode": True, "confirmed": True,
                           "confirmed_action_id": action_id, "confirmed_parameters": collected_parameters})
-        self.assertEqual(mock_req.call_count, 1, "must execute exactly once, never fall through to RAG/fallback")
+        # Continuation correctly resolved the action (never fell through
+        # to RAG/fallback) -- proven without relying on the real ERP call.
+        self.assertEqual(result["routing"]["type"], "API")
         self.assertNotEqual(result["routing"]["type"], "RAG")
-        sent_body = mock_req.call_args.kwargs.get("json") or mock_req.call_args.kwargs.get("data") or {}
-        self.assertEqual(sent_body.get("CustCode"), "SP1008")
+        mock_req.assert_not_called()  # no verified binding -> the real mutation must never fire
 
     # TEST 15b — Address Change Full UAT fix (2026-08-24): a field
     # correction sent WHILE a confirmation is genuinely pending must
@@ -4059,10 +4088,14 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         collected = (turn3.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
         self.assertEqual(collected.get("CustCode"), "SP1008", "CustCode must survive the unrelated turn")
         # getdatacustomer itself has no confirmation gate and CustCode was
-        # already known, so turn 2's diversion correctly executed it (a
-        # real, legitimate lookup answer) -- proving requirement #4, not
-        # violating it.
-        mock_req.assert_called_once()
+        # already known, so turn 2's diversion correctly reached execution
+        # -- proving requirement #4 (the guard/continuation logic), not
+        # violating it. Task 06 (2026-08-26): getdatacustomer also requires
+        # a verified customer binding, which doesn't exist for this
+        # unauthenticated-channel context, so the real ERP call is denied
+        # (never fabricated) -- the guard behavior under test here is
+        # unaffected by that separate, later-added concern.
+        mock_req.assert_not_called()
 
     # TEST 17 — the more important mid-flow case: the diversion happens
     # WHILE the address-change action is actively waiting for
@@ -4094,10 +4127,12 @@ class TestShippingAddressChangeRequest(unittest.TestCase):
         self.assertNotEqual(turn4["routing"]["type"], "HUMAN_HANDOFF")
         collected4 = (turn4.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
         self.assertEqual(collected4.get("CustCode"), "SP1008")
-        # One real call from turn 3's legitimate getdatacustomer lookup;
-        # the address-change flow itself never reached execution (still
-        # missing ShipmentCode on turn 4).
-        mock_req.assert_called_once()
+        # Task 06 (2026-08-26): turn 3's getdatacustomer lookup also now
+        # requires a verified customer binding (which doesn't exist here),
+        # so it is denied rather than fabricated; the address-change flow
+        # itself never reached execution either (still missing
+        # ShipmentCode on turn 4) -- no real ERP call happens at all.
+        mock_req.assert_not_called()
 
     # TEST 17b — Address Change Full UAT fix (2026-08-24): the SAME
     # resume-after-diversion scenario as TEST 17, but with a natural
@@ -4507,10 +4542,12 @@ class TestGenericContinuationIntentGuard(unittest.TestCase):
     def test_A_correct_answer_continues_normally(self):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req:
-            turn1 = self.engine.decide("PO100820260815001", history=[], context={"developer_mode": True})
+            turn1 = self.engine.decide("PO100820260815001", history=[],
+                                        context={"developer_mode": True, "channel": "admin"})
             history = [{"role": "user", "content": "PO100820260815001"},
                        {"role": "assistant", "content": turn1["reply"]["text"]}]
-            turn2 = self.engine.decide("test@example.com", history=history, context={"developer_mode": True})
+            turn2 = self.engine.decide("test@example.com", history=history,
+                                        context={"developer_mode": True, "channel": "admin"})
         collected = (turn2.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
         self.assertEqual(collected.get("OrderCode"), "PO100820260815001")
         self.assertEqual(collected.get("Email"), "test@example.com")
@@ -4570,7 +4607,8 @@ class TestGenericContinuationIntentGuard(unittest.TestCase):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req:
             result = self.engine.decide("คูปอง", history=[],
-                                         context={"developer_mode": True, "customer_context": {"cust_code": "C1008"}})
+                                         context={"developer_mode": True, "customer_context": {"cust_code": "C1008"},
+                                                   "channel": "admin"})
         collected = (result.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
         self.assertEqual(collected.get("CustCode"), "C1008")
         mock_req.assert_called_once()
@@ -4605,10 +4643,12 @@ class TestGenericContinuationIntentGuard(unittest.TestCase):
                                                   "http_method": "POST"})
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {"status": "success"})) as mock_req:
-            turn1 = self.engine.decide("PO100820260815001", history=[], context={"developer_mode": True})
+            turn1 = self.engine.decide("PO100820260815001", history=[],
+                                        context={"developer_mode": True, "channel": "admin"})
             history = [{"role": "user", "content": "PO100820260815001"},
                        {"role": "assistant", "content": turn1["reply"]["text"]}]
-            turn2 = self.engine.decide("test@example.com", history=history, context={"developer_mode": True})
+            turn2 = self.engine.decide("test@example.com", history=history,
+                                        context={"developer_mode": True, "channel": "admin"})
         collected = (turn2.get("developer") or {}).get("information_collection_status", {}).get("collected_parameters", {})
         self.assertEqual(collected.get("OrderCode"), "PO100820260815001")
         self.assertEqual(collected.get("Email"), "test@example.com")
@@ -4696,7 +4736,8 @@ class TestStaleIdentifierMemoryNeverHijacksFreshUnrelatedQuestion(unittest.TestC
             result = self.engine.decide("พัสดุล่าสุดถึงไหนแล้ว", history=history,
                                           context={"developer_mode": True,
                                                     "customer_context": {"cust_code": "SP1008",
-                                                                          "last_business_action": "order_lookup"}})
+                                                                          "last_business_action": "order_lookup"},
+                                                    "channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         self.assertEqual((result.get("developer") or {}).get("information_collection_status", {})
                           .get("selected_business_action"), "shipment_lookup")
@@ -4716,7 +4757,8 @@ class TestStaleIdentifierMemoryNeverHijacksFreshUnrelatedQuestion(unittest.TestC
             result = self.engine.decide("ข้อมูลลูกค้าของผมมีอะไรบ้าง", history=history,
                                           context={"developer_mode": True,
                                                     "customer_context": {"cust_code": "SP1008",
-                                                                          "last_business_action": "shipment_lookup"}})
+                                                                          "last_business_action": "shipment_lookup"},
+                                                    "channel": "admin"})
         self.assertEqual(result["routing"]["type"], "API")
         self.assertEqual((result.get("developer") or {}).get("information_collection_status", {})
                           .get("selected_business_action"), "customer_lookup")

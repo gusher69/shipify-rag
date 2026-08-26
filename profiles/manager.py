@@ -120,21 +120,20 @@ def update_profile_from_turn(line_user_id: str, *, decide_result: Dict, conversa
         if not profile.get("first_seen"):
             row["first_seen"] = datetime.now(timezone.utc).isoformat()
 
-        # Customer Intelligence V1 (2026-08-15) -- identifier memory.
-        # `collected` values are the SAME customer_message-sourced,
-        # validated parameters services/decision_engine.py already bound
-        # this turn (see extract_conversation_fields), never a raw guess
-        # -- so a present value always overwrites; an ABSENT one is left
-        # untouched (never cleared) per "Do NOT erase known identifiers
-        # from vague later messages." Never includes SecretCode or any
-        # credential_store/secret_configuration-sourced value (those are
-        # never placed in collection_status.collected_parameters at all).
-        from services.action_selection_primitives import IDENTIFIER_MEMORY_FIELDS
-        collected = conversation_fields.get("collected_parameters") or {}
-        for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
-            value = collected.get(param_name)
-            if value:
-                row[profile_field] = value
+        # Identifier Memory persistence REMOVED (Task 06, 2026-08-26).
+        # Customer Intelligence V1 (2026-08-15) used to write a customer-
+        # TYPED CustCode/OrderCode/ShipmentCode/Tracking into this row as a
+        # convenience cache, keyed only by line_user_id, with no ownership
+        # verification -- meaning anyone who once typed another person's
+        # identifier in chat had it permanently remembered and auto-applied
+        # to future Business Action calls on THIS line_user_id ("type it
+        # once, exploit forever"). A user-supplied identifier is never
+        # proof of account ownership (IDENTIFIER != AUTHORIZATION -- see
+        # services/authorization_service.py), so it must never be persisted
+        # here as if it were. cust_code/last_order_code/last_shipment_code/
+        # last_tracking are intentionally left untouched by this function
+        # going forward; existing rows written before this fix are a
+        # separate data-cleanup concern, not addressed by this code change.
 
         # Conversation Resolver (Final Conversational Correctness,
         # 2026-08-15; migration 039) -- remembers which Business Action

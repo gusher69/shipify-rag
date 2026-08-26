@@ -2261,6 +2261,12 @@ class DecisionEngine:
                 # (e.g. a URL-handling tool, or a NOTIFICATION action's
                 # composed Message — see _compose_notification_message_system_value).
                 "system_values": system_values,
+                # Propagated so services/authorization_service.py can tell
+                # an admin/Playground caller (channel == "playground") apart
+                # from a real customer-facing channel (Task 06) — dropping
+                # this would make the Authorization Gate fail closed for
+                # Playground/admin tooling too, which is not the intent.
+                "channel": context.get("channel"),
             }
             exec_start = time.time()
             try:
@@ -2296,6 +2302,19 @@ class DecisionEngine:
             return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
                                    developer_trace=developer_trace, context=context, start=start,
                                    alert=alert, error=exec_result.get("error"))
+
+        if status == "denied":
+            # Authorization Gate (Task 06, 2026-08-26) — without this
+            # branch, "denied" falls through to the "status == success"
+            # path below and _compose_natural_reply mangles the neutral
+            # denial dict ({"message": ...}) into a raw "message: ..."
+            # line instead of surfacing it cleanly. Never treat a denial
+            # as a successful business-action result.
+            denial_text = (exec_result.get("result") or {}).get("message") or \
+                "ขออภัยค่ะ ไม่สามารถยืนยันสิทธิ์ในการเข้าถึงข้อมูลรายการนี้ได้ในขณะนี้ รบกวนติดต่อเจ้าหน้าที่เพื่อยืนยันตัวตนก่อนนะคะ"
+            reply = _build_response(text=denial_text)
+            return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                   developer_trace=developer_trace, context=context, start=start, alert=alert)
 
         # status == "success"
         result_payload = exec_result.get("result") or {}
@@ -2671,6 +2690,7 @@ class DecisionEngine:
                 "collected_slots": {}, "conversation_context": context.get("conversation_context") or {},
                 "customer_context": context.get("customer_context") or {}, "current_user": context.get("current_user"),
                 "developer_mode": bool(context.get("developer_mode")),
+                "channel": context.get("channel"),
             }
             exec_result = self.executor.execute(selected["id"], exec_context)
             developer_trace["execution_result"] = exec_result
@@ -2863,6 +2883,7 @@ class DecisionEngine:
                     "customer_context": context.get("customer_context") or {},
                     "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
                     "system_values": _extract_system_values(erp_sub_question, history=history),
+                    "channel": context.get("channel"),
                 }
                 try:
                     erp_exec_result = self.executor.execute(action_id, exec_context)
@@ -2881,6 +2902,13 @@ class DecisionEngine:
                     erp_answer = agg_answer or self._compose_natural_reply(
                         mapped if mapped else erp_exec_result.get("result"), full_action.get("response_mapping"),
                         fallback_payload=full_mapped)
+                elif erp_exec_result.get("status") == "denied":
+                    # Authorization Gate (Task 06) — never fall through to
+                    # the generic "unknown ERP error" wording for a denial;
+                    # surface the neutral denial message as the ERP section
+                    # directly, never a fabricated/partial ERP answer.
+                    erp_answer = (erp_exec_result.get("result") or {}).get("message") or \
+                        "ขออภัยค่ะ ไม่สามารถยืนยันสิทธิ์ในการเข้าถึงข้อมูลรายการนี้ได้ในขณะนี้ รบกวนติดต่อเจ้าหน้าที่เพื่อยืนยันตัวตนก่อนนะคะ"
                 else:
                     erp_error = erp_exec_result.get("error") or "unknown ERP error"
             elif ambiguous:

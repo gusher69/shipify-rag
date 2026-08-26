@@ -6292,7 +6292,10 @@ async def api_execute_business_action(request: Request, action_id: str):
     # (_resolve_param_value) — action_executor.py itself is untouched;
     # this is just making sure this manual test caller's values reach
     # whichever key each action_type actually reads.
-    result = executor.execute(action_id, context={"action_params": params, "collected_slots": params})
+    # Task 06 Authorization Gate — this route sits behind auth(request)
+    # above (session-cookie authenticated staff), never a real customer.
+    result = executor.execute(action_id, context={"action_params": params, "collected_slots": params,
+                                                    "channel": "admin"})
     return JSONResponse({"ok": True, "result": result})
 
 

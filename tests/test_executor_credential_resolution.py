@@ -55,7 +55,10 @@ class TestExecutorCredentialResolution(unittest.TestCase):
         action_id = self._make_action()
         self.cred_store.create("default", "fasttrade_erp_secret", "FastTrade ERP SecretCode", "secret_code", "16513268151")
         with patch("services.action_executor.requests.request", return_value=_fake_response()) as mock_req:
-            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}})
+            # channel="admin" (Task 06 Authorization Gate) -- this test
+            # exercises credential-store resolution, not customer
+            # authorization; CustCode here is arbitrary test data.
+            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}, "channel": "admin"})
         self.assertEqual(result["status"], "success")
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertEqual(sent_params.get("SecretCode"), "16513268151")
@@ -63,7 +66,7 @@ class TestExecutorCredentialResolution(unittest.TestCase):
     def test_missing_credential_blocks_call_with_structured_error(self):
         action_id = self._make_action()
         with patch("services.action_executor.requests.request") as mock_req:
-            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}})
+            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}, "channel": "admin"})
         mock_req.assert_not_called()
         self.assertEqual(result["status"], "error")
         self.assertIn("SecretCode", result["error"])
@@ -73,7 +76,7 @@ class TestExecutorCredentialResolution(unittest.TestCase):
         self.cred_store.create("default", "fasttrade_erp_secret", "FastTrade ERP SecretCode", "secret_code", "16513268151")
         self.cred_store.set_status("default", "fasttrade_erp_secret", "disabled")
         with patch("services.action_executor.requests.request") as mock_req:
-            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}})
+            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}, "channel": "admin"})
         mock_req.assert_not_called()
         self.assertEqual(result["status"], "error")
 
@@ -82,7 +85,7 @@ class TestExecutorCredentialResolution(unittest.TestCase):
         self.cred_store.create("default", "fasttrade_erp_secret", "FastTrade ERP SecretCode", "secret_code", "16513268151")
         self.cred_store.set_status("default", "fasttrade_erp_secret", "revoked")
         with patch("services.action_executor.requests.request") as mock_req:
-            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}})
+            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}, "channel": "admin"})
         mock_req.assert_not_called()
         self.assertEqual(result["status"], "error")
 
@@ -110,7 +113,7 @@ class TestExecutorCredentialResolution(unittest.TestCase):
         self.cred_store.create("default", "fasttrade_erp_secret", "FastTrade ERP SecretCode", "secret_code", "old_value")
         self.cred_store.rotate("default", "fasttrade_erp_secret", "new_value")
         with patch("services.action_executor.requests.request", return_value=_fake_response()) as mock_req:
-            self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}})
+            self.executor.execute(action_id, {"collected_slots": {"CustCode": "C00001"}, "channel": "admin"})
         sent_params = mock_req.call_args.kwargs.get("params") or {}
         self.assertEqual(sent_params.get("SecretCode"), "new_value")
 
@@ -141,7 +144,7 @@ class TestExecutorCredentialResolution(unittest.TestCase):
         ])
         self.reg.upsert_execution(action_2, {"endpoint": "https://fasttrade.in.th/api2", "http_method": "GET"})
         with patch("services.action_executor.requests.request", return_value=_fake_response()) as mock_req:
-            self.executor.execute(action_1, {"collected_slots": {"CustCode": "C00001"}})
+            self.executor.execute(action_1, {"collected_slots": {"CustCode": "C00001"}, "channel": "admin"})
             self.executor.execute(action_2, {})
         calls = mock_req.call_args_list
         self.assertEqual(calls[0].kwargs["params"].get("SecretCode"), "16513268151")

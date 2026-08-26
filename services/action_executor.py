@@ -488,6 +488,28 @@ class ActionExecutor:
                             metadata={"action_id": action_id, "action_key": action.get("action_key")},
                             latency_ms=(time.time() - start) * 1000)
 
+        # Authorization Gate (Task 06, 2026-08-26) — checked here, the ONE
+        # choke point every caller (LINE webhook, Admin Playground, an
+        # admin route, or a future direct service call) must go through
+        # to actually run a Business Action, so this can never be
+        # bypassed by routing around the conversational layer. See
+        # services/authorization_service.py's module docstring for the
+        # confirmed root cause (no verified LINE-user-to-customer-account
+        # binding exists anywhere) and why this fails closed rather than
+        # trusting a customer-supplied CustCode/OrderCode/ShipmentCode as
+        # proof of ownership.
+        from services.authorization_service import check_authorization, AUTHORIZATION_DENIED_MESSAGE
+        auth = check_authorization(action, context)
+        if not auth["authorized"]:
+            return _result(
+                "denied",
+                result={"message": AUTHORIZATION_DENIED_MESSAGE},
+                error=None,
+                metadata={"action_id": action_id, "action_key": action.get("action_key"),
+                          "authorization_denied_reason": auth["reason"]},
+                latency_ms=(time.time() - start) * 1000,
+            )
+
         action_type = action.get("action_type")
         executor_fn = _EXECUTORS.get(action_type)
         if not executor_fn:

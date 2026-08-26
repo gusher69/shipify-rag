@@ -58,7 +58,10 @@ class TestRestExecutor(unittest.TestCase):
     def test_successful_rest_call(self):
         action_id = _make_rest_action(self.reg)
         with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"status": "ok"})):
-            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C1"}})
+            # channel="admin" (Task 06 Authorization Gate) -- this test
+            # exercises REST executor mechanics, not customer authorization;
+            # CustCode here is arbitrary test data, not a real identifier claim.
+            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C1"}, "channel": "admin"})
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["result"]["status_code"], 200)
         self.assertIn("latency_ms", result)
@@ -72,7 +75,7 @@ class TestRestExecutor(unittest.TestCase):
     def test_group_validation_blocks_call_without_network(self):
         action_id = _make_rest_action(self.reg, with_group=True)
         with patch("services.action_executor.requests.request") as mock_req:
-            result = self.executor.execute(action_id, {})
+            result = self.executor.execute(action_id, {"channel": "admin"})
         mock_req.assert_not_called()
         self.assertEqual(result["status"], "error")
 
@@ -101,7 +104,7 @@ class TestSecretResolutionAndMasking(unittest.TestCase):
         action_id = _make_rest_action(self.reg, with_secret=True)
         os.environ.pop(SECRET_REF, None)
         with patch("services.action_executor.requests.request") as mock_req:
-            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C1"}})
+            result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C1"}, "channel": "admin"})
         mock_req.assert_not_called()
         self.assertEqual(result["status"], "error")
         self.assertIn("SecretCode", result["error"])
@@ -111,7 +114,7 @@ class TestSecretResolutionAndMasking(unittest.TestCase):
         fake_secret = "REAL-SECRET-abc123"
         with patch.dict(os.environ, {SECRET_REF: fake_secret}):
             with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"ok": True})):
-                result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C1"}})
+                result = self.executor.execute(action_id, {"collected_slots": {"CustCode": "C1"}, "channel": "admin"})
         dumped = str(result)
         self.assertNotIn(fake_secret, dumped)
         self.assertIn("[MASKED]", dumped)
@@ -311,14 +314,15 @@ class TestCustomerMessageFallbackDefault(unittest.TestCase):
     def test_explicit_customer_value_overrides_default(self):
         action_id = self._make_action_with_latest()
         with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"ok": True})) as mock_req:
-            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014", "Latest": "3"}})
+            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014", "Latest": "3"},
+                                               "channel": "admin"})
         sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
         self.assertEqual(sent_body.get("Latest"), "3")
 
     def test_falls_back_to_example_value_when_not_specified(self):
         action_id = self._make_action_with_latest()
         with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"ok": True})) as mock_req:
-            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014"}})
+            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014"}, "channel": "admin"})
         sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
         self.assertEqual(sent_body.get("Latest"), "5")
 
@@ -346,7 +350,7 @@ class TestCustomerMessageFallbackDefault(unittest.TestCase):
         ])
         self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/api", "http_method": "POST"})
         with patch("services.action_executor.requests.request", return_value=_fake_response(200, {"ok": True})) as mock_req:
-            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014"}})
+            self.executor.execute(action_id, {"collected_slots": {"CustCode": "SP1014"}, "channel": "admin"})
         sent_body = mock_req.call_args.kwargs.get("data") or mock_req.call_args.kwargs.get("json") or {}
         self.assertEqual(sent_body.get("CustCode"), "SP1014")
         self.assertNotIn("CustEmail", sent_body)
@@ -362,7 +366,7 @@ class TestCustomerMessageFallbackDefault(unittest.TestCase):
         ])
         self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/api", "http_method": "POST"})
         with patch("services.action_executor.requests.request") as mock_req:
-            result = self.executor.execute(action_id, {"collected_slots": {}})
+            result = self.executor.execute(action_id, {"collected_slots": {}, "channel": "admin"})
         mock_req.assert_not_called()
         self.assertEqual(result["status"], "error")
 

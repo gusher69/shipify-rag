@@ -1667,6 +1667,11 @@ def run_erp_test(*, sb, action_id: str, message: str, mode: str,
             execution_result = executor.execute(action_id, context={
                 "collected_slots": collected_params, "action_params": collected_params, "developer_mode": True,
                 "system_values": system_values,
+                # Task 06 Authorization Gate — every caller of run_erp_test
+                # ("live" mode) sits behind admin/routes.py's own
+                # auth(request) session-cookie gate; this is staff test
+                # tooling, never a real customer request.
+                "channel": "admin",
             })
         except Exception as e:
             trace.append(_trace_step("erp_execution", "error", latency_ms=(time.time() - t0) * 1000,

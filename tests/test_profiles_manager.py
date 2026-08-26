@@ -1,8 +1,15 @@
 """Tests for profiles/manager.py's Customer Intelligence V1 (2026-08-15)
-additions: identifier memory (cust_code/last_order_code/last_shipment_code/
-last_tracking) and primary_intent persisted from update_profile_from_turn(),
-per Phase 7's rules (never erase a known identifier on a vague later
-message, never invent one that was never in the message)."""
+additions: primary_intent persisted from update_profile_from_turn().
+
+Identifier memory (cust_code/last_order_code/last_shipment_code/
+last_tracking) persistence was REMOVED (Task 06, 2026-08-26): a
+customer-TYPED identifier is never proof of account ownership, so
+permanently writing it to user_profiles from an unverified message let
+anyone who once typed another person's CustCode/OrderCode/ShipmentCode/
+Tracking have it remembered and auto-applied to future Business Action
+calls on their OWN line_user_id ("type it once, exploit forever"). See
+services/authorization_service.py and TestIdentifierPersistence below,
+which now proves NON-persistence for these 4 fields."""
 import sys
 import unittest
 from pathlib import Path
@@ -101,17 +108,22 @@ class TestIdentifierPersistence(unittest.TestCase):
                                       conversation_fields=conversation_fields, is_new_conversation=True)
             return fake_sb._table.profile
 
-    def test_f_cust_code_persisted_when_present(self):
+    def test_f_cust_code_no_longer_persisted(self):
+        """Task 06 (2026-08-26) — a customer-typed CustCode is never
+        proof of ownership, so it must never be written to user_profiles
+        from an unverified message, even though it was collected/used for
+        THIS turn's own Business Action call."""
         updated = self._run({"line_user_id": "U1"}, {"CustCode": "SP1014"})
-        self.assertEqual(updated["cust_code"], "SP1014")
+        self.assertNotIn("cust_code", updated)
 
-    def test_order_shipment_tracking_codes_persisted(self):
+    def test_order_shipment_tracking_codes_no_longer_persisted(self):
+        """Task 06 companion for OrderCode/ShipmentCode/Tracking."""
         updated = self._run({"line_user_id": "U1"}, {
             "OrderCode": "POS100820260809001", "ShipmentCode": "FT318220260726001", "Tracking": "testlineOnNut007",
         })
-        self.assertEqual(updated["last_order_code"], "POS100820260809001")
-        self.assertEqual(updated["last_shipment_code"], "FT318220260726001")
-        self.assertEqual(updated["last_tracking"], "testlineOnNut007")
+        self.assertNotIn("last_order_code", updated)
+        self.assertNotIn("last_shipment_code", updated)
+        self.assertNotIn("last_tracking", updated)
 
     def test_i_no_identifier_in_message_never_invents_one(self):
         updated = self._run({"line_user_id": "U1"}, {})
