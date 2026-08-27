@@ -1,5 +1,8 @@
+import asyncio
 import requests
 from typing import List
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Request, HTTPException
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
@@ -41,6 +44,117 @@ async def _validate_embedding_configuration_at_startup():
 sessions: dict = {}
 
 
+# ── LINE Multi-User Concurrency Fix (2026-08-27) ────────────────────────
+# Confirmed live root cause: this process runs a single uvicorn worker with
+# a fully synchronous handler chain — the OLD webhook() route called
+# handler.handle(body, signature) directly, which parses AND dispatches to
+# the registered callback (handle_message) INLINE on the async event loop
+# thread. Since handle_message runs the entire Decision Engine/RAG/LLM/ERP
+# pipeline synchronously, this blocked the ONE event loop for the full
+# duration of every turn — for ANY user, not just the one being answered.
+# Proved with two synthetic LINE users sent ~50ms apart against this exact
+# endpoint: User A's own turn took 9.76s, but User B — despite arriving
+# almost simultaneously — didn't finish until 21.13s total, meaning User
+# B's real processing didn't even start until User A's was nearly done.
+#
+# Fix: PER-USER asyncio.Queue + a lazily-created background consumer task
+# per user, with the actual (synchronous) processing offloaded to a shared
+# bounded ThreadPoolExecutor. This guarantees, using only existing asyncio/
+# threading primitives (no new architecture, no external queue/broker):
+#   - strict FIFO order for the SAME user (asyncio.Queue is FIFO)
+#   - true concurrency ACROSS users (independent queues/tasks — the event
+#     loop is never blocked by one user's processing, so a second user's
+#     turn can start immediately instead of waiting)
+#   - zero changes to any RAG/routing/business logic — handle_message() /
+#     _handle_message_via_decision_engine() / _handle_message_legacy() are
+#     called exactly as before, only the DISPATCH layer changed.
+_EXECUTOR = ThreadPoolExecutor(max_workers=20, thread_name_prefix="line-user-worker")
+_user_queues: dict = {}
+_user_tasks: dict = {}
+_USER_WORKER_IDLE_TIMEOUT_SECONDS = 120.0  # self-terminate an idle per-user worker/queue
+
+# Same-Question-Pending Collapse (2026-08-27) — a set of normalized message
+# texts currently queued-or-processing per user. Populated the instant a
+# message is accepted for real processing, cleared the instant that exact
+# item finishes (success or failure) — so a LATER repeat of the same
+# question, asked after the first one has genuinely completed, is never
+# suppressed (only a duplicate arriving WHILE the first is still pending
+# is collapsed). Confirmed live: without this, an impatient customer
+# repeat of the identical question produced two independent ~10s
+# executions and two separate replies minutes apart — exactly the
+# production symptom this fix targets. Never touches RAG/Answerability/
+# spell correction/routing — a duplicate is simply never handed to
+# handle_message() at all; the ONE in-flight execution's own eventual
+# reply is the customer's only answer.
+_pending_texts_by_user: "dict[str, set]" = defaultdict(set)
+
+
+def _normalize_for_dedup(text) -> str:
+    return (text or "").strip()
+
+
+async def _user_worker(user_id: str):
+    """Background consumer for ONE LINE user — processes that user's own
+    queued messages strictly in arrival order, one at a time, while other
+    users' workers run fully independently. Self-terminates after a period
+    of inactivity so a one-off/inactive user doesn't hold a queue/task
+    forever."""
+    queue = _user_queues[user_id]
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=_USER_WORKER_IDLE_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                break
+            try:
+                await loop.run_in_executor(_EXECUTOR, handle_message, event)
+            except Exception as e:
+                print(f"[webhook] per-user worker error for {user_id!r}: {e}")
+            finally:
+                text = _normalize_for_dedup(getattr(event.message, "text", None))
+                _pending_texts_by_user[user_id].discard(text)
+                queue.task_done()
+    finally:
+        if _user_tasks.get(user_id) is asyncio.current_task():
+            _user_tasks.pop(user_id, None)
+            _user_queues.pop(user_id, None)
+            _pending_texts_by_user.pop(user_id, None)
+
+
+def _dispatch_event(event) -> None:
+    """Fast, non-blocking dispatch — called synchronously from the async
+    webhook() route on the event loop thread for every parsed MessageEvent/
+    TextMessageContent. Creates (or reuses) this user's own queue +
+    background consumer task, then either enqueues the event for normal
+    serialized processing or — if this is a duplicate of an already
+    pending message from the SAME user — skips it entirely (same user +
+    same normalized text + first request still queued/processing)."""
+    user_id = event.source.user_id if event.source else None
+    if not user_id:
+        # No isolable per-user identity (e.g. a group/room event) —
+        # process directly via the shared executor; matches prior
+        # behavior for such events (no per-user ordering was ever
+        # meaningful for them anyway).
+        asyncio.get_running_loop().run_in_executor(_EXECUTOR, handle_message, event)
+        return
+
+    text = _normalize_for_dedup(getattr(event.message, "text", None))
+    if text and text in _pending_texts_by_user[user_id]:
+        print(f"[webhook] duplicate pending message from {user_id!r} ({text!r}) — skipping duplicate execution")
+        return
+
+    queue = _user_queues.get(user_id)
+    if queue is None:
+        queue = asyncio.Queue()
+        _user_queues[user_id] = queue
+        _user_tasks[user_id] = asyncio.create_task(_user_worker(user_id))
+
+    if text:
+        _pending_texts_by_user[user_id].add(text)
+    queue.put_nowait(event)
+
+
 def send_line_notify(message: str):
     """แจ้ง CS ผ่าน LINE Notify"""
     try:
@@ -78,16 +192,33 @@ def _expired_result() -> dict:
 
 @app.post("/webhook")
 async def webhook(request: Request):
+    """Signature verification and payload parsing are unchanged (still
+    delegated to the LINE SDK's own WebhookParser, still returning the
+    identical 400 on any invalid-signature/malformed-payload error) — only
+    DISPATCH changed. Reusing handler.handle(...) here would parse AND
+    invoke handle_message() synchronously, inline, on this coroutine's own
+    event-loop thread — exactly the global-blocking bottleneck this fix
+    exists for (see _dispatch_event's docstring above). Calling the SAME
+    parser directly (handler.parser.parse — the exact method handler.handle()
+    itself calls internally) keeps identical validation behavior while
+    letting each event be handed to its own user's queue instead."""
     signature = request.headers.get("X-Line-Signature", "")
     body = await request.body()
     try:
-        handler.handle(body.decode(), signature)
+        payload = handler.parser.parse(body.decode(), signature, as_payload=True)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid signature")
+
+    for event in payload.events:
+        # Matches the exact narrow dispatch handler.handle() used to
+        # perform via its internal registry (only MessageEvent +
+        # TextMessageContent was ever registered here) — every other
+        # event type is still silently ignored, unchanged from before.
+        if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
+            _dispatch_event(event)
     return {"status": "ok"}
 
 
-@handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event: MessageEvent):
     """Production Integration Sprint (2026-08-02), Phase 1 Step D/E —
     temporary rollout dispatch. `config.DECISION_ENGINE_LIVE_ROUTING`
@@ -101,10 +232,14 @@ def handle_message(event: MessageEvent):
     2026-08-25) — checked here, once, before EITHER branch, so a
     redelivered event (LINE resending the same webhookEventId because it
     didn't get an HTTP response before its own timeout) never re-runs a
-    full turn a second time. Confirmed live: this process is a single,
-    fully synchronous worker, so two DIFFERENT events can never overlap —
-    this fix is about DUPLICATE processing of the SAME event, not
-    concurrency."""
+    full turn a second time. This is about DUPLICATE processing of the
+    SAME event, distinct from the separate same-user/same-text pending
+    collapse in _dispatch_event() above. Uses the database's own UNIQUE
+    constraint (insert-then-detect-conflict, never check-then-insert), so
+    it stays correct now that different users' events genuinely run
+    concurrently (LINE Multi-User Concurrency Fix, 2026-08-27 — this
+    process previously ran every event fully sequentially regardless of
+    user; that global blocking is what that fix removed)."""
     from services.webhook_event_dedup_service import get_webhook_event_dedup_service
     import config as _config
     dedup = get_webhook_event_dedup_service()

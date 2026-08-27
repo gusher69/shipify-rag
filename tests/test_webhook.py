@@ -11,6 +11,7 @@ imported (cached afterward in sys.modules, same as any other import).
 Never calls the real LINE API, never calls DecisionEngine.decide() for
 real (mocked at its call site), never sends a real LINE Notify request.
 """
+import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -1492,6 +1493,156 @@ class TestTask02CInterruptedWorkflowAutoResume(unittest.TestCase):
         self.assertIn("ยืนยัน", status_reply)
         correction_reply = self._turn("เบอร์โทรผิด แก้เป็น 0899999999")
         self.assertIn("0899999999", correction_reply)
+
+
+class TestPerUserConcurrencyDispatch(unittest.IsolatedAsyncioTestCase):
+    """LINE Multi-User Concurrency Fix (2026-08-27) — _dispatch_event()'s
+    per-user asyncio.Queue + background worker + same-text-pending
+    collapse. Never touches handle_message()'s own body (already covered
+    by TestRolloutFlagDispatch/TestWebhookRedeliveryDedup above) — every
+    test here mocks handle_message() itself so only the DISPATCH/ORDERING/
+    DEDUP layer is under test, with zero real RAG/LLM/ERP calls."""
+
+    def setUp(self):
+        # Module-level dicts are shared across tests — reset before each
+        # so one test's per-user state can never leak into another's.
+        webhook_module._user_queues.clear()
+        webhook_module._user_tasks.clear()
+        webhook_module._pending_texts_by_user.clear()
+
+    async def asyncTearDown(self):
+        # Let any still-running per-user worker tasks unwind cleanly
+        # before the next test's event loop is torn down.
+        for task in list(webhook_module._user_tasks.values()):
+            task.cancel()
+        await asyncio.sleep(0)
+
+    async def _drain(self, user_ids):
+        """Waits for every named user's queue to be fully processed."""
+        for uid in user_ids:
+            queue = webhook_module._user_queues.get(uid)
+            if queue is not None:
+                await queue.join()
+
+    async def test_two_different_users_get_isolated_queues(self):
+        event_a = _fake_event(text="Q_A", user_id="U_isolation_A", webhook_event_id="evt-iso-a")
+        event_b = _fake_event(text="Q_B", user_id="U_isolation_B", webhook_event_id="evt-iso-b")
+        with patch.object(webhook_module, "handle_message") as mock_handle:
+            webhook_module._dispatch_event(event_a)
+            webhook_module._dispatch_event(event_b)
+            await self._drain(["U_isolation_A", "U_isolation_B"])
+        self.assertIn("U_isolation_A", webhook_module._user_queues.keys() | {"U_isolation_A"})
+        # Two distinct queue objects were created — never shared.
+        self.assertIsNot(
+            webhook_module._user_tasks.get("U_isolation_A"),
+            webhook_module._user_tasks.get("U_isolation_B"),
+        )
+        self.assertEqual(mock_handle.call_count, 2)
+        called_events = [c.args[0] for c in mock_handle.call_args_list]
+        self.assertIn(event_a, called_events)
+        self.assertIn(event_b, called_events)
+
+    async def test_same_user_rapid_messages_processed_in_strict_order(self):
+        uid = "U_order_test"
+        events = [_fake_event(text=f"Q{i}", user_id=uid, webhook_event_id=f"evt-order-{i}") for i in range(4)]
+        call_order = []
+
+        def _record(event):
+            call_order.append(event.message.text)
+
+        with patch.object(webhook_module, "handle_message", side_effect=_record):
+            for ev in events:
+                webhook_module._dispatch_event(ev)
+            await self._drain([uid])
+        self.assertEqual(call_order, ["Q0", "Q1", "Q2", "Q3"])
+
+    async def test_different_rapid_questions_are_never_collapsed(self):
+        """Section 6 — four genuinely DIFFERENT questions from the same
+        user must each be answered exactly once, never dropped."""
+        uid = "U_no_collapse"
+        texts = ["นำเข้าสินค้ามีขั้นต่ำไหม", "สินค้าที่ห้ามนำเข้ามีอะไรบ้าง",
+                 "เรทค่าขนส่งเท่าไหร่", "ทางรถกับทางเรือใช้เวลากี่วัน"]
+        events = [_fake_event(text=t, user_id=uid, webhook_event_id=f"evt-nc-{i}") for i, t in enumerate(texts)]
+        with patch.object(webhook_module, "handle_message") as mock_handle:
+            for ev in events:
+                webhook_module._dispatch_event(ev)
+            await self._drain([uid])
+        self.assertEqual(mock_handle.call_count, 4)
+
+    async def test_duplicate_same_text_while_pending_is_collapsed(self):
+        """Section 4/9 — the exact same user + exact same normalized text,
+        sent again while the first is still queued/processing, must NOT
+        trigger a second expensive execution."""
+        uid = "U_dup_test"
+        # handle_message is normally sync (run via run_in_executor), so the
+        # blocking gate must be a plain threading primitive, not asyncio.
+        import threading
+        started_evt = threading.Event()
+        release_evt = threading.Event()
+
+        def _blocking_handle(event):
+            started_evt.set()
+            release_evt.wait(timeout=5)
+
+        with patch.object(webhook_module, "handle_message", side_effect=_blocking_handle) as mock_handle:
+            event1 = _fake_event(text="เรทค่าขนส่งเท่าไหร่", user_id=uid, webhook_event_id="evt-dup-1")
+            webhook_module._dispatch_event(event1)
+            # Wait until the first message has actually started processing
+            # (its text is now genuinely "pending"), then send the exact
+            # duplicate while it's still in flight.
+            await asyncio.get_event_loop().run_in_executor(None, started_evt.wait, 5)
+            event2 = _fake_event(text="เรทค่าขนส่งเท่าไหร่", user_id=uid, webhook_event_id="evt-dup-2")
+            webhook_module._dispatch_event(event2)
+            await asyncio.sleep(0.05)  # let the dispatch (or skip) settle
+            release_evt.set()
+            await self._drain([uid])
+        # Only ONE real execution for the duplicate text, despite two
+        # distinct webhookEventIds arriving.
+        self.assertEqual(mock_handle.call_count, 1)
+
+    async def test_same_question_after_completion_works_normally_again(self):
+        """Section 4's explicit non-regression: once the FIRST request has
+        completed, asking the identical question again later must work
+        normally — never permanently suppressed."""
+        uid = "U_repeat_after_done"
+        with patch.object(webhook_module, "handle_message") as mock_handle:
+            event1 = _fake_event(text="เรทค่าขนส่งเท่าไหร่", user_id=uid, webhook_event_id="evt-repeat-1")
+            webhook_module._dispatch_event(event1)
+            await self._drain([uid])
+            self.assertEqual(mock_handle.call_count, 1)
+
+            event2 = _fake_event(text="เรทค่าขนส่งเท่าไหร่", user_id=uid, webhook_event_id="evt-repeat-2")
+            webhook_module._dispatch_event(event2)
+            await self._drain([uid])
+        self.assertEqual(mock_handle.call_count, 2)
+
+    async def test_two_users_process_concurrently_not_serialized(self):
+        """Section 2/7/11 — a slow-processing USER_A must never block
+        USER_B's own turn from starting."""
+        import threading
+        a_started = threading.Event()
+        a_release = threading.Event()
+        b_started = threading.Event()
+
+        def _handle(event):
+            if event.source.user_id == "U_concurrent_A":
+                a_started.set()
+                a_release.wait(timeout=5)
+            else:
+                b_started.set()
+
+        with patch.object(webhook_module, "handle_message", side_effect=_handle):
+            event_a = _fake_event(text="CBM คืออะไร", user_id="U_concurrent_A", webhook_event_id="evt-conc-a")
+            event_b = _fake_event(text="นำเข้าสินค้ามีขั้นต่ำไหม", user_id="U_concurrent_B", webhook_event_id="evt-conc-b")
+            webhook_module._dispatch_event(event_a)
+            await asyncio.get_event_loop().run_in_executor(None, a_started.wait, 5)
+            webhook_module._dispatch_event(event_b)
+            # USER_B must start (and this test proves it CAN start) while
+            # USER_A is still deliberately blocked mid-processing.
+            b_started_in_time = await asyncio.get_event_loop().run_in_executor(None, b_started.wait, 3)
+            a_release.set()
+            await self._drain(["U_concurrent_A", "U_concurrent_B"])
+        self.assertTrue(b_started_in_time, "USER_B's turn must start without waiting for USER_A to finish")
 
 
 if __name__ == "__main__":
