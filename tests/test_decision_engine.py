@@ -5699,5 +5699,43 @@ class TestTask03IntentUnderstandingClarificationMultiIntent(unittest.TestCase):
         self.assertEqual(collected.get("ReceiverName"), "สมชาย")
 
 
+# Customer Journey UAT (2026-08-27) — Answerability Gate deterministic
+# fallback wording fix. The UAT reproduced "ตอนนี้ยังไม่พบข้อมูลนี้ใน
+# ฐานความรู้ค่ะ" through services/playground_orchestrator.py's zero-
+# reliable-evidence branch (rag/confidence.py::compute_confidence's
+# answerability=="no_information"), which bypasses the LLM/Prompt Studio
+# prompt entirely — so CS-03's own unknown_information_wording rule
+# (services/prompt_builder.py) could never reach it. This is the SAME
+# deterministic function every channel goes through (Playground, LINE,
+# Website, ...), so one function-level test plus one channel="line"
+# regression test (the real customer-facing path) is sufficient.
+class TestAnswerabilityGateFallbackWording(unittest.TestCase):
+    _FORBIDDEN_TERMS = ("ฐานความรู้", "RAG", "Knowledge Base", "Top K", "retrieval")
+
+    def test_run_playground_turn_zero_evidence_fallback_avoids_internal_terms(self):
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = run_playground_turn("เรื่องที่ไม่มีข้อมูลในระบบเลยครับ", history=[])
+        for term in self._FORBIDDEN_TERMS:
+            self.assertNotIn(term, result.answer)
+        self.assertIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", result.answer)
+
+    def test_real_line_channel_path_also_avoids_internal_terms(self):
+        """The exact real-customer path: DecisionEngine.decide() with
+        context["channel"]="line" -- the same value line_bot/webhook.py
+        uses -- reaching the identical deterministic fallback."""
+        reg = BusinessActionRegistry(_FakeSupabase())  # no actions seeded -> pure RAG routing
+        engine = _engine_with_registry(reg)
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = engine.decide("เรื่องที่ไม่มีข้อมูลในระบบเลยครับ", history=[],
+                                    context={"channel": "line", "developer_mode": True})
+        reply_text = result["reply"]["text"]
+        for term in self._FORBIDDEN_TERMS:
+            self.assertNotIn(term, reply_text)
+        self.assertIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", reply_text)
+
+
 if __name__ == "__main__":
     unittest.main()

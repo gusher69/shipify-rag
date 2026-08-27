@@ -685,7 +685,17 @@ def run_playground_turn(
         # "## กรณีไม่มีข้อมูล (Fallback Tone)" section) — reused verbatim so
         # this deterministic path sounds identical to what the LLM would
         # have said anyway, never an infrastructure-sounding message.
-        answer_text = "ตอนนี้ยังไม่พบข้อมูลนี้ในฐานความรู้ค่ะ"
+        #
+        # Customer Journey UAT (2026-08-27) — this deterministic path
+        # bypasses the LLM/Prompt Studio entirely, so CS-03's
+        # unknown_information_wording rule (which forbids the internal-
+        # sounding term "ฐานความรู้" in customer-facing replies) could
+        # never reach it. Confirmed live for real LINE traffic
+        # (channel="line") via this same Answerability Gate. Updated to
+        # the same natural wording CS-03 already established elsewhere —
+        # no business fact changed, still an honest "no information"
+        # answer.
+        answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                              "no chunk carries reliable evidence for this question (Answerability Gate) — "
                              "deterministic safe-fallback used, no LLM call, no chunks used as evidence"))
