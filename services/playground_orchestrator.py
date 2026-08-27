@@ -47,6 +47,35 @@ from rag.hybrid_scoring import has_strong_company_profile_evidence
 _URGENCY_SIGNAL_RE = re.compile(r"รีบ|ด่วน|ตามมาหลาย|ตามอยู่|ไม่ทันใช้", re.IGNORECASE)
 _COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำรุด|เสียหาย|ของผิด|ของขาด|ตกหล่น|ไม่ครบ", re.IGNORECASE)
 
+# Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
+# 2026-08-27) — a CLOSED, explicit deny-list, directly reusing the exact
+# topic taxonomy this feature's own spec lists as never-to-be-guessed by
+# a general LLM (company policy, shipping rate/duration, refund/warranty,
+# order/shipment status, customer/wallet/coupon data, warehouse status,
+# prices, promotions), plus the same self-reference markers ("ของผม" etc)
+# already established elsewhere in this codebase for "this is about MY
+# OWN account" detection. Used ONLY inside the existing zero-evidence
+# Answerability Gate branch below (never a new routing layer, never
+# touches Business Action selection, never runs before RAG/retrieval has
+# already found no reliable evidence) to decide whether that branch's
+# EXISTING safe-uncertainty fallback should stay as-is (this matches —
+# default, unchanged behavior) or whether the message is safe to answer
+# as ordinary general conversation instead (this does NOT match).
+# Deliberately conservative: matching this regex is the ONLY way to
+# reach general-chat mode is to NOT match it, so anything ambiguous or
+# genuinely company-adjacent defaults to the existing safe fallback,
+# never the other way around.
+_COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
+    r"บริษัท|ของผม|ของฉัน|ของดิฉัน|"
+    r"นโยบาย|ประกัน|ค่าส่ง|ค่าขนส่ง|เรท|ราคา|"
+    r"คืนเงิน|คืนสินค้า|รับประกัน|"
+    r"ออเดอร์|คำสั่งซื้อ|"
+    r"shipment|พัสดุ|บิลขนส่ง|ติดตาม|"
+    r"ข้อมูลลูกค้า|wallet|กระเป๋าเงิน|ยอดเงิน|"
+    r"คูปอง|โกดัง|โปรโมชั่น|โปรโมชัน|บริการ",
+    re.IGNORECASE,
+)
+
 
 def _has_direct_structured_evidence(chunks: List[Dict]) -> bool:
     """True when the FINAL evidence-classified chunk list (rag/
@@ -681,7 +710,19 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
-    elif conf_result.answerability == "no_information":
+    elif conf_result.answerability == "no_information" and (
+            _COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
+            or _URGENCY_SIGNAL_RE.search(question or "")
+            or _COMPLAINT_SIGNAL_RE.search(question or "")):
+        # An urgency/complaint-signaled message (checked here via the SAME
+        # regexes the Zero-Evidence Fallback Tone Guard below already
+        # uses) is always about some issue the company is expected to
+        # address — even when it names no explicit company/operational
+        # noun of its own (e.g. "ตามมาหลายวันแล้วครับ ของรีบใช้ ลูกค้าผมก็
+        # ตามอยู่") — so it must stay on this safe-fallback path (with its
+        # tone acknowledgement below), never be redirected to general
+        # chat mode just because it doesn't literally name a topic noun.
+        #
         # Answerability Gate (Task 04B, 2026-08-26) — retrieval returning
         # a non-empty Top-K is never the same thing as the question being
         # answerable (confirmed live: "บริษัทมีนโยบายเรื่องการรีไซเคิล
@@ -738,6 +779,49 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
+    elif conf_result.answerability == "no_information":
+        # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27)
+        # — reached only when the Answerability Gate found no reliable
+        # company evidence AND (see _COMPANY_OPERATIONAL_TOPIC_RE above)
+        # the question itself carries no company/operational topic signal
+        # either — e.g. "จีนอยู่ทวีปอะไร" or "ช่วยคิดชื่อร้านขายของออนไลน์".
+        # Confirmed live: without this branch, such a question still
+        # reached the normal LLM branch below with whatever (irrelevant)
+        # chunks retrieval happened to return as "Context" plus
+        # STRICT_GROUNDING_RULES' "answer only from Context" instruction —
+        # producing a wrong, contaminated answer (e.g. a China-geography
+        # question answered with the company's China-warehouse address)
+        # rather than a plain general-knowledge answer. Builds a SEPARATE
+        # prompt via the SAME centralized build_prompt() (never a second,
+        # ad-hoc prompt-assembly path) with EMPTY context (so there is no
+        # irrelevant chunk to be tempted into using) and
+        # general_chat_mode=True (swaps STRICT_GROUNDING_RULES for
+        # GENERAL_CHAT_GUIDANCE — see services/prompt_builder.py) — same
+        # persona/template, same Human CS tone, just permitted to use its
+        # own general knowledge for this one turn and explicitly warned
+        # never to present that as an official Shipify fact.
+        try:
+            general_chat_prompt = build_prompt(
+                canonical_question, "", template_id=template_id, policy_notes=policy.notes,
+                history=history, retrieval_confidence=retrieval_confidence_result["retrieval_confidence"],
+                answer_plan=answer_plan, general_chat_mode=True)
+            llm = get_llm_service()
+            llm_response = llm.generate(general_chat_prompt.messages, model=OPENAI_CHAT_MODEL,
+                                         temperature=temperature, max_tokens=max_tokens)
+            stages.append(Stage("LLM", "success", (time.time() - t0) * 1000,
+                                 f"model={llm_response.model} (general chat mode — no company evidence used)"))
+            services_used.append({"name": "LLMService", "status": "success"})
+            answer_text = llm_response.text
+            input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens
+            llm_latency = llm_response.latency_ms
+            llm_failed = False
+        except Exception as e:
+            stages.append(Stage("LLM", "failed", (time.time() - t0) * 1000, str(e)))
+            services_used.append({"name": "LLMService", "status": "failed"})
+            answer_text = "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ"
+            input_tokens = output_tokens = 0
+            llm_latency = 0.0
+            llm_failed = True
     else:
         try:
             llm = get_llm_service()

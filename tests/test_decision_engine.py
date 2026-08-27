@@ -5821,10 +5821,18 @@ class TestAnswerabilityGateFallbackWording(unittest.TestCase):
     _FORBIDDEN_TERMS = ("ฐานความรู้", "RAG", "Knowledge Base", "Top K", "retrieval")
 
     def test_run_playground_turn_zero_evidence_fallback_avoids_internal_terms(self):
+        # Company-topic message (Hybrid RAG + General AI Chat, 2026-08-27
+        # update) -- this test is specifically about the DETERMINISTIC
+        # safe-fallback path never leaking internal terminology, which
+        # only applies to a company/operational question with zero
+        # evidence; a topic-less placeholder would now correctly go
+        # through the separate General Chat Fallback branch instead (see
+        # TestGeneralChatFallback below), which is a real, unmocked LLM
+        # call and not what this test is exercising.
         from services.playground_orchestrator import run_playground_turn
         with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
             mock_get_rag.return_value.retrieve.return_value = []
-            result = run_playground_turn("เรื่องที่ไม่มีข้อมูลในระบบเลยครับ", history=[])
+            result = run_playground_turn("บริษัทมีนโยบายเรื่องการรีไซเคิลกล่องพัสดุอย่างไร", history=[])
         for term in self._FORBIDDEN_TERMS:
             self.assertNotIn(term, result.answer)
         self.assertIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", result.answer)
@@ -5837,7 +5845,7 @@ class TestAnswerabilityGateFallbackWording(unittest.TestCase):
         engine = _engine_with_registry(reg)
         with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
             mock_get_rag.return_value.retrieve.return_value = []
-            result = engine.decide("เรื่องที่ไม่มีข้อมูลในระบบเลยครับ", history=[],
+            result = engine.decide("บริษัทมีนโยบายเรื่องการรีไซเคิลกล่องพัสดุอย่างไร", history=[],
                                     context={"channel": "line", "developer_mode": True})
         reply_text = result["reply"]["text"]
         for term in self._FORBIDDEN_TERMS:
@@ -5866,14 +5874,142 @@ class TestAnswerabilityGateFallbackWording(unittest.TestCase):
         self.assertNotIn("จริง", result.answer)
 
     def test_neutral_question_still_gets_the_bare_fallback(self):
-        """No urgency/complaint signal -- output must be byte-identical to
-        the existing, already-tested plain fallback (no regression for the
-        overwhelming majority of zero-evidence questions)."""
+        """No urgency/complaint signal, genuinely company-specific topic
+        (Hybrid RAG + General AI Chat, 2026-08-27 update swapped the
+        original topic-less placeholder message for this reason -- see
+        test_run_playground_turn_zero_evidence_fallback_avoids_internal_terms
+        above) -- output must be byte-identical to the existing, already-
+        tested plain fallback (no regression for company-specific
+        zero-evidence questions)."""
         from services.playground_orchestrator import run_playground_turn
         with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
             mock_get_rag.return_value.retrieve.return_value = []
-            result = run_playground_turn("เรื่องทั่วไปที่ไม่มีข้อมูลเลยครับ", history=[])
+            result = run_playground_turn("บริษัทชดเชยคาร์บอนจากการขนส่งหรือไม่", history=[])
         self.assertEqual(result.answer, "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ")
+
+
+def _fake_llm_response(text):
+    from services.llm_service import LLMResponse
+    return LLMResponse(text=text, model="gpt-4o", provider="openai",
+                        input_tokens=10, output_tokens=10, latency_ms=1.0)
+
+
+class TestCompanyOperationalTopicGuard(unittest.TestCase):
+    """_COMPANY_OPERATIONAL_TOPIC_RE (services/playground_orchestrator.py)
+    -- pure regex checks against the Hybrid RAG + General AI Chat feature's
+    own Fast Test Set (2026-08-27), no mocking/LLM calls needed."""
+
+    def _matches(self, message):
+        from services.playground_orchestrator import _COMPANY_OPERATIONAL_TOPIC_RE
+        return bool(_COMPANY_OPERATIONAL_TOPIC_RE.search(message))
+
+    def test_general_chat_messages_do_not_match(self):
+        for msg in ("วันนี้เหนื่อยจัง", "ช่วยคิดข้อความโปรโมตสินค้าให้หน่อย",
+                    "ช่วยคิดชื่อร้านขายของออนไลน์", "จีนอยู่ทวีปอะไร"):
+            self.assertFalse(self._matches(msg), f"{msg!r} must NOT match (should reach general chat)")
+
+    def test_general_advice_message_does_not_match(self):
+        self.assertFalse(self._matches("ถ้าจะเริ่มขายสินค้านำเข้าควรเริ่มยังไง"))
+
+    def test_company_gap_message_matches(self):
+        self.assertTrue(self._matches("บริษัทมีประกัน All Risk ทุกออเดอร์ไหม"))
+
+    def test_private_action_message_matches(self):
+        """Even though this specific phrasing doesn't currently match any
+        Business Action's own configured keywords (a pre-existing,
+        separate config gap, out of this feature's scope), it must still
+        be treated as company/private-topic here -- never redirected to
+        an unmocked general LLM that could invent shipment data."""
+        self.assertTrue(self._matches("เช็ก Shipment ของผมให้หน่อย"))
+
+    def test_company_rag_message_with_explicit_company_subject_matches(self):
+        # "ทางรถกี่วัน" normally succeeds via real RAG evidence and never
+        # reaches this guard at all -- not tested here for that reason.
+        self.assertTrue(self._matches("บริษัทมีบริการอะไรบ้าง"))
+
+
+class TestGeneralChatFallback(unittest.TestCase):
+    """Hybrid RAG + General AI Chat (2026-08-27) -- the NEW branch inside
+    the existing zero-evidence Answerability Gate. get_llm_service is
+    mocked (this branch, unlike the deterministic safe-fallback branch,
+    does make a real LLM call) so no network/API call happens in tests."""
+
+    def test_general_chat_message_gets_natural_answer_not_bare_fallback(self):
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            mock_get_llm.return_value.generate.return_value = _fake_llm_response("เอเชียค่ะ")
+            result = run_playground_turn("จีนอยู่ทวีปอะไร", history=[])
+        self.assertEqual(result.answer, "เอเชียค่ะ")
+        self.assertNotIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", result.answer)
+
+    def test_general_chat_prompt_uses_general_chat_guidance_not_strict_grounding(self):
+        from services.playground_orchestrator import run_playground_turn
+        from services.prompt_builder import GENERAL_CHAT_GUIDANCE, STRICT_GROUNDING_RULES
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            mock_get_llm.return_value.generate.return_value = _fake_llm_response("คำตอบทั่วไปค่ะ")
+            run_playground_turn("ช่วยคิดชื่อร้านขายของออนไลน์", history=[])
+        called_messages = mock_get_llm.return_value.generate.call_args[0][0]
+        system_content = called_messages[0]["content"]
+        self.assertIn(GENERAL_CHAT_GUIDANCE.strip(), system_content)
+        self.assertNotIn(STRICT_GROUNDING_RULES.strip(), system_content)
+
+    def test_general_chat_prompt_context_is_empty_not_irrelevant_chunks(self):
+        """Confirmed live bug this fix exists for: a general-knowledge
+        question ("จีนอยู่ทวีปอะไร") was previously answered using
+        irrelevant retrieved chunks (a China-warehouse-address FAQ),
+        because those chunks were passed as Context. General chat mode
+        must never show the LLM any retrieved chunk as evidence."""
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            mock_get_llm.return_value.generate.return_value = _fake_llm_response("เอเชียค่ะ")
+            run_playground_turn("จีนอยู่ทวีปอะไร", history=[])
+        called_messages = mock_get_llm.return_value.generate.call_args[0][0]
+        user_content = called_messages[1]["content"]
+        self.assertIn("ไม่มีข้อมูลเพิ่มเติม", user_content)
+
+    def test_company_gap_message_never_calls_the_llm(self):
+        """A company-specific question with zero evidence must stay on
+        the deterministic safe-fallback path -- the LLM must never be
+        invoked for it, regardless of this new branch's existence."""
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = run_playground_turn("บริษัทมีประกัน All Risk ทุกออเดอร์ไหม", history=[])
+        mock_get_llm.assert_not_called()
+        self.assertEqual(result.answer, "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ")
+
+    def test_private_action_message_never_calls_the_llm(self):
+        """A private/customer-specific message with zero evidence (even
+        one that doesn't match any Business Action's own keywords -- a
+        separate, pre-existing config gap, out of scope here) must never
+        be answered by an unmocked general LLM that could invent
+        shipment/customer data."""
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = run_playground_turn("เช็ก Shipment ของผมให้หน่อย", history=[])
+        mock_get_llm.assert_not_called()
+        self.assertEqual(result.answer, "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ")
+
+    def test_urgency_signal_still_stays_on_safe_fallback_not_general_chat(self):
+        """Regression guard: an urgency-signaled message with no company
+        noun of its own must still take the tone-guarded safe-fallback
+        path (Gap B), never this new general-chat branch."""
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = run_playground_turn("ตามมาหลายวันแล้วครับ ของรีบใช้ ลูกค้าผมก็ตามอยู่", history=[])
+        mock_get_llm.assert_not_called()
+        self.assertIn("เร่งด่วน", result.answer)
 
 
 # General Import Advice Routing Fix (2026-08-27) — confirmed live (single-

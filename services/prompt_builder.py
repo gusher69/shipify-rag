@@ -48,6 +48,36 @@ STRICT_GROUNDING_RULES = (
 )
 
 
+# ── General Chat Guidance (Hybrid RAG + General AI Chat, 2026-08-27) ───
+# The counterpart to STRICT_GROUNDING_RULES above, for the ONE case the
+# Decision Engine/RAG pipeline has already determined is NOT a company-
+# specific/operational question (services/playground_orchestrator.py's
+# own deny-list check, run BEFORE deciding to pass general_chat_mode=True
+# here — never decided by this module). Swapped in for that exact turn
+# only; STRICT_GROUNDING_RULES remains the default for every other turn,
+# so this never weakens factual safety for a genuinely company-specific
+# question. `context` is passed empty for this call (see the caller) so
+# there is no retrieved-but-irrelevant chunk for the LLM to be tempted
+# into forcing an answer from.
+GENERAL_CHAT_GUIDANCE = (
+    "\n\nGENERAL CHAT GUIDANCE (this question was already determined to be "
+    "NOT about company-specific data, policy, or operations — must follow exactly):\n"
+    "- You may answer this question naturally and helpfully using your own general "
+    "knowledge, like a normal AI assistant would — this is not a company data lookup.\n"
+    "- Never state or imply that a general fact, opinion, or piece of advice is Shipify's "
+    "own official policy, process, rate, or data unless it is explicitly present in the "
+    "Context below (which will normally be empty for this kind of question).\n"
+    "- If your answer could sound like it describes this company's own specific process "
+    "(e.g. general advice about importing or reselling goods), frame it as general "
+    "information (\"โดยทั่วไปแล้ว...\", \"ถ้าพูดในภาพรวม...\") rather than as Shipify's own "
+    "steps, unless the Context explicitly supports that.\n"
+    "- Do not invent or guess this company's prices, shipping rates/duration, order or "
+    "shipment status, refund/warranty policy, customer/wallet/coupon data, warehouse "
+    "status, or current promotions — those still require confirmed information; say so "
+    "honestly if asked and unavailable, instead of guessing."
+)
+
+
 # ── Base Conversation Rules (platform standard, read-only) ─────────────
 # Requirement: prompt authors should never have to re-write basic
 # conversation hygiene (greet-once, don't repeat prior answers, don't
@@ -468,7 +498,8 @@ def build_prompt(question: str, context: str, *, template_id: Optional[str] = No
                   history: Optional[List[Dict]] = None,
                   template: Optional[PromptTemplate] = None,
                   retrieval_confidence: Optional[float] = None,
-                  answer_plan: Optional[Dict] = None) -> BuiltPrompt:
+                  answer_plan: Optional[Dict] = None,
+                  general_chat_mode: bool = False) -> BuiltPrompt:
     """`history` is prior turns of the SAME session — [{"role": "user"/
     "assistant", "content": ...}, ...]. It is NEVER injected verbatim as
     separate chat messages (see the module docstring above for why) —
@@ -502,7 +533,10 @@ def build_prompt(question: str, context: str, *, template_id: Optional[str] = No
         _rules_block("Fallback rules", template.fallback_rules) +
         _rules_block("Safety rules", template.safety_rules)
     )
-    grounding_block = STRICT_GROUNDING_RULES if RAG_GROUNDING_MODE == "strict" else ""
+    if general_chat_mode:
+        grounding_block = GENERAL_CHAT_GUIDANCE
+    else:
+        grounding_block = STRICT_GROUNDING_RULES if RAG_GROUNDING_MODE == "strict" else ""
     # Base Conversation Rules (platform standard, read-only — see the
     # constant's docstring above) ALWAYS comes first, ahead of Tone
     # Guidance and the Customer System Prompt (both already folded into
