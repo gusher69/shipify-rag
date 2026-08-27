@@ -819,7 +819,31 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
         prior_idx = assistant_indices[-2]
         prior_text = (history[prior_idx].get("content") or "").strip()
         if prior_text and prior_text != last_text:
-            matches = _match_against(prior_text, history[:prior_idx + 1], allow_confirmation=False)
+            lookback_matches = _match_against(prior_text, history[:prior_idx + 1], allow_confirmation=False)
+            # Terminal-Outcome Guard (Mixed Routing / Stuck Workflow
+            # production fix, 2026-08-27) — confirmed live: the look-back
+            # above assumes the skipped exchange (prior_text ... last_text)
+            # is always a genuine mid-collection RAG interruption, but the
+            # SAME shape (one assistant turn that doesn't match anything,
+            # preceded by one that does) also occurs when an action reached
+            # a TERMINAL outcome — e.g. CustCode was supplied, the action
+            # executed via the API/WEBHOOK executor, and authorization was
+            # DENIED (last_text is that denial message, not a follow-up
+            # question). That action is done, not "waiting on its next
+            # parameter" — its own denial reply must never be mistaken for
+            # an unrelated interruption and used to re-open it for a later,
+            # completely unrelated message. Distinguish the two by
+            # replaying each look-back match against the FULL prior
+            # history (not just the truncated slice up to prior_idx): if
+            # the action is ALREADY complete once the turns in between are
+            # accounted for, the gap was a terminal outcome, not an
+            # interruption, and this match must be dropped.
+            matches = [
+                a for a in lookback_matches
+                if _next_expected_parameter(
+                    a, registry, _replay_business_action_collection(a, registry, history[:-1], customer_context)
+                ) is not None
+            ]
 
     if not matches:
         return None
@@ -1919,41 +1943,107 @@ class DecisionEngine:
                     selected = select_best_action(candidates, minimum_score=1.0 if not workflow_hint else 0.5)
                     developer_trace["selection_source"] = "fresh_search"
 
-                    # General Company Policy Question Guard (Customer
-                    # Journey UAT, 2026-08-27) — confirmed live:
-                    # "บริษัทมีประกัน All Risk ให้ทุกออเดอร์ไหมครับ" (a general
-                    # policy question, not a request for any specific
-                    # customer's own data) matched searchdataorderlist
-                    # purely via its generic "ออเดอร์" keyword — the bare
-                    # word legitimately appears in countless account-
-                    # specific requests too, so it can't be removed from
-                    # the action's own keywords the way the "เข้าไทย"
-                    # collision fix could (that keyword's ONLY genuine
-                    # meaning was arrival-status; "ออเดอร์" has no such
-                    # single meaning). Narrowly vetoes a selection when
-                    # ALL of: (1) the message names the company as subject
-                    # ("บริษัท") -- never present in any of the legitimate
-                    # preserve-list examples (self-referencing requests
-                    # like "เช็กบิลของผม"/"เช็ก Shipment นี้"/"ขอดู Wallet
-                    # ของผม" all name THEMSELVES, never "the company"),
-                    # (2) the message is phrased as a genuine yes/no
-                    # question (_QUESTION_MARKER_RE, already used
-                    # elsewhere in this same function), and (3) the
-                    # winning candidate's own evidence contains no
-                    # identifier-pattern contribution (a message that
-                    # ALSO supplies a real CustCode/OrderCode alongside
-                    # "บริษัท" is never vetoed -- that's real evidence of
-                    # an actual account-specific request, not a policy
-                    # question). Falls through to ordinary RAG/
-                    # clarification handling below, exactly like any
-                    # other unmatched message.
+                    # General Informational Question Guard (Customer
+                    # Journey UAT, 2026-08-27; broadened 2026-08-27 same
+                    # day — Mixed Routing / Stuck Workflow production fix)
+                    # — confirmed live twice: (1) "บริษัทมีประกัน All Risk
+                    # ให้ทุกออเดอร์ไหมครับ" (a general policy question)
+                    # matched searchdataorderlist purely via its generic
+                    # "ออเดอร์" keyword; (2) "เปลี่ยนที่อยู่จัดส่งในระบบยังไง"
+                    # (a HOW-TO informational question about the address-
+                    # change PROCESS) matched requestshippingaddresschange
+                    # purely via its "เปลี่ยนที่อยู่" keyword, identical to
+                    # how a real "please change my address" request would
+                    # match. Neither keyword can be removed from its
+                    # action (both legitimately appear in real account-
+                    # specific requests too), so this is, in both cases, a
+                    # selection-time veto, not a keyword change. Vetoes a
+                    # fresh selection when EITHER of two independent
+                    # informational shapes is proven, AND (always required)
+                    # the winning candidate's own evidence contains no
+                    # identifier-pattern contribution (a message that ALSO
+                    # supplies a real CustCode/OrderCode is never vetoed —
+                    # that's real evidence of an actual account-specific
+                    # request):
+                    #   (a) the message names the company as subject
+                    #       ("บริษัท") AND is phrased as a genuine question
+                    #       (_QUESTION_MARKER_RE) — never present in any of
+                    #       the legitimate preserve-list examples (self-
+                    #       referencing requests like "เช็กบิลของผม"/"เช็ก
+                    #       Shipment นี้"/"ขอดู Wallet ของผม" all name
+                    #       THEMSELVES, never "the company");
+                    #   (b) the message is phrased as a genuine question
+                    #       (_QUESTION_MARKER_RE, e.g. "ยังไง"/"อะไร"/"ไหม")
+                    #       AND carries NO polite-request marker of its own
+                    #       (_REQUEST_MARKER_RE, e.g. "ช่วย...หน่อย"/"ขอ...
+                    #       ด้วย" — already used elsewhere in this same
+                    #       function for the identical informational-vs-
+                    #       request distinction). This is what separates
+                    #       "เปลี่ยนที่อยู่จัดส่งในระบบยังไง" (informational,
+                    #       vetoed) from "ช่วยเปลี่ยนที่อยู่จัดส่งให้หน่อย" /
+                    #       "อยากเปลี่ยนที่อยู่จัดส่งครับ" (real requests,
+                    #       neither carries a question marker at all, so
+                    #       condition (b) never even applies to them).
+                    #
+                    # Branch (b) additionally requires ALL of (confirmed
+                    # live via full regression -- each guards one real,
+                    # distinct false-positive, not a hypothetical):
+                    #   - the winning candidate is an identity-gated
+                    #     action (API/WEBHOOK). A RAG-type "Business
+                    #     Action" (a knowledge-base entry configured with
+                    #     its own keywords, e.g. "คลังสินค้าอยู่ที่ไหน" ->
+                    #     a warehouse-location KB entry) is never
+                    #     identity-gated in the first place -- it IS the
+                    #     informational answer, so it must never be
+                    #     vetoed away from itself.
+                    #   - the message is NOT itself multi-clause
+                    #     (_split_clauses returns >1 part) -- a compound
+                    #     ask like "อยากเปลี่ยนที่อยู่จัดส่งบิลนี้ และ CBM
+                    #     คำนวณยังไง" carries a real action-request FIRST
+                    #     clause plus a genuine question SECOND clause;
+                    #     _QUESTION_MARKER_RE matches the whole string
+                    #     regardless of which clause it came from, so
+                    #     without this guard a real request gets vetoed
+                    #     purely because it happens to be joined to an
+                    #     unrelated question. Multi-clause messages are
+                    #     the existing Hybrid/multi-intent pipeline's own
+                    #     job (classify_question/_split_clauses above),
+                    #     never this guard's.
+                    #   - the message carries no _REFERENCE_MARKER_RE
+                    #     self-reference ("ของผม"/"ของฉัน"/"อันนี้"/...) --
+                    #     "ข้อมูลลูกค้าของผมมีอะไรบ้าง" ("what's in MY OWN
+                    #     customer data") is phrased as a question but is
+                    #     unmistakably a self-referencing account request.
+                    #   - the message contains no bare identifier-shaped
+                    #     token of its own (_validate_generic_identifier,
+                    #     checked message-wide, independent of whether
+                    #     the WINNING action's own parameter happens to
+                    #     have a validation_pattern configured) --
+                    #     "คูปองของลูกค้า SP1014 มีอะไรบ้าง" names a
+                    #     specific record (SP1014); the identifier-
+                    #     pattern-evidence check above can miss this when
+                    #     the selected action's own parameter has no
+                    #     validation_pattern set, so this is a second,
+                    #     independent identifier check, not a duplicate.
+                    # Falls through to ordinary RAG/clarification handling
+                    # below, exactly like any other unmatched message.
                     general_policy_question_vetoed = False
-                    if selected and "บริษัท" in (message or "") and _QUESTION_MARKER_RE.search(message or "") \
+                    if selected and _QUESTION_MARKER_RE.search(message or "") \
                             and not any("parameter identifier pattern" in r for r in (selected.get("_reasons") or [])):
-                        selected = None
-                        candidates = []
-                        general_policy_question_vetoed = True
-                        developer_trace["selection_source"] = "fresh_search_vetoed_general_policy_question"
+                        is_company_policy_question = "บริษัท" in (message or "")
+                        is_unrequested_howto_question = (
+                            not _REQUEST_MARKER_RE.search(message or "")
+                            and selected.get("action_type") in ("API", "WEBHOOK")
+                            and len(_split_clauses(message or "")) <= 1
+                            and not _REFERENCE_MARKER_RE.search(message or "")
+                            and not any(_validate_generic_identifier(tok)
+                                        for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
+                        )
+                        if is_company_policy_question or is_unrequested_howto_question:
+                            selected = None
+                            candidates = []
+                            general_policy_question_vetoed = True
+                            developer_trace["selection_source"] = "fresh_search_vetoed_general_policy_question"
 
                     # A vetoed general policy question must not fall back
                     # to some earlier, unrelated remembered topic either —

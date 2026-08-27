@@ -3333,6 +3333,37 @@ class TestKeywordMatchesAsciiBoundary(unittest.TestCase):
         self.assertGreater(_keyword_score(action, "ขอดู PO ล่าสุด"), 0.0)
 
 
+class TestImportArrivalCompoundWordGuard(unittest.TestCase):
+    """_keyword_matches's "เข้า..." guard (services/action_selection_
+    primitives.py) -- a keyword starting with "เข้า" (e.g. "เข้าไทย") must
+    never match a message that is fundamentally about the general
+    "นำเข้า" (import) TOPIC, regardless of where in the message "นำเข้า"
+    appears relative to the keyword match. Broadened 2026-08-27 (Mixed
+    Routing / Stuck Workflow production fix) from an adjacency-only
+    lookbehind (only caught "นำเข้าไทย") to a message-wide check, after a
+    second, differently-shaped real production collision
+    ("...การนำเข้าสินค้าเข้าไทย" -- "เข้าไทย" here is preceded by "สินค้า",
+    not "นำ") proved the adjacency-only guard too narrow."""
+
+    def test_immediate_adjacency_collision_still_blocked(self):
+        """The ORIGINAL confirmed collision (e7fd988) -- unaffected by
+        the broadening."""
+        self.assertFalse(_keyword_matches("เข้าไทย", "มีสินค้าอะไรแนะนำไหมสำหรับนำเข้าไทย"))
+
+    def test_non_adjacent_collision_now_blocked(self):
+        """The NEW, second confirmed collision (Mixed Routing production
+        fix) -- "เข้าไทย" is preceded by "สินค้า", not "นำ" directly, so
+        the original adjacency-only guard missed it."""
+        self.assertFalse(_keyword_matches("เข้าไทย", "แนะนำทีครับขั้นตอนการนำเข้าสินค้าเข้าไทย"))
+
+    def test_genuine_arrival_status_question_still_matches(self):
+        """The keyword's ORIGINAL intended meaning -- a genuine shipment-
+        arrival status question, never containing "นำเข้า" anywhere --
+        must be completely unaffected."""
+        self.assertTrue(_keyword_matches("เข้าไทย", "ของเข้าไทยหรือยังครับ"))
+        self.assertTrue(_keyword_matches("เข้าไทย", "SP1008 มีบิลที่รับเข้าไทยกี่บิล"))
+
+
 class TestTask03CBusinessActionRegistryCollision(unittest.TestCase):
     """Task 03C — Fix Business Action Registry Keyword Collision
     (2026-08-26). Confirmed live: "รับประกันไหมว่าจะถึงภายใน 7 วัน" tied
@@ -5425,6 +5456,36 @@ class TestTask02BCrossTopicContaminationPrevention(unittest.TestCase):
         self.assertTrue(gate.get("required"), "must reach the confirmation gate, never auto-execute")
         self.assertFalse(gate.get("confirmed"), "must stop BEFORE mutation -- no 'confirm' was ever sent")
 
+    def test_16_journey_b_plain_continuation_survives_a_genuine_rag_interruption(self):
+        """JOURNEY B (Mixed Routing / Stuck Workflow production fix,
+        2026-08-27) -- start a workflow, let a genuine RAG question
+        interrupt it mid-collection, then continue answering the SAME
+        pending field (no correction involved this time). The workflow
+        must resume and ask for the NEXT field, never restart or get
+        abandoned. Exercises the same look-back path as test_15 above,
+        but proves the Terminal-Outcome Guard added for the Mixed
+        Routing fix does not regress the plain (non-correction) resume
+        case -- the guard only excludes a look-back match that is
+        ALREADY fully collected under the complete history, which is
+        never true here (ReceiverName/ReceiverPhone are still pending
+        when CBM interrupts)."""
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self._turn(self.TRIGGER, context=ctx)
+        self._turn(self.SHIPMENT_CODE, context=ctx)
+
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="CBM คือปริมาตรสินค้าค่ะ")):
+            interruption = self._turn("CBM คืออะไรครับ", context=ctx)
+        self.assertEqual((interruption.get("routing") or {}).get("type"), "RAG")
+
+        resumed = self._turn("ผู้รับสมชายครับ เบอร์ 0812345678", context=ctx)
+        collected = self._ics(resumed).get("collected_parameters", {})
+        self.assertEqual(collected.get("ReceiverName"), "สมชายครับ",
+                          "workflow must resume and bind the reply to the pending field, not restart")
+        self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE,
+                          "already-collected fields must survive the interruption")
+        self.assertEqual(collected.get("ReceiverPhone"), "0812345678")
+
 
 class TestTask03IntentUnderstandingClarificationMultiIntent(unittest.TestCase):
     """Task 03 — Fix Intent Understanding + Clarification + Multi-Intent +
@@ -5972,6 +6033,84 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         result = self._decide("บริษัทเช็คออเดอร์ SP1008 ให้หน่อยได้ไหมครับ")
         ics = (result.get("developer") or {}).get("information_collection_status") or {}
         self.assertEqual(ics.get("selected_business_action"), "searchdataorderlist")
+
+    # ---- Mixed Routing / Stuck Workflow production fix (2026-08-27) ----
+    # Reproduces a REAL production conversation: a general import-advice
+    # question falsely entered SearchDataShipmentList (a second, DIFFERENT
+    # "เข้าไทย" collision shape than the one e7fd988 fixed -- see
+    # test_journey_a below), the customer typed a CustCode only because
+    # of that false start, authorization then denied it (no verified
+    # binding), and the conversation stayed stuck answering every
+    # subsequent unrelated message with the SAME authorization-denial
+    # reply. Journeys A/B/C/D below are named exactly as specified in
+    # that production fix task.
+
+    def test_journey_a_same_session_general_questions_all_stay_informational(self):
+        """JOURNEY A -- the exact 3-turn same-session reproduction. All
+        three must remain informational; none may ever request CustCode
+        or select a Business Action."""
+        history = []
+        for message in (
+            "แนะนำทีครับขั้นตอนการนำเข้าสินค้าเข้าไทย",
+            "สนใจนำเข้าสินค้าจากจีน",
+            "เปลี่ยนที่อยู่จัดส่งในระบบยังไง",
+        ):
+            result = self._decide(message, history=history)
+            self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+            ics = (result.get("developer") or {}).get("information_collection_status") or {}
+            self.assertNotIn(ics.get("selected_business_action"),
+                              ("searchdatashipmentlist", "getdatacustomer", "searchdataorderlist"))
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": result["reply"]["text"]})
+
+    def test_import_process_howto_with_arrival_keyword_does_not_select_shipment_action(self):
+        """The SECOND, DIFFERENT "เข้าไทย" collision shape (Mixed Routing
+        production fix) -- "เข้าไทย" here is preceded by "สินค้า", not "นำ"
+        directly, so the original e7fd988 adjacency-only guard (fixed for
+        "นำเข้าไทย") does NOT catch it; the broadened, message-wide "นำเข้า
+        anywhere" guard does."""
+        result = self._decide("แนะนำทีครับขั้นตอนการนำเข้าสินค้าเข้าไทย")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
+
+    def test_authorization_denial_does_not_poison_later_general_questions(self):
+        """JOURNEY C (core) -- a genuine action selection, followed by a
+        real authorization denial (no verified binding for this fake
+        context), must not leave the SAME action "stuck" as a
+        conversation_continuation for a later, completely unrelated
+        general message. Proves the Terminal-Outcome Guard on
+        _resolve_continuation_action's look-back retry."""
+        turn1 = self._decide("ของเข้าไทยหรือยังครับ")
+        self.assertIn("รหัสลูกค้า", turn1["reply"]["text"])
+        history = [{"role": "user", "content": "ของเข้าไทยหรือยังครับ"},
+                   {"role": "assistant", "content": turn1["reply"]["text"]}]
+
+        turn2 = self._decide("SP1008", history=history)
+        self.assertIn("ไม่สามารถยืนยันสิทธิ์", turn2["reply"]["text"])
+        history.append({"role": "user", "content": "SP1008"})
+        history.append({"role": "assistant", "content": turn2["reply"]["text"]})
+
+        turn3 = self._decide("สนใจนำเข้าสินค้าจากจีน", history=history)
+        self.assertNotIn("ไม่สามารถยืนยันสิทธิ์", turn3["reply"]["text"])
+        ics3 = (turn3.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(ics3.get("selected_business_action"), "searchdatashipmentlist")
+        self.assertNotEqual((turn3.get("developer") or {}).get("selection_source"), "conversation_continuation")
+
+    def test_journey_d_address_howto_is_informational_execution_request_still_starts_workflow(self):
+        """JOURNEY D -- an informational HOW-TO question about the
+        address-change PROCESS must stay informational; an explicit
+        request to actually perform the change must still start the
+        workflow (Task 06/06B unweakened)."""
+        howto = self._decide("เปลี่ยนที่อยู่จัดส่งในระบบยังไง")
+        self.assertNotIn("รหัสลูกค้า", howto["reply"]["text"])
+        howto_ics = (howto.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(howto_ics.get("selected_business_action"), "getdatacustomer")
+
+        execution = self._decide("ช่วยเปลี่ยนที่อยู่จัดส่งให้หน่อย")
+        self.assertIn("รหัสลูกค้า", execution["reply"]["text"])
+        execution_ics = (execution.get("developer") or {}).get("information_collection_status") or {}
+        self.assertEqual(execution_ics.get("selected_business_action"), "getdatacustomer")
 
 
 if __name__ == "__main__":
