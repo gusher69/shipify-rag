@@ -5908,8 +5908,16 @@ class TestCompanyOperationalTopicGuard(unittest.TestCase):
                     "ช่วยคิดชื่อร้านขายของออนไลน์", "จีนอยู่ทวีปอะไร"):
             self.assertFalse(self._matches(msg), f"{msg!r} must NOT match (should reach general chat)")
 
-    def test_general_advice_message_does_not_match(self):
-        self.assertFalse(self._matches("ถ้าจะเริ่มขายสินค้านำเข้าควรเริ่มยังไง"))
+    def test_general_advice_message_now_matches_as_company_domain(self):
+        """Strict Shipify RAG Grounding (2026-08-27) update -- "นำเข้า" is
+        now itself a required company-domain trigger word (Section 2 of
+        that task's own spec), superseding the earlier assumption that
+        this exact phrase should be general-chat-eligible. This message
+        already answers from genuine, well-grounded RAG evidence either
+        way (verified live in the prior task) -- staying on the company
+        path exclusively going forward is a strictly safer default, never
+        a functional regression for it."""
+        self.assertTrue(self._matches("ถ้าจะเริ่มขายสินค้านำเข้าควรเริ่มยังไง"))
 
     def test_company_gap_message_matches(self):
         self.assertTrue(self._matches("บริษัทมีประกัน All Risk ทุกออเดอร์ไหม"))
@@ -5934,6 +5942,26 @@ class TestCompanyOperationalTopicGuard(unittest.TestCase):
         TestGeneralChatFallback below for why that reordering was
         needed)."""
         for msg in ("CBM คืออะไร", "ทางรถกี่วัน", "โกดังจีนอยู่ที่ไหน", "นำเข้าสินค้ามีขั้นต่ำไหม"):
+            self.assertTrue(self._matches(msg), f"{msg!r} must match (must stay on company/RAG path)")
+
+    def test_strict_grounding_expanded_terms_match(self):
+        """Strict Shipify RAG Grounding (2026-08-27) -- Section 2 of that
+        task's own spec explicitly lists these as required company-domain
+        trigger words (Shipify, นำเข้า, ฝากสั่ง, ฝากโอน, การชำระเงิน, เคลม,
+        ยกเลิก, เงื่อนไข, English "order"/"tracking"). The RAG-042 hard
+        regression question itself is included since it's the case that
+        first proved "นำเข้า" was missing."""
+        for msg in (
+            "ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยมีอะไรบ้าง",
+            "Shipify ทำอะไร",
+            "ฝากสั่งกับฝากนำเข้าต่างกันยังไง",
+            "การชำระเงินทำยังไง",
+            "สินค้าแตกหักเคลมได้ไหม",
+            "ยกเลิกออเดอร์นี้ได้ไหม",
+            "เงื่อนไขการรับประกันเป็นยังไง",
+            "check my order status",
+            "tracking number อยู่ไหน",
+        ):
             self.assertTrue(self._matches(msg), f"{msg!r} must match (must stay on company/RAG path)")
 
 
@@ -6111,7 +6139,11 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         self.customer_lookup_id = _seed_action(
             self.reg, key="getdatacustomer", action_type="API", category="Customer Data",
             ai_description="ค้นหาข้อมูลลูกค้า ยอด Wallet และคูปองของลูกค้า",
-            keywords=["เช็กบิลของผม", "ดู wallet", "wallet ของผม", "เปลี่ยนที่อยู่จัดส่ง"])
+            keywords=["เช็กบิลของผม", "ดู wallet", "wallet ของผม", "เปลี่ยนที่อยู่จัดส่ง",
+                       # Strict Shipify RAG Grounding (2026-08-27) -- mirrors
+                       # the REAL production getdatacustomer keyword list,
+                       # which has bare "Wallet" (no "ดู"/"ของผม" required).
+                       "wallet"])
         self.reg.replace_parameters(self.customer_lookup_id, [
             {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
              "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
@@ -6194,6 +6226,19 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
 
     def test_wallet_check_still_requires_custcode(self):
         result = self._decide("ขอดู wallet ของผม")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_wallet_check_with_bare_pronoun_still_requires_custcode(self):
+        """Strict Shipify RAG Grounding (2026-08-27) -- confirmed live:
+        "Wallet ผมเหลือเท่าไหร่" (a genuine account-balance question,
+        using bare "ผม" without "ของ") was wrongly vetoed by the General
+        Informational Question Guard as if it were a topic-less how-to
+        question, since _REFERENCE_MARKER_RE only recognizes the
+        possessive "ของผม". Must still select the secured Business
+        Action and request CustCode -- never a public/general answer."""
+        result = self._decide("Wallet ผมเหลือเท่าไหร่")
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertEqual(ics.get("selected_business_action"), "getdatacustomer")
         self.assertIn("รหัสลูกค้า", result["reply"]["text"])
 
     def test_address_change_still_requires_custcode(self):

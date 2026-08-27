@@ -164,9 +164,68 @@ _PROTECTED_PATTERNS = [
 ]
 
 
+# Fuzzy-Correction-Only Phrase Guards (Strict Shipify RAG Grounding,
+# 2026-08-27) — a SEPARATE list from _PROTECTED_PATTERNS above, checked
+# ONLY by _find_fuzzy_spans (via _correction_protected_spans below), never
+# by rag/semantic_guard.py::_extract_identifiers. A domain_terms entry
+# only prevents the EXACT-length, EXACT-position window from being
+# overwritten (the `substr in vocab_set` check); it does nothing for a
+# DIFFERENT, one-character-shifted window that happens to align well
+# against some OTHER vocabulary/tag word instead. Confirmed live:
+# "ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยมีอะไรบ้าง" (a genuine RAG-042
+# question, no typo at all) still got "การนำเข้า" shifted one character to
+# "ารนำเข้า" and fuzzy-corrected to the registered vocabulary/tag term
+# "เรทนำเข้า" ("import rate"), sending a completely unrelated corrupted
+# query into retrieval and RAG-042 never being found. A protected PATTERN
+# (unlike a domain_terms entry) blocks every span that OVERLAPS it,
+# regardless of offset, and — critically — is never itself added to the
+# correction-target vocabulary, so (unlike registering the shifted
+# fragment itself as a domain_term, which was tried and rejected: it
+# started corrupting OTHER unrelated messages by becoming a fuzzy-
+# correction target in its own right) this cannot introduce a new
+# corruption anywhere else.
+#
+# Deliberately kept OUT of _PROTECTED_PATTERNS itself: that list is also
+# reused by rag/semantic_guard.py::_extract_identifiers to build each
+# side of the before/after entity diff a Canonical Query Rewrite is
+# checked against — confirmed live, putting these ordinary business
+# PHRASES there (as opposed to _PROTECTED_PATTERNS' actual identifiers:
+# URLs/emails/phone numbers/tracking codes/known abbreviations, which are
+# supposed to never appear/disappear across a rewrite) broke the
+# legitimate "ขอเรทเรือ" -> "อัตราค่าขนส่งทางเรือเท่าไหร่" canonical
+# rewrite: revealing "ทางเรือ" this way is exactly the SAME kind of safe,
+# structure-revealing completion the topic/attribute exemption in
+# semantic_guard.py already allows, not a genuinely introduced identifier.
+_FUZZY_CORRECTION_PHRASE_GUARDS = [
+    re.compile(r"การนำเข้า"),
+    # Same class, same mechanism — "นำเข้าสินค้า" ("import goods," a
+    # completely ordinary phrase, e.g. "สนใจนำเข้าสินค้าจากจีน") had its
+    # "นำเข้าสิน" window fuzzy-corrected to the vocabulary/tag term
+    # "นำเข้าจีน" for the identical reason.
+    re.compile(r"นำเข้าสินค้า"),
+    # Same class, same mechanism — "ทางเรือ" ("by sea," e.g. "ทางรถกับ
+    # ทางเรือกี่วัน") had "เรื" fuzzy-corrected into "เรท" ("rate") for
+    # the identical reason (one edit apart, "เรท" a registered
+    # vocabulary/tag term).
+    re.compile(r"ทางเรือ"),
+]
+
+
 def _protected_spans(text: str) -> List[Tuple[int, int]]:
     spans = []
     for pat in _PROTECTED_PATTERNS:
+        for m in pat.finditer(text):
+            spans.append((m.start(), m.end()))
+    return spans
+
+
+def _correction_protected_spans(text: str) -> List[Tuple[int, int]]:
+    """_protected_spans() PLUS _FUZZY_CORRECTION_PHRASE_GUARDS — used only
+    by _find_fuzzy_spans (fuzzy correction itself), never by
+    rag/semantic_guard.py's identifier diff (see that list's own
+    docstring for why the two must stay separate)."""
+    spans = _protected_spans(text)
+    for pat in _FUZZY_CORRECTION_PHRASE_GUARDS:
         for m in pat.finditer(text):
             spans.append((m.start(), m.end()))
     return spans
@@ -306,7 +365,7 @@ def _find_fuzzy_spans(text: str, vocabulary: List[str],
     max edit distance, isn't already a DIFFERENT valid vocabulary word,
     doesn't cross a whitespace boundary the word itself doesn't have, and
     doesn't overlap a protected span."""
-    protected = _protected_spans(text) + (extra_protected or [])
+    protected = _correction_protected_spans(text) + (extra_protected or [])
     vocab_set = set(vocabulary)
     candidates: List[Tuple[int, int, str, str, int]] = []
 

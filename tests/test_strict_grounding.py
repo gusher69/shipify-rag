@@ -46,5 +46,40 @@ class TestStrictGroundingDefault(unittest.TestCase):
         self.assertNotIn("STRICT GROUNDING RULES", built.final_prompt_text)
 
 
+class TestStrictGroundingForbidsIndustryFiller(unittest.TestCase):
+    """Strict Shipify RAG Grounding (2026-08-27, RAG-042 hard regression)
+    -- confirmed live: even with RAG-042's genuine content correctly
+    retrieved and placed in Context, the LLM still completed the answer
+    with generic industry-standard import steps (supplier vetting,
+    contract negotiation, invoices/certificates, customs clearance, HS
+    codes, import duties/taxes) that are not written in RAG-042 at all.
+    The pre-existing STRICT_GROUNDING_RULES (focused on "don't substitute
+    a different but related attribute", e.g. runtime vs package version)
+    did not cover "don't complete an apparently missing PROCESS STEP
+    using outside/industry knowledge" -- this extends the SAME rules
+    block with that explicit case, reusing the task's own required
+    wording."""
+
+    def test_grounding_rules_forbid_completing_missing_process_steps(self):
+        text = pb.STRICT_GROUNDING_RULES
+        self.assertIn("PROCESS/PROCEDURE", text)
+        self.assertIn("never complete an apparently missing step", text)
+
+    def test_grounding_rules_name_the_forbidden_rag_042_categories(self):
+        """The exact forbidden-output categories from the task's own
+        Section 6 (customs/HS-code/import-license style additions)."""
+        text = pb.STRICT_GROUNDING_RULES
+        for term in ("customs clearance", "duties/taxes", "HS codes", "import licenses"):
+            self.assertIn(term, text)
+
+    def test_build_prompt_carries_the_process_rule_through(self):
+        template = pb.PromptTemplate(id="t1", name="Test", version="1", system_prompt="Base prompt.")
+        built = pb.build_prompt("ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยมีอะไรบ้าง",
+                                 "Question: ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยทำอย่างไร\n"
+                                 "Answer: 1. คัดลอกที่อยู่โกดังจีน... 2. ร้านจีนจัดส่งไปโกดังจีน...",
+                                 template=template)
+        self.assertIn("never complete an apparently missing step", built.final_prompt_text)
+
+
 if __name__ == "__main__":
     unittest.main()

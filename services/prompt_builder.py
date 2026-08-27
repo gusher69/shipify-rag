@@ -44,7 +44,16 @@ STRICT_GROUNDING_RULES = (
     "- Do not use hedging/general-advice phrases (\"โดยทั่วไป\", \"แนะนำให้ใช้\", \"ควรใช้\", "
     "\"generally\", \"it is recommended\", \"you should use\") to fill a gap in the Context.\n"
     "- Do not add an escalation/handoff sentence (e.g. offering to check with a team) unless an "
-    "active policy note actually triggered one."
+    "active policy note actually triggered one.\n"
+    "- When the question asks about a PROCESS/PROCEDURE (steps, how something is done), use ONLY "
+    "the steps/facts actually written in the Context, in that order — never add a step, "
+    "requirement, fee, timeline, or legal/compliance detail (e.g. supplier vetting, negotiation, "
+    "invoices/certificates, customs clearance, duties/taxes, HS codes, import licenses/permits) "
+    "just because it is standard practice for that general topic elsewhere in the world. A process "
+    "described in the Context is treated as COMPLETE as given — you may summarize, reorder for "
+    "readability, and make the wording natural, but never complete an apparently missing step using "
+    "outside/industry knowledge. If the Context only covers PART of what was asked, answer that part "
+    "and say the rest is not confirmed, rather than filling the gap with plausible-sounding steps."
 )
 
 

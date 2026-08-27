@@ -2031,11 +2031,29 @@ class DecisionEngine:
                     if selected and _QUESTION_MARKER_RE.search(message or "") \
                             and not any("parameter identifier pattern" in r for r in (selected.get("_reasons") or [])):
                         is_company_policy_question = "บริษัท" in (message or "")
+                        # Strict Shipify RAG Grounding (2026-08-27) —
+                        # confirmed live: "Wallet ผมเหลือเท่าไหร่" (a genuine
+                        # account-specific balance question) was wrongly
+                        # vetoed here too — _REFERENCE_MARKER_RE only
+                        # recognizes the possessive "ของผม" ("of mine"),
+                        # never the bare speaker pronoun "ผม" used without
+                        # "ของ" (equally a clear self-reference in Thai,
+                        # e.g. "...ผมเหลือเท่าไหร่" = "...I have left"). A
+                        # narrow, local addition (not broadening the SHARED
+                        # _REFERENCE_MARKER_RE, which other call sites also
+                        # depend on) — bare "ผม/ฉัน/ดิฉัน" only counts here
+                        # when this veto's OTHER conditions (a Business
+                        # Action already matched, question-marker present,
+                        # no request marker) are already true, so it can
+                        # only ever narrow this one veto further, never
+                        # widen anything else.
+                        _bare_self_reference = bool(re.search(r"ผม|ฉัน|ดิฉัน", message or ""))
                         is_unrequested_howto_question = (
                             not _REQUEST_MARKER_RE.search(message or "")
                             and selected.get("action_type") in ("API", "WEBHOOK")
                             and len(_split_clauses(message or "")) <= 1
                             and not _REFERENCE_MARKER_RE.search(message or "")
+                            and not _bare_self_reference
                             and not any(_validate_generic_identifier(tok)
                                         for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
                         )

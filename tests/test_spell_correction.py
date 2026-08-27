@@ -149,5 +149,59 @@ class TestVocabularySources(unittest.TestCase):
         self.assertIn("CBเอ็ม", fb["direct_corrections"])
 
 
+class TestStrictShipifyRagGroundingProtectedPhrases(unittest.TestCase):
+    """Strict Shipify RAG Grounding (2026-08-27, RAG-042 hard regression)
+    -- confirmed live: "ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยมีอะไรบ้าง" (a
+    genuine RAG-042 question, no typo at all) had "การนำเข้า" shifted one
+    character to "ารนำเข้า" and fuzzy-corrected to the registered
+    vocabulary/tag term "เรทนำเข้า" ("import rate"), corrupting the query
+    before it ever reached retrieval. A domain_terms entry only protects
+    the EXACT-position window (tried and found insufficient -- see
+    services/... this class's own history); a _PROTECTED_PATTERNS regex
+    entry blocks every OVERLAPPING span regardless of offset, and (unlike
+    registering the shifted fragment itself as a domain_term, which was
+    tried and reverted: it started corrupting OTHER unrelated messages by
+    becoming a fuzzy-correction target in its own right) is never itself
+    added to the correction-target vocabulary."""
+
+    def test_rag_042_question_is_never_corrected(self):
+        r = correct_query("ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยมีอะไรบ้าง")
+        self.assertEqual(r["corrected_query"], "ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยมีอะไรบ้าง")
+        self.assertEqual(r["corrections"], [])
+
+    def test_import_goods_phrase_is_never_corrected(self):
+        r = correct_query("สนใจนำเข้าสินค้าจากจีน")
+        self.assertEqual(r["corrected_query"], "สนใจนำเข้าสินค้าจากจีน")
+        self.assertEqual(r["corrections"], [])
+
+    def test_by_sea_phrase_is_never_corrected(self):
+        r = correct_query("ทางรถกับทางเรือกี่วัน")
+        self.assertEqual(r["corrected_query"], "ทางรถกับทางเรือกี่วัน")
+        self.assertEqual(r["corrections"], [])
+
+    def test_documented_rate_typo_still_corrects(self):
+        """Regression guard: protecting "ทางเรือ" must not disturb the
+        documented, legitimate "เรด"->"เรท" (rate) typo fix, which shares
+        the same target vocabulary word."""
+        r = correct_query("เรดทางเรือ")
+        self.assertEqual(r["corrected_query"], "เรททางเรือ")
+
+    def test_phrase_guards_are_not_treated_as_identifiers(self):
+        """Confirmed live: adding these phrases to the SHARED
+        _PROTECTED_PATTERNS list (used by rag/semantic_guard.py's
+        identifier diff, not just this module's own fuzzy correction)
+        broke Canonical Query Rewrite -- "ขอเรทเรือ" ->
+        "อัตราค่าขนส่งทางเรือเท่าไหร่" was rejected as "introducing a new
+        identifier" the moment "ทางเรือ" appeared in the rewritten
+        candidate but not the original. The fix keeps these phrase
+        guards in a SEPARATE list (_FUZZY_CORRECTION_PHRASE_GUARDS) that
+        _protected_spans() -- what semantic_guard.py actually calls --
+        never sees."""
+        from rag.spell_correction import _protected_spans, _correction_protected_spans
+        text = "ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยมีอะไรบ้าง"
+        self.assertEqual(_protected_spans(text), [])
+        self.assertGreater(len(_correction_protected_spans(text)), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
