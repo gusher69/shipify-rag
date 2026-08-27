@@ -48,23 +48,27 @@ _URGENCY_SIGNAL_RE = re.compile(r"รีบ|ด่วน|ตามมาหล�
 _COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำรุด|เสียหาย|ของผิด|ของขาด|ตกหล่น|ไม่ครบ", re.IGNORECASE)
 
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
-# 2026-08-27) — a CLOSED, explicit deny-list, directly reusing the exact
-# topic taxonomy this feature's own spec lists as never-to-be-guessed by
-# a general LLM (company policy, shipping rate/duration, refund/warranty,
+# 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization)
+# — a CLOSED, explicit deny-list, directly reusing the exact topic
+# taxonomy this feature's own spec lists as never-to-be-guessed by a
+# general LLM (company policy, shipping rate/duration, refund/warranty,
 # order/shipment status, customer/wallet/coupon data, warehouse status,
 # prices, promotions), plus the same self-reference markers ("ของผม" etc)
 # already established elsewhere in this codebase for "this is about MY
-# OWN account" detection. Used ONLY inside the existing zero-evidence
-# Answerability Gate branch below (never a new routing layer, never
-# touches Business Action selection, never runs before RAG/retrieval has
-# already found no reliable evidence) to decide whether that branch's
-# EXISTING safe-uncertainty fallback should stay as-is (this matches —
-# default, unchanged behavior) or whether the message is safe to answer
-# as ordinary general conversation instead (this does NOT match).
-# Deliberately conservative: matching this regex is the ONLY way to
-# reach general-chat mode is to NOT match it, so anything ambiguous or
-# genuinely company-adjacent defaults to the existing safe fallback,
-# never the other way around.
+# OWN account" detection, plus a few precise, low-collision domain terms
+# (CBM, ทางรถ/ทางเรือ shipping modes, ขั้นต่ำ) added once this check
+# started running BEFORE consulting RAG evidence quality at all (see the
+# General Chat Fallback branch below) — without them, a genuinely
+# company-specific question that doesn't happen to name "บริษัท" (e.g.
+# "CBM คืออะไร", "ทางรถกี่วัน") would incorrectly skip its own real,
+# well-grounded company answer in favor of general chat. Used to decide
+# whether a message should even be CONSIDERED against RAG evidence at all
+# (this matches — stays on the existing company/RAG path, unchanged) or
+# is safe to answer as ordinary general conversation instead (this does
+# NOT match). Deliberately conservative: matching this regex is the ONLY
+# way to stay on the company path is to match it, so anything ambiguous
+# or genuinely company-adjacent defaults to the existing safe/RAG
+# behavior, never the other way around.
 _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     r"บริษัท|ของผม|ของฉัน|ของดิฉัน|"
     r"นโยบาย|ประกัน|ค่าส่ง|ค่าขนส่ง|เรท|ราคา|"
@@ -72,7 +76,8 @@ _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     r"ออเดอร์|คำสั่งซื้อ|"
     r"shipment|พัสดุ|บิลขนส่ง|ติดตาม|"
     r"ข้อมูลลูกค้า|wallet|กระเป๋าเงิน|ยอดเงิน|"
-    r"คูปอง|โกดัง|โปรโมชั่น|โปรโมชัน|บริการ",
+    r"คูปอง|โกดัง|โปรโมชั่น|โปรโมชัน|บริการ|"
+    r"cbm|ทางรถ|ทางเรือ|ขั้นต่ำ",
     re.IGNORECASE,
 )
 
@@ -710,18 +715,58 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
-    elif conf_result.answerability == "no_information" and (
-            _COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
-            or _URGENCY_SIGNAL_RE.search(question or "")
-            or _COMPLAINT_SIGNAL_RE.search(question or "")):
-        # An urgency/complaint-signaled message (checked here via the SAME
-        # regexes the Zero-Evidence Fallback Tone Guard below already
-        # uses) is always about some issue the company is expected to
-        # address — even when it names no explicit company/operational
-        # noun of its own (e.g. "ตามมาหลายวันแล้วครับ ของรีบใช้ ลูกค้าผมก็
-        # ตามอยู่") — so it must stay on this safe-fallback path (with its
-        # tone acknowledgement below), never be redirected to general
-        # chat mode just because it doesn't literally name a topic noun.
+    elif not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
+              or _URGENCY_SIGNAL_RE.search(question or "")
+              or _COMPLAINT_SIGNAL_RE.search(question or "")):
+        # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27;
+        # moved ahead of the Answerability Gate 2026-08-27 same day — Final
+        # Hybrid Stabilization) — confirmed live: "จีนอยู่ทวีปอะไร" (a pure
+        # general-knowledge question) still got answered with the
+        # company's China-warehouse-address FAQ, because that chunk's
+        # ONLY shared word with the question is the generic noun "จีน" —
+        # enough for rag/confidence.py's has_literal_evidence check to
+        # call it "reliable," so conf_result.answerability came back
+        # direct_answer/partial_answer, never no_information, and this
+        # branch (originally gated on == "no_information") never ran.
+        # Checking topic BEFORE consulting answerability at all — the
+        # question's own nature decides, never retrieval-quality alone —
+        # is what the task itself requires ("even if irrelevant company
+        # RAG happens to retrieve lexical matches"). _COMPANY_OPERATIONAL_
+        # TOPIC_RE was extended with a few precise, low-collision domain
+        # terms (CBM, ทางรถ, ทางเรือ, ขั้นต่ำ) specifically so genuinely
+        # company-specific questions that happen not to name "บริษัท"
+        # (e.g. "CBM คืออะไร", "ทางรถกี่วัน") are never pulled into this
+        # branch — matching examples from BOTH sides of this exact
+        # distinction were verified live before this reordering shipped.
+        try:
+            general_chat_prompt = build_prompt(
+                canonical_question, "", template_id=template_id, policy_notes=policy.notes,
+                history=history, retrieval_confidence=retrieval_confidence_result["retrieval_confidence"],
+                answer_plan=answer_plan, general_chat_mode=True)
+            llm = get_llm_service()
+            llm_response = llm.generate(general_chat_prompt.messages, model=OPENAI_CHAT_MODEL,
+                                         temperature=temperature, max_tokens=max_tokens)
+            stages.append(Stage("LLM", "success", (time.time() - t0) * 1000,
+                                 f"model={llm_response.model} (general chat mode — no company evidence used)"))
+            services_used.append({"name": "LLMService", "status": "success"})
+            answer_text = llm_response.text
+            input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens
+            llm_latency = llm_response.latency_ms
+            llm_failed = False
+        except Exception as e:
+            stages.append(Stage("LLM", "failed", (time.time() - t0) * 1000, str(e)))
+            services_used.append({"name": "LLMService", "status": "failed"})
+            answer_text = "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ"
+            input_tokens = output_tokens = 0
+            llm_latency = 0.0
+            llm_failed = True
+    elif conf_result.answerability == "no_information":
+        # Every message reaching this branch already matched the company/
+        # operational/urgency/complaint check above (the General Chat
+        # Fallback branch, immediately above, is what catches everything
+        # else) — so this stays the SAME deterministic safe-fallback for a
+        # genuinely company-specific question with zero reliable evidence,
+        # completely unchanged from before this reordering.
         #
         # Answerability Gate (Task 04B, 2026-08-26) — retrieval returning
         # a non-empty Top-K is never the same thing as the question being
@@ -779,49 +824,6 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
-    elif conf_result.answerability == "no_information":
-        # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27)
-        # — reached only when the Answerability Gate found no reliable
-        # company evidence AND (see _COMPANY_OPERATIONAL_TOPIC_RE above)
-        # the question itself carries no company/operational topic signal
-        # either — e.g. "จีนอยู่ทวีปอะไร" or "ช่วยคิดชื่อร้านขายของออนไลน์".
-        # Confirmed live: without this branch, such a question still
-        # reached the normal LLM branch below with whatever (irrelevant)
-        # chunks retrieval happened to return as "Context" plus
-        # STRICT_GROUNDING_RULES' "answer only from Context" instruction —
-        # producing a wrong, contaminated answer (e.g. a China-geography
-        # question answered with the company's China-warehouse address)
-        # rather than a plain general-knowledge answer. Builds a SEPARATE
-        # prompt via the SAME centralized build_prompt() (never a second,
-        # ad-hoc prompt-assembly path) with EMPTY context (so there is no
-        # irrelevant chunk to be tempted into using) and
-        # general_chat_mode=True (swaps STRICT_GROUNDING_RULES for
-        # GENERAL_CHAT_GUIDANCE — see services/prompt_builder.py) — same
-        # persona/template, same Human CS tone, just permitted to use its
-        # own general knowledge for this one turn and explicitly warned
-        # never to present that as an official Shipify fact.
-        try:
-            general_chat_prompt = build_prompt(
-                canonical_question, "", template_id=template_id, policy_notes=policy.notes,
-                history=history, retrieval_confidence=retrieval_confidence_result["retrieval_confidence"],
-                answer_plan=answer_plan, general_chat_mode=True)
-            llm = get_llm_service()
-            llm_response = llm.generate(general_chat_prompt.messages, model=OPENAI_CHAT_MODEL,
-                                         temperature=temperature, max_tokens=max_tokens)
-            stages.append(Stage("LLM", "success", (time.time() - t0) * 1000,
-                                 f"model={llm_response.model} (general chat mode — no company evidence used)"))
-            services_used.append({"name": "LLMService", "status": "success"})
-            answer_text = llm_response.text
-            input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens
-            llm_latency = llm_response.latency_ms
-            llm_failed = False
-        except Exception as e:
-            stages.append(Stage("LLM", "failed", (time.time() - t0) * 1000, str(e)))
-            services_used.append({"name": "LLMService", "status": "failed"})
-            answer_text = "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ"
-            input_tokens = output_tokens = 0
-            llm_latency = 0.0
-            llm_failed = True
     else:
         try:
             llm = get_llm_service()
@@ -862,6 +864,19 @@ def run_playground_turn(
         attachment_plan = {"should_send": False, "selected_attachments": [], "attachment_order": [],
                             "selection_reason": "slot filling turn (follow-up question, escalation, or pending "
                                                  "ERP acknowledgement) — never an evidence-chunk attachment",
+                            "omitted_attachments": []}
+    elif not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
+              or _URGENCY_SIGNAL_RE.search(question or "")
+              or _COMPLAINT_SIGNAL_RE.search(question or "")):
+        # General Chat Fallback (see the matching branch above) answers
+        # from the LLM's own general knowledge with empty context — the
+        # retrieved context_chunks here are whatever (possibly irrelevant)
+        # evidence the company RAG pipeline happened to return and were
+        # never actually shown to the LLM; attaching one of them (e.g. a
+        # company image/file) to a general-chat answer would be exactly
+        # as wrong as using it as text evidence.
+        attachment_plan = {"should_send": False, "selected_attachments": [], "attachment_order": [],
+                            "selection_reason": "general chat mode — no company evidence-chunk attachment",
                             "omitted_attachments": []}
     elif conf_result.answerability == "no_information":
         # Answerability Gate (Task 04B, 2026-08-26) — a safe-fallback

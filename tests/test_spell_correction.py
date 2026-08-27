@@ -99,6 +99,29 @@ class TestSafetyAndAmbiguity(unittest.TestCase):
         self.assertIn("ส่ง", r["corrected_query"])
         self.assertNotIn("ขนส่ง", r["corrected_query"])
 
+    def test_common_word_khit_is_not_overwritten_by_khiw(self):
+        """Final Hybrid Stabilization (2026-08-27, Case 1) -- confirmed
+        live: "คิด" (a completely ordinary word, "to think/compose") was
+        being fuzzy-corrected to "คิว" (a real vocabulary term via the
+        CBM synonym group, one edit-distance away) purely because "คิด"
+        itself was never registered as a known-valid word, which then
+        triggered CBM/cubic-meter query expansion and contaminated
+        retrieval for any "ช่วยคิด..." creative request. Fixed by adding
+        "คิด" to data/spell_correction_fallback.json's domain_terms --
+        the SAME existing "never overwrite an already-valid vocabulary
+        word" guard this class's sibling test above already exercises,
+        no code change."""
+        r = correct_query("ช่วยคิดข้อความขายของให้หน่อย")
+        self.assertEqual(r["corrected_query"], "ช่วยคิดข้อความขายของให้หน่อย")
+        self.assertEqual(r["corrections"], [])
+
+    def test_khiw_cbm_usage_is_still_unaffected(self):
+        """Registering "คิด" as a valid word must not disturb "คิว"'s own
+        legitimate use in a real CBM-unit question."""
+        r = correct_query("1 คิว เท่ากับกี่ CBM")
+        self.assertIn("คิว", r["corrected_query"])
+        self.assertIn("CBM", r["corrected_query"])
+
 
 class TestEditDistanceAndAlignment(unittest.TestCase):
     def test_edit_distance_basic(self):

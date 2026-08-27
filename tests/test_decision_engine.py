@@ -5915,17 +5915,26 @@ class TestCompanyOperationalTopicGuard(unittest.TestCase):
         self.assertTrue(self._matches("บริษัทมีประกัน All Risk ทุกออเดอร์ไหม"))
 
     def test_private_action_message_matches(self):
-        """Even though this specific phrasing doesn't currently match any
-        Business Action's own configured keywords (a pre-existing,
-        separate config gap, out of this feature's scope), it must still
-        be treated as company/private-topic here -- never redirected to
-        an unmocked general LLM that could invent shipment data."""
+        """Must be treated as company/private-topic here regardless of
+        whether it also matches a Business Action's own keywords (Case 3,
+        Final Hybrid Stabilization, separately fixed the keyword gap for
+        this exact phrasing) -- never redirected to an unmocked general
+        LLM that could invent shipment data."""
         self.assertTrue(self._matches("เช็ก Shipment ของผมให้หน่อย"))
 
     def test_company_rag_message_with_explicit_company_subject_matches(self):
-        # "ทางรถกี่วัน" normally succeeds via real RAG evidence and never
-        # reaches this guard at all -- not tested here for that reason.
         self.assertTrue(self._matches("บริษัทมีบริการอะไรบ้าง"))
+
+    def test_domain_specific_company_rag_terms_match(self):
+        """Final Hybrid Stabilization (2026-08-27, Case 2) -- these precise
+        domain terms (CBM, transport mode, minimum-order) were added so a
+        genuinely company-specific question that doesn't happen to name
+        "บริษัท" still stays on the company/RAG path now that this check
+        runs BEFORE consulting RAG evidence quality at all (see
+        TestGeneralChatFallback below for why that reordering was
+        needed)."""
+        for msg in ("CBM คืออะไร", "ทางรถกี่วัน", "โกดังจีนอยู่ที่ไหน", "นำเข้าสินค้ามีขั้นต่ำไหม"):
+            self.assertTrue(self._matches(msg), f"{msg!r} must match (must stay on company/RAG path)")
 
 
 class TestGeneralChatFallback(unittest.TestCase):
@@ -5943,6 +5952,55 @@ class TestGeneralChatFallback(unittest.TestCase):
             result = run_playground_turn("จีนอยู่ทวีปอะไร", history=[])
         self.assertEqual(result.answer, "เอเชียค่ะ")
         self.assertNotIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", result.answer)
+
+    def test_general_chat_bypasses_spurious_direct_answer_evidence(self):
+        """Final Hybrid Stabilization (2026-08-27, Case 2) -- the exact
+        live bug this reordering fixes: "จีนอยู่ทวีปอะไร" retrieved the
+        company's China-warehouse-address FAQ, whose ONLY shared word
+        with the question is the generic noun "จีน" -- enough for
+        rag/confidence.py's has_literal_evidence check to call it
+        "reliable," so compute_confidence returned answerability=
+        "direct_answer" (never "no_information"), and the OLD no_
+        information-scoped general chat branch never even ran; the LLM
+        then answered from that irrelevant chunk instead. Mocks
+        compute_confidence directly to reproduce that exact spurious
+        verdict and proves the (now topic-first) General Chat Fallback
+        still engages and ignores it."""
+        from services.playground_orchestrator import run_playground_turn
+        from rag.confidence import ConfidenceResult
+        spurious = ConfidenceResult(answer_confidence=0.85, answerability="direct_answer",
+                                     raw_vector_similarity=0.42, hybrid_retrieval_score=0.42,
+                                     evidence_count=1, reason="spurious literal overlap on a generic word")
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.compute_confidence", return_value=spurious), \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            mock_get_llm.return_value.generate.return_value = _fake_llm_response("ประเทศจีนอยู่ในทวีปเอเชียค่ะ")
+            result = run_playground_turn("จีนอยู่ทวีปอะไร", history=[])
+        self.assertEqual(result.answer, "ประเทศจีนอยู่ในทวีปเอเชียค่ะ")
+
+    def test_company_topic_with_spurious_labeling_still_uses_normal_rag_path(self):
+        """Regression guard, the other direction: a genuinely company-
+        specific message (matches _COMPANY_OPERATIONAL_TOPIC_RE) must
+        stay on the normal RAG/safe-fallback path even under the SAME
+        "direct_answer" classification -- proves the reordering didn't
+        accidentally make ALL messages skip evidence-based answering."""
+        from services.playground_orchestrator import run_playground_turn
+        from rag.confidence import ConfidenceResult
+        strong = ConfidenceResult(answer_confidence=0.9, answerability="direct_answer",
+                                   raw_vector_similarity=1.0, hybrid_retrieval_score=1.0,
+                                   evidence_count=1, reason="genuine exact FAQ match")
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.compute_confidence", return_value=strong), \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            mock_get_llm.return_value.generate.return_value = _fake_llm_response(
+                "CBM คือปริมาตรของสินค้าค่ะ")
+            run_playground_turn("CBM คืออะไร", history=[])
+        called_messages = mock_get_llm.return_value.generate.call_args[0][0]
+        system_content = called_messages[0]["content"]
+        from services.prompt_builder import GENERAL_CHAT_GUIDANCE
+        self.assertNotIn(GENERAL_CHAT_GUIDANCE.strip(), system_content)
 
     def test_general_chat_prompt_uses_general_chat_guidance_not_strict_grounding(self):
         from services.playground_orchestrator import run_playground_turn
@@ -6034,7 +6092,14 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         self.shipment_action_id = _seed_action(
             self.reg, key="searchdatashipmentlist", action_type="API", category="Customer Shipment Retrieval",
             ai_description="ค้นหารายการบิลขนส่งของลูกค้า โดยค้นหาจากรหัสลูกค้า พร้อมช่วงวันที่รับเข้าจีน วันที่ส่งออก วันที่ถึงไทย",
-            keywords=["พัสดุ", "tracking", "ติดตามพัสดุ", "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "เข้าไทย", "สถานะรับเข้าไทย"])
+            keywords=["พัสดุ", "tracking", "ติดตามพัสดุ", "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "เข้าไทย", "สถานะรับเข้าไทย",
+                       # Case 3, Final Hybrid Stabilization (2026-08-27) -- the bare
+                       # English word "shipment" was missing entirely, so "เช็ก
+                       # Shipment ของผมให้หน่อย" matched no Business Action at all
+                       # and got a generic RAG safe-uncertainty reply instead of
+                       # the secured shipment-lookup workflow. Mirrors the exact
+                       # production keyword addition, verified live.
+                       "shipment"])
         self.reg.replace_parameters(self.shipment_action_id, [
             {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
              "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
@@ -6046,7 +6111,7 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         self.customer_lookup_id = _seed_action(
             self.reg, key="getdatacustomer", action_type="API", category="Customer Data",
             ai_description="ค้นหาข้อมูลลูกค้า ยอด Wallet และคูปองของลูกค้า",
-            keywords=["เช็กบิลของผม", "เช็ก shipment", "ดู wallet", "wallet ของผม", "เปลี่ยนที่อยู่จัดส่ง"])
+            keywords=["เช็กบิลของผม", "ดู wallet", "wallet ของผม", "เปลี่ยนที่อยู่จัดส่ง"])
         self.reg.replace_parameters(self.customer_lookup_id, [
             {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
              "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
@@ -6142,6 +6207,20 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         result = self._decide("ของเข้าไทยหรือยังครับ")
         ics = (result.get("developer") or {}).get("information_collection_status") or {}
         self.assertEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
+
+    # ---- Case 3, Final Hybrid Stabilization (2026-08-27) ----
+
+    def test_shipment_english_word_selects_secured_shipment_workflow(self):
+        """The exact reproduction case: a private/account-specific
+        shipment request phrased with the bare English word "Shipment"
+        must select the secured shipment-lookup Business Action and
+        request the genuinely required CustCode -- never a generic RAG
+        safe-uncertainty reply, and never private data without
+        authorization."""
+        result = self._decide("เช็ก Shipment ของผมให้หน่อย")
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
 
     # ---- General Company Policy Question Guard (Gap C) ----
 
