@@ -5737,5 +5737,123 @@ class TestAnswerabilityGateFallbackWording(unittest.TestCase):
         self.assertIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", reply_text)
 
 
+# General Import Advice Routing Fix (2026-08-27) — confirmed live (single-
+# turn, no history involved): "มีสินค้าอะไรแนะนำไหมสำหรับนำเข้าไทย" falsely
+# matched SearchDataShipmentList's own configured keyword "เข้าไทย"
+# (intended for "has my shipment arrived in Thailand" status questions),
+# because services/action_selection_primitives.py::_keyword_matches does
+# plain substring matching for Thai keywords (deliberately, since Thai has
+# no word boundaries) -- "เข้าไทย" is a literal substring of "นำเข้าไทย"
+# ("import to Thailand", an unrelated business term). Root cause proven via
+# a real registry query: the ONLY keyword anywhere in the registry
+# containing "เข้า" is SearchDataShipmentList's "เข้าไทย"/"สถานะรับเข้าไทย".
+# Fix: a single, narrow guard in _keyword_matches -- a keyword starting
+# with "เข้า" must not match when immediately preceded by "นำ" in the
+# message. General Thai substring matching (no word-boundary guard) is
+# deliberately unchanged for every other keyword.
+class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        # Mirrors the REAL production SearchDataShipmentList action closely
+        # enough to reproduce the exact collision: same trigger keyword.
+        self.shipment_action_id = _seed_action(
+            self.reg, key="searchdatashipmentlist", action_type="API", category="Customer Shipment Retrieval",
+            ai_description="ค้นหารายการบิลขนส่งของลูกค้า โดยค้นหาจากรหัสลูกค้า พร้อมช่วงวันที่รับเข้าจีน วันที่ส่งออก วันที่ถึงไทย",
+            keywords=["พัสดุ", "tracking", "ติดตามพัสดุ", "เมื่อไหร่จะถึง", "ถึงไทยหรือยัง", "เข้าไทย", "สถานะรับเข้าไทย"])
+        self.reg.replace_parameters(self.shipment_action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        self.reg.upsert_execution(self.shipment_action_id, {"endpoint": "https://example.test/shipments", "http_method": "GET"})
+
+        # A second, genuinely customer-specific action (bill/wallet-style
+        # lookup) -- proves legitimate CustCode-gating is unaffected.
+        self.customer_lookup_id = _seed_action(
+            self.reg, key="getdatacustomer", action_type="API", category="Customer Data",
+            ai_description="ค้นหาข้อมูลลูกค้า ยอด Wallet และคูปองของลูกค้า",
+            keywords=["เช็กบิลของผม", "เช็ก shipment", "ดู wallet", "wallet ของผม", "เปลี่ยนที่อยู่จัดส่ง"])
+        self.reg.replace_parameters(self.customer_lookup_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        self.reg.upsert_execution(self.customer_lookup_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+
+        self.engine = _engine_with_registry(self.reg)
+
+    def _decide(self, message, history=None):
+        # A message that no longer matches any Business Action falls
+        # through to the RAG path (services/playground_orchestrator.py) --
+        # mocked here (zero evidence) so this test never makes a real
+        # embedding/network call, matching this file's own convention.
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
+            mock_get_rag.return_value.retrieve.return_value = []
+            return self.engine.decide(message, history=history or [],
+                                       context={"channel": "line", "developer_mode": True})
+
+    # ---- MUST NOT REQUEST CUSTCODE ----
+
+    def test_general_import_interest_does_not_request_custcode(self):
+        result = self._decide("สนใจนำเข้าสินค้าครับ")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_product_recommendation_for_import_does_not_request_custcode(self):
+        """The exact reported reproduction case -- single turn, no history."""
+        result = self._decide("มีสินค้าอะไรแนะนำไหมสำหรับนำเข้าไทย")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
+
+    def test_how_to_start_importing_does_not_request_custcode(self):
+        result = self._decide("ถ้าอยากเริ่มนำเข้าสินค้าควรเริ่มยังไง")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_which_product_category_to_import_does_not_request_custcode(self):
+        result = self._decide("สินค้าประเภทไหนน่านำเข้าครับ")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_wants_to_resell_imported_goods_does_not_request_custcode(self):
+        result = self._decide("อยากขายของนำเข้า มีอะไรแนะนำไหม")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_reproduction_is_single_turn_not_history_related(self):
+        """Turn 2 alone (fresh session) must behave identically to Turn 2
+        preceded by Turn 1's history -- confirms this was never a context-
+        contamination bug."""
+        turn2 = "มีสินค้าอะไรแนะนำไหมสำหรับนำเข้าไทย"
+        alone = self._decide(turn2)
+        turn1_result = self._decide("สนใจนำเข้าสินค้ามาไทย")
+        history = [{"role": "user", "content": "สนใจนำเข้าสินค้ามาไทย"},
+                   {"role": "assistant", "content": turn1_result["reply"]["text"]}]
+        with_history = self._decide(turn2, history=history)
+        self.assertNotIn("รหัสลูกค้า", alone["reply"]["text"])
+        self.assertNotIn("รหัสลูกค้า", with_history["reply"]["text"])
+
+    # ---- MUST STILL REQUIRE CUSTOMER CONTEXT (regression -- unaffected) ----
+
+    def test_bill_check_still_requires_custcode(self):
+        result = self._decide("ช่วยเช็กบิลของผมให้หน่อย")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_shipment_check_still_requires_custcode(self):
+        result = self._decide("ช่วยเช็ก shipment นี้ให้หน่อย")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_wallet_check_still_requires_custcode(self):
+        result = self._decide("ขอดู wallet ของผม")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_address_change_still_requires_custcode(self):
+        result = self._decide("อยากเปลี่ยนที่อยู่จัดส่ง")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_genuine_arrival_status_keyword_still_matches(self):
+        """The "เข้าไทย" keyword must still work for its ORIGINAL intended
+        purpose -- a genuine shipment-arrival status question, never
+        preceded by "นำ" (import)."""
+        result = self._decide("ของเข้าไทยหรือยังครับ")
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
+
+
 if __name__ == "__main__":
     unittest.main()

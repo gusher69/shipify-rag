@@ -197,6 +197,20 @@ def _keyword_matches(kw: str, message_l: str) -> bool:
         return False
     if _ASCII_KEYWORD_RE.match(kw_l):
         return re.search(r"(?<![A-Za-z0-9])" + re.escape(kw_l) + r"(?![A-Za-z0-9])", message_l) is not None
+    # Import/Arrival Compound-Word Guard (2026-08-27) — a keyword starting
+    # with "เข้า" (enter/arrive, e.g. "เข้าไทย" = arrived in Thailand) must
+    # never match as the tail of "นำเข้า" (import, an unrelated meaning) in
+    # the message — confirmed live: "นำเข้าไทย" (a general "import to
+    # Thailand" business question, e.g. "มีสินค้าอะไรแนะนำไหมสำหรับนำเข้าไทย")
+    # falsely matched SearchDataShipmentList's "เข้าไทย" keyword (configured
+    # for a "has my shipment arrived" intent), routing a general product-
+    # recommendation question into a CustCode-gated shipment lookup. This
+    # is a single, narrow guard for one specific, confirmed Thai compound-
+    # word collision — general Thai substring matching (no word-boundary
+    # guard) is deliberately kept for every other keyword, per this
+    # function's own docstring above.
+    if kw_l.startswith("เข้า"):
+        return re.search(r"(?<!นำ)" + re.escape(kw_l), message_l) is not None
     return kw_l in message_l
 
 
