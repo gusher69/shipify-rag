@@ -4685,6 +4685,43 @@ class TestGenericContinuationIntentGuard(unittest.TestCase):
         self.assertEqual(collected.get("Email"), "test@example.com")
         mock_req.assert_called_once()
 
+    # H — P0 Final Fix (2026-08-28): the exact reproduced production bug.
+    # A declarative statement of general Shipify service interest ("ผม
+    # ต้องการ...") carries NO question particle at all, so it never
+    # reached the Mid-Collection RAG Diversion check before this fix --
+    # confirmed live on the real deployed LINE webhook: sent while an
+    # unrelated private action (here: coupon lookup, waiting on CustCode)
+    # was still pending, it got silently absorbed as an attempted answer
+    # to that pending action instead of escaping to RAG.
+    def test_H_declarative_service_intent_escapes_pending_private_action(self):
+        turn1 = self.engine.decide("คูปอง", history=[], context={"developer_mode": True})
+        self.assertEqual((turn1.get("developer") or {}).get("information_collection_status", {})
+                          .get("selected_business_action"), "get_customer_coupons")
+        history = [{"role": "user", "content": "คูปอง"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="ฝากสั่งช่วยหาร้านและประสานงานหลังการขายค่ะ")) as mock_rag, \
+             patch.object(self.engine.executor, "execute") as mock_exec:
+            turn2 = self.engine.decide("ผมต้องการสั่งซื้อสินค้าจากจีนครับ", history=history,
+                                        context={"developer_mode": True})
+        self.assertEqual(turn2["routing"]["type"], "RAG")
+        mock_rag.assert_called_once()
+        mock_exec.assert_not_called()
+
+    # I — regression guard, the critical safety check for fix H: a
+    # declarative statement that ALSO contains a genuine private-action
+    # verb ("เปลี่ยน") must still be treated as a real request, not swept
+    # into "informational" just because it also says "อยาก". Matches the
+    # required contrast pair: "อยากเปลี่ยนที่อยู่จัดส่งครับ" must stay a
+    # real address-change request, never vetoed to RAG.
+    def test_I_declarative_with_private_action_verb_still_continues_erp(self):
+        turn1 = self.engine.decide("คูปอง", history=[], context={"developer_mode": True})
+        history = [{"role": "user", "content": "คูปอง"}, {"role": "assistant", "content": turn1["reply"]["text"]}]
+        with patch("services.playground_orchestrator.run_playground_turn") as mock_rag:
+            turn2 = self.engine.decide("C12345", history=history, context={"developer_mode": True})
+        mock_rag.assert_not_called()
+        self.assertEqual((turn2.get("developer") or {}).get("information_collection_status", {})
+                          .get("selected_business_action"), "get_customer_coupons")
+
 
 class TestStaleIdentifierMemoryNeverHijacksFreshUnrelatedQuestion(unittest.TestCase):
     """Real LINE Production Defect fix (Continuation Precedence,
@@ -5567,13 +5604,34 @@ class TestTask03IntentUnderstandingClarificationMultiIntent(unittest.TestCase):
 
     # ---- (A) Wrong-Intent fix ----
 
-    # TEST 01 — the exact reproduced customer defect: bare interest, no
-    # question, no Business Action match -> CLARIFICATION_REQUIRED, never
-    # a confident RAG guess that could answer with unrelated content.
+    # TEST 01 — genuinely topic-less interest (no "นำเข้า" or any other
+    # concrete Shipify subject at all), no question, no Business Action
+    # match -> CLARIFICATION_REQUIRED, never a confident RAG guess that
+    # could answer with unrelated content. This is the residual case the
+    # original Wrong-Intent fix still protects (see TEST 01b below for
+    # the P0 Final Fix supersession of the ORIGINAL reproduction phrase).
     def test_01_bare_interest_no_question_routes_to_clarification(self):
-        result = self.engine.decide("สนใจนำเข้าสินค้าครับ", history=[], context={"developer_mode": True})
+        result = self.engine.decide("สนใจครับ", history=[], context={"developer_mode": True})
         self.assertEqual(result["routing"]["type"], "WORKFLOW")
         self.assertIn("รบกวนขอรายละเอียดเพิ่มเติม", result["reply"]["text"])
+
+    # TEST 01b — Named-Topic Exception (P0 Final Fix, 2026-08-28)
+    # supersedes this class's ORIGINAL TEST 01 assertion for THIS exact
+    # phrase: "นำเข้า" names a concrete, unambiguous Shipify core-business
+    # topic, unlike the genuinely topic-less "สนใจครับ" TEST 01 above still
+    # covers. Confirmed live: this exact phrase now retrieves a correct,
+    # well-grounded, 0.9-confidence Shipify answer about the ฝากนำเข้า
+    # process (the Semantic RAG Retrieval fix, commit ba3fced, earlier the
+    # same session, independently resolved the retrieval-quality concern
+    # the original Task 03 fix existed to guard against) -- required by
+    # the P0 Final Fix task's own explicit test list (Section 6 item 3 /
+    # Section 8 Pair 2), verified against the real DecisionEngine path.
+    def test_01b_named_topic_interest_now_reaches_rag(self):
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="ฝากนำเข้าใช้บริการยังไง...", confidence=0.9)):
+            result = self.engine.decide("สนใจนำเข้าสินค้าครับ", history=[], context={"developer_mode": True})
+        self.assertEqual(result["routing"]["type"], "RAG")
+        self.assertNotIn("รบกวนขอรายละเอียดเพิ่มเติม", result["reply"]["text"])
 
     # TEST 02 — a REAL question about the same topic must still reach RAG
     # normally (has its own question marker "อะไร" -> not the ambiguous
@@ -6262,6 +6320,22 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         """The exact reported reproduction case -- single turn, no history."""
         result = self._decide("มีสินค้าอะไรแนะนำไหมสำหรับนำเข้าไทย")
         self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_bare_numeric_token_is_never_treated_as_identifier_evidence(self):
+        """P0 Final Fix (2026-08-28) -- confirmed live: "รองรับเว็บ 1688
+        ไหม" (a general policy/capability question about whether the
+        1688.com platform is supported) matched a Business Action via its
+        "order" keyword and was NOT vetoed, because the bare number
+        "1688" satisfied _validate_generic_identifier's broad shape check
+        (any 4-20 char alphanumeric string with a digit), disqualifying
+        the General Informational Question Guard. Every real Shipify
+        identifier (CustCode/OrderCode/ShipmentCode/Tracking) is letter-
+        prefixed -- a pure-digit token must never count as identifier
+        evidence on its own."""
+        result = self._decide("order รองรับเว็บ 1688 ไหม")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(ics.get("selected_business_action"), "searchdataorderlist")
         ics = (result.get("developer") or {}).get("information_collection_status") or {}
         self.assertNotEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
 

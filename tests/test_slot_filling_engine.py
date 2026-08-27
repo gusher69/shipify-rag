@@ -514,5 +514,40 @@ class TestWarrantyGuaranteeIntentCollision(unittest.TestCase):
         self.assertIsNone(detect_erp_intent("shipping SLA มีไหม"))
 
 
+class TestInvoiceLookupCollision(unittest.TestCase):
+    """Invoice Lookup Collision fix (P0 Final Fix, 2026-08-28) — mirrors
+    TestWarrantyGuaranteeIntentCollision above exactly.
+
+    Confirmed live root cause: _INTENT_KEYWORD_PATTERNS["invoice"]'s bare
+    "ใบกำกับภาษี"/"ใบเสร็จ"/"invoice" match matched ANY message containing
+    those words, with no requirement that the customer is actually asking
+    to RETRIEVE an existing document — "ออกใบกำกับภาษีได้ไหม" (a general
+    POLICY/capability question: does Shipify offer this service at all)
+    matched it identically to a genuine "ขอใบกำกับภาษีของผมหน่อย" lookup,
+    triggering the invoice/order-number follow-up question for a customer
+    who never asked to look anything up.
+
+    Fix: detect_erp_intent() now runs a second gate,
+    _is_genuine_invoice_lookup_request() — requires self-reference/request-
+    marker evidence or a real invoice/order number before confirming
+    Invoice Lookup; a bare policy/capability question falls through to
+    None, letting the normal RAG/Decision Engine path handle it."""
+
+    def test_general_policy_question_is_not_invoice_lookup(self):
+        for text in ("ออกใบกำกับภาษีได้ไหม", "มีใบเสร็จค่าขนส่งไหม", "ขอใบกำกับภาษีอิเล็กทรอนิกส์ได้ไหม"):
+            self.assertIsNone(detect_erp_intent(text), text)
+
+    def test_genuine_invoice_lookup_requests_still_work(self):
+        cases = [
+            "ขอใบกำกับภาษีของผมหน่อย",
+            "ช่วยส่งใบเสร็จให้หน่อยครับ",
+            "รบกวนส่งใบกำกับภาษีด้วยค่ะ",
+            "ขอใบกำกับภาษี INV-2026-00125 หน่อยค่ะ",
+            "เช็คใบเสร็จของผมหน่อย",
+        ]
+        for text in cases:
+            self.assertEqual(detect_erp_intent(text), "invoice", text)
+
+
 if __name__ == "__main__":
     unittest.main()

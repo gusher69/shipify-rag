@@ -433,8 +433,24 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
         # opposite. A negator immediately preceding the interest wording
         # means the customer is declining, not expressing unclear
         # interest; original behavior (RAG_ONLY fallback below) resumes.
+        # Named-Topic Exception (P0 Final Fix, 2026-08-28) — "นำเข้า" names
+        # a concrete, unambiguous Shipify service topic (the platform's
+        # own core business), unlike a genuinely context-free "สนใจครับ"/
+        # "อยากเริ่มใช้บริการ" with no subject at all — this is no longer
+        # the same "vague interest, nothing concrete to answer" case this
+        # rule exists for. Confirmed live: the ORIGINAL Task 03 bug
+        # reproduction phrase itself ("สนใจนำเข้าสินค้าครับ") now retrieves
+        # a correct, well-grounded, high-confidence (0.9) Shipify answer
+        # about the ฝากนำเข้า process — the retrieval-quality problem this
+        # rule was protecting against (RAG confidently answering with an
+        # UNRELATED "prohibited goods" chunk) was independently fixed by
+        # the Semantic RAG Retrieval fix earlier this session (commit
+        # ba3fced), so this safety net is no longer needed for this one
+        # named topic specifically — every OTHER context-free "สนใจ"/
+        # "อยากเริ่ม"/"ขอราคา" expression is completely unaffected.
         if _HOT_RE.search(message) and not _QUESTION_MARKER_RE.search(message) \
-                and not _NEGATED_INTEREST_RE.search(message):
+                and not _NEGATED_INTEREST_RE.search(message) \
+                and "นำเข้า" not in message:
             return _result(
                 "CLARIFICATION_REQUIRED", 0.4,
                 ["message expresses interest/intent but asks no concrete question, and matches no "

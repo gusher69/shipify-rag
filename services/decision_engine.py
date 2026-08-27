@@ -893,6 +893,52 @@ _REFERENCE_MARKER_RE = re.compile(
     r"ล่าสุด|ของผม|ของฉัน|ของดิฉัน|อันนี้|รายการนี้|ตอนนี้|แล้ว.*ล่ะ|ถึงหรือยัง|สถานะ",
     re.IGNORECASE)
 
+# Declarative Service-Intent Marker (P0 Final Fix, Business Action vs
+# informational boundary, 2026-08-28) — confirmed live on the REAL
+# deployed LINE webhook path: "ผมต้องการสั่งซื้อสินค้าจากจีนครับ" (a general
+# declarative statement of interest in a Shipify service, no question
+# particle at all) got permanently stuck answering "กรุณาแจ้งรหัสลูกค้าค่ะ"
+# whenever ANY earlier turn in the same conversation had left an
+# incomplete Business Action pending (e.g. an unverified "เช็ก Shipment
+# ของผมให้หน่อย") — both the Mid-Collection RAG Diversion guard below and
+# the General Informational Question Guard further down only ever
+# considered a message "informational" when it was phrased as a QUESTION
+# (_QUESTION_MARKER_RE: ยังไง/อะไร/ไหม/...), so a declarative "ต้องการ/
+# อยาก/สนใจ" statement with no question particle never even reached either
+# guard's own classify_question/veto check. This is the declarative-
+# statement counterpart to _QUESTION_MARKER_RE — used ONLY to decide
+# whether to RE-EXAMINE a message via the existing classify_question/
+# selection-veto machinery (never bypasses it, never itself decides
+# anything), so a declarative statement that genuinely IS still about a
+# pending private action is unaffected by this alone.
+_DECLARATIVE_INTENT_MARKER_RE = re.compile(r"ต้องการ|อยาก|สนใจ")
+
+# Subject-Pronoun Want-Verb Pattern (P0 Final Fix, 2026-08-28) — "ผม/ฉัน/
+# ดิฉัน" used as the grammatical SUBJECT of a want/interest verb ("ผม
+# ต้องการ...", "ผมอยาก...", "ผมสนใจ...") is NOT the same signal as the
+# bare-pronoun POSSESSIVE usage the existing General Informational
+# Question Guard's `_bare_self_reference` check exists for (e.g. "Wallet
+# ผมเหลือเท่าไหร่" = "MY wallet has how much left" — a genuine, already-
+# proven account-specific question that must stay ERP). Confirmed live:
+# per the task's own explicit requirement, "ผม" alone must never be
+# treated as equivalent to "ของผม"/"Order ของผม"/"Wallet ผม" — this narrow
+# pattern is what tells the two apart: "ผม" immediately followed by a
+# want-verb is a plain declarative subject ("I want..."), never a
+# possessive reference to a private noun.
+_SUBJECT_INTENT_RE = re.compile(r"(ผม|ฉัน|ดิฉัน)\s*(ต้องการ|อยาก|สนใจ)")
+
+# Private-Action Verb Evidence (P0 Final Fix, 2026-08-28) — a declarative
+# "ต้องการ/อยาก/สนใจ" statement that ALSO names a concrete lookup/action
+# verb ("เช็ก"/"ดู"/"ยอด"/"แก้"/"เปลี่ยน"/"ยกเลิก") is real account-specific
+# intent, not general service interest — e.g. "อยากเปลี่ยนที่อยู่จัดส่งครับ"
+# (a genuine, already-proven address-change request) must never be swept
+# into "informational" purely because it also says "อยาก". Checked by
+# BOTH declarative-intent guards below so they can never disagree about
+# what counts as real evidence. "สถานะ"/"รายละเอียด" are deliberately not
+# repeated here — already covered by the existing _REFERENCE_MARKER_RE /
+# _DETAIL_INTENT_RE this same code already checks.
+_PRIVATE_ACTION_VERB_RE = re.compile(r"เช็ก|ดู|ยอด|แก้|เปลี่ยน|ยกเลิก")
+
 # A generic "I want the SPECIFIC record, not the list" signal — see the
 # LIST -> DETAIL sibling preference in _resolve_conversation_reference.
 # Deliberately just this one word; it is never used to invent an action,
@@ -1824,7 +1870,23 @@ class DecisionEngine:
                     # asked for CustCode) was wrongly swept into this same
                     # diversion, losing the in-progress order lookup
                     # entirely instead of continuing to wait for CustCode.
-                    if (_QUESTION_MARKER_RE.search(message or "")
+                    # Declarative Service-Intent Diversion (P0 Final Fix,
+                    # 2026-08-28) — widened alongside the existing question-
+                    # marker trigger below: a declarative "ต้องการ/อยาก/
+                    # สนใจ" statement with no question particle at all
+                    # (_DECLARATIVE_INTENT_MARKER_RE) is EQUALLY valid
+                    # evidence the customer has moved to a fresh,
+                    # unrelated topic — confirmed live: "ผมต้องการสั่งซื้อ
+                    # สินค้าจากจีนครับ" sent while an unrelated Shipment
+                    # check was still pending (unverified, waiting on
+                    # CustCode) never reached this check at all before,
+                    # since it carries no _QUESTION_MARKER_RE particle.
+                    # Still fully gated by the SAME classify_question ==
+                    # RAG_ONLY confirmation as the question-marker path —
+                    # this only widens WHEN to ask, never what counts as a
+                    # genuine answer.
+                    if ((_QUESTION_MARKER_RE.search(message or "")
+                         or _DECLARATIVE_INTENT_MARKER_RE.search(message or ""))
                             and not _COLLECTION_STATUS_QUERY_RE.search(message or "")
                             and not _REFERENCE_MARKER_RE.search(message or "")):
                         fresh_classification = classify_question(message, self.registry)
@@ -2027,8 +2089,15 @@ class DecisionEngine:
                     #     independent identifier check, not a duplicate.
                     # Falls through to ordinary RAG/clarification handling
                     # below, exactly like any other unmatched message.
+                    # Widened alongside the Mid-Collection RAG Diversion
+                    # guard above (P0 Final Fix, 2026-08-28) — a declarative
+                    # "ต้องการ/อยาก/สนใจ" statement (_DECLARATIVE_INTENT_
+                    # MARKER_RE) with no question particle at all must also
+                    # reach this veto's own evaluation, not only a message
+                    # phrased as a literal question.
                     general_policy_question_vetoed = False
-                    if selected and _QUESTION_MARKER_RE.search(message or "") \
+                    if selected and (_QUESTION_MARKER_RE.search(message or "")
+                                      or _DECLARATIVE_INTENT_MARKER_RE.search(message or "")) \
                             and not any("parameter identifier pattern" in r for r in (selected.get("_reasons") or [])):
                         is_company_policy_question = "บริษัท" in (message or "")
                         # Strict Shipify RAG Grounding (2026-08-27) —
@@ -2047,15 +2116,57 @@ class DecisionEngine:
                         # no request marker) are already true, so it can
                         # only ever narrow this one veto further, never
                         # widen anything else.
-                        _bare_self_reference = bool(re.search(r"ผม|ฉัน|ดิฉัน", message or ""))
+                        # P0 Final Fix (2026-08-28) — excludes the plain
+                        # declarative-subject usage ("ผมต้องการ...", "ผม
+                        # อยาก...", never a possessive reference to a
+                        # private noun) via _SUBJECT_INTENT_RE, so "ผม
+                        # ต้องการสั่งซื้อสินค้าจากจีนครับ" is no longer
+                        # disqualified from this veto purely for containing
+                        # the bare word "ผม" — while "Wallet ผมเหลือเท่าไหร่"
+                        # (ผม NOT immediately followed by a want-verb) is
+                        # completely unaffected and still correctly counts
+                        # as self-reference.
+                        _bare_self_reference = (bool(re.search(r"ผม|ฉัน|ดิฉัน", message or ""))
+                                                 and not _SUBJECT_INTENT_RE.search(message or ""))
+                        # P0 Final Fix (2026-08-28) — a private-action verb
+                        # (เปลี่ยน/แก้/...) only counts as "real evidence,
+                        # never veto" when the message has NO genuine
+                        # question marker of its own — a pure declarative
+                        # statement ("อยากเปลี่ยนที่อยู่จัดส่งครับ", no "ยังไง")
+                        # is a real request, but "เปลี่ยนที่อยู่จัดส่งในระบบ
+                        # ยังไง" (a genuine "how do I..." informational
+                        # question that HAPPENS to also contain "เปลี่ยน")
+                        # must still be vetoed exactly as before — the verb
+                        # alone is not decisive once the message is already
+                        # phrased as a how-to question about the process.
+                        _has_question_marker = bool(_QUESTION_MARKER_RE.search(message or ""))
+                        _declarative_private_action = (
+                            not _has_question_marker and _PRIVATE_ACTION_VERB_RE.search(message or ""))
+                        # P0 Final Fix (2026-08-28) — a bare, PURELY NUMERIC
+                        # token ("1688") must never count as identifier
+                        # evidence on its own: every real Shipify identifier
+                        # (CustCode/OrderCode "PO.../ShipmentCode "FT.../
+                        # Tracking) is letter-prefixed, so a pure-digit
+                        # string is far more likely a website/platform name
+                        # ("รองรับเว็บ 1688 ไหม" — does Shipify support the
+                        # 1688.com platform) or an ordinary number mentioned
+                        # in conversation than an actual account identifier.
+                        # _validate_generic_identifier itself is left
+                        # completely untouched (shared by slot-filling
+                        # elsewhere, where a pure-digit tracking number IS
+                        # legitimately valid) — this refines only THIS
+                        # veto's own reading of its result.
+                        _identifier_evidence = any(
+                            _validate_generic_identifier(tok) and not tok.isdigit()
+                            for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
                         is_unrequested_howto_question = (
                             not _REQUEST_MARKER_RE.search(message or "")
                             and selected.get("action_type") in ("API", "WEBHOOK")
                             and len(_split_clauses(message or "")) <= 1
                             and not _REFERENCE_MARKER_RE.search(message or "")
                             and not _bare_self_reference
-                            and not any(_validate_generic_identifier(tok)
-                                        for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
+                            and not _declarative_private_action
+                            and not _identifier_evidence
                         )
                         if is_company_policy_question or is_unrequested_howto_question:
                             selected = None

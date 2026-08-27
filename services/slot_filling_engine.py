@@ -130,6 +130,34 @@ def _is_genuine_product_warranty(text: str) -> bool:
     return False
 
 
+# Invoice Lookup Collision fix (P0 Final Fix, 2026-08-28) — mirrors the
+# warranty disambiguation above exactly: confirmed live, "ออกใบกำกับภาษี
+# ได้ไหม" (a general POLICY/capability question — does Shipify offer this
+# service at all) matched the bare "invoice" keyword identically to a
+# genuine "please retrieve MY invoice" lookup, triggering the invoice/
+# order-number follow-up question for a customer who never asked to look
+# anything up. Genuine invoice LOOKUP requires evidence of an actual
+# retrieval request: self-reference, a polite request marker, or a real
+# invoice/order number already given — never the bare word "ใบกำกับภาษี"/
+# "ใบเสร็จ" alone.
+_INVOICE_LOOKUP_EVIDENCE_RE = re.compile(
+    r"ของผม|ของฉัน|ของดิฉัน|(ขอ|ช่วย|รบกวน).{0,40}(หน่อย|ด้วย)"
+)
+
+
+def _is_genuine_invoice_lookup_request(text: str) -> bool:
+    """Disambiguates a bare "ใบกำกับภาษี"/"ใบเสร็จ"/"invoice" mention —
+    same spirit as _is_genuine_product_warranty above: a message with
+    NEITHER a self-reference/request marker NOR a real invoice/order
+    number is ambiguous and falls through to the normal RAG/Decision
+    Engine path instead of confidently assuming a private lookup."""
+    if _INVOICE_LOOKUP_EVIDENCE_RE.search(text):
+        return True
+    if _SLOT_PATTERNS["invoice_number"].search(text) or _SLOT_PATTERNS["order_number"].search(text):
+        return True
+    return False
+
+
 def detect_erp_intent(text: str) -> Optional[str]:
     """First-matching ERP intent, or None if the text doesn't ask about
     any ERP-backed topic at all — None means "this workflow layer has
@@ -139,6 +167,8 @@ def detect_erp_intent(text: str) -> Optional[str]:
     for intent in _INTENT_ORDER:
         if _INTENT_KEYWORD_PATTERNS[intent].search(text):
             if intent == "warranty" and not _is_genuine_product_warranty(text):
+                continue
+            if intent == "invoice" and not _is_genuine_invoice_lookup_request(text):
                 continue
             return intent
     return None
