@@ -94,6 +94,18 @@ _DELIVERY_GUARANTEE_CONTEXT_RE = re.compile(
 _WARRANTY_NEGATION_MARKERS = ["ไม่ได้ถาม", "ไม่ได้หมายถึง", "ไม่ใช่", "ไม่ต้อง", "ไม่เอา"]
 _WARRANTY_NEGATION_WINDOW_CHARS = 20
 
+# Company-Policy-Subject exclusion (P0 Final Fix follow-up, 2026-08-28) —
+# confirmed live: "Shipify ช่วยเคลมสินค้าไหม" / "Shipify รับประกันคุณภาพ
+# สินค้าไหม" (does Shipify offer this service AT ALL — a general policy/
+# capability question naming the COMPANY as subject) matched
+# _WARRANTY_PRODUCT_CONTEXT_RE via "สินค้า" identically to a genuine "check
+# MY OWN item's warranty" lookup, triggering the Serial Number follow-up
+# for a customer who never asked about their own product. Checked BEFORE
+# the product-context check so it takes precedence only for THIS narrow
+# shape; every existing product-warranty-lookup example (none of which
+# name "Shipify"/"บริษัท" as the question's subject) is unaffected.
+_COMPANY_POLICY_SUBJECT_RE = re.compile(r"shipify|บริษัท", re.IGNORECASE)
+
 
 def _strip_warranty_negation(text: str) -> str:
     result = text
@@ -123,6 +135,8 @@ def _is_genuine_product_warranty(text: str) -> bool:
     mechanisms for exactly this case). Negation-aware: a negated mention
     of "ประกันสินค้า" never counts as positive product evidence."""
     stripped = _strip_warranty_negation(text)
+    if _COMPANY_POLICY_SUBJECT_RE.search(stripped):
+        return False
     if _WARRANTY_PRODUCT_CONTEXT_RE.search(stripped):
         return True
     if _DELIVERY_GUARANTEE_CONTEXT_RE.search(stripped):

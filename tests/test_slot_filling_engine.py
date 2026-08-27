@@ -513,6 +513,15 @@ class TestWarrantyGuaranteeIntentCollision(unittest.TestCase):
         self.assertEqual(detect_erp_intent("check warranty SN12345"), "warranty")
         self.assertIsNone(detect_erp_intent("shipping SLA มีไหม"))
 
+    # TEST 13 — Company-Policy-Subject exclusion (P0 Final Fix follow-up,
+    # 2026-08-28): a general capability/policy question naming Shipify or
+    # the company as subject must never be treated as a specific-item
+    # warranty lookup, even though it also contains "สินค้า".
+    def test_13_company_policy_question_not_product_warranty(self):
+        for text in ("Shipify ช่วยเคลมสินค้าไหม", "Shipify รับประกันคุณภาพสินค้าไหม",
+                      "บริษัทรับประกันสินค้าไหม"):
+            self.assertIsNone(detect_erp_intent(text), text)
+
 
 class TestInvoiceLookupCollision(unittest.TestCase):
     """Invoice Lookup Collision fix (P0 Final Fix, 2026-08-28) — mirrors

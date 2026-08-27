@@ -73,8 +73,15 @@ _LOOSE_SEGMENT_MARKERS = ("แล้ว",)
 # vocabulary (coupons, wallets, shipments, ...); the same handful of
 # words that turn any clause into a recognizable question, regardless of
 # what it's asking about.
+#
+# P0 Final Fix follow-up (2026-08-28) -- added แค่ไหน/เมื่อไหร่/หรือเปล่า,
+# confirmed live: "J&T รับพัสดุขนาดใหญ่แค่ไหน" (extent), "ของถึงไทยเมื่อไหร่"
+# (when), and "ใช้ลิงก์ Tmall ได้หรือเปล่า" (yes/no) are equally common,
+# equally generic Thai question forms that this pattern's own existing
+# members (ไหม/กี่/ที่ไหน/...) were already meant to cover -- none of these
+# three name any customer/domain vocabulary, same as every existing entry.
 _QUESTION_MARKER_RE = re.compile(
-    r"(ยังไง|อย่างไร|อะไร|ทำไม|เท่าไหร่|เท่าไร|หรือไม่|ไหม|กี่|ที่ไหน)"
+    r"(ยังไง|อย่างไร|อะไร|ทำไม|เท่าไหร่|เท่าไร|หรือไม่|หรือเปล่า|ไหม|กี่|ที่ไหน|แค่ไหน|เมื่อไหร่)"
 )
 
 # A second, distinct kind of clause evidence: a genuine second ASK phrased
