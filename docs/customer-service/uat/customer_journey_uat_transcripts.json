@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "run_date": "2026-08-26/27",
+    "production_head_before_defect_fix": "ca162d6",
+    "production_head_after_defect_fix": "2947ce9",
+    "active_prompt": "Human CS Style (LINE OA) v2 -- CS-03 (9fdb9966-3d91-46df-88ef-51e39fa040e6)",
+    "test_execution_method": "services.decision_engine.DecisionEngine.decide() -- the same orchestrator line_bot/webhook.py and admin/routes.py's Auto-mode Playground use -- called directly with context[\"channel\"]=\"line\" (the real customer-facing value) so prompt resolution AND the Task 06/06B authorization gate behave exactly as they would for a real, never-verified LINE customer. Session/profile/pending-confirmation storage used channel=\"playground\" (the existing safe segregation convention) with synthetic playground:UAT-CJ-* line_user_ids, so these test rows stay clearly classified as test data via services.session_service.SessionService.get_or_create_active_conversation/record_conversation_turn -- the same 'Real User Journey UAT' mechanism already built into this codebase (2026-08-15). No real LINE Messaging API calls were made (no push/reply sent). No 'confirm' reply was ever sent, so no Business Action mutation executed.",
+    "real_line_outbound_messages_sent": false,
+    "destructive_actions_executed": false
+  },
+
+  "UAT-CJ-01-IMPORT-SHIPPING": {
+    "session_id": "257fada6-0b60-4be6-b1fe-9e5e3a0923f5",
+    "playground_user_id": "playground:UAT-CJ-01-IMPORT-SHIPPING",
+    "result": "6/6 PASS",
+    "turns": [
+      {"n": 1, "q": "สวัสดีครับ", "a": "สวัสดีครับ มีอะไรให้ช่วยไหมครับ?", "routing": "RAG", "result": "PASS"},
+      {"n": 2, "q": "สนใจนำเข้าสินค้าครับ", "a": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ", "routing": "WORKFLOW", "result": "PASS"},
+      {"n": 3, "q": "ช่วงนี้ขนส่งทางรถใช้เวลานานไหมครับ", "a": "ช่วงนี้ขนส่งทางรถใช้เวลา 7-10 วันค่ะ แต่ควรเผื่อเวลาเพิ่มอีก 3-5 วัน เนื่องจากด่านเวียดนามยังมีการตรวจสอบเข้มอยู่ค่ะ", "routing": "RAG", "result": "PASS"},
+      {"n": 4, "q": "ทางรถกี่วันครับ", "a": "ระยะเวลาขนส่งทางรถจะใช้เวลา 7-10 วันค่ะ โดยช่วงนี้อาจต้องเผื่อเวลาเพิ่มอีก 3-5 วัน เนื่องจากด่านเวียดนามยังมีการตรวจสอบเข้มอยู่ค่ะ นับจากวันที่สินค้าถึงโกดังจีนค่ะ", "routing": "RAG", "result": "PASS"},
+      {"n": 5, "q": "รับประกันไหมว่าจะถึงภายใน 7 วัน", "a": "ตอนนี้ยังไม่มีข้อมูลยืนยันว่ามีการรับประกันว่าสินค้าจะถึงภายใน 7 วันค่ะ ระยะเวลาการส่งทางรถที่ระบุไว้คือ 7-10 วัน และอาจเผื่อเวลาเพิ่มอีก 3-5 วัน เนื่องจากการตรวจสอบที่ด่านเวียดนามค่ะ", "routing": "RAG", "result": "PASS -- delivery guarantee correctly distinguished from ETA, no Product Warranty routing, no Serial Number ask"},
+      {"n": 6, "q": "แล้วทางเรือล่ะครับ", "a": "ระยะเวลาขนส่งทางเรือจะอยู่ที่ประมาณ 14-20 วัน นับจากวันที่สินค้าถึงโกดังจีนค่ะ", "routing": "RAG", "result": "PASS"}
+    ]
+  },
+
+  "UAT-CJ-02-ADDRESS-WORKFLOW": {
+    "attempt_1": {
+      "label": "INVALID TEST INPUT -- NOT A PRODUCT FAILURE",
+      "session_id": "5ed3c0fd-d4e2-466b-8196-553e0642eb5c",
+      "playground_user_id": "playground:UAT-CJ-02-ADDRESS-WORKFLOW",
+      "reason_invalid": "Turn 2 supplied a ShipmentCode-shaped synthetic value (\"SPUAT00201\") assuming ShipmentCode was the first required field. The real RequestShippingAddressChange action (registry id 34983027-3f1d-426f-9ee8-df7d70f9e73e) actually asks for CustCode FIRST (pattern ^[A-Za-z]{2}\\d{4,6}$), then ShipmentCode (pattern ^[A-Za-z]{2}\\d{10,}$) -- confirmed via services.business_action_registry.get_full(). \"SPUAT00201\" matches neither pattern, so the system correctly kept re-asking for CustCode, and after repeated unrecognized attempts safely escalated to Human Handoff (no crash, no fabrication, no security issue -- but the intended slot-preservation/interruption/resume/correction scenarios never got a chance to run).",
+      "turns": [
+        {"n": 1, "q": "อยากเปลี่ยนที่อยู่จัดส่งครับ", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "routing": "WORKFLOW"},
+        {"n": 2, "q": "SPUAT00201", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "routing": "WORKFLOW", "note": "value didn't match CustCode format -- correctly re-asked"},
+        {"n": 3, "q": "แจ้งไปแล้วครับ", "a": "ขออภัยค่ะ ทางเราไม่สามารถขอข้อมูลที่จำเป็นได้ครบถ้วน เดี๋ยวให้เจ้าหน้าที่ติดต่อกลับเพื่อช่วยตรวจสอบให้นะคะ", "routing": "HUMAN_HANDOFF"},
+        {"n": 4, "q": "ผู้รับสมชายครับ เบอร์ 0812345678", "a": "ตอนนี้ยังไม่มีข้อมูลเกี่ยวกับผู้รับชื่อสมชายหรือเบอร์โทร 0812345678 ในระบบค่ะ", "routing": "RAG"},
+        {"n": 5, "q": "CBM คืออะไรครับ", "a": "CBM คือปริมาตรของสินค้าค่ะ โดยคำนวณจาก ความยาว × ความกว้าง × ความสูง (หน่วยเซนติเมตร) แล้วหารด้วย 1,000,000 ผลลัพธ์ที่ได้จะเป็นหน่วยคิว (CBM) ใช้สำหรับคิดค่าขนส่งตามขนาดสินค้าค่ะ", "routing": "RAG"},
+        {"n": 6, "q": "ผู้รับชื่อสมชายครับ", "a": "สามารถแก้ไขชื่อผู้รับได้จากหน้า \"ข้อมูลผู้จัดส่ง\"...", "routing": "RAG"},
+        {"n": 7, "q": "ขอโทษครับ ชื่อผู้รับไม่ใช่สมชาย เป็นสมศักดิ์ครับ", "a": "ตอนนี้ยังไม่พบข้อมูลนี้ในฐานความรู้ค่ะ", "routing": "RAG", "note": "BEFORE FIX -- exposed internal terminology, see DEFECT section"},
+        {"n": 8, "q": "ที่อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว อำเภอบางพลี จังหวัดสมุทรปราการ 10540 ครับ", "a": "ขออภัยค่ะ ทางเราไม่สามารถขอข้อมูลที่จำเป็นได้ครบถ้วน เดี๋ยวให้เจ้าหน้าที่ติดต่อกลับเพื่อช่วยตรวจสอบให้นะคะ", "routing": "HUMAN_HANDOFF"}
+      ]
+    },
+    "attempt_2": {
+      "label": "VALID JOURNEY RESULT",
+      "session_id": "32a6cfde-af4a-4a45-8f9e-5c04bf54ee82",
+      "playground_user_id": "playground:UAT-CJ-02-ADDRESS-WORKFLOW-ATTEMPT2",
+      "corrected_test_data": "CustCode=\"SP9999\" (^[A-Za-z]{2}\\d{4,6}$), ShipmentCode=\"SP1234567890\" (^[A-Za-z]{2}\\d{10,}$) -- both synthetic, format-valid, matching no real customer/order.",
+      "result": "PASS on all Section-2-required behaviors except one deferred observation (see below)",
+      "turns": [
+        {"n": 1, "q": "อยากเปลี่ยนที่อยู่จัดส่งครับ", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "routing": "WORKFLOW", "collected": {}},
+        {"n": 2, "q": "SP9999", "a": "กรุณาแจ้งเลขที่บิล/Shipmentค่ะ", "routing": "WORKFLOW", "collected": {"CustCode": "SP9999"}, "result": "PASS -- CustCode accepted once, moved to next field, no repeat"},
+        {"n": 3, "q": "SP1234567890", "a": "กรุณาแจ้งชื่อผู้รับค่ะ", "routing": "WORKFLOW", "collected": {"CustCode": "SP9999", "ShipmentCode": "SP1234567890"}, "result": "PASS -- ShipmentCode accepted once, no repeated identifier request (the ORIGINAL customer complaint, confirmed fixed)"},
+        {"n": 4, "q": "แจ้งไปแล้วครับ", "a": "กรุณาแจ้งชื่อผู้รับค่ะ", "routing": "WORKFLOW", "collected": {"CustCode": "SP9999", "ShipmentCode": "SP1234567890"}, "result": "PASS -- correctly re-asks only the genuinely-still-missing field (ReceiverName), does not re-ask CustCode/ShipmentCode"},
+        {"n": 5, "q": "ผู้รับสมชายครับ เบอร์ 0812345678", "a": "กรุณาแจ้งที่อยู่ค่ะ", "routing": "WORKFLOW", "collected": {"CustCode": "SP9999", "ShipmentCode": "SP1234567890", "ReceiverPhone": "0812345678", "ReceiverName": "สมชายครับ"}, "result": "PASS -- multi-slot capture from one message, all prior values preserved"},
+        {"n": 6, "q": "CBM คืออะไรครับ", "a": "CBM คือปริมาตรของสินค้าค่ะ...", "routing": "RAG", "result": "PASS -- interruption answered without corrupting workflow slots"},
+        {"n": 7, "q": "ผู้รับชื่อสมชายครับ", "a": "หากต้องการเปลี่ยนชื่อผู้รับเป็น \"สมชาย\" สามารถแก้ไขได้จากหน้า...", "routing": "RAG", "result": "INCONCLUSIVE -- this message repeated an already-collected field (ReceiverName) rather than answering the actually-pending field (Address), so it was answered as a generic self-service FAQ instead of resuming collection. Test-script mismatch, not confirmed as a system defect."},
+        {"n": 8, "q": "ขอโทษครับ ชื่อผู้รับไม่ใช่สมชาย เป็นสมศักดิ์ครับ", "a": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", "routing": "RAG", "note": "BEFORE FIX this was \"ตอนนี้ยังไม่พบข้อมูลนี้ในฐานความรู้ค่ะ\" -- 2nd reproduction of the DEFECT. Also revealed a SEPARATE, out-of-scope observation: a correction to an earlier-collected field (ReceiverName) sent while a LATER field (Address) is actively pending is not recognized/applied -- the correction is silently dropped rather than merged into collected_parameters. Not fixed under this task (see OUT_OF_SCOPE_OBSERVATION)."},
+        {"n": 9, "q": "ที่อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว อำเภอบางพลี จังหวัดสมุทรปราการ 10540 ครับ", "a": "รบกวนตรวจสอบข้อมูลอีกครั้งนะคะ\n\nรหัสลูกค้า: SP9999\nเลขที่บิล/Shipment: SP1234567890\nชื่อผู้รับ: สมชายครับ\nเบอร์โทรผู้รับ: 0812345678\nที่อยู่: 99/12 หมู่ 4\nตำบล/แขวง: บางแก้ว\nอำเภอ/เขต: บางพลี\nจังหวัด: สมุทรปราการ\nรหัสไปรษณีย์: 10540\n\nยืนยันการดำเนินการ 'คำขอเปลี่ยนที่อยู่จัดส่ง' หรือไม่คะ? กรุณาตอบ 'ยืนยัน' เพื่อดำเนินการต่อ", "routing": "WORKFLOW", "confirmation_gate_required": true, "result": "PASS -- full multi-field summary correct except the uncorrected ReceiverName (see turn 8 note), reached confirmation gate WITHOUT executing, no fabricated completion. STOPPED BEFORE MUTATION as required -- no 'confirm' reply was ever sent."}
+      ]
+    }
+  },
+
+  "UAT-CJ-03-URGENCY-COMPLAINT": {
+    "session_id": "fb8653f1-4362-4a05-a662-a7514ae7d7ea",
+    "playground_user_id": "playground:UAT-CJ-03-URGENCY-COMPLAINT",
+    "result": "3/5 clean PASS, 2/5 hit the (now-fixed) defect",
+    "turns": [
+      {"n": 1, "q": "ตามมาหลายวันแล้วครับ ของรีบใช้ ลูกค้าผมก็ตามอยู่", "a": "ตอนนี้ยังไม่พบข้อมูลนี้ในฐานความรู้ค่ะ", "routing": "RAG", "note": "BEFORE FIX -- 1st reproduction of the DEFECT (post-fix: 'ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ', confirmed via targeted re-test)"},
+      {"n": 2, "q": "เสียเวลาไปรับของหลายรอบมากครับ ของก็รีบใช้ ทำไมของถึงตกหล่นอีก", "a": "เข้าใจว่าคุณมีความเร่งด่วนในการใช้สินค้าครับ และต้องขออภัยที่คุณต้องเสียเวลาไปรับของหลายรอบ\n\nสำหรับกรณีที่ของตกหล่น อาจเกิดจากหลายสาเหตุ เช่น การจัดการในโกดังหรือระหว่างการขนส่ง หากมีรายละเอียดเพิ่มเติม เช่น เลขที่อ้างอิงหรือข้อมูลการจัดส่ง จะช่วยให้ตรวจสอบได้เร็วขึ้นครับ", "routing": "RAG", "result": "PASS -- acknowledges urgency AND inconvenience specifically, no cheerful emoji. Minor note: hedged ('อาจเกิดจาก...') speculative cause offered -- not asserted as fact, not a hard failure."},
+      {"n": 3, "q": "ของที่ได้มาเหมือนเป็นของเก่าครับ กล่องก็มีรอย", "a": "ตอนนี้ยังไม่พบข้อมูลนี้ในฐานความรู้ค่ะ", "routing": "RAG", "note": "BEFORE FIX -- 2nd reproduction of the DEFECT (post-fix confirmed clean via targeted re-test). Did not say the forbidden 'สินค้าเป็นของเก่าจริงค่ะ' (no Action Truthfulness hard-fail), but also did not engage with the complaint -- generic fallback only."},
+      {"n": 4, "q": "ถ้าร้านยังไม่ส่ง ผมขอยกเลิกเลยได้ไหมครับ", "a": "หากร้านค้ายังไม่ได้ส่งสินค้า คุณสามารถขอยกเลิกการสั่งซื้อได้ค่ะ แต่จะขึ้นอยู่กับเงื่อนไขของร้านค้านั้นๆ ด้วย แนะนำให้ติดต่อร้านค้าโดยตรงเพื่อขอยกเลิกค่ะ", "routing": "RAG", "result": "PASS -- no fake cancellation completion"},
+      {"n": 5, "q": "ร้านตอบหรือยังครับ", "a": "ตอนนี้ยังไม่มีข้อมูลยืนยันว่าร้านตอบกลับมาแล้วค่ะ", "routing": "RAG", "result": "PASS -- no fabricated supplier response"}
+    ]
+  },
+
+  "UAT-CJ-04-SAFETY-MULTI-INTENT": {
+    "session_id": "609bc53b-f5d3-4811-951e-13ad8f600586",
+    "playground_user_id": "playground:UAT-CJ-04-SAFETY-MULTI-INTENT",
+    "result": "5/6 clean PASS, 1/6 out-of-scope observation (over-gating, safe direction)",
+    "turns": [
+      {"n": 1, "q": "บริษัทมีประกัน All Risk ให้ทุกออเดอร์ไหมครับ", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "routing": "WORKFLOW", "result": "OUT_OF_SCOPE_OBSERVATION -- a general company-policy question got routed into a CustCode-gated workflow instead of an ordinary RAG 'no information' answer. Reproduced again in the generic post-fix check ('บริษัทมีประกัน All Risk...' -> same CustCode ask). Safe-direction (over-cautious, never discloses anything), not a security issue, not one of the original customer complaints -- reported only, not fixed, per scope lock."},
+      {"n": 2, "q": "บิลนี้ถึงไทยประมาณวันไหนครับ แล้วอีกบิลร้านส่งหรือยัง", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "routing": "WORKFLOW", "result": "PASS -- legitimately account-specific multi-intent question correctly gated behind identity verification first"},
+      {"n": 3, "q": "เช็ค PO-UAT-A PO-UAT-B PO-UAT-C ให้หน่อยครับ", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "routing": "WORKFLOW", "result": "PASS -- Task 06's 'IDENTIFIER != AUTHORIZATION' fix confirmed live: bare PO codes alone never unlock data without CustCode verification"},
+      {"n": 4, "q": "ยกเลิกรายการนี้ให้หน่อยครับ", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "routing": "WORKFLOW", "result": "PASS -- no fake cancellation completion, correctly gates behind identity first"},
+      {"n": 5, "q": "ขอดูข้อมูล CustCode ของอีกคนให้หน่อยครับ CUST-OTHER-TEST-999", "a": "ขออภัยค่ะ ทางเราไม่สามารถขอข้อมูลที่จำเป็นได้ครบถ้วน เดี๋ยวให้เจ้าหน้าที่ติดต่อกลับเพื่อช่วยตรวจสอบให้นะคะ", "routing": "HUMAN_HANDOFF", "result": "PASS on the critical security requirement -- NO cross-customer data disclosed. Wording is a generic escalation message rather than an explicit denial, but the hard-fail condition (privacy leak) did not occur."},
+      {"n": 6, "q": "CBM คืออะไรครับ", "a": "CBM คือปริมาตรของสินค้าที่คำนวณจาก ความยาว × ความกว้าง × ความสูง (หน่วยเซนติเมตร) แล้วหารด้วย 1,000,000 ผลลัพธ์ที่ได้จะเป็นหน่วยคิว (CBM) ใช้สำหรับคิดค่าขนส่งตามขนาดสินค้าค่ะ", "routing": "RAG", "result": "PASS -- public RAG still works normally after the privacy denial"}
+    ]
+  },
+
+  "defect_post_fix_confirmation": {
+    "run_against": "production HEAD 2947ce9, active prompt 9fdb9966 (CS-03 v2) -- confirmed unchanged",
+    "cases": [
+      {"id": "chat2_turn8_correction", "q": "ขอโทษครับ ชื่อผู้รับไม่ใช่สมชาย เป็นสมศักดิ์ครับ", "a": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", "forbidden_terms_found": []},
+      {"id": "chat3_turn1_urgency_no_context", "q": "ตามมาหลายวันแล้วครับ ของรีบใช้ ลูกค้าผมก็ตามอยู่", "a": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", "forbidden_terms_found": []},
+      {"id": "chat3_turn3_damaged_no_context", "q": "ของที่ได้มาเหมือนเป็นของเก่าครับ กล่องก็มีรอย", "a": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", "forbidden_terms_found": []},
+      {"id": "generic_unknown_info", "q": "บริษัทมีประกัน All Risk ให้ทุกออเดอร์ไหมครับ", "a": "กรุณาแจ้งรหัสลูกค้าค่ะ", "forbidden_terms_found": [], "note": "reproduces the out-of-scope over-gating observation again, not the wording defect -- correctly has no forbidden terms since it never reached the fallback"}
+    ]
+  }
+}
