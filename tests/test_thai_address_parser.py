@@ -384,6 +384,17 @@ class TestDetectFieldCorrection(unittest.TestCase):
         self.assertIsNone(detect_field_correction(""))
         self.assertIsNone(detect_field_correction(None))
 
+    # Customer Journey UAT (2026-08-27) — "<field>ไม่ใช่<old> เป็น<new>" was
+    # falling through undetected (no cue phrase covered "ไม่ใช่"), silently
+    # dropping the customer's own mid-workflow correction.
+    def test_receiver_name_correction_with_mai_chai_cue(self):
+        self.assertEqual(
+            detect_field_correction("ขอโทษครับ ชื่อผู้รับไม่ใช่สมชาย เป็นสมศักดิ์ครับ"),
+            ("receiver_name", "สมศักดิ์"))
+
+    def test_province_correction_with_mai_chai_cue(self):
+        self.assertEqual(detect_field_correction("จังหวัดไม่ใช่ชลบุรี เป็นระยอง"), ("province", "ระยอง"))
+
 
 if __name__ == "__main__":
     unittest.main()

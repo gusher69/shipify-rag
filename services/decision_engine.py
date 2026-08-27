@@ -673,8 +673,32 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
         next_param = _next_expected_parameter(action, registry, collected)
         if not next_param:
             continue
-        if not _reply_matches_question((preceding.get("content") or "").strip(),
-                                        _generate_parameter_question(next_param)):
+        expected_q = _generate_parameter_question(next_param)
+        preceding_matches = _reply_matches_question((preceding.get("content") or "").strip(), expected_q)
+        # Mid-Collection Interruption Continuation fix (Customer Journey
+        # UAT, 2026-08-27) — companion to the identical fix in
+        # _resolve_continuation_action. A genuine RAG-answered interruption
+        # (e.g. "CBM คืออะไรครับ" answered while Address is pending) sits
+        # as its own (user, assistant) pair immediately before this turn,
+        # so `preceding` is the INTERRUPTION's answer, never the real
+        # pending question — replay silently skipped binding this turn
+        # entirely (never even reaching _bind_all_from_message, so a field
+        # correction inside it — services/thai_address_parser.py::
+        # detect_field_correction — could never be replayed forward into
+        # any LATER turn's reconstruction either). Confirmed live: a
+        # ReceiverName correction sent right after such an interruption was
+        # correctly applied to THAT turn's own live collected_parameters,
+        # but reverted back to the stale original on the very NEXT turn,
+        # because replaying up through the correction for that next turn
+        # hit exactly this skip. Only looks back exactly one interruption
+        # pair (i-3: past the interruption's own assistant reply AND its
+        # own user question) — never an unbounded lookback.
+        if not preceding_matches and i >= 3:
+            further_back = history[i - 3]
+            if further_back.get("role") == "assistant":
+                preceding_matches = _reply_matches_question(
+                    (further_back.get("content") or "").strip(), expected_q)
+        if not preceding_matches:
             continue
         result = _bind_all_from_message(action, registry, collected, turn.get("content") or "")
         collected = result["collected"]
@@ -701,58 +725,101 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
     "whichever the registry returned first" order."""
     if not history:
         return None
-    last_assistant = next((t for t in reversed(history) if t.get("role") == "assistant"), None)
-    if not last_assistant:
-        return None
-    last_text = (last_assistant.get("content") or "").strip()
-    if not last_text:
+    assistant_indices = [i for i, t in enumerate(history) if t.get("role") == "assistant"]
+    if not assistant_indices:
         return None
     try:
         candidates = registry.enabled_actions()
     except Exception:
         return None
-    matches = []
-    for action in candidates:
-        if action.get("action_type") not in ("API", "WEBHOOK"):
-            continue
-        # `candidates` are bare rows from enabled_actions() (no joined
-        # parameters table) — must fetch the full record before knowing
-        # whether this action actually has parameter metadata.
-        full_action = registry.get_full(action["id"], mask_secrets=False)
-        if not (full_action.get("parameters") or full_action.get("parameter_groups")):
-            continue
-        collected_so_far = _replay_business_action_collection(full_action, registry, history[:-1], customer_context)
-        next_param = _next_expected_parameter(full_action, registry, collected_so_far)
-        # Status Query companion fix (2026-08-24) — a Collection Status
-        # Query reply ("ข้อมูลที่ได้รับตอนนี้ค่ะ...\n\n{same question}")
-        # always ENDS with this exact same generated question/
-        # confirmation text (see _compose_collection_status_reply), but
-        # is never IDENTICAL to it — confirmed live: continuation
-        # resolution went straight to None after a status-query turn
-        # (an exact-equality check only), so the very next reply (a
-        # correction, or any answer with no identifier/keyword of its
-        # own to win fresh selection by coincidence) fell through to RAG
-        # entirely. Accepting "ends with" alongside exact-equality only
-        # ever ADDS a recognized match; every existing exact-match case
-        # is completely unaffected.
-        if next_param:
-            expected_q = _generate_parameter_question(next_param)
-            if _reply_matches_question(last_text, expected_q):
-                matches.append(full_action)
-        elif next_param is None and _requires_confirmation(full_action):
-            # The last assistant turn was THIS action's confirmation-gate
-            # question (2026-08-09, SendLineNotiCS enablement) — the
-            # customer's reply this turn (e.g. "ยืนยัน"/"ยกเลิก", or a
-            # correction) is an answer to it, not a fresh, independently-
-            # routable message. Also accepts a Collection Status Query
-            # reply ending with this same confirmation question (Task 02,
-            # 2026-08-25 companion to the 2026-08-24 parameter-question
-            # fix above) — mirrors that fix exactly, for the same reason:
-            # a status-query turn at the confirmation stage must not
-            # silently break continuation for whatever comes next.
-            expected_confirmation_q = _generate_confirmation_question(full_action, collected_so_far)
-            if _reply_matches_question(last_text, expected_confirmation_q):
-                matches.append(full_action)
+
+    def _match_against(last_text: str, replay_history: List[Dict], *, allow_confirmation: bool) -> List[Dict]:
+        found = []
+        for action in candidates:
+            if action.get("action_type") not in ("API", "WEBHOOK"):
+                continue
+            # `candidates` are bare rows from enabled_actions() (no joined
+            # parameters table) — must fetch the full record before knowing
+            # whether this action actually has parameter metadata.
+            full_action = registry.get_full(action["id"], mask_secrets=False)
+            if not (full_action.get("parameters") or full_action.get("parameter_groups")):
+                continue
+            collected_so_far = _replay_business_action_collection(full_action, registry, replay_history, customer_context)
+            next_param = _next_expected_parameter(full_action, registry, collected_so_far)
+            # Status Query companion fix (2026-08-24) — a Collection Status
+            # Query reply ("ข้อมูลที่ได้รับตอนนี้ค่ะ...\n\n{same question}")
+            # always ENDS with this exact same generated question/
+            # confirmation text (see _compose_collection_status_reply), but
+            # is never IDENTICAL to it — confirmed live: continuation
+            # resolution went straight to None after a status-query turn
+            # (an exact-equality check only), so the very next reply (a
+            # correction, or any answer with no identifier/keyword of its
+            # own to win fresh selection by coincidence) fell through to RAG
+            # entirely. Accepting "ends with" alongside exact-equality only
+            # ever ADDS a recognized match; every existing exact-match case
+            # is completely unaffected.
+            if next_param:
+                expected_q = _generate_parameter_question(next_param)
+                if _reply_matches_question(last_text, expected_q):
+                    found.append(full_action)
+            elif next_param is None and allow_confirmation and _requires_confirmation(full_action):
+                # The last assistant turn was THIS action's confirmation-gate
+                # question (2026-08-09, SendLineNotiCS enablement) — the
+                # customer's reply this turn (e.g. "ยืนยัน"/"ยกเลิก", or a
+                # correction) is an answer to it, not a fresh, independently-
+                # routable message. Also accepts a Collection Status Query
+                # reply ending with this same confirmation question (Task 02,
+                # 2026-08-25 companion to the 2026-08-24 parameter-question
+                # fix above) — mirrors that fix exactly, for the same reason:
+                # a status-query turn at the confirmation stage must not
+                # silently break continuation for whatever comes next.
+                expected_confirmation_q = _generate_confirmation_question(full_action, collected_so_far)
+                if _reply_matches_question(last_text, expected_confirmation_q):
+                    found.append(full_action)
+        return found
+
+    last_idx = assistant_indices[-1]
+    last_text = (history[last_idx].get("content") or "").strip()
+    matches = _match_against(last_text, history[:-1], allow_confirmation=True) if last_text else []
+
+    # Mid-Collection Interruption Continuation fix (Customer Journey UAT,
+    # 2026-08-27) — confirmed live: a genuine RAG-answered interruption
+    # mid-collection (e.g. "CBM คืออะไรครับ" answered while Address is
+    # pending — Task 03's own "Mid-Collection RAG Diversion fix" lets this
+    # answer through, exactly as intended) becomes the new last assistant
+    # turn, so the NEXT customer turn (any reply that carries no keyword/
+    # identifier-pattern evidence of its own to win FRESH selection by
+    # coincidence — a correction like "ชื่อผู้รับไม่ใช่สมชาย เป็นสมศักดิ์" is
+    # exactly this shape) can never match ANY action's expected question
+    # here, falls through to RAG entirely, and _bind_message_to_action's
+    # own field_correction handling (services/thai_address_parser.py::
+    # detect_field_correction) never even gets a chance to run. A message
+    # that DOES carry its own strong signal (e.g. a full address block)
+    # was already unaffected by this — it wins FRESH re-selection via
+    # search_candidate_actions independently of continuation resolution,
+    # which is why this went unnoticed until a correction-shaped reply was
+    # tested. Fix: if the true last assistant turn matches nothing, retry
+    # against the assistant turn from ONE turn further back (skipping
+    # exactly the most recent interruption's own exchange, never more) —
+    # _replay_business_action_collection already tolerates an interruption
+    # pair sitting in the middle of history when reconstructing collected
+    # slots (proven by the address-block case above), so only the
+    # question-matching check itself needed to look past it too.
+    #
+    # allow_confirmation=False here is deliberate and load-bearing:
+    # confirmed live (Task 02C regression) that allowing the confirmation-
+    # question branch through this look-back path resurrects an ALREADY-
+    # EXECUTED action — a completed action's own "ยืนยัน" reply plus its
+    # completion message look, textually, exactly like "one interruption
+    # pair" too, but must never be reopened by a later, unrelated message
+    # (e.g. a bare name sent long after checkout). The parameter-question
+    # branch has no such risk (an action can't be "done" while it still
+    # has a next parameter to ask), so only that branch is retried here.
+    if not matches and len(assistant_indices) >= 2:
+        prior_idx = assistant_indices[-2]
+        prior_text = (history[prior_idx].get("content") or "").strip()
+        if prior_text and prior_text != last_text:
+            matches = _match_against(prior_text, history[:prior_idx + 1], allow_confirmation=False)
 
     if not matches:
         return None
@@ -1852,7 +1919,47 @@ class DecisionEngine:
                     selected = select_best_action(candidates, minimum_score=1.0 if not workflow_hint else 0.5)
                     developer_trace["selection_source"] = "fresh_search"
 
-                    if not selected and referenced:
+                    # General Company Policy Question Guard (Customer
+                    # Journey UAT, 2026-08-27) — confirmed live:
+                    # "บริษัทมีประกัน All Risk ให้ทุกออเดอร์ไหมครับ" (a general
+                    # policy question, not a request for any specific
+                    # customer's own data) matched searchdataorderlist
+                    # purely via its generic "ออเดอร์" keyword — the bare
+                    # word legitimately appears in countless account-
+                    # specific requests too, so it can't be removed from
+                    # the action's own keywords the way the "เข้าไทย"
+                    # collision fix could (that keyword's ONLY genuine
+                    # meaning was arrival-status; "ออเดอร์" has no such
+                    # single meaning). Narrowly vetoes a selection when
+                    # ALL of: (1) the message names the company as subject
+                    # ("บริษัท") -- never present in any of the legitimate
+                    # preserve-list examples (self-referencing requests
+                    # like "เช็กบิลของผม"/"เช็ก Shipment นี้"/"ขอดู Wallet
+                    # ของผม" all name THEMSELVES, never "the company"),
+                    # (2) the message is phrased as a genuine yes/no
+                    # question (_QUESTION_MARKER_RE, already used
+                    # elsewhere in this same function), and (3) the
+                    # winning candidate's own evidence contains no
+                    # identifier-pattern contribution (a message that
+                    # ALSO supplies a real CustCode/OrderCode alongside
+                    # "บริษัท" is never vetoed -- that's real evidence of
+                    # an actual account-specific request, not a policy
+                    # question). Falls through to ordinary RAG/
+                    # clarification handling below, exactly like any
+                    # other unmatched message.
+                    general_policy_question_vetoed = False
+                    if selected and "บริษัท" in (message or "") and _QUESTION_MARKER_RE.search(message or "") \
+                            and not any("parameter identifier pattern" in r for r in (selected.get("_reasons") or [])):
+                        selected = None
+                        candidates = []
+                        general_policy_question_vetoed = True
+                        developer_trace["selection_source"] = "fresh_search_vetoed_general_policy_question"
+
+                    # A vetoed general policy question must not fall back
+                    # to some earlier, unrelated remembered topic either —
+                    # it is a fresh question in its own right, not a
+                    # continuation of anything.
+                    if not selected and referenced and not general_policy_question_vetoed:
                         # The memory-boosted search still found nothing
                         # (fresh_topic_beats_reference was True only
                         # because of a WEAKER, sub-threshold memory-free

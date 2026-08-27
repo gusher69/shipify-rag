@@ -5378,6 +5378,53 @@ class TestTask02BCrossTopicContaminationPrevention(unittest.TestCase):
         self.assertEqual(collected.get("ReceiverPhone"), "0899999999")
         self.assertEqual(collected.get("ShipmentCode"), self.SHIPMENT_CODE)
 
+    # TEST 15 — Customer Journey UAT (2026-08-27): unlike TEST 14's status-
+    # query interruption (whose own reply always ENDS with the pending
+    # question, so it never actually breaks continuation-matching), a
+    # genuine RAG-answered interruption ("CBM คืออะไรครับ", Task 03's own
+    # Mid-Collection RAG Diversion fix) becomes the new last assistant
+    # turn with UNRELATED content -- confirmed live this made both
+    # _resolve_continuation_action and _replay_business_action_collection
+    # fail to recognize the NEXT turn (here, a correction to an already-
+    # collected field while a DIFFERENT, later field is still pending) as
+    # a continuation at all, silently dropping the correction. Proves the
+    # full, real multi-turn workflow end-to-end: an interruption, then the
+    # correction, then the remaining field, ending with the CORRECTED
+    # value in the final confirmation summary -- never the stale
+    # original, never a lost/reset workflow, never an executed mutation.
+    def test_15_mid_workflow_correction_survives_a_genuine_rag_interruption(self):
+        ctx = {"developer_mode": True, "customer_context": {"cust_code": "SP1008"}}
+        self._turn(self.TRIGGER, context=ctx)
+        self._turn(self.SHIPMENT_CODE, context=ctx)
+        t3 = self._turn("ผู้รับสมชายครับ เบอร์ 0812345678", context=ctx)
+        collected_before = self._ics(t3).get("collected_parameters", {})
+        self.assertEqual(collected_before.get("ReceiverName"), "สมชายครับ")
+
+        # Genuine RAG interruption -- must not corrupt any collected slot.
+        with patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="CBM คือปริมาตรสินค้าค่ะ")):
+            self._turn("CBM คืออะไรครับ", context=ctx)
+
+        # Correction -- sent while Address (not ReceiverName) is the
+        # actively-pending field.
+        t5 = self._turn("ขอโทษครับ ชื่อผู้รับไม่ใช่สมชาย เป็นสมศักดิ์ครับ", context=ctx)
+        collected_after = self._ics(t5).get("collected_parameters", {})
+        self.assertEqual(collected_after.get("ReceiverName"), "สมศักดิ์",
+                          "correction must be applied, not silently dropped")
+        self.assertEqual(collected_after.get("ShipmentCode"), self.SHIPMENT_CODE,
+                          "unrelated already-collected fields must survive the correction")
+        self.assertEqual(collected_after.get("ReceiverPhone"), "0812345678")
+
+        t6 = self._turn("ที่อยู่ 99/12 หมู่ 4 ตำบลบางแก้ว อำเภอบางพลี จังหวัดสมุทรปราการ 10540 ครับ",
+                          context=ctx)
+        final_collected = self._ics(t6).get("collected_parameters", {})
+        self.assertEqual(final_collected.get("ReceiverName"), "สมศักดิ์",
+                          "final confirmation summary must contain the CORRECTED name")
+        self.assertEqual(final_collected.get("ShipmentCode"), self.SHIPMENT_CODE)
+        gate = (t6.get("developer") or {}).get("confirmation_gate") or {}
+        self.assertTrue(gate.get("required"), "must reach the confirmation gate, never auto-execute")
+        self.assertFalse(gate.get("confirmed"), "must stop BEFORE mutation -- no 'confirm' was ever sent")
+
 
 class TestTask03IntentUnderstandingClarificationMultiIntent(unittest.TestCase):
     """Task 03 — Fix Intent Understanding + Clarification + Multi-Intent +
@@ -5736,6 +5783,37 @@ class TestAnswerabilityGateFallbackWording(unittest.TestCase):
             self.assertNotIn(term, reply_text)
         self.assertIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", reply_text)
 
+    # ---- Zero-Evidence Fallback Tone Guard (Gap B) ----
+
+    def test_urgency_signal_gets_acknowledged_not_a_bare_fallback(self):
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = run_playground_turn("ตามมาหลายวันแล้วครับ ของรีบใช้ ลูกค้าผมก็ตามอยู่", history=[])
+        self.assertIn("เร่งด่วน", result.answer)
+        self.assertIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", result.answer, "the underlying truthful text must be preserved verbatim")
+
+    def test_complaint_signal_gets_acknowledged_not_a_bare_fallback(self):
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = run_playground_turn("ของที่ได้มาเหมือนเป็นของเก่าครับ กล่องก็มีรอย", history=[])
+        self.assertIn("รับทราบ", result.answer)
+        self.assertIn("ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ", result.answer)
+        # Never presents the customer's own allegation as independently
+        # verified fact.
+        self.assertNotIn("จริง", result.answer)
+
+    def test_neutral_question_still_gets_the_bare_fallback(self):
+        """No urgency/complaint signal -- output must be byte-identical to
+        the existing, already-tested plain fallback (no regression for the
+        overwhelming majority of zero-evidence questions)."""
+        from services.playground_orchestrator import run_playground_turn
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag:
+            mock_get_rag.return_value.retrieve.return_value = []
+            result = run_playground_turn("เรื่องทั่วไปที่ไม่มีข้อมูลเลยครับ", history=[])
+        self.assertEqual(result.answer, "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ")
+
 
 # General Import Advice Routing Fix (2026-08-27) — confirmed live (single-
 # turn, no history involved): "มีสินค้าอะไรแนะนำไหมสำหรับนำเข้าไทย" falsely
@@ -5777,6 +5855,20 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
              "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
         ])
         self.reg.upsert_execution(self.customer_lookup_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+
+        # A third action mirroring the REAL production SearchDataOrderList
+        # -- reproduces the exact General Company Policy Question collision
+        # (Customer Journey UAT, 2026-08-27): the generic keyword "ออเดอร์"
+        # legitimately appears both in account-specific requests AND
+        # general policy questions about orders as a category.
+        self.order_action_id = _seed_action(
+            self.reg, key="searchdataorderlist", action_type="API", category="Order Lookup",
+            ai_description="ค้นหารายการคำสั่งซื้อของลูกค้า", keywords=["ออเดอร์", "order", "คำสั่งซื้อ"])
+        self.reg.replace_parameters(self.order_action_id, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message",
+             "validation_pattern": r"^[A-Za-z]{2}\d{4,6}$"},
+        ])
+        self.reg.upsert_execution(self.order_action_id, {"endpoint": "https://example.test/orders", "http_method": "GET"})
 
         self.engine = _engine_with_registry(self.reg)
 
@@ -5853,6 +5945,33 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         result = self._decide("ของเข้าไทยหรือยังครับ")
         ics = (result.get("developer") or {}).get("information_collection_status") or {}
         self.assertEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
+
+    # ---- General Company Policy Question Guard (Gap C) ----
+
+    def test_general_company_policy_question_does_not_request_custcode(self):
+        """The exact reported reproduction case."""
+        result = self._decide("บริษัทมีประกัน All Risk ให้ทุกออเดอร์ไหมครับ")
+        self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertNotEqual(ics.get("selected_business_action"), "searchdataorderlist")
+
+    def test_self_referencing_order_request_still_requires_custcode(self):
+        """Same "ออเดอร์" keyword, but phrased as the customer's OWN
+        request (no "บริษัท" subject) -- must be completely unaffected."""
+        result = self._decide("เช็คออเดอร์ของผมให้หน่อยครับ")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
+
+    def test_policy_question_with_a_real_custcode_is_never_vetoed(self):
+        """A message that names the company AND supplies a real
+        identifier is genuine evidence of an account-specific request --
+        the veto must never fire when identifier-pattern evidence exists.
+        (CustCode is already supplied, so this reaches the Task 06
+        authorization gate rather than asking for it again -- the point
+        here is only that the action was SELECTED at all, never vetoed
+        to RAG/no-selection.)"""
+        result = self._decide("บริษัทเช็คออเดอร์ SP1008 ให้หน่อยได้ไหมครับ")
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertEqual(ics.get("selected_business_action"), "searchdataorderlist")
 
 
 if __name__ == "__main__":

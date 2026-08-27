@@ -7,6 +7,7 @@ happen before prompt assembly, since the prompt needs the retrieved
 context) — the Playground's Pipeline tab renders these stages in this
 same order.
 """
+import re
 import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
@@ -30,6 +31,21 @@ from services.llm_service import get_llm_service, estimate_cost_usd
 from services.embedding_service import get_embedding_provider
 from rag.evidence_classifier import classify_evidence, select_citation_sources
 from rag.hybrid_scoring import has_strong_company_profile_evidence
+
+# Zero-Evidence Fallback Tone Guard (Customer Journey UAT, 2026-08-27) —
+# the Answerability Gate's deterministic "no information" fallback below
+# never invokes the LLM, so it cannot pick up CS-03's own Human CS tone
+# rules (urgency acknowledgement, complaint acknowledgement) the way an
+# LLM-generated reply does. Deliberately separate from
+# services/policy_engine.py::DISSATISFACTION_KEYWORDS (that list gates
+# real ESCALATION to a human via the exact production handoff logic
+# line_bot/webhook.py shares — this guard only prepends one short,
+# neutral acknowledgement sentence to the SAME truthful "no information"
+# text; it never escalates, never fabricates a status, never invents a
+# cause). Narrowly scoped to this one fallback branch, not a new tone
+# system.
+_URGENCY_SIGNAL_RE = re.compile(r"รีบ|ด่วน|ตามมาหลาย|ตามอยู่|ไม่ทันใช้", re.IGNORECASE)
+_COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำรุด|เสียหาย|ของผิด|ของขาด|ตกหล่น|ไม่ครบ", re.IGNORECASE)
 
 
 def _has_direct_structured_evidence(chunks: List[Dict]) -> bool:
@@ -695,7 +711,26 @@ def run_playground_turn(
         # the same natural wording CS-03 already established elsewhere —
         # no business fact changed, still an honest "no information"
         # answer.
+        #
+        # Zero-Evidence Fallback Tone Guard (Customer Journey UAT,
+        # 2026-08-27) — a bare "no information" reply is not sufficient
+        # Human CS behavior when the customer's own message carries an
+        # urgency or complaint signal (confirmed live: "ตามมาหลายวันแล้ว
+        # ครับ ของรีบใช้..." and "...เหมือนเป็นของเก่าครับ กล่องก็มีรอย" both
+        # produced only the bare fallback, with no acknowledgement at
+        # all). Matched against the RAW customer message (never the
+        # canonicalized/rewritten query, which can lose the emotional
+        # signal) — checked in order (complaint takes precedence when a
+        # message carries both, since the customer report is the more
+        # specific of the two). Prepends one short, neutral acknowledgement
+        # sentence reusing the SAME safe phrasing families CS-02/CS-03
+        # already established elsewhere in the prompt (never invents a
+        # cause, never claims a status, never escalates).
         answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
+        if _COMPLAINT_SIGNAL_RE.search(question or ""):
+            answer_text = "รับทราบเรื่องที่แจ้งมาค่ะ " + answer_text + " หากมีเลขที่คำสั่งซื้อหรือรายละเอียดเพิ่มเติม รบกวนแจ้งเพิ่มเติมได้เลยค่ะ จะช่วยตรวจสอบให้ค่ะ"
+        elif _URGENCY_SIGNAL_RE.search(question or ""):
+            answer_text = "เข้าใจว่าเรื่องนี้เร่งด่วนสำหรับคุณค่ะ " + answer_text + " จะติดตามและแจ้งความคืบหน้าให้เร็วที่สุดค่ะ"
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                              "no chunk carries reliable evidence for this question (Answerability Gate) — "
                              "deterministic safe-fallback used, no LLM call, no chunks used as evidence"))

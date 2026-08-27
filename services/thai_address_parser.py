@@ -300,7 +300,17 @@ _CORRECTION_CONCEPT_TERMS = {
     "receiver_name": ("ชื่อผู้รับ",),
     "receiver_phone": ("เบอร์โทรผู้รับ", "เบอร์โทร"),
 }
-_CORRECTION_CUE_RE = re.compile(r"ผิด|เปลี่ยนเป็น|แก้เป็น|ที่จริงคือ|ที่ถูกคือ")
+# "ไม่ใช่" (Customer Journey UAT, 2026-08-27) — a mid-workflow correction
+# phrased as "<field>ไม่ใช่<old value> เป็น<new value>" (e.g. "ชื่อผู้รับไม่ใช่
+# สมชาย เป็นสมศักดิ์ครับ") was falling through to the generic compound-
+# address parser instead of this correction path, since none of the
+# original cue phrases cover "ไม่ใช่" -- the customer's OWN corrected value
+# was then silently never applied to any collected slot. Every concept term
+# this cue can pair with (see _CORRECTION_CONCEPT_TERMS above) already
+# requires BOTH a named field AND a "เป็น"/"คือ" replacement value before
+# detect_field_correction returns anything, so this addition does not
+# widen false-positive risk beyond the existing cue phrases' own scope.
+_CORRECTION_CUE_RE = re.compile(r"ผิด|เปลี่ยนเป็น|แก้เป็น|ที่จริงคือ|ที่ถูกคือ|ไม่ใช่")
 _CORRECTION_VALUE_RE = re.compile(r"(?:เป็น|คือ)\s*(.+)$")
 
 
