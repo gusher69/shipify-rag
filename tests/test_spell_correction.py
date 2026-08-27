@@ -202,6 +202,16 @@ class TestStrictShipifyRagGroundingProtectedPhrases(unittest.TestCase):
         self.assertEqual(_protected_spans(text), [])
         self.assertGreater(len(_correction_protected_spans(text)), 0)
 
+    def test_start_word_is_never_corrected(self):
+        """Semantic RAG Retrieval fix (2026-08-27) -- confirmed live:
+        "เริ่มนำเข้าสินค้าจากจีนยังไงครับ" (no typo at all) had its own
+        leading fragment "เริ" fuzzy-corrected into the registered
+        vocabulary/tag term "เรท" ("rate"), corrupting the query into
+        "เรท่มนำเข้าสินค้าจากจีนยังไงครับ" before it ever reached retrieval."""
+        r = correct_query("เริ่มนำเข้าสินค้าจากจีนยังไงครับ")
+        self.assertEqual(r["corrected_query"], "เริ่มนำเข้าสินค้าจากจีนยังไงครับ")
+        self.assertEqual(r["corrections"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -208,6 +208,13 @@ _FUZZY_CORRECTION_PHRASE_GUARDS = [
     # the identical reason (one edit apart, "เรท" a registered
     # vocabulary/tag term).
     re.compile(r"ทางเรือ"),
+    # Semantic RAG Retrieval fix (2026-08-27) — same class, same mechanism
+    # — "เริ่ม" ("to start/begin," an ordinary word, e.g. "เริ่มนำเข้า
+    # สินค้าจากจีนยังไงครับ") had its own leading fragment "เริ" fuzzy-
+    # corrected into "เรท" ("rate") for the identical reason (one edit
+    # apart, "เรท" a registered vocabulary/tag term) — confirmed live to
+    # corrupt "เริ่มนำเข้า..." into "เรท่มนำเข้า...".
+    re.compile(r"เริ่ม"),
 ]
 
 

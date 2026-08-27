@@ -48,14 +48,15 @@ _URGENCY_SIGNAL_RE = re.compile(r"รีบ|ด่วน|ตามมาหล�
 _COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำรุด|เสียหาย|ของผิด|ของขาด|ตกหล่น|ไม่ครบ", re.IGNORECASE)
 
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
-# 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization)
-# — a CLOSED, explicit deny-list, directly reusing the exact topic
-# taxonomy this feature's own spec lists as never-to-be-guessed by a
-# general LLM (company policy, shipping rate/duration, refund/warranty,
-# order/shipment status, customer/wallet/coupon data, warehouse status,
-# prices, promotions), plus the same self-reference markers ("ของผม" etc)
-# already established elsewhere in this codebase for "this is about MY
-# OWN account" detection, plus a few precise, low-collision domain terms
+# 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization;
+# broadened again 2026-08-27 same day — Semantic RAG Retrieval fix) — a
+# CLOSED, explicit deny-list, directly reusing the exact topic taxonomy
+# this feature's own spec lists as never-to-be-guessed by a general LLM
+# (company policy, shipping rate/duration, refund/warranty, order/shipment
+# status, customer/wallet/coupon data, warehouse status, prices,
+# promotions), plus the same self-reference markers ("ของผม" etc) already
+# established elsewhere in this codebase for "this is about MY OWN
+# account" detection, plus a few precise, low-collision domain terms
 # (CBM, ทางรถ/ทางเรือ shipping modes, ขั้นต่ำ) added once this check
 # started running BEFORE consulting RAG evidence quality at all (see the
 # General Chat Fallback branch below) — without them, a genuinely
@@ -69,6 +70,24 @@ _COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำ
 # way to stay on the company path is to match it, so anything ambiguous
 # or genuinely company-adjacent defaults to the existing safe/RAG
 # behavior, never the other way around.
+#
+# Semantic RAG Retrieval fix (2026-08-27) — "สั่ง"/"ซื้อ" added: confirmed
+# live that a natural order/purchase-intent message ("ผมต้องการสั่งซื้อ
+# สินค้าจากจีนครับ", "อยากให้ช่วยสั่งของจากจีน", "ผมสั่งของกับร้านจีนเองแล้ว
+# ต้องทำอะไรต่อ") already retrieves a genuinely relevant, high-confidence
+# RAG answer (rag/confidence.py's Answerability Gate already correctly
+# returns direct_answer/0.9 for these) but never REACHED that answer
+# because this gate — checked BEFORE consulting RAG evidence at all — ran
+# first and had no order/purchase vocabulary in its list, sending the
+# message to General Chat instead (which then either falsely claimed "no
+# information exists" despite a real answer being available, or, worse,
+# fabricated generic international-shipping/customs advice). "สั่ง" (to
+# order, with the ั vowel — confirmed distinct from "ส่ง"/"ขนส่ง", "to
+# send"/"shipping", which do NOT contain this substring) and "ซื้อ" (to
+# buy) are safe, low-collision bare additions: neither appears in any of
+# this task's required General Chat test messages (verified: "จีนอยู่ทวีป
+# อะไร", "ขนส่งระหว่างประเทศคืออะไร", "ช่วยคิดข้อความขายของ", etc. contain
+# neither word).
 _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     r"shipify|บริษัท|ของผม|ของฉัน|ของดิฉัน|"
     r"นโยบาย|เงื่อนไข|ประกัน|เคลม|ค่าส่ง|ค่าขนส่ง|เรท|ราคา|"
@@ -78,9 +97,28 @@ _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     r"ข้อมูลลูกค้า|wallet|กระเป๋าเงิน|ยอดเงิน|"
     r"คูปอง|โกดัง|โปรโมชั่น|โปรโมชัน|บริการ|"
     r"cbm|ทางรถ|ทางเรือ|ระยะเวลาขนส่ง|ขั้นต่ำ|"
-    r"นำเข้า|ฝากสั่ง|ฝากโอน",
+    r"นำเข้า|ฝากสั่ง|ฝากโอน|"
+    r"สั่ง|ซื้อ",
     re.IGNORECASE,
 )
+
+# China-Sourced Action Guard (Semantic RAG Retrieval fix, 2026-08-27) —
+# China named as the SOURCE of a shipping/fetch action ("ส่งของจากจีนมา
+# ไทยทำยังไง", "สินค้าจีนส่งมาไทยใช้เวลากี่วัน", "อยากเอาของจากจีนเข้ามาไทย")
+# is genuine Shipify service intent even when none of the topic words
+# above are present. Deliberately NOT a bare "จีน" check: confirmed live
+# that bare "จีน" alone is an unsafe signal on its own — rag/confidence.py's
+# Answerability Gate already gives "จีนอยู่ทวีปอะไร" a literal_keyword_score
+# up to 1.0 and answerability="direct_answer" purely from coincidental
+# word overlap (จีน + อยู่) against the China-warehouse-address FAQ, which
+# is exactly the spurious-match failure mode this whole topic gate exists
+# to reject — so "จีน" must never be added to _COMPANY_OPERATIONAL_TOPIC_RE
+# as a bare word. Requiring collocation with a real shipping/fetch verb
+# (ส่ง/เอา) keeps a pure geography/general-knowledge mention of China
+# ("จีนอยู่ทวีปอะไร", "จีนมีเมืองอะไรบ้าง" — neither has a nearby ส่ง/เอา)
+# on the General Chat path, verified against every required General Chat
+# test message for this task.
+_CHINA_SOURCED_ACTION_RE = re.compile(r"(ส่ง|เอา).{0,20}จีน|จีน.{0,20}(ส่ง|เอา)")
 
 
 def _has_direct_structured_evidence(chunks: List[Dict]) -> bool:
@@ -717,6 +755,7 @@ def run_playground_turn(
         llm_latency = 0.0
         llm_failed = False
     elif not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
+              or _CHINA_SOURCED_ACTION_RE.search(question or "")
               or _URGENCY_SIGNAL_RE.search(question or "")
               or _COMPLAINT_SIGNAL_RE.search(question or "")):
         # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27;
@@ -867,6 +906,7 @@ def run_playground_turn(
                                                  "ERP acknowledgement) — never an evidence-chunk attachment",
                             "omitted_attachments": []}
     elif not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
+              or _CHINA_SOURCED_ACTION_RE.search(question or "")
               or _URGENCY_SIGNAL_RE.search(question or "")
               or _COMPLAINT_SIGNAL_RE.search(question or "")):
         # General Chat Fallback (see the matching branch above) answers

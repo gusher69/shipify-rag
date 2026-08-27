@@ -5903,6 +5903,13 @@ class TestCompanyOperationalTopicGuard(unittest.TestCase):
         from services.playground_orchestrator import _COMPANY_OPERATIONAL_TOPIC_RE
         return bool(_COMPANY_OPERATIONAL_TOPIC_RE.search(message))
 
+    def _stays_on_company_path(self, message):
+        """Combined check mirroring the ACTUAL gate condition in
+        run_playground_turn (services/playground_orchestrator.py) --
+        _COMPANY_OPERATIONAL_TOPIC_RE OR _CHINA_SOURCED_ACTION_RE."""
+        from services.playground_orchestrator import _COMPANY_OPERATIONAL_TOPIC_RE, _CHINA_SOURCED_ACTION_RE
+        return bool(_COMPANY_OPERATIONAL_TOPIC_RE.search(message) or _CHINA_SOURCED_ACTION_RE.search(message))
+
     def test_general_chat_messages_do_not_match(self):
         for msg in ("วันนี้เหนื่อยจัง", "ช่วยคิดข้อความโปรโมตสินค้าให้หน่อย",
                     "ช่วยคิดชื่อร้านขายของออนไลน์", "จีนอยู่ทวีปอะไร"):
@@ -5963,6 +5970,48 @@ class TestCompanyOperationalTopicGuard(unittest.TestCase):
             "tracking number อยู่ไหน",
         ):
             self.assertTrue(self._matches(msg), f"{msg!r} must match (must stay on company/RAG path)")
+
+    def test_semantic_order_purchase_intent_stays_on_company_path(self):
+        """Semantic RAG Retrieval fix (2026-08-27) -- confirmed live that
+        these order/purchase-intent paraphrases already retrieve a
+        genuinely relevant, high-confidence RAG answer (rag/confidence.py
+        returns answerability="direct_answer", confidence 0.9) but were
+        falling through to General Chat because this gate had no
+        order/purchase vocabulary at all -- General Chat then either
+        falsely claimed no information exists, or (worse) fabricated
+        generic customs/tax advice never present in Shipify's own
+        Knowledge. Bare "สั่ง"/"ซื้อ" (added to the main deny-list) and the
+        new China-Sourced Action Guard (_CHINA_SOURCED_ACTION_RE, for
+        messages with neither word but naming China as the source of a
+        shipping/fetch action) fix this without ever treating bare "จีน"
+        as company-domain evidence on its own."""
+        for msg in (
+            "ผมต้องการสั่งซื้อสินค้าจากจีนครับ",
+            "อยากซื้อของจากจีนผ่านทางนี้",
+            "อยากให้ช่วยสั่งของจากจีน",
+            "ถ้าจะสั่งสินค้าจีนต้องทำยังไง",
+            "ผมสั่งของจีนเองแล้วต้องทำอะไรต่อ",
+            "อยากเอาของจากจีนเข้ามาไทย",
+            "ส่งของจากจีนมาไทยทำยังไง",
+            "สินค้าจีนส่งมาไทยใช้เวลากี่วัน",
+            "ถ้าสั่งนิดเดียวรับไหม",
+        ):
+            self.assertTrue(self._stays_on_company_path(msg), f"{msg!r} must stay on company/RAG path")
+
+    def test_bare_china_mention_alone_still_does_not_match(self):
+        """Regression guard, the critical safety check for this fix --
+        "จีน" by itself (no order/purchase/shipping verb collocated with
+        it) must never become company-domain evidence on its own.
+        Confirmed live that rag/confidence.py's Answerability Gate ALSO
+        mislabels this exact bare-จีน overlap as reliable evidence
+        (literal_keyword_score up to 1.0, answerability="direct_answer")
+        purely from coincidental word overlap against the China-warehouse
+        FAQ -- this gate is the only safety net preventing these from
+        wrongly leaving General Chat, so _CHINA_SOURCED_ACTION_RE must
+        require a real shipping/fetch verb (ส่ง/เอา), never bare "จีน"."""
+        for msg in ("จีนอยู่ทวีปอะไร", "จีนมีเมืองอะไรบ้าง"):
+            self.assertFalse(self._stays_on_company_path(msg),
+                              f"{msg!r} must NOT match (should reach general chat)")
 
 
 class TestGeneralChatFallback(unittest.TestCase):
@@ -6029,6 +6078,33 @@ class TestGeneralChatFallback(unittest.TestCase):
         system_content = called_messages[0]["content"]
         from services.prompt_builder import GENERAL_CHAT_GUIDANCE
         self.assertNotIn(GENERAL_CHAT_GUIDANCE.strip(), system_content)
+
+    def test_order_purchase_intent_message_uses_normal_rag_path_not_general_chat(self):
+        """Semantic RAG Retrieval fix (2026-08-27) -- end-to-end regression
+        for the reported live bug: "ผมต้องการสั่งซื้อสินค้าจากจีนครับ" already
+        retrieves a genuinely relevant, high-confidence RAG chunk (real
+        production trace: answerability="direct_answer", confidence 0.9),
+        but was routed to General Chat (empty context) purely because the
+        topic gate had no order/purchase vocabulary -- proves it now uses
+        STRICT_GROUNDING_RULES (real evidence), never GENERAL_CHAT_GUIDANCE
+        (empty context), for this exact message."""
+        from services.playground_orchestrator import run_playground_turn
+        from rag.confidence import ConfidenceResult
+        strong = ConfidenceResult(answer_confidence=0.9, answerability="direct_answer",
+                                   raw_vector_similarity=1.0, hybrid_retrieval_score=1.0,
+                                   evidence_count=1, reason="genuine direct FAQ match")
+        with patch("services.playground_orchestrator.get_rag_service") as mock_get_rag, \
+             patch("services.playground_orchestrator.compute_confidence", return_value=strong), \
+             patch("services.playground_orchestrator.get_llm_service") as mock_get_llm:
+            mock_get_rag.return_value.retrieve.return_value = []
+            mock_get_llm.return_value.generate.return_value = _fake_llm_response(
+                "ได้เลยค่ะ ทาง Shipify มีทั้งบริการฝากสั่งและฝากนำเข้าค่ะ")
+            run_playground_turn("ผมต้องการสั่งซื้อสินค้าจากจีนครับ", history=[])
+        called_messages = mock_get_llm.return_value.generate.call_args[0][0]
+        system_content = called_messages[0]["content"]
+        from services.prompt_builder import GENERAL_CHAT_GUIDANCE, STRICT_GROUNDING_RULES
+        self.assertNotIn(GENERAL_CHAT_GUIDANCE.strip(), system_content)
+        self.assertIn(STRICT_GROUNDING_RULES.strip(), system_content)
 
     def test_general_chat_prompt_uses_general_chat_guidance_not_strict_grounding(self):
         from services.playground_orchestrator import run_playground_turn
