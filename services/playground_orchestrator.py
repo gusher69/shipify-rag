@@ -175,6 +175,60 @@ _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
 # test message for this task.
 _CHINA_SOURCED_ACTION_RE = re.compile(r"(ส่ง|เอา).{0,20}จีน|จีน.{0,20}(ส่ง|เอา)")
 
+# New-Topic Question Marker (Usage Lock fix, 2026-08-28) — a documented
+# SUBSET of services/hybrid_question_classifier.py's own _QUESTION_MARKER_RE
+# word list (never re-widened, never a new vocabulary), keeping only the
+# WH-question words that ask FOR a specific new fact about some entity
+# ("จีนอยู่ทวีปอะไร", "ทางรถกี่วัน") — genuine new-topic signals. Deliberately
+# EXCLUDES the polar/yes-no markers (หรือไม่|หรือเปล่า|ไหม): in Thai these
+# routinely function as a POLITE REQUEST form ("...ช่วยอธิบายง่ายๆได้ไหม" =
+# "could you explain simply?"), not a fact-seeking question about a new
+# subject — confirmed live: excluding them was necessary for "ผมไม่ค่อย
+# เข้าใจ ช่วยอธิบายง่ายๆได้ไหม" (a genuine continuation request) to be
+# correctly distinguished from "จีนอยู่ทวีปอะไร" (a genuine new topic),
+# since both would otherwise look identical to a single, undifferentiated
+# "has a question marker" check.
+_NEW_TOPIC_QUESTION_MARKER_RE = re.compile(r"(ยังไง|อย่างไร|อะไร|ทำไม|เท่าไหร่|เท่าไร|กี่|ที่ไหน|แค่ไหน|เมื่อไหร่)")
+
+
+def _is_ambiguous_rag_continuity_followup(question: str, history: Optional[List[Dict]]) -> bool:
+    """Usage Lock root-cause fix (2026-08-28) — confirmed live: a plain
+    declarative follow-up inside an active Shipify-informational
+    conversation (e.g. "ผมมีงบประมาณประมาณ 10,000 บาทครับ" right after
+    "ฝากสั่งกับฝากนำเข้าต่างกันยังไง") carries no _COMPANY_OPERATIONAL_
+    TOPIC_RE/_CHINA_SOURCED_ACTION_RE term of its own, so it fell straight
+    into General Chat Fallback and lost all connection to the ongoing
+    conversation — the exact "context is not used naturally" complaint.
+
+    Narrow, additive exception: keeps the turn on the company/RAG path
+    (with history, letting the existing grounding rules decide what — if
+    anything — can be said) ONLY when ALL of:
+      (a) there IS prior conversation history (never the first turn);
+      (b) the most recent CUSTOMER turn in that history was itself on a
+          company topic (the SAME two regexes above, reused not
+          duplicated) — proving this really is a continuation, not an
+          assumption;
+      (c) the CURRENT message carries no NEW-TOPIC WH-question marker of
+          its own (_NEW_TOPIC_QUESTION_MARKER_RE) — a self-contained new
+          question (e.g. "จีนอยู่ทวีปอะไร") is deliberately NOT covered by
+          this exception and must still be evaluated independently, so
+          General Chat Fallback still correctly wins for it even
+          immediately after the same company conversation.
+
+    Never phrase-specific — no keyword list of its own beyond the shared,
+    documented subset above — works for any declarative/request-shaped
+    follow-up that merely supplies context (budget, quantity, shipping
+    preference, experience level, a request to simplify), never for a
+    new self-contained question."""
+    if not history:
+        return False
+    if _NEW_TOPIC_QUESTION_MARKER_RE.search(question or ""):
+        return False
+    last_customer_turn = next(
+        (t.get("content") or "" for t in reversed(history) if t.get("role") == "user"), "")
+    return bool(_COMPANY_OPERATIONAL_TOPIC_RE.search(last_customer_turn)
+                or _CHINA_SOURCED_ACTION_RE.search(last_customer_turn))
+
 
 def _has_direct_structured_evidence(chunks: List[Dict]) -> bool:
     """True when the FINAL evidence-classified chunk list (rag/
@@ -825,7 +879,8 @@ def run_playground_turn(
     elif not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
               or _CHINA_SOURCED_ACTION_RE.search(question or "")
               or _URGENCY_SIGNAL_RE.search(question or "")
-              or _COMPLAINT_SIGNAL_RE.search(question or "")):
+              or _COMPLAINT_SIGNAL_RE.search(question or "")
+              or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27;
         # moved ahead of the Answerability Gate 2026-08-27 same day — Final
         # Hybrid Stabilization) — confirmed live: "จีนอยู่ทวีปอะไร" (a pure
@@ -985,7 +1040,8 @@ def run_playground_turn(
     elif not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
               or _CHINA_SOURCED_ACTION_RE.search(question or "")
               or _URGENCY_SIGNAL_RE.search(question or "")
-              or _COMPLAINT_SIGNAL_RE.search(question or "")):
+              or _COMPLAINT_SIGNAL_RE.search(question or "")
+              or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (see the matching branch above) answers
         # from the LLM's own general knowledge with empty context — the
         # retrieved context_chunks here are whatever (possibly irrelevant)
