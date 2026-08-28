@@ -190,6 +190,23 @@ _CHINA_SOURCED_ACTION_RE = re.compile(r"(ส่ง|เอา).{0,20}จีน|�
 # "has a question marker" check.
 _NEW_TOPIC_QUESTION_MARKER_RE = re.compile(r"(ยังไง|อย่างไร|อะไร|ทำไม|เท่าไหร่|เท่าไร|กี่|ที่ไหน|แค่ไหน|เมื่อไหร่)")
 
+# ERP-Clarification-In-Progress Guard (Final Two Blockers, 2026-08-28) —
+# confirmed live: "ช่วยคิดข้อความขายสินค้านี้ให้หน่อย" (a General Chat
+# creative-writing request, no self-contained WH-question marker) sent
+# right after an ERP Shipment lookup asked for CustCode ("กรุณาแจ้ง
+# รหัสลูกค้าค่ะ") was wrongly captured by THIS SAME continuity exception,
+# because the most recent CUSTOMER turn ("...Shipment...") happened to
+# match _COMPANY_OPERATIONAL_TOPIC_RE — even though the conversation's
+# actual active thread had already moved from RAG to an (independently
+# escaped, per services/decision_engine.py's own continuation-escape
+# fix) ERP clarification exchange, not a RAG answer. Reuses the EXACT
+# literal template services/decision_engine.py::_generate_parameter_
+# question already renders for every single ERP follow-up question
+# across the whole codebase ("กรุณาแจ้ง{display}ค่ะ") — never a new,
+# invented pattern — as the signal that the conversation's immediately
+# preceding turn is ERP-shaped, not RAG-shaped.
+_ERP_CLARIFICATION_QUESTION_RE = re.compile(r"^กรุณาแจ้ง.*ค่ะ$")
+
 
 def _is_ambiguous_rag_continuity_followup(question: str, history: Optional[List[Dict]]) -> bool:
     """Usage Lock root-cause fix (2026-08-28) — confirmed live: a plain
@@ -213,7 +230,13 @@ def _is_ambiguous_rag_continuity_followup(question: str, history: Optional[List[
           question (e.g. "จีนอยู่ทวีปอะไร") is deliberately NOT covered by
           this exception and must still be evaluated independently, so
           General Chat Fallback still correctly wins for it even
-          immediately after the same company conversation.
+          immediately after the same company conversation;
+      (d) the immediately preceding turn overall (history[-1], typically
+          the assistant's own last reply) is NOT itself an ERP
+          clarification question in progress (_ERP_CLARIFICATION_
+          QUESTION_RE) — the conversation's active thread has already
+          moved on to an ERP exchange by then, so a RAG-topic mention
+          from several turns earlier must not resurrect it.
 
     Never phrase-specific — no keyword list of its own beyond the shared,
     documented subset above — works for any declarative/request-shaped
@@ -223,6 +246,8 @@ def _is_ambiguous_rag_continuity_followup(question: str, history: Optional[List[
     if not history:
         return False
     if _NEW_TOPIC_QUESTION_MARKER_RE.search(question or ""):
+        return False
+    if _ERP_CLARIFICATION_QUESTION_RE.match((history[-1].get("content") or "").strip()):
         return False
     last_customer_turn = next(
         (t.get("content") or "" for t in reversed(history) if t.get("role") == "user"), "")
