@@ -54,7 +54,10 @@ def _has_reliable_evidence(c: Dict) -> bool:
     )
 
 
-def _classify_answerability(chunks: List[Dict], is_calculated: bool) -> str:
+_CONTINUITY_STRONG_VECTOR_THRESHOLD = 0.75  # matches confidence_label's own "High" cutoff
+
+
+def _classify_answerability(chunks: List[Dict], is_calculated: bool, is_continuity_followup: bool = False) -> str:
     if is_calculated:
         return "direct_answer"
     if not chunks:
@@ -87,6 +90,29 @@ def _classify_answerability(chunks: List[Dict], is_calculated: bool) -> str:
     all_weak_semantic = all(c.get("classification") == "weak_semantic" for c in chunks)
     if len(chunks) >= 3 and all_weak_semantic:
         return "partial_answer"
+    # RAG-Continuity Strong-Vector Fallback (2026-08-29) — the two guards
+    # above correctly distrust `classification`/`has_lexical_evidence` on
+    # their own (contaminated by query-expansion/Tags-line noise), but a
+    # RAG-continuity/meta-followup turn (rag/query_resolution.py already
+    # resolved it to "<the confirmed prior topic> + <this turn's modifier>"
+    # — the caller passes is_continuity_followup=True only for that exact
+    # shape, never for a fresh question) is a narrower situation: retrieval
+    # was run against a query that already names the established topic, so
+    # a chunk the ranking layer independently scored as strong evidence
+    # AND that also has a high raw vector/semantic similarity to that same
+    # resolved query is trustworthy even without literal-keyword overlap
+    # (a rephrasing/simplification request legitimately shares no exact
+    # keywords with the FAQ's own wording). Confirmed live: both turns of
+    # "ช่วยอธิบายแบบง่ายๆ" / "ตอบเฉพาะเท่าที่ทราบ" retrieved the correct
+    # ฝากสั่ง/ฝากนำเข้า FAQ as the top-ranked chunk (normalized_vector_score
+    # 0.91 / 1.0) yet fell through to no_information for lack of literal
+    # evidence alone. Never applies outside continuity turns, and never
+    # lowers the has_literal_evidence bar used above for a fresh question.
+    if is_continuity_followup and any(
+            c.get("classification") in ("direct_evidence", "supporting_evidence")
+            and (c.get("normalized_vector_score") or 0) >= _CONTINUITY_STRONG_VECTOR_THRESHOLD
+            for c in chunks):
+        return "partial_answer"
     # Only weak_semantic (or nothing) survived, and no reliable evidence
     # anywhere in the pool — genuinely no_information, regardless of
     # whether retrieval happened to return SOME chunks (Top-K being
@@ -94,7 +120,7 @@ def _classify_answerability(chunks: List[Dict], is_calculated: bool) -> str:
     return "no_information"
 
 
-def compute_confidence(chunks: List[Dict]) -> ConfidenceResult:
+def compute_confidence(chunks: List[Dict], is_continuity_followup: bool = False) -> ConfidenceResult:
     """`chunks` is the FINAL selected-evidence list (already filtered/
     ranked by rag/hybrid_scoring.py) — never the raw candidate pool.
     Confidence is built from: how many chunks actually support the
@@ -112,7 +138,7 @@ def compute_confidence(chunks: List[Dict]) -> ConfidenceResult:
     top = chunks[0]
     raw_vector = top.get("score")
     hybrid = top.get("hybrid_score")
-    answerability = _classify_answerability(chunks, is_calculated)
+    answerability = _classify_answerability(chunks, is_calculated, is_continuity_followup)
 
     if is_calculated:
         confidence = 0.97

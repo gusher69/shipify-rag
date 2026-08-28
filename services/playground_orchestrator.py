@@ -713,7 +713,15 @@ def run_playground_turn(
     #    count), NOT the raw vector score. raw_vector_similarity is still
     #    captured and returned separately (Part 19: never relabel a 27%
     #    cosine score as "27% answer confidence").
-    conf_result = compute_confidence(chunks)
+    #    is_continuity_followup is passed ONLY for the meta-followup shapes
+    #    (query_resolution already resolved these to "<confirmed prior
+    #    topic> + <this turn's modifier>") so rag/confidence.py's strong-
+    #    vector fallback never applies to an ordinary fresh question.
+    is_continuity_followup = conversation.get("followup_type") in (
+        "meta-summary-followup", "meta-detail-followup",
+        "meta-simplify-followup", "meta-partial-followup",
+    )
+    conf_result = compute_confidence(chunks, is_continuity_followup=is_continuity_followup)
     confidence = conf_result.answer_confidence
     confidence_label = _confidence_label_from_score(confidence)
 
