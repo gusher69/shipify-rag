@@ -1998,6 +1998,61 @@ class DecisionEngine:
                         if fresh_classification["classification"] == "RAG_ONLY":
                             continuation_action = None
 
+                    # Independent-Request Escape (Final Two Blockers,
+                    # 2026-08-28) — confirmed live: "ช่วยคิดข้อความขายสินค้า
+                    # นี้ให้หน่อย" (a General Chat creative-writing request)
+                    # sent right after a Shipment lookup asked for CustCode
+                    # was silently swallowed as a failed CustCode answer —
+                    # the guards above only ever fire on a question/
+                    # declarative-intent marker, and this message has
+                    # neither. Gated on _REQUEST_MARKER_RE ("ช่วย/ขอ/
+                    # รบกวน...หน่อย/ด้วย") specifically — a POSITIVE signal
+                    # the message is itself a concrete, polite ask for
+                    # something, not merely the ABSENCE of a slot match.
+                    # Confirmed live this distinction is load-bearing: a
+                    # genuine non-answer/confused reply ("เอิ่มมม", "ไม่ทราบ
+                    # ครับ", "abc") ALSO fails to match the pending slot's
+                    # shape and carries no ERP/company-topic evidence
+                    # either, but carries no request marker — those must
+                    # keep counting as retry attempts against the SAME
+                    # pending action (existing retry/escalation logic),
+                    # never escape here. Scoped to STRUCTURED (pattern-
+                    # validated) pending slots only — CustCode/OrderCode/
+                    # ShipmentCode/Tracking-style parameters, never a free-
+                    # text slot (e.g. ReceiverName/Address). Escapes ONLY
+                    # when ALL of: a request marker is present, the message
+                    # doesn't match the pending slot's own validation_
+                    # pattern shape, carries no ERP/action evidence of its
+                    # own (diversion_selected, already computed above —
+                    # same signal, not a new one), and carries no Shipify
+                    # company-topic evidence either (reusing services/
+                    # playground_orchestrator.py's existing topic gate,
+                    # imported lazily to avoid a module-level import cycle
+                    # — same pattern _run_rag_pipeline already uses).
+                    if continuation_action and _REQUEST_MARKER_RE.search(message or ""):
+                        replayed_for_escape = _replay_business_action_collection(
+                            continuation_action, self.registry, history, customer_context)
+                        next_param_for_escape = _next_expected_parameter(
+                            continuation_action, self.registry, replayed_for_escape)
+                        pattern_for_escape = (next_param_for_escape or {}).get("validation_pattern")
+                        if next_param_for_escape and pattern_for_escape:
+                            tokens_for_escape = [t for t in _TOKEN_SPLIT_RE.split(message or "") if t]
+                            try:
+                                matches_slot_shape = any(
+                                    re.compile(pattern_for_escape).match(tok) for tok in tokens_for_escape)
+                            except re.error:
+                                matches_slot_shape = any(
+                                    _validate_generic_identifier(tok) for tok in tokens_for_escape)
+                            has_erp_evidence = bool(diversion_selected)
+                            from services.playground_orchestrator import (
+                                _COMPANY_OPERATIONAL_TOPIC_RE as _escape_company_re,
+                                _CHINA_SOURCED_ACTION_RE as _escape_china_re,
+                            )
+                            has_company_topic_evidence = bool(
+                                _escape_company_re.search(message or "") or _escape_china_re.search(message or ""))
+                            if not matches_slot_shape and not has_erp_evidence and not has_company_topic_evidence:
+                                continuation_action = None
+
             detail_sibling_action = None
             if not continuation_action and customer_context.get("last_business_action") \
                     and _DETAIL_INTENT_RE.search(message or ""):
