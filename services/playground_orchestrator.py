@@ -713,14 +713,22 @@ def run_playground_turn(
     #    count), NOT the raw vector score. raw_vector_similarity is still
     #    captured and returned separately (Part 19: never relabel a 27%
     #    cosine score as "27% answer confidence").
-    #    is_continuity_followup is passed ONLY for the meta-followup shapes
-    #    (query_resolution already resolved these to "<confirmed prior
-    #    topic> + <this turn's modifier>") so rag/confidence.py's strong-
-    #    vector fallback never applies to an ordinary fresh question.
+    #    is_continuity_followup is passed ONLY when this turn is already
+    #    established as a RAG-continuation, so rag/confidence.py's strong-
+    #    vector fallback never applies to an ordinary fresh question. Two
+    #    EXISTING signals, ORed (never a new classifier): (1) followup_type
+    #    is one of the meta-followup shapes query_resolution.py resolves to
+    #    "<confirmed prior topic> + <this turn's modifier>", or (2)
+    #    _is_ambiguous_rag_continuity_followup(question, history) — the
+    #    SAME continuity check already gating General Chat Fallback above
+    #    — since a message can legitimately keep the conversation on-topic
+    #    (e.g. it names "นำเข้า" itself, so query_resolution's own
+    #    fresh-question guard leaves followup_type=None) while still being
+    #    the kind of vague/simplify-style follow-up this gate must cover.
     is_continuity_followup = conversation.get("followup_type") in (
         "meta-summary-followup", "meta-detail-followup",
         "meta-simplify-followup", "meta-partial-followup",
-    )
+    ) or _is_ambiguous_rag_continuity_followup(question, history)
     conf_result = compute_confidence(chunks, is_continuity_followup=is_continuity_followup)
     confidence = conf_result.answer_confidence
     confidence_label = _confidence_label_from_score(confidence)
