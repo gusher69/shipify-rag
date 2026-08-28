@@ -133,7 +133,16 @@ _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     r"คูปอง|โกดัง|โปรโมชั่น|โปรโมชัน|บริการ|"
     r"cbm|ทางรถ|ทางเรือ|ระยะเวลาขนส่ง|ขั้นต่ำ|"
     r"นำเข้า|ฝากสั่ง|ฝากโอน|"
-    r"สั่ง|ซื้อ|"
+    r"สั่ง|ซื้อ|ที่อยู่|"
+    # Final Systemic Routing Fix (2026-08-28) — "ที่อยู่" (shipping
+    # address) was missing from this gate despite RequestShippingAddress
+    # Change being a real, configured Business Action in this exact
+    # registry — confirmed live via the Locked Acceptance Matrix:
+    # "เปลี่ยนที่อยู่ในระบบยังไง" (a genuine Shipify how-to question) fell
+    # through to General Chat Fallback purely because the raw text
+    # matched none of this list's existing terms, exactly the same class
+    # of gap the "form e" fix above already closed once.
+
     # P0 Final Blocker Closure (2026-08-28) — "Form E" is a term named
     # ONLY inside RAG-035's own trusted answer (a customs/tax FAQ record),
     # with no plausible general-chat meaning outside that exact context.
@@ -267,6 +276,18 @@ class PlaygroundResult:
     # AND no chunk carries strong (exact-FAQ or profile-heading) company-
     # profile evidence.
     company_profile_warning: Optional[str]
+    # Root Change 2 (Final Systemic Routing Fix, 2026-08-28) — the
+    # forensic routing audit's Root Cause #2: the General Chat Fallback
+    # branch below (no company/china/urgency/complaint evidence) answers
+    # with zero retrieved-chunk grounding, using general LLM knowledge,
+    # but was previously reported to every caller identically to a
+    # grounded Shipify-KB answer (routing_type=="RAG"). Surfaced here —
+    # additive only, never changes `answer`/`chunks`/anything else this
+    # dataclass already returns — so services/decision_engine.py can
+    # report a genuinely distinct "GENERAL" route instead of masking it
+    # as "RAG". Defaults False so this field is a pure addition for every
+    # other branch (slot-filling/no-information/normal-grounded-answer).
+    general_chat_used: bool = False
 
 
 def run_playground_turn(
@@ -719,6 +740,7 @@ def run_playground_turn(
     slot_filling_active = slot_state is not None and not slot_state["is_complete"] and not slot_state["escalation_required"]
     slot_filling_escalation = slot_state is not None and slot_state["escalation_required"]
     slot_filling_complete = slot_state is not None and slot_state["is_complete"]
+    general_chat_used = False
 
     if bare_math_result:
         value = bare_math_result["value"]
@@ -824,6 +846,7 @@ def run_playground_turn(
         # (e.g. "CBM คืออะไร", "ทางรถกี่วัน") are never pulled into this
         # branch — matching examples from BOTH sides of this exact
         # distinction were verified live before this reordering shipped.
+        general_chat_used = True
         try:
             general_chat_prompt = build_prompt(
                 canonical_question, "", template_id=template_id, policy_notes=policy.notes,
@@ -1091,4 +1114,5 @@ def run_playground_turn(
         messages=[{"type": "text", "content": part} for part in segmented.message_parts],
         reply_text=answer_text,
         company_profile_warning=company_profile_warning,
+        general_chat_used=general_chat_used,
     )

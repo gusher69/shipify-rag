@@ -84,7 +84,13 @@ def extract_conversation_fields(decide_result: Dict) -> Dict:
     exec_result = dev.get("execution_result") or {}
     exec_inner = exec_result.get("result") or {}
 
-    if routing_type == "RAG":
+    if routing_type in ("RAG", "GENERAL"):
+        # Root Change 2 (Final Systemic Routing Fix, 2026-08-28) — a
+        # GENERAL turn is still answered by the SAME shared pipeline (a
+        # real LLM call, real prompt/model), it simply used no company-KB
+        # grounding (chunks naturally empty for it) — this metadata must
+        # still be extracted for Conversation History, not silently
+        # dropped just because routing_type is no longer "RAG".
         chunks = exec_inner.get("chunks") or []
         prompt = {"template_id": exec_inner.get("prompt_template_id"),
                   "template_name": exec_inner.get("prompt_template_name"),

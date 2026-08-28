@@ -3814,6 +3814,24 @@ async def hybrid_playground_ask(request: Request):
                 )
             except Exception as e:
                 print(f"[playground] failed to persist mid-collection pending state (non-fatal): {e}")
+        elif routing_type in ("API", "WEBHOOK", "TOOL", "NOTIFICATION", "HUMAN_HANDOFF"):
+            # Terminal Pending Cleanup (Root Change 3, Final Systemic
+            # Routing Fix, 2026-08-28) — mirrors line_bot/webhook.py's own
+            # identical fix exactly (see that file's own comment for the
+            # full rationale, incl. why this is narrowed to the SAME
+            # action_key only — an unrelated one-shot interruption action
+            # completing must never be mistaken for a DIFFERENT, still-
+            # pending action having concluded). A RAG/SAFE_FALLBACK/HYBRID/
+            # WORKFLOW(clarification) turn, or any OTHER action's own
+            # execution, is never evidence the PENDING action itself
+            # concluded.
+            try:
+                stale_pending = pending_service.get_active(
+                    tenant_id=pg_tenant_id, channel=pg_channel, conversation_key=playground_user_id)
+                if stale_pending and stale_pending.get("pending_action_name") == dev.get("selected_business_action"):
+                    pending_service.mark_cancelled(stale_pending["id"], source="turn_reached_terminal_outcome")
+            except Exception as e:
+                print(f"[playground] failed to resolve stale pending state (non-fatal): {e}")
 
         route_decision = {
             "route": routing_type.lower() if routing_type else "unknown",
@@ -3830,7 +3848,12 @@ async def hybrid_playground_ask(request: Request):
             }
 
         rag_inner = None
-        if routing_type == "RAG":
+        if routing_type in ("RAG", "GENERAL"):
+            # Root Change 2 (Final Systemic Routing Fix, 2026-08-28) — a
+            # GENERAL turn still ran through this exact same pipeline
+            # (exec_result/metadata shape unchanged); only routing_type
+            # itself now distinguishes it from a grounded "RAG" answer,
+            # so the Explainability panel must keep populating for it.
             rag_inner, rag_meta = exec_result.get("result") or {}, exec_result.get("metadata") or {}
         elif routing_type == "HYBRID":
             rag_inner, rag_meta = rag_exec.get("result") or {}, rag_exec.get("metadata") or {}

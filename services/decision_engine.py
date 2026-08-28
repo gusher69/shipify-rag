@@ -1170,7 +1170,8 @@ _LEGAL_THREAT_RE = re.compile(r"ทนายความ|ฟ้องร้อ�
 # C) — a genuinely new routing outcome (ERP + RAG combined via services/
 # hybrid_runtime_service.py::synthesize_hybrid_answer), never previously
 # representable; additive only, every existing type is unchanged.
-_ROUTING_TYPES = ("RAG", "API", "TOOL", "WORKFLOW", "NOTIFICATION", "HUMAN_HANDOFF", "WEBHOOK", "SAFE_FALLBACK", "HYBRID")
+_ROUTING_TYPES = ("RAG", "GENERAL", "API", "TOOL", "WORKFLOW", "NOTIFICATION", "HUMAN_HANDOFF", "WEBHOOK",
+                  "SAFE_FALLBACK", "HYBRID")
 
 _URL_RE = re.compile(r"https?://\S+")
 
@@ -1508,16 +1509,102 @@ def _identifier_pattern_score(registry, action: Dict, message: str, *,
     return score
 
 
+# ── Shared Turn-Intent Primitive (Root Change 1, Final Systemic Routing
+# Fix, 2026-08-28) — the forensic routing audit's Root Cause #1: the
+# "informational vs. private/action" distinction used to be decided
+# AFTER Business Action scoring/selection already ran, as a bolt-on
+# veto (the old "General Informational Question Guard") applied only
+# to whichever candidate happened to score highest — so an obviously
+# informational message (e.g. "เติม Wallet ยังไง") was routinely SCORED
+# as a private ERP action first, then (hopefully) caught afterward.
+# This function makes the identical decision — reusing every regex it
+# already relied on, nothing new, nothing widened, precedence
+# unchanged — BEFORE search_candidate_actions() ever runs, so an
+# informational message can no longer be offered an identity-gated
+# Business Action as a candidate in the first place. Continuation
+# (already resolved earlier in decide()) and RAG-vs-General-Chat
+# (decided separately inside run_playground_turn — see Root Change 2)
+# are each already owned by their own existing mechanism; this
+# function's only job is the private-action/informational axis for a
+# FRESH, non-continuation, single-clause message.
+def classify_turn_intent(message: str) -> str:
+    """Returns "PRIVATE_ACTION" when the message carries real self-
+    referencing/current-state/action-request evidence (must remain
+    eligible to select an identity-gated Business Action),
+    "SHIPIFY_INFORMATION" when it is a genuine company-subject or
+    how-to question with NONE of that evidence (must never be offered
+    an identity-gated Business Action as a candidate), or "AMBIGUOUS"
+    when neither is decisively true (existing scoring/selection
+    decides, exactly as before this fix). Message-only — never
+    depends on which Business Action would otherwise have won — so it
+    can run before candidate search instead of after selection."""
+    text = message or ""
+    has_question_marker = bool(_QUESTION_MARKER_RE.search(text))
+    has_declarative_intent = bool(_DECLARATIVE_INTENT_MARKER_RE.search(text))
+    if not (has_question_marker or has_declarative_intent):
+        return "AMBIGUOUS"
+
+    # Identifier evidence has the HIGHEST precedence — exactly mirroring
+    # the original guard's own outer gate (`not any("parameter identifier
+    # pattern" in r for r in selected.get("_reasons"))`, which exempted
+    # the ENTIRE veto, including the company-subject check below, once a
+    # real identifier was present): a message that supplies a real
+    # account/order/shipment identifier is unconditional evidence of an
+    # actual account-specific request, overriding even "บริษัท" wording
+    # (e.g. "บริษัทเช็คออเดอร์ SP1008 ให้หน่อยได้ไหมครับ" must still select
+    # the order-lookup action).
+    identifier_evidence = any(
+        _validate_generic_identifier(tok) and not tok.isdigit()
+        for tok in _TOKEN_SPLIT_RE.split(text) if tok)
+    if identifier_evidence:
+        return "PRIVATE_ACTION"
+
+    # Company-as-subject override — unconditional (once identifier
+    # evidence is ruled out above), exactly mirroring the original
+    # guard's own precedence: a message naming "บริษัท" as its subject,
+    # phrased as a genuine question, is never a private/self-referencing
+    # request (a real private request always names ITSELF — "เช็กบิลของ
+    # ผม" — never "the company"), regardless of any other signal also
+    # present.
+    if "บริษัท" in text and has_question_marker:
+        return "SHIPIFY_INFORMATION"
+
+    bare_self_reference = bool(re.search(r"ผม|ฉัน|ดิฉัน", text)) and not _SUBJECT_INTENT_RE.search(text)
+    declarative_private_action = not has_question_marker and bool(_PRIVATE_ACTION_VERB_RE.search(text))
+    private_action_evidence = (
+        bool(_REQUEST_MARKER_RE.search(text))
+        or bool(_REFERENCE_MARKER_RE.search(text))
+        or bare_self_reference
+        or declarative_private_action
+        or bool(_PRIVATE_STATE_QUERY_RE.search(text))
+        or len(_split_clauses(text)) > 1
+    )
+    return "PRIVATE_ACTION" if private_action_evidence else "SHIPIFY_INFORMATION"
+
+
+# Identity-gated action types — the SAME tuple the (now-removed)
+# post-selection veto used to gate on (`selected.get("action_type") in
+# ("API", "WEBHOOK")`); reused here to EXCLUDE these types from
+# candidate search up front for a SHIPIFY_INFORMATION-classified
+# message, instead of un-selecting one after the fact.
+_IDENTITY_GATED_ACTION_TYPES = ("API", "WEBHOOK")
+
+
 def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
                               collected_slots: Optional[Dict] = None,
-                              action_types: Optional[List[str]] = None) -> List[Dict]:
+                              action_types: Optional[List[str]] = None,
+                              exclude_action_types: Optional[List[str]] = None) -> List[Dict]:
     """Business Action Search — returns enabled candidates the Decision
     Engine may choose from, each annotated with a `_score`/`_reasons`.
     Considers: category (workflow match), keyword/example/ai_description
     overlap, parameter identifier-pattern evidence, parameter availability,
     priority, and (currently inert) future semantic/embedding scores.
     Never filters by a hardcoded action_key — every action, current or
-    future, competes on the same generic signals."""
+    future, competes on the same generic signals. `exclude_action_types`
+    (Root Change 1) is the inverse of `action_types`: used to keep
+    identity-gated actions out of the candidate pool entirely for a
+    message already classified SHIPIFY_INFORMATION, never to hide a
+    hardcoded action."""
     try:
         candidates = registry.enabled_actions()
     except Exception:
@@ -1525,6 +1612,8 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
 
     if action_types:
         candidates = [a for a in candidates if a.get("action_type") in action_types]
+    if exclude_action_types:
+        candidates = [a for a in candidates if a.get("action_type") not in exclude_action_types]
 
     # Pre-pass for _identifier_pattern_score's AND _parameter_availability_
     # score's shared discriminating-power weighting (see either function's
@@ -1939,6 +2028,29 @@ class DecisionEngine:
                 candidates = [selected]
                 developer_trace["selection_source"] = "conversation_reference_detail"
             else:
+                # Root Change 1 (Final Systemic Routing Fix, 2026-08-28) —
+                # classify the message's informational-vs-private-action
+                # intent ONCE, here, BEFORE classify_question()'s own
+                # private-Business-Action tie/ambiguity resolution ever
+                # runs (that machinery — services/hybrid_question_
+                # classifier.py — scores every enabled identity-gated
+                # API/WEBHOOK action; the forensic audit reproduced live
+                # that "ติดต่อ Shipify ยังไง" ties two such actions there
+                # BEFORE any informational classification gets a chance to
+                # win). `exclude_private` is threaded into every candidate
+                # search below (classify_question's own tie/ambiguity
+                # scoring, the entity-continuation diversion check, and
+                # the main fresh search) so a SHIPIFY_INFORMATION message
+                # can never be offered — or tied between — identity-gated
+                # actions at any of those points; every OTHER existing
+                # behavior (vague-interest clarification, HYBRID
+                # detection, entity-continuation field matching, RAG-type
+                # action selection) is completely unchanged, since none of
+                # it depends on identity-gated actions being present.
+                turn_intent = classify_turn_intent(message)
+                developer_trace["turn_intent"] = turn_intent
+                exclude_private = _IDENTITY_GATED_ACTION_TYPES if turn_intent == "SHIPIFY_INFORMATION" else None
+
                 # Hybrid Question Classifier (2026-08-02 Production
                 # Integration Sprint, Phase 1 Step C) — only consulted on
                 # a FRESH turn (a continuation in progress always takes
@@ -1948,7 +2060,7 @@ class DecisionEngine:
                 # result is NOT used to select an action — the existing,
                 # unchanged search below still does that; no duplicate
                 # routing decision is made.
-                classification = classify_question(message, self.registry)
+                classification = classify_question(message, self.registry, exclude_action_types=exclude_private)
                 developer_trace["classification"] = classification
                 if classification["classification"] == "HYBRID":
                     return self._handle_hybrid_turn(classification, message, history, context,
@@ -1994,7 +2106,8 @@ class DecisionEngine:
                     and _validate_generic_identifier((message or "").strip())
                 if referenced and not is_bare_identifier_message:
                     topic_only_candidates = search_candidate_actions(
-                        self.registry, workflow=workflow_hint, message=message, collected_slots={})
+                        self.registry, workflow=workflow_hint, message=message, collected_slots={},
+                        exclude_action_types=exclude_private)
                     if topic_only_candidates and topic_only_candidates[0]["id"] != referenced["id"] \
                             and topic_only_candidates[0]["_score"] >= (1.0 if not workflow_hint else 0.5):
                         fresh_topic_beats_reference = True
@@ -2017,7 +2130,8 @@ class DecisionEngine:
                         if customer_context.get(profile_field)
                     } if customer_context else {}
                     candidates = search_candidate_actions(self.registry, workflow=workflow_hint, message=message,
-                                                            collected_slots=identifier_memory_slots)
+                                                            collected_slots=identifier_memory_slots,
+                                                            exclude_action_types=exclude_private)
                     selected = select_best_action(candidates, minimum_score=1.0 if not workflow_hint else 0.5)
                     developer_trace["selection_source"] = "fresh_search"
 
@@ -2707,6 +2821,12 @@ class DecisionEngine:
             # re-implemented per channel adapter.
             images, files = _extract_reply_attachments(result_payload.get("chunks") or [])
             reply = _build_response(text=answer, images=images, files=files)
+            # Root Change 2 (Final Systemic Routing Fix, 2026-08-28) — a
+            # turn the shared RAG pipeline itself answered via General
+            # Chat Fallback (no company-KB grounding at all) is reported
+            # as its own distinct route, never silently folded into "RAG".
+            if result_payload.get("general_chat_used"):
+                routing_type = "GENERAL"
         else:
             full_mapped = result_payload.get("mapped_fields")
             # Response-Derived Identifier Memory (2026-08-15, Issue 2) —
@@ -3090,7 +3210,12 @@ class DecisionEngine:
 
         if answer_text and answer_text.strip():
             reply = _build_response(text=answer_text)
-            return self._finalize(reply=reply, routing_type="RAG", workflow=None,
+            # Root Change 2 (Final Systemic Routing Fix, 2026-08-28) —
+            # same distinction as _execute_selected_action's RAG branch:
+            # a General-Chat-Fallback answer (no company-KB grounding) is
+            # reported as its own route, never silently folded into "RAG".
+            safe_fallback_routing_type = "GENERAL" if result_payload.get("general_chat_used") else "RAG"
+            return self._finalize(reply=reply, routing_type=safe_fallback_routing_type, workflow=None,
                                    developer_trace=developer_trace, context=context, start=start, alert=alert)
 
         reply, _ = _safe_fallback_response(reason)
@@ -3183,6 +3308,12 @@ class DecisionEngine:
                     "prompt_template_name": result.prompt.template.name,
                     "prompt_template_version": result.prompt.template.version,
                     "policy_set_name": result.policy_set_name,
+                    # Root Change 2 (Final Systemic Routing Fix,
+                    # 2026-08-28) — surfaced (not re-derived) so callers
+                    # can report routing_type="GENERAL" instead of "RAG"
+                    # for a turn the shared pipeline itself answered with
+                    # no company-KB grounding at all.
+                    "general_chat_used": result.general_chat_used,
                 },
                 "metadata": {"model": result.model, "confidence_label": result.confidence_label},
                 "latency_ms": latency_ms, "error": None, "logs": [],

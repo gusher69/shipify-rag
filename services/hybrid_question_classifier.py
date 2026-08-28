@@ -208,13 +208,29 @@ def _result(classification: str, confidence: float, evidence: List[str], *,
     }
 
 
-def classify_question(message: str, registry, *, forced_action_id: Optional[str] = None) -> Dict:
+def classify_question(message: str, registry, *, forced_action_id: Optional[str] = None,
+                       exclude_action_types: Optional[tuple] = None) -> Dict:
     """The one entry point. `forced_action_id`: when the caller already
     knows which Business Action to use (an explicit ERP/Hybrid mode
     selection), evidence-gathering for WHICH action is skipped — this
     still performs parameter-value segmentation against that action's own
     configured parameters, so explicit Hybrid mode benefits from
-    segmentation exactly like Auto-detected Hybrid does."""
+    segmentation exactly like Auto-detected Hybrid does.
+
+    `exclude_action_types` (Root Change 1, Final Systemic Routing Fix,
+    2026-08-28) — lets a caller that has ALREADY classified this message
+    as purely Shipify-informational (services/decision_engine.py::
+    classify_turn_intent) keep identity-gated actions out of THIS
+    function's own tie/ambiguity scoring too, not just the caller's
+    separate search_candidate_actions() call. Without this, an
+    informational message could still trigger a false multi-candidate
+    CLARIFICATION_REQUIRED between two private Business Actions here
+    (the forensic routing audit reproduced live: "ติดต่อ Shipify ยังไง"
+    tied two unrelated identity-gated actions at this exact point,
+    before any informational classification got a chance to win). The
+    separate "vague interest, no Business Action at all" clarification
+    path (`candidate_ids` empty, further below) is untouched either way
+    — it fires on the ABSENCE of any match, independent of exclusion."""
     message = (message or "").strip()
     if not message:
         return _result("UNKNOWN", 0.0, ["empty message"])
@@ -231,6 +247,8 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
     else:
         try:
             enabled = [a for a in registry.enabled_actions() if a.get("action_type") in ("API", "WEBHOOK")]
+            if exclude_action_types:
+                enabled = [a for a in enabled if a.get("action_type") not in exclude_action_types]
         except Exception:
             enabled = []
         scored = sorted(

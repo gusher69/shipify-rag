@@ -46,7 +46,7 @@ def _fake_exec_result(status="success", result=None, error=None):
 def _fake_playground_result(answer="", chunks=None, confidence=0.0, confidence_label="Low", model="gpt-4o",
                              policy_escalate=False, policy_escalation_message=None,
                              template_id="t1", template_name="Standard Policy Template", template_version="3",
-                             policy_set_name="Standard Policy"):
+                             policy_set_name="Standard Policy", general_chat_used=False):
     """Production Integration Sprint (2026-08-02) — Decision Engine's RAG
     execution now calls services/playground_orchestrator.py::
     run_playground_turn() directly (services/decision_engine.py::
@@ -62,13 +62,20 @@ def _fake_playground_result(answer="", chunks=None, confidence=0.0, confidence_l
     reroute every RAG test to HUMAN_HANDOFF. Likewise `prompt.template`'s
     `name` must be set via attribute assignment, not the MagicMock(name=)
     constructor kwarg — that kwarg is reserved for the mock's own debug
-    repr, not a real `.name` attribute (a well-known unittest.mock gotcha)."""
+    repr, not a real `.name` attribute (a well-known unittest.mock gotcha).
+    `general_chat_used` (Root Change 2, Final Systemic Routing Fix,
+    2026-08-28) is the SAME kind of trap — an unset attribute on a bare
+    MagicMock auto-creates a truthy child mock, which would make
+    `result_payload.get("general_chat_used")` always true and silently
+    reroute every RAG test to routing_type="GENERAL"; defaults to the
+    real dataclass field's own default (False) here."""
     template_mock = MagicMock(id=template_id, version=template_version)
     template_mock.name = template_name
     return MagicMock(answer=answer, chunks=chunks or [], confidence=confidence,
                       confidence_label=confidence_label, model=model,
                       policy=MagicMock(escalate=policy_escalate, escalation_message=policy_escalation_message),
-                      prompt=MagicMock(template=template_mock), policy_set_name=policy_set_name)
+                      prompt=MagicMock(template=template_mock), policy_set_name=policy_set_name,
+                      general_chat_used=general_chat_used)
 
 
 class TestBusinessActionSearchAndSelection(unittest.TestCase):

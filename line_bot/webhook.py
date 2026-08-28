@@ -601,6 +601,37 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             )
         except Exception as e:
             print(f"[webhook] failed to persist mid-collection pending state (non-fatal): {e}")
+    elif routing_type in ("API", "WEBHOOK", "TOOL", "NOTIFICATION", "HUMAN_HANDOFF"):
+        # Terminal Pending Cleanup (Root Change 3, Final Systemic Routing
+        # Fix, 2026-08-28) — closes the one asymmetry the forensic routing
+        # audit found between the two continuation paths: pending_service.
+        # create() already auto-supersedes any prior active pending_
+        # confirmations row whenever a NEW one is persisted (either branch
+        # above); but a turn whose OWN execution reached a genuinely
+        # terminal outcome (that SAME action ran to success/error/denied,
+        # or escalated to Human Handoff) neither branch above fires, so no
+        # create() call ever runs to supersede a still-"pending" row left
+        # over from an EARLIER turn for THAT action — it would otherwise
+        # sit "pending" until it passively expires
+        # (PENDING_CONFIRMATION_TIMEOUT_SECONDS, default 300s) and could be
+        # re-adopted as a continuation by an unrelated later message.
+        #
+        # Deliberately narrowed to the SAME action_key only (confirmed
+        # live: an unrelated one-shot status-query interruption — e.g.
+        # "พัสดุล่าสุดถึงไหนแล้ว" mid-address-change — also executes as a
+        # genuine, successful API action; that action completing must
+        # never be mistaken for the DIFFERENT, still-pending address-
+        # change action having concluded — the exact scenario the
+        # Interrupted Workflow Auto-Resume fix above exists to protect).
+        # A RAG/SAFE_FALLBACK/HYBRID/WORKFLOW(clarification) turn, or any
+        # OTHER action's own execution, is never evidence that THIS
+        # PENDING action itself concluded.
+        try:
+            stale_pending = pending_service.get_active(tenant_id=tenant_id, channel=channel, conversation_key=user_id)
+            if stale_pending and stale_pending.get("pending_action_name") == dev.get("selected_business_action"):
+                pending_service.mark_cancelled(stale_pending["id"], source="turn_reached_terminal_outcome")
+        except Exception as e:
+            print(f"[webhook] failed to resolve stale pending state (non-fatal): {e}")
 
     # Human Handoff (2026-08-13) — the escalation DECISION already
     # happened inside decide() (explicit human request, refusal, max-

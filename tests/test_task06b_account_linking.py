@@ -384,7 +384,8 @@ class TestEndToEndVerifiedAccess(unittest.TestCase):
             mock_rag.return_value = MagicMock(
                 answer="CBM คือหน่วยวัดปริมาตรสินค้า", chunks=[], confidence=0.9, confidence_label="High",
                 model="gpt-4o", policy=MagicMock(escalate=False, escalation_message=None),
-                prompt=MagicMock(template=MagicMock(id="t1", version="1")), policy_set_name="Standard")
+                prompt=MagicMock(template=MagicMock(id="t1", version="1")), policy_set_name="Standard",
+                general_chat_used=False)
             mock_rag.return_value.prompt.template.name = "Standard"
             result = self.engine.decide(
                 "CBM คืออะไร", history=[],
