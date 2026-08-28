@@ -47,6 +47,41 @@ from rag.hybrid_scoring import has_strong_company_profile_evidence
 _URGENCY_SIGNAL_RE = re.compile(r"รีบ|ด่วน|ตามมาหลาย|ตามอยู่|ไม่ทันใช้", re.IGNORECASE)
 _COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำรุด|เสียหาย|ของผิด|ของขาด|ตกหล่น|ไม่ครบ", re.IGNORECASE)
 
+# Deterministic Grounding Safety Net (P0 Final Blocker Closure, 2026-08-28)
+# — confirmed live: for a "X คืออะไร"-shaped question where the trusted
+# Context only mentions X in passing (e.g. RAG-035's own trusted answer
+# names "Form E" only as "may help reduce duty under the ASEAN-China
+# agreement", never explaining what Form E actually IS), the LLM
+# persistently added real-world facts about X (its formal name, its
+# certification mechanism) despite an explicit STRICT_GROUNDING_RULES
+# instruction naming this EXACT term as a worked example of what never
+# to add — prompt instructions alone proved insufficient for this one
+# well-known-term class. This is a small, deliberately narrow watchlist
+# of terms that are strong, unambiguous signals of exactly that failure
+# mode (a formal international-trade-agreement name/acronym, or a
+# certificate-of-origin description) — never a general "any added fact"
+# detector, which would be too fragile/broad. If the model's own answer
+# contains one of these AND it does not appear anywhere in the trusted
+# Context actually supplied, the answer is deterministically discarded
+# and replaced with the SAME safe-uncertainty phrase already used
+# elsewhere in this module for genuine no-information cases — zero
+# additional LLM calls, never a silent partial rewrite of the model's
+# own wording.
+_GROUNDING_RISK_TERMS = [
+    "ACFTA", "ASEAN-China Free Trade Area", "AFTA", "ASEAN Free Trade Area",
+    "หนังสือรับรองแหล่งกำเนิดสินค้า", "หนังสือรับรองถิ่นกำเนิดสินค้า", "certificate of origin",
+]
+
+
+def _find_ungrounded_risk_term(answer_text: str, context_text: str) -> Optional[str]:
+    answer_l = (answer_text or "").lower()
+    context_l = (context_text or "").lower()
+    for term in _GROUNDING_RISK_TERMS:
+        term_l = term.lower()
+        if term_l in answer_l and term_l not in context_l:
+            return term
+    return None
+
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
 # 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization;
 # broadened again 2026-08-27 same day — Semantic RAG Retrieval fix) — a
@@ -98,7 +133,18 @@ _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     r"คูปอง|โกดัง|โปรโมชั่น|โปรโมชัน|บริการ|"
     r"cbm|ทางรถ|ทางเรือ|ระยะเวลาขนส่ง|ขั้นต่ำ|"
     r"นำเข้า|ฝากสั่ง|ฝากโอน|"
-    r"สั่ง|ซื้อ",
+    r"สั่ง|ซื้อ|"
+    # P0 Final Blocker Closure (2026-08-28) — "Form E" is a term named
+    # ONLY inside RAG-035's own trusted answer (a customs/tax FAQ record),
+    # with no plausible general-chat meaning outside that exact context.
+    # Confirmed live: "Form E คืออะไร" retrieved RAG-035 with a PERFECT
+    # (1.0) confidence score, yet this text-only gate — checked BEFORE
+    # consulting retrieval quality at all — still diverted it to General
+    # Chat (empty context) purely because the raw question text matched
+    # none of this list's existing terms, letting the LLM answer entirely
+    # from its own real-world knowledge of ASEAN-China trade documents
+    # instead of the one genuinely relevant, retrieved trusted chunk.
+    r"form e",
     re.IGNORECASE,
 )
 
@@ -869,9 +915,17 @@ def run_playground_turn(
             llm = get_llm_service()
             llm_response = llm.generate(built_prompt.messages, model=OPENAI_CHAT_MODEL,
                                          temperature=temperature, max_tokens=max_tokens)
-            stages.append(Stage("LLM", "success", (time.time() - t0) * 1000, f"model={llm_response.model}"))
-            services_used.append({"name": "LLMService", "status": "success"})
             answer_text = llm_response.text
+            _risk_term = _find_ungrounded_risk_term(answer_text, context)
+            if _risk_term:
+                stage_detail = (f"model={llm_response.model} — answer discarded: contained "
+                                 f"ungrounded term {_risk_term!r} not present in the supplied Context "
+                                 f"(Deterministic Grounding Safety Net)")
+                answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ในระบบค่ะ"
+            else:
+                stage_detail = f"model={llm_response.model}"
+            stages.append(Stage("LLM", "success", (time.time() - t0) * 1000, stage_detail))
+            services_used.append({"name": "LLMService", "status": "success"})
             input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens
             llm_latency = llm_response.latency_ms
             llm_failed = False

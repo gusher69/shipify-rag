@@ -939,6 +939,22 @@ _SUBJECT_INTENT_RE = re.compile(r"(ผม|ฉัน|ดิฉัน)\s*(ต้�
 # _DETAIL_INTENT_RE this same code already checks.
 _PRIVATE_ACTION_VERB_RE = re.compile(r"เช็ก|ดู|ยอด|แก้|เปลี่ยน|ยกเลิก")
 
+# Private State/Value Query Evidence (P0 Final Presentation Hardening,
+# 2026-08-28) — confirmed live: "มี Order อะไรอยู่บ้าง" and "มีคูปองเหลือ
+# ไหมครับ" (both asking about a CURRENT VALUE the customer already has,
+# with no self-reference pronoun and no request marker at all) were
+# wrongly vetoed by the guard below purely for carrying a question
+# marker ("อะไร"/"ไหม") — unlike เช็ก/ดู/แก้/เปลี่ยน/ยกเลิก above (which
+# genuinely CAN form a legitimate "how does this process work" question,
+# e.g. "เปลี่ยนที่อยู่จัดส่งในระบบยังไง"), a "เหลือ" (remaining)/"ยอด"
+# (balance) reference or a "มี...อะไร/บ้าง" ("what do I currently have")
+# shape has no such informational reading in natural Thai — asking "เหลือ
+# เท่าไหร่"/"มีอะไรบ้าง" is never "explain how the remaining-balance
+# concept works in general," so this evidence counts UNCONDITIONALLY
+# (regardless of question-marker presence), exactly like the existing
+# self-reference/reference-marker checks below already do.
+_PRIVATE_STATE_QUERY_RE = re.compile(r"เหลือ|ยอดคงเหลือ|มี.{0,15}(อะไร|บ้าง)")
+
 # A generic "I want the SPECIFIC record, not the list" signal — see the
 # LIST -> DETAIL sibling preference in _resolve_conversation_reference.
 # Deliberately just this one word; it is never used to invent an action,
@@ -2167,6 +2183,7 @@ class DecisionEngine:
                             and not _bare_self_reference
                             and not _declarative_private_action
                             and not _identifier_evidence
+                            and not _PRIVATE_STATE_QUERY_RE.search(message or "")
                         )
                         if is_company_policy_question or is_unrequested_howto_question:
                             selected = None

@@ -6339,6 +6339,23 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
         ics = (result.get("developer") or {}).get("information_collection_status") or {}
         self.assertNotEqual(ics.get("selected_business_action"), "searchdatashipmentlist")
 
+    def test_current_value_question_without_self_reference_still_selects_erp(self):
+        """FINAL PRESENTATION HARDENING (2026-08-28) -- confirmed live: "มี
+        Order อะไรอยู่บ้าง" (asking about a CURRENT VALUE the customer
+        already has -- their own orders -- with no "ของผม" and no request
+        marker at all) was wrongly vetoed by the General Informational
+        Question Guard purely for carrying a question marker ("อะไร"),
+        the same way a genuine how-to question would be. Natural Thai
+        often omits the possessive in exactly this shape; a "มี...อะไร/
+        บ้าง" (what do I currently have) or "เหลือ" (remaining) reference
+        has no legitimate "explain how this works in general" reading,
+        unlike เปลี่ยน/แก้/ยกเลิก (which genuinely can), so it must count
+        as private-lookup evidence unconditionally."""
+        result = self._decide("มี Order อะไรอยู่บ้าง")
+        self.assertIn("รหัสลูกค้า", result["reply"]["text"])
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertEqual(ics.get("selected_business_action"), "searchdataorderlist")
+
     def test_how_to_start_importing_does_not_request_custcode(self):
         result = self._decide("ถ้าอยากเริ่มนำเข้าสินค้าควรเริ่มยังไง")
         self.assertNotIn("รหัสลูกค้า", result["reply"]["text"])

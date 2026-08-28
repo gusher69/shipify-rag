@@ -15,6 +15,7 @@ Nothing here is ERP- or endpoint-specific: every REST call is built purely
 from the Business Action's own `execution`/`parameters` configuration, and
 every adapter is looked up generically by `action_type`.
 """
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -125,9 +126,68 @@ def _build_rest_headers(execution: Dict) -> Dict[str, str]:
     return headers
 
 
+# Tracking Record Selection fix (P0 Final Blocker Closure, 2026-08-28) —
+# confirmed live: SearchDataShipmentList's own `response_mapping` always
+# reads `$.data.0.X` ("the latest shipment"), and this action has no
+# "Tracking" parameter configured at all, so a customer-provided China
+# tracking number (e.g. "เช็ก Tracking 79017107089341") was never used to
+# select a record — the API's own "Latest 5" response for the customer's
+# CustCode was returned as-is, silently substituting whichever shipment
+# happened to be newest, even when that shipment's own TrackingCH/
+# TrackingTH plainly did NOT match the number the customer asked about.
+# A purely GENERIC, structural fix (works for ANY action whose response
+# has this shape, never hardcoded to one action_key): if the raw response
+# has a top-level "data" list of dicts that carry Tracking-shaped fields,
+# and the customer's own message names an identifier-shaped token, search
+# every item for an exact match on TrackingCH/TrackingTH and move it to
+# index 0 (so the EXISTING "$.data.0.X" response_mapping convention picks
+# it up completely unchanged); if the message names such a token but NO
+# item matches, clear the list to empty (-> $.data.0.X maps to None ->
+# "not found" downstream, never a silent wrong-record substitution). A
+# complete no-op whenever the response has no Tracking-shaped field at
+# all, or the message names no identifier-shaped token — e.g. "FT3182 มี
+# Order อะไรบ้าง" / "เช็ก Shipment ของผมให้หน่อย" (no specific value named)
+# still correctly default to the latest record, unaffected. Confirmed
+# live: a bare CustCode mentioned in the message (e.g. "FT3182 มี Order
+# อะไรบ้าง") is ITSELF identifier-shaped, so it must be excluded from the
+# candidate tokens — it already IS the authenticated request parameter,
+# never "a specific Tracking value being searched for".
+_TRACKING_FIELD_NAMES = ("TrackingCH", "TrackingTH")
+_IDENTIFIER_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_/]{3,19}$")
+
+
+def _reorder_data_by_tracking_match(response_body: Any, customer_message: Optional[str],
+                                     request_values: Optional[Dict[str, str]] = None) -> None:
+    if not customer_message or not isinstance(response_body, dict):
+        return
+    data = response_body.get("data")
+    if not isinstance(data, list) or not data or not all(isinstance(d, dict) for d in data):
+        return
+    tracking_fields = [f for f in _TRACKING_FIELD_NAMES if any(f in d for d in data)]
+    if not tracking_fields:
+        return
+    already_used_values = {str(v) for v in (request_values or {}).values() if v}
+    tokens = [t for t in re.split(r"[\s,;]+", customer_message) if t]
+    identifier_tokens = [t for t in tokens if _IDENTIFIER_TOKEN_RE.match(t) and any(ch.isdigit() for ch in t)
+                         and t not in already_used_values]
+    if not identifier_tokens:
+        return
+    for i, d in enumerate(data):
+        for field in tracking_fields:
+            val = d.get(field)
+            if val and any(tok == val for tok in identifier_tokens):
+                if i != 0:
+                    data.insert(0, data.pop(i))
+                return
+    # An identifier-shaped token was named but matched no returned record —
+    # never fall back to whatever the API happened to return at index 0.
+    data.clear()
+
+
 def run_rest_call(execution: Dict, request_values: Dict[str, str], headers: Dict[str, str],
                    response_mapping: Optional[List[Dict]] = None,
-                   secret_values: Optional[Dict[str, Optional[str]]] = None) -> Dict:
+                   secret_values: Optional[Dict[str, Optional[str]]] = None,
+                   customer_message: Optional[str] = None) -> Dict:
     """Shared low-level REST call — used by both the REST Executor and the
     Business Action Center's manual "Test Action" (admin/routes.py), so the
     two never drift apart. Substitutes {path_param} placeholders in the
@@ -179,6 +239,7 @@ def run_rest_call(execution: Dict, request_values: Dict[str, str], headers: Dict
                 response_body = resp.json()
             except Exception:
                 response_body = resp.text
+            _reorder_data_by_tracking_match(response_body, customer_message, request_values)
             sanitized_response = sanitize_response_body(response_body)
             detected_keys = list(response_body.keys()) if isinstance(response_body, dict) else []
             mapped = {}
@@ -287,7 +348,8 @@ def _execute_rest(action: Dict, context: Dict, registry) -> Dict:
         return _result("error", error=" / ".join(parts) or "ข้อมูลไม่ครบตามเงื่อนไข")
 
     headers = _build_rest_headers(execution)
-    outcome = run_rest_call(execution, provided, headers, action.get("response_mapping"), secret_values)
+    outcome = run_rest_call(execution, provided, headers, action.get("response_mapping"), secret_values,
+                             customer_message=context.get("question"))
     status = "error" if outcome.get("error") else "success"
     return _result(status, result=outcome, error=outcome.get("error"), latency_ms=outcome.get("execution_time_ms") or 0.0)
 

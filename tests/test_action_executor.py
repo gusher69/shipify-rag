@@ -94,6 +94,54 @@ class TestRestExecutor(unittest.TestCase):
         self.assertEqual(result["error"], "Action not found")
 
 
+class TestTrackingRecordSelection(unittest.TestCase):
+    """Tracking Record Selection fix (P0 Final Blocker Closure, 2026-08-28)
+    -- confirmed live: SearchDataShipmentList's response_mapping always
+    reads $.data.0.X ("the latest shipment"), and it has no "Tracking"
+    parameter configured at all, so a customer-provided China tracking
+    number was never used to select a record -- the API's own "latest"
+    response was returned as-is even when that shipment's own tracking
+    plainly did not match what the customer asked about. run_rest_call
+    now reorders/filters the response's own "data" array by an exact
+    TrackingCH/TrackingTH match before response_mapping evaluates
+    "$.data.0.X" -- a complete no-op for any action without this shape."""
+
+    _SHIPMENTS = [
+        {"Code": "FT318220260726001", "TrackingCH": "testlineOnNut007"},
+        {"Code": "FT318220260710001", "TrackingCH": "FTTestopen002"},
+    ]
+
+    def _call(self, message):
+        execution = {"endpoint": "https://example.test/shipments", "http_method": "POST"}
+        return run_rest_call(execution, {"CustCode": "FT3182"}, {},
+                              response_mapping=[{"json_path": "$.data.0.Code", "mapped_label": "code"}],
+                              customer_message=message)
+
+    def test_matching_tracking_is_moved_to_front(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=_fake_response(200, {"data": list(self._SHIPMENTS)})):
+            outcome = self._call("เช็ก Tracking FTTestopen002")
+        self.assertEqual(outcome["mapped_fields"]["code"], "FT318220260710001")
+
+    def test_non_matching_tracking_clears_result_never_substitutes_latest(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=_fake_response(200, {"data": list(self._SHIPMENTS)})):
+            outcome = self._call("เช็ก Tracking 79017107089341")
+        self.assertIsNone(outcome["mapped_fields"]["code"])
+
+    def test_no_tracking_named_defaults_to_latest_unaffected(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=_fake_response(200, {"data": list(self._SHIPMENTS)})):
+            outcome = self._call("เช็ก Shipment ของผมให้หน่อย")
+        self.assertEqual(outcome["mapped_fields"]["code"], "FT318220260726001")
+
+    def test_bare_custcode_in_message_not_treated_as_tracking_search(self):
+        with patch("services.action_executor.requests.request",
+                   return_value=_fake_response(200, {"data": list(self._SHIPMENTS)})):
+            outcome = self._call("FT3182 มี Shipment อะไรบ้าง")
+        self.assertEqual(outcome["mapped_fields"]["code"], "FT318220260726001")
+
+
 class TestSecretResolutionAndMasking(unittest.TestCase):
     def setUp(self):
         self.reg = BusinessActionRegistry(_FakeSupabase())
