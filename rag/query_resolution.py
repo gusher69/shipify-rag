@@ -325,7 +325,17 @@ def _detect_marker(normalized: str) -> Optional[str]:
         # "ช่วยสรุปข้อมูลบริษัทให้หน่อย" is deliberately a full sentence,
         # not a short fragment; _is_meta_followup() itself is the guard
         # against misfiring on a genuinely new, self-contained question.
-        return "meta-summary-followup" if _META_SUMMARY_MARKER_RE.search(normalized) else "meta-detail-followup"
+        # Checked in this order — a message could plausibly contain more
+        # than one marker family; summary/detail take precedence since
+        # they were established first and this ordering preserves their
+        # exact prior behavior unchanged.
+        if _META_SUMMARY_MARKER_RE.search(normalized):
+            return "meta-summary-followup"
+        if _META_DETAIL_MARKER_RE.search(normalized):
+            return "meta-detail-followup"
+        if _META_SIMPLIFY_MARKER_RE.search(normalized):
+            return "meta-simplify-followup"
+        return "meta-partial-followup"
     if normalized.startswith("แล้ว"):
         # A "แล้ว" prefix is ALREADY a deliberate, strong follow-up
         # signal on its own — no length cap here (unlike the bare-entity
@@ -356,17 +366,32 @@ def _detect_marker(normalized: str) -> Optional[str]:
 _META_SUMMARY_MARKER_RE = re.compile(r"สรุป|อีกที|ทบทวน")
 _META_DETAIL_MARKER_RE = re.compile(r"ละเอียด|ขยายความ|เพิ่มเติม")
 
+# Final Blocker B fix (2026-08-29) — the SAME "instruction about HOW to
+# answer, not a new topic" concept as the summary/detail markers above,
+# extended to two more generic shapes confirmed live to reach retrieval
+# with no topic of their own, pulling unrelated chunks purely because the
+# active conversation's own substantive question was never carried
+# forward: (1) a request to explain more SIMPLY ("ช่วยอธิบายแบบง่ายๆได้ไหม"
+# right after a genuine question, e.g. "ฝากสั่งกับฝากนำเข้าต่างกันยังไง"),
+# and (2) a request to answer with whatever's AVAILABLE/PARTIAL ("ถ้า
+# ข้อมูลบางส่วนยังไม่มี ช่วยบอกเท่าที่ทราบได้ไหม"). Neither names its own
+# topic/attribute/transport/location entity, exactly like สรุป/ละเอียด —
+# reuses the identical _is_meta_followup gate, never a new mechanism.
+_META_SIMPLIFY_MARKER_RE = re.compile(r"ง่ายๆ|ง่าย ๆ|เข้าใจง่าย")
+_META_PARTIAL_MARKER_RE = re.compile(r"เท่าที่ทราบ|เท่าที่มี|เท่าที่รู้|บางส่วน")
+
 
 def _is_meta_followup(text: str) -> bool:
-    """True when `text` carries a summarize/detail-again instruction but
-    introduces no new topic/attribute/transport/location entity of its
-    own — i.e. it can only be answered by reusing whatever the
-    conversation already established, never as a complete question in
-    isolation. A question that both uses one of these words AND names
-    its own concrete subject (e.g. "สรุปนโยบายการคืนสินค้า") is NOT a
-    meta follow-up — it's a fresh, self-contained question and must be
-    left untouched, same as any other standalone question."""
-    if not (_META_SUMMARY_MARKER_RE.search(text) or _META_DETAIL_MARKER_RE.search(text)):
+    """True when `text` carries a summarize/detail/simplify/partial-info-
+    again instruction but introduces no new topic/attribute/transport/
+    location entity of its own — i.e. it can only be answered by reusing
+    whatever the conversation already established, never as a complete
+    question in isolation. A question that both uses one of these words
+    AND names its own concrete subject (e.g. "สรุปนโยบายการคืนสินค้า") is
+    NOT a meta follow-up — it's a fresh, self-contained question and must
+    be left untouched, same as any other standalone question."""
+    if not (_META_SUMMARY_MARKER_RE.search(text) or _META_DETAIL_MARKER_RE.search(text)
+            or _META_SIMPLIFY_MARKER_RE.search(text) or _META_PARTIAL_MARKER_RE.search(text)):
         return False
     entities = extract_entities(text)
     if any(entities.get(k) for k in ("transport", "location", "attribute")):
@@ -491,17 +516,28 @@ def resolve_conversation(question: str, history: Optional[List[Dict]] = None) ->
     if not prev_q:
         return _empty_result(original, marker, 1.0, prev_topic)
 
-    if marker in ("meta-summary-followup", "meta-detail-followup"):
+    if marker in ("meta-summary-followup", "meta-detail-followup",
+                  "meta-simplify-followup", "meta-partial-followup"):
         # Reuses ONLY the previous USER question's own wording — never
         # the assistant's prior answer — as the subject to summarize/
-        # detail, per the "never use previous AI answers as evidence"
-        # requirement. _strip_suffix/_strip_prefix are the SAME helpers
-        # the legacy tier already uses, so this stays consistent with
-        # every other resolution path in this module.
+        # detail/simplify/partially-answer, per the "never use previous
+        # AI answers as evidence" requirement. _strip_suffix/_strip_prefix
+        # are the SAME helpers the legacy tier already uses, so this stays
+        # consistent with every other resolution path in this module.
         subject, _ = _strip_suffix(_strip_prefix(prev_q.strip()))
         if not subject:
             return _empty_result(original, marker, 0.0, prev_topic)
-        prefix = "สรุปข้อมูลเกี่ยวกับ" if marker == "meta-summary-followup" else "อธิบายรายละเอียดเกี่ยวกับ"
+        _META_PREFIXES = {
+            "meta-summary-followup": "สรุปข้อมูลเกี่ยวกับ",
+            "meta-detail-followup": "อธิบายรายละเอียดเกี่ยวกับ",
+            # Final Blocker B fix (2026-08-29) — preserves the active
+            # substantive topic (`subject`, the previous real question)
+            # while appending the CURRENT turn's own modifier, so
+            # retrieval never runs on a topic-less fragment alone.
+            "meta-simplify-followup": "อธิบายแบบง่ายเกี่ยวกับ",
+            "meta-partial-followup": "ตอบเฉพาะข้อมูลที่รองรับเกี่ยวกับ",
+        }
+        prefix = _META_PREFIXES[marker]
         resolved = prefix + subject
         carried = {k: v for k, v in prev_entities.items() if v}
         return {
