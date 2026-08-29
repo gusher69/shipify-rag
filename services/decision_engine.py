@@ -248,6 +248,9 @@ def _next_expected_parameter(action: Dict, registry, collected: Dict) -> Optiona
     return None  # nothing left to ask (e.g. only a secret is missing)
 
 
+_RETRY_LOOKBACK_TURNS = 16  # ~8 exchanges — see Recency-Bounded Retry Window note below
+
+
 def _count_genuine_retries(registry, history: List[Dict], expected_question: str) -> int:
     """Companion to the Generic Continuation Intent Guard (2026-08-24,
     same fix) — retry_count below is retroactively recomputed from
@@ -269,14 +272,35 @@ def _count_genuine_retries(registry, history: List[Dict], expected_question: str
     same action or a different one, never re-derived here) is never
     counted as a failed attempt. A reply with no decisive match for
     anything (genuinely off-topic/confused/silent replies) still counts
-    exactly as before."""
+    exactly as before.
+
+    Recency-Bounded Retry Window (2026-08-29 production fix) — confirmed
+    live: a customer_identifier parameter question asked (and left
+    unanswered) during one action's collection episode that had already
+    been closed out by its own escalation to human handoff was still
+    being counted as 2/2 genuine retries almost a full day and ~18-20
+    messages later, against a BRAND-NEW same-day request for a completely
+    different Business Action that merely happens to need the same
+    parameter group — permanently escalating that customer's very FIRST
+    attempt at every future request needing that identifier, forever,
+    long after the original episode was already closed. `history` here
+    carries no timestamp (services/session_service.py::get_recent_history
+    only returns role/content), so position within `history` is the only
+    recency signal available without changing that caller contract —
+    only the most recent _RETRY_LOOKBACK_TURNS entries are scanned, still
+    generous enough to preserve the original 2026-08-24 fix's own "customer
+    decisively diverts to a different action for a turn or two, then comes
+    back" scenario (which resolves within a handful of exchanges in
+    practice), while excluding a stale match from many exchanges/a full
+    day earlier."""
     count = 0
-    for i, t in enumerate(history):
+    recent_history = history[-_RETRY_LOOKBACK_TURNS:] if history else history
+    for i, t in enumerate(recent_history):
         if t.get("role") != "assistant" or not _reply_matches_question(
                 (t.get("content") or "").strip(), expected_question):
             continue
-        if i + 1 < len(history) and history[i + 1].get("role") == "user":
-            reply = history[i + 1].get("content") or ""
+        if i + 1 < len(recent_history) and recent_history[i + 1].get("role") == "user":
+            reply = recent_history[i + 1].get("content") or ""
             candidates = search_candidate_actions(registry, workflow=None, message=reply, collected_slots={})
             if select_best_action(candidates, minimum_score=1.0):
                 continue
