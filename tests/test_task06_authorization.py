@@ -301,7 +301,18 @@ class TestEndToEndCrossCustomerDenialViaDecide(unittest.TestCase):
         customer_context carries a remembered cust_code (as an OLD,
         pre-fix profile row still would, until it naturally goes stale),
         that alone must not grant access -- the Authorization Gate checks
-        the CHANNEL, not whether an identifier happens to be known."""
+        the CHANNEL, not whether an identifier happens to be known.
+
+        Self-Service Identity Verification (2026-08-29) — a remembered
+        CustCode with no verified binding now gets offered a phone-
+        verification question (services/decision_engine.py::
+        _attempt_self_verification) instead of the bare denial. This
+        does NOT weaken the invariant this test exists to prove: the
+        remembered identifier ALONE still never grants access on its
+        own -- an INDEPENDENT second factor (a phone number matching
+        ERP records) is still required, and no ERP call happens (no
+        data of any kind is exposed) until/unless the customer actually
+        supplies one."""
         self._seed_customer_lookup()
         with patch("services.action_executor.requests.request",
                    return_value=_fake_response(200, {"Wallet": 1})) as mock_req:
@@ -309,7 +320,8 @@ class TestEndToEndCrossCustomerDenialViaDecide(unittest.TestCase):
                 "ข้อมูลลูกค้า", history=[],
                 context={"channel": "line", "customer_context": {"cust_code": "CU-0001"}})
         mock_req.assert_not_called()
-        self.assertEqual(result["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
+        self.assertNotEqual(result["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
+        self.assertIn("เบอร์โทร", result["reply"]["text"])  # asks for the second factor, never grants access
 
     def test_playground_admin_context_still_permitted(self):
         """Admin/Playground tooling must remain usable -- staff are

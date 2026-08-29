@@ -6521,7 +6521,7 @@ class TestGeneralImportAdviceDoesNotRequireCustCode(unittest.TestCase):
                    {"role": "assistant", "content": turn1["reply"]["text"]}]
 
         turn2 = self._decide("SP1008", history=history)
-        self.assertIn("ไม่สามารถยืนยันสิทธิ์", turn2["reply"]["text"])
+        self.assertIn("เบอร์โทร", turn2["reply"]["text"])
         history.append({"role": "user", "content": "SP1008"})
         history.append({"role": "assistant", "content": turn2["reply"]["text"]})
 

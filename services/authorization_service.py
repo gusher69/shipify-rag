@@ -68,6 +68,15 @@ _IDENTIFIER_PARAM_NAMES = {
 # module docstring.
 _ADMIN_CHANNELS = {"playground", "admin"}
 
+# Named so callers that need to react specifically to "no binding exists
+# yet" (as opposed to any other denial reason, e.g. an identity-switch
+# rejection) can compare against this exact constant instead of
+# duplicating the literal string (services/decision_engine.py's
+# Self-Service Identity Verification sub-flow, 2026-08-29, is the first
+# such caller).
+NO_VERIFIED_BINDING_REASON = ("no verified customer binding exists for this channel — failing closed "
+                               "(see services/authorization_service.py module docstring)")
+
 
 def requires_verified_identity(action: Dict) -> bool:
     """True when `action` has at least one customer_message-sourced
@@ -154,8 +163,7 @@ def check_authorization(action: Dict, context: Optional[Dict] = None, sb=None) -
     if not binding:
         return {
             "authorized": False,
-            "reason": "no verified customer binding exists for this channel — failing closed "
-                       "(see services/authorization_service.py module docstring)",
+            "reason": NO_VERIFIED_BINDING_REASON,
         }
 
     custcode_param = _find_custcode_param_name(action)

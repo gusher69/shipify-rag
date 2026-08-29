@@ -11,13 +11,17 @@ integrates into Task 06's authorization gate WITHOUT weakening it:
     revoked binding                 -> DENY again, immediately
 
 VERIFICATION METHOD (Task 06B investigation, see the before-code
-report): no trusted self-service channel exists in this codebase (no
-OTP provider, no customer login, no LINE Login) — every binding here is
-created via the staff-assisted admin API (behind the SAME auth(request)
-session-cookie gate as every other admin surface), never a customer-
-facing self-service flow. Tests marked N/A below are for self-service-
-only concerns (OTP replay/rate-limiting) that don't apply to this
-verification method.
+report): every binding in THIS file is still created via the staff-
+assisted admin API (behind the SAME auth(request) session-cookie gate as
+every other admin surface). Tests marked N/A below are for OTP-specific
+concerns (replay/rate-limiting) that don't apply to this verification
+method. A SECOND, self-service verification method now also exists
+(services/self_verification_service.py + services/decision_engine.py::
+DecisionEngine._attempt_self_verification, 2026-08-29) — a customer with
+no binding yet is offered a phone-number check against the (masked)
+value on file before falling back to this file's staff-assisted denial;
+see tests/test_decision_engine.py's Self-Service Identity Verification
+cases for that path's own coverage.
 
 Synthetic identifiers only (SP-A/SP-B/Uverified-a/...), never real
 customer data.
@@ -338,13 +342,20 @@ class TestEndToEndVerifiedAccess(unittest.TestCase):
         self.assertEqual(result["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
 
     def test_unverified_user_still_denied_end_to_end_task06_regression(self):
+        """Self-Service Identity Verification (2026-08-29) — an
+        unverified user with a CustCode now gets offered a phone-
+        verification question (services/decision_engine.py::
+        _attempt_self_verification) instead of the bare denial on this
+        first turn — no ERP call happens either way (no data exposed)
+        until/unless the customer actually supplies a matching phone."""
         self._seed_customer_lookup()
         with patch("services.action_executor.requests.request") as mock_req:
             result = self.engine.decide(
                 "ข้อมูลลูกค้า CU0002", history=[],
                 context={"channel": "line", "tenant_id": TENANT, "external_user_id": "Unever-linked"})
         mock_req.assert_not_called()
-        self.assertEqual(result["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
+        self.assertNotEqual(result["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
+        self.assertIn("เบอร์โทร", result["reply"]["text"])
 
     def test_binding_convenience_autofill_never_requires_retyping_custcode(self):
         """Phase 17/21: a verified customer's OWN CustCode is auto-filled
@@ -367,17 +378,43 @@ class TestEndToEndVerifiedAccess(unittest.TestCase):
     def test_revocation_mid_pending_workflow_denies_on_resume(self):
         """Phase 31: verified, starts a flow, binding gets revoked before
         the ACTUAL execution turn -- authorization is re-checked, a
-        pending state never bypasses revocation."""
+        pending state never bypasses revocation.
+
+        Self-Service Identity Verification (2026-08-29) — the FIRST
+        reply after revocation now offers a phone-verification question
+        instead of the bare denial (same as any other unverified
+        request); extended here to prove the full end-to-end guarantee
+        this test exists for still holds: a revoked customer who can't
+        actually produce the real on-file phone number still ends up
+        denied, never quietly re-authorized via the pending workflow."""
         self._seed_customer_lookup()
         binding = self.binding_svc.link_verified(tenant_id=TENANT, channel=CHANNEL, external_user_id="Uverified-a",
                                                   cust_code="CU0001", created_by="admin")
         self.binding_svc.revoke(binding["id"], reason="test_mid_flow_revocation")
         with patch("services.action_executor.requests.request") as mock_req:
+            mock_req.return_value = _fake_response(200, {"data": []})  # ERP: no record for CU0001
             result = self.engine.decide(
                 "ข้อมูลลูกค้า CU0001", history=[],
                 context={"channel": "line", "tenant_id": TENANT, "external_user_id": "Uverified-a"})
-        mock_req.assert_not_called()
-        self.assertEqual(result["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
+            self.assertNotEqual(result["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
+            self.assertIn("เบอร์โทร", result["reply"]["text"])
+
+            history = [{"role": "user", "content": "ข้อมูลลูกค้า CU0001"},
+                       {"role": "assistant", "content": result["reply"]["text"]}]
+            result2 = self.engine.decide(
+                "0899999999", history=history,
+                context={"channel": "line", "tenant_id": TENANT, "external_user_id": "Uverified-a"})
+            self.assertIn("อีเมล", result2["reply"]["text"])  # phone didn't match -> asks for email next
+            history += [{"role": "user", "content": "0899999999"},
+                        {"role": "assistant", "content": result2["reply"]["text"]}]
+
+            result3 = self.engine.decide(
+                "nobody@example.com", history=history,
+                context={"channel": "line", "tenant_id": TENANT, "external_user_id": "Uverified-a"})
+        self.assertEqual(result3["routing"]["type"], "HUMAN_HANDOFF")
+        self.assertEqual(result3["reply"]["text"], AUTHORIZATION_DENIED_MESSAGE)
+        self.assertIsNone(self.binding_svc.get_verified_binding(
+            tenant_id=TENANT, channel=CHANNEL, external_user_id="Uverified-a"))
 
     def test_public_rag_unaffected_by_binding_state(self):
         with patch("services.playground_orchestrator.run_playground_turn") as mock_rag:

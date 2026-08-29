@@ -729,6 +729,21 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     return collected
 
 
+# Self-Service Identity Verification (2026-08-29) — the customer-facing
+# question text for each step of the verify-with-a-second-factor sub-flow
+# (DecisionEngine._attempt_self_verification). Matched EXACTLY against
+# the most recent assistant turn (same convention as
+# _generate_parameter_question's own literal-template matching elsewhere
+# in this file) to recover which step of the sub-flow the CURRENT
+# message is answering — no separate persisted state, same "recompute
+# from history" convention this whole module already follows everywhere
+# else. Module-level (not a class attribute) so _resolve_continuation_
+# action's own nested _match_against closure — a plain function, no
+# `self` in scope — can reference them too (see its own comment there).
+_SELF_VERIFY_ASK_PHONE_TEXT = "เพื่อยืนยันตัวตนก่อนดูข้อมูลนี้ รบกวนแจ้งเบอร์โทรที่ผูกกับบัญชีลูกค้าด้วยค่ะ"
+_SELF_VERIFY_ASK_EMAIL_TEXT = "เบอร์โทรที่แจ้งมาไม่ตรงกับข้อมูลในระบบค่ะ รบกวนแจ้งอีเมลที่ผูกกับบัญชีลูกค้าแทนได้ไหมคะ"
+
+
 def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: Optional[str] = None,
                                   customer_context: Optional[Dict] = None) -> Optional[Dict]:
     """Conversation Continuation without a persistence layer: if the
@@ -785,6 +800,26 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
             if next_param:
                 expected_q = _generate_parameter_question(next_param)
                 if _reply_matches_question(last_text, expected_q):
+                    found.append(full_action)
+            elif next_param is None and last_text in (
+                    _SELF_VERIFY_ASK_PHONE_TEXT, _SELF_VERIFY_ASK_EMAIL_TEXT):
+                # Self-Service Identity Verification (2026-08-29) — all
+                # required parameters are collected (next_param is None)
+                # but execution was denied for lack of a verified binding,
+                # so decision_engine._execute_selected_action's own denial
+                # branch asked one of these two questions instead of
+                # executing. Without this, the customer's phone/email
+                # reply has no identifier/keyword pattern of its own to
+                # win FRESH re-selection, and (confirmed live) a bare
+                # phone-number-shaped reply gets mis-matched to a
+                # completely different action (e.g. an order-lookup
+                # action whose own next-missing parameter also happens to
+                # be numeric) instead of continuing THIS action's
+                # verification step. Reusing requires_verified_identity()
+                # keeps this scoped to only actions that could actually
+                # have asked this question in the first place.
+                from services.authorization_service import requires_verified_identity
+                if requires_verified_identity(full_action):
                     found.append(full_action)
             elif next_param is None and allow_confirmation and _requires_confirmation(full_action):
                 # The last assistant turn was THIS action's confirmation-gate
@@ -2751,6 +2786,100 @@ class DecisionEngine:
 
     # ── Execute the selected Business Action via the Generic Action Executor ──
 
+    def _attempt_self_verification(self, collected_slots: Dict, message: str, history: List[Dict],
+                                    context: Dict, developer_trace: Dict) -> Dict:
+        """Runs ONLY when Action Executor denied execution specifically
+        because no verified customer_channel_bindings row exists yet
+        (services/authorization_service.py::NO_VERIFIED_BINDING_REASON —
+        checked by the caller before this is even invoked; a denial for
+        a DIFFERENT reason, e.g. an already-verified customer typing a
+        DIFFERENT CustCode, never reaches here and stays denied exactly
+        as before this fix). Lets a customer establish their OWN
+        verified binding immediately by proving they know a SECOND piece
+        of information already on file for the CustCode they gave —
+        services/self_verification_service.py does the actual lookup/
+        compare, this method only drives the deterministic conversational
+        sequence and persists the binding via the SAME services/
+        customer_binding_service.py::link_verified staff-assisted path
+        already uses (just a different `method` value — the module's own
+        docstring already reserved this: "only `method` gains a new
+        value and a new caller").
+
+        PHONE ONLY is auto-verified, deliberately — every phone/email
+        field this provider returns is masked server-side before this
+        module (or anything else) ever sees it (services/
+        business_action_registry.py::sanitize_response_body, applied
+        unconditionally, not just for display — there is no unmasked
+        value to compare against anywhere in this codebase, by design).
+        That masking keeps a handful of TRAILING characters visible
+        regardless of field type — confirmed live: for a phone number
+        that is 3-4 trailing DIGITS, a reasonably distinguishing signal;
+        for an email address it is virtually always just the domain
+        suffix (e.g. "****.com"), which almost every real email shares —
+        comparing against it would "verify" nearly any customer's email
+        as a match, which is not verification at all. Email is still
+        ASKED (matching the requested phone-then-email sequence, and
+        genuinely useful context for staff) but only ever used as a
+        supporting detail in the escalation handoff below — never as a
+        second auto-verification factor.
+
+        Deliberately scoped to ONLY the case actually observed and
+        confirmed live: the customer's given identifier is CustCode
+        (collected_slots["CustCode"], the AT_LEAST_ONE identifier group's
+        own first/default member — in practice virtually always what
+        gets asked/given first). If collected_slots has no CustCode at
+        all (the customer identified some other way — email/phone/name),
+        this returns {"resolved": False} with no reply_text and no
+        escalate flag, so the caller falls through to the ORIGINAL,
+        unchanged denial message rather than guessing against an
+        untested identifier shape.
+
+        Returns exactly one of:
+          {"resolved": True} — a verified binding now exists; caller
+              should re-attempt the same action execution.
+          {"resolved": False, "reply_text": <question>, "escalate": False}
+              — ask the next verification question.
+          {"resolved": False, "reply_text": None, "escalate": True,
+              "internal_reason": <str>} — phone did not match (email is
+              never auto-checked); caller should escalate, carrying
+              `internal_reason` into the handoff for CS visibility
+              (never shown verbatim to the customer — the customer-
+              facing wording stays the existing neutral, anti-
+              enumeration AUTHORIZATION_DENIED_MESSAGE).
+          {"resolved": False} — nothing applicable; fall through to the
+              original unchanged denial behavior."""
+        cust_code = collected_slots.get("CustCode")
+        if not cust_code:
+            return {"resolved": False}
+
+        last_assistant = next(
+            (t.get("content") or "" for t in reversed(history or []) if t.get("role") == "assistant"), "")
+        from services.self_verification_service import verify_customer_claim
+        from services.customer_binding_service import get_customer_binding_service
+
+        if last_assistant.strip() == _SELF_VERIFY_ASK_EMAIL_TEXT:
+            # Email is collected as a supporting detail for the human
+            # handoff below, never auto-verified (see this method's own
+            # docstring) — the reply itself is the "email", whatever it
+            # is; no lookup/comparison call is made here at all.
+            return {"resolved": False, "reply_text": None, "escalate": True,
+                    "internal_reason": f"CustCode {cust_code}: phone did not match record on file; "
+                                        f"customer-claimed email for manual follow-up: {message!r}"}
+
+        if last_assistant.strip() == _SELF_VERIFY_ASK_PHONE_TEXT:
+            result = verify_customer_claim(cust_code, claimed_phone=message, sb=self.registry._sb)
+            developer_trace["self_verification"] = result
+            if result["verified"]:
+                get_customer_binding_service(self.registry._sb).link_verified(
+                    tenant_id=context.get("tenant_id"), channel=context.get("channel"),
+                    external_user_id=context.get("external_user_id"), cust_code=cust_code,
+                    created_by="self_verification_service", method="self_service_phone")
+                return {"resolved": True}
+            return {"resolved": False, "reply_text": _SELF_VERIFY_ASK_EMAIL_TEXT, "escalate": False}
+
+        # First time hitting this denial for this CustCode this exchange.
+        return {"resolved": False, "reply_text": _SELF_VERIFY_ASK_PHONE_TEXT, "escalate": False}
+
     def _execute_selected_action(self, selected: Dict, candidates: List[Dict], message: str,
                                   history: List[Dict], context: Dict, developer_trace: Dict, start: float,
                                   *, workflow: Optional[str], intent: Optional[str], collected_slots: Dict) -> Dict:
@@ -2853,6 +2982,40 @@ class DecisionEngine:
             # denial dict ({"message": ...}) into a raw "message: ..."
             # line instead of surfacing it cleanly. Never treat a denial
             # as a successful business-action result.
+            #
+            # Self-Service Identity Verification (2026-08-29) — checked
+            # ONLY for the specific "no binding exists yet" denial reason
+            # (never an identity-switch rejection, a different, more
+            # suspicious case that must stay denied outright). Gives the
+            # customer a legitimate way to establish their own binding
+            # right now (prove a second on-file detail) instead of always
+            # needing a staff member to do it manually — see
+            # _attempt_self_verification's own docstring. The Authorization
+            # Gate itself (services/authorization_service.py,
+            # services/action_executor.py) is completely untouched: this
+            # only ever creates a REAL verified binding through the SAME
+            # existing services/customer_binding_service.py::link_verified
+            # path, then re-attempts the SAME execution, which now passes
+            # the SAME unmodified check on its own.
+            from services.authorization_service import NO_VERIFIED_BINDING_REASON
+            auth_reason = (exec_result.get("metadata") or {}).get("authorization_denied_reason") or ""
+            if auth_reason == NO_VERIFIED_BINDING_REASON:
+                sv = self._attempt_self_verification(collected_slots, message, history, context, developer_trace)
+                if sv.get("resolved"):
+                    return self._execute_selected_action(
+                        selected, candidates, message, history, context, developer_trace, start,
+                        workflow=workflow, intent=intent, collected_slots=collected_slots)
+                if sv.get("reply_text"):
+                    reply = _build_response(text=sv["reply_text"])
+                    return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                           developer_trace=developer_trace, context=context, start=start, alert=alert)
+                if sv.get("escalate"):
+                    developer_trace["self_verification_escalation_reason"] = sv.get("internal_reason")
+                    return self._route_human_handoff(
+                        message, history, context, developer_trace, start,
+                        reason=f"self_verification_failed: {sv.get('internal_reason')}", workflow=workflow,
+                        message_override=(exec_result.get("result") or {}).get("message"))
+
             denial_text = (exec_result.get("result") or {}).get("message") or \
                 "ขออภัยค่ะ ไม่สามารถยืนยันสิทธิ์ในการเข้าถึงข้อมูลรายการนี้ได้ในขณะนี้ รบกวนติดต่อเจ้าหน้าที่เพื่อยืนยันตัวตนก่อนนะคะ"
             reply = _build_response(text=denial_text)
