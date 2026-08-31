@@ -1704,7 +1704,26 @@ def classify_turn_intent(message: str) -> str:
     text = message or ""
     has_question_marker = bool(_QUESTION_MARKER_RE.search(text))
     has_declarative_intent = bool(_DECLARATIVE_INTENT_MARKER_RE.search(text))
-    if not (has_question_marker or has_declarative_intent):
+
+    # Contact-channel request (Customer-Data Relevance fix, 2026-09-01) —
+    # "ขอเบอร์ติดต่อ" / "ขอเบอร์โทร" ask for the COMPANY's published contact
+    # channel (a curated FAQ row exists for exactly this), NOT the
+    # customer's own registered phone. These are usually phrased as a bare
+    # request with no question/declarative marker, so without this they
+    # hit the AMBIGUOUS early-return below, identity-gated Business Actions
+    # stay eligible, and getdatacustomer wins by binding the whole message
+    # as a free-text CustName — returning the user's masked number. A
+    # genuine "my registered number" request always self-references
+    # (ผม/ฉัน/บัญชี/ลงทะเบียน/ที่ผูก/ในระบบ) or carries a reference marker
+    # (both excluded here); an identifier-bearing message still returns
+    # PRIVATE_ACTION via the higher-precedence check just below.
+    _contact_request = bool(re.search(
+        r"เบอร์|ช่องทางติดต่อ|contact|call\s*center|ติดต่อ.{0,12}(shipify|fasttrade|เจ้าหน้าที่|แอดมิน|บริษัท)",
+        text, re.IGNORECASE))
+    _self_registered = bool(re.search(r"ผม|ฉัน|ดิฉัน|ลงทะเบียน|ที่ผูก|บัญชีของ|โปรไฟล์|ในระบบ", text)) \
+        or bool(_REFERENCE_MARKER_RE.search(text))
+
+    if not (has_question_marker or has_declarative_intent or _contact_request):
         return "AMBIGUOUS"
 
     # Identifier evidence has the HIGHEST precedence — exactly mirroring
@@ -1730,6 +1749,12 @@ def classify_turn_intent(message: str) -> str:
     # ผม" — never "the company"), regardless of any other signal also
     # present.
     if "บริษัท" in text and has_question_marker:
+        return "SHIPIFY_INFORMATION"
+
+    # Contact-channel request override — see the _contact_request comment
+    # near the top of this function. Reached only after identifier
+    # evidence (PRIVATE_ACTION, higher precedence) is ruled out.
+    if _contact_request and not _self_registered:
         return "SHIPIFY_INFORMATION"
 
     bare_self_reference = bool(re.search(r"ผม|ฉัน|ดิฉัน", text)) and not _SUBJECT_INTENT_RE.search(text)
@@ -2266,6 +2291,47 @@ class DecisionEngine:
                 # action selection) is completely unchanged, since none of
                 # it depends on identity-gated actions being present.
                 turn_intent = classify_turn_intent(message)
+
+                # Immediate-Context-Over-Stale-ERP guard (2026-09-01) — a
+                # short contextual follow-up ("แล้วจีนล่ะ" after a Thai-
+                # warehouse RAG answer, "แล้วทางเรือล่ะ" after a road-rate
+                # answer) names no identifier and no self-referencing
+                # request of its own, so classify_turn_intent sees only
+                # "AMBIGUOUS" and leaves identity-gated API/WEBHOOK actions
+                # eligible. A stale customer_context identity from an
+                # EARLIER, since-abandoned ERP exchange can then resurrect a
+                # private profile/wallet lookup via _resolve_conversation_
+                # reference — a customer-data relevance/privacy regression.
+                # Reuses two existing deterministic signals, ANDed, never a
+                # new classifier: (1) resolve_conversation already marks
+                # this turn as a genuine follow-up (`followup_type` set) and
+                # rewrites it to its real subject; (2) _last_assistant_turn_
+                # requests_input already tells us the immediately preceding
+                # assistant turn was NOT an active ERP parameter/
+                # confirmation request. When both hold AND the rewritten
+                # subject carries no identifier token of its own (so a
+                # genuine "แล้ว SP1002 ล่ะ" order follow-up is untouched),
+                # the immediate informational context wins — exactly as an
+                # explicit SHIPIFY_INFORMATION turn would. The cheap
+                # contrastive-particle precheck ("แล้ว…ล่ะ/ละ" — the same
+                # shape rag/query_resolution._FOLLOWUP_RE keys on) keeps
+                # resolve_conversation off the hot path for every message
+                # that could not possibly be this kind of follow-up.
+                if (turn_intent == "AMBIGUOUS" and history
+                        and "แล้ว" in (message or "")
+                        and ("ล่ะ" in (message or "") or "ละ" in (message or ""))):
+                    from rag.query_resolution import resolve_conversation as _resolve_conv
+                    _conv = _resolve_conv(message, history)
+                    _recent_asst = [t.get("content") for t in history if t.get("role") == "assistant"][-2:]
+                    _resolved_q = _conv.get("resolved_question") or ""
+                    _resolved_has_identifier = any(
+                        _validate_generic_identifier(tok) and not tok.isdigit()
+                        for tok in _TOKEN_SPLIT_RE.split(_resolved_q) if tok)
+                    if (_conv.get("followup_type") and not _resolved_has_identifier
+                            and not any(_last_assistant_turn_requests_input(c) for c in _recent_asst)):
+                        turn_intent = "SHIPIFY_INFORMATION"
+                        developer_trace["turn_intent_coerced"] = "rag_continuity_followup_over_stale_erp"
+
                 developer_trace["turn_intent"] = turn_intent
                 exclude_private = _IDENTITY_GATED_ACTION_TYPES if turn_intent == "SHIPIFY_INFORMATION" else None
 

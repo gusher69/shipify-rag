@@ -16,7 +16,7 @@ from config import OPENAI_CHAT_MODEL
 from rag.searcher import is_analytical
 from rag.query_expansion import normalize_query
 from rag.spell_correction import correct_query
-from rag.query_resolution import resolve_conversation
+from rag.query_resolution import resolve_conversation, requested_transport_modes
 from rag.canonical_query import rewrite_canonical_query
 from rag.query_understanding import classify_actionable_intent
 from rag.confidence import compute_confidence, confidence_label as _confidence_label_from_score
@@ -266,6 +266,22 @@ def _is_ambiguous_rag_continuity_followup(question: str, history: Optional[List[
         (t.get("content") or "" for t in reversed(history) if t.get("role") == "user"), "")
     return bool(_COMPANY_OPERATIONAL_TOPIC_RE.search(last_customer_turn)
                 or _CHINA_SOURCED_ACTION_RE.search(last_customer_turn))
+
+
+def _faq_row_overspecified_for_transport(faq_text: str, raw_question: str) -> bool:
+    """True when a verbatim FAQ return would over-answer on transport mode:
+    the customer's question names exactly ONE mode (requested_transport_
+    modes — the shared transport SoT, negation-aware) but the matched FAQ
+    row's answer covers BOTH road and sea. Happens when a mode-specific
+    question near-matches a generic rate/duration FAQ ("ทางรถเรทเท่าไหร่"
+    -> "เรทเท่าไหร่คะ"). Such a turn must go through synthesis so
+    answer_plan's own transport narrowing applies; a zero-mode ("generic
+    rate") or already-two-mode question is NOT over-specified and still
+    returns verbatim."""
+    modes = requested_transport_modes(raw_question or "")
+    if len(modes) != 1:
+        return False
+    return ("ทางรถ" in faq_text or "ทางบก" in faq_text) and "ทางเรือ" in faq_text
 
 
 def _has_direct_structured_evidence(chunks: List[Dict]) -> bool:
@@ -746,6 +762,59 @@ def run_playground_turn(
     confidence = conf_result.answer_confidence
     confidence_label = _confidence_label_from_score(confidence)
 
+    # Strong-Retrieval Yield (RAG-vs-General routing fix, 2026-08-31) — the
+    # General Chat Fallback gate below is a pure keyword allowlist checked
+    # BEFORE retrieval quality; it deliberately rejects spurious lexical
+    # matches (the "จีนอยู่ทวีปอะไร" class), but it ALSO drops genuinely
+    # company-specific questions whose wording happens to carry none of the
+    # allowlisted terms ("รถกับเรือใช้เวลากี่วัน" — no ทาง-/ขนส่ง-/นำเข้า
+    # token) even when RAG returned a literally-grounded direct answer.
+    # This is NOT "retrieval quality alone decides": it fires only when the
+    # single top chunk is a direct-evidence hit whose has_literal_evidence
+    # bar was cleared on the RAW question AND whose hybrid_score is in the
+    # multi-signal band (>= 0.95 — vector + keyword + heading all agreeing;
+    # confirmed against the trace, single-signal spurious matches like
+    # "จีนอยู่ทวีปอะไร" sit at ~0.72, well below this). Not sentence-
+    # specific: no literal string is matched, only the shared retrieval
+    # signals every chunk already carries.
+    _top_chunk = chunks[0] if chunks else {}
+    _rag_strong_direct = bool(
+        chunks
+        and conf_result.answerability in ("direct_answer", "partial_answer")
+        and _top_chunk.get("classification") == "direct_evidence"
+        and _top_chunk.get("has_literal_evidence")
+        and (_top_chunk.get("hybrid_score") or 0.0) >= 0.95
+    )
+
+    # RAG-topic continuity follow-up (context-priority fix, 2026-09-01) —
+    # a short "แล้ว…ล่ะ"/contrastive follow-up ("แล้วจีนล่ะ" after a Thai-
+    # warehouse answer, "แล้วทางเรือล่ะ" after a road-duration answer)
+    # carries none of the keyword-gate terms itself, so it fell to General
+    # Chat and answered "ยังไม่มีข้อมูล" — losing the topic the customer is
+    # still on. Reuses the EXISTING deterministic resolver output, no new
+    # classifier: resolve_conversation already flagged this turn as a
+    # genuine follow-up (`followup_type` set) and rewrote it to its real
+    # subject (`canonical_question`); if that rewritten subject is itself a
+    # company/operational topic, the turn stays on the RAG path so the
+    # already-retrieved evidence for the resolved question is used.
+    _rag_topic_continuity_followup = bool(
+        conversation.get("followup_type")
+        and (_COMPANY_OPERATIONAL_TOPIC_RE.search(canonical_question or "")
+             or _CHINA_SOURCED_ACTION_RE.search(canonical_question or ""))
+    )
+
+    # Curated FAQ row is always a company answer (routing fix, 2026-09-01)
+    # — an exact/near-exact match against the reviewed FAQ index (rag/
+    # faq_matcher.py, NEAR_EXACT_THRESHOLD 0.88 on the question + its
+    # curated alt-phrasings) means a human already decided this wording is
+    # a company/operational question and wrote its answer. Such a turn must
+    # never fall through the keyword gate to General Chat just because its
+    # surface words ("ขอเบอร์ติดต่อ", "ส่งต่อในไทยคิดค่าใช้จ่ายอะไรบ้าง",
+    # "แนะนำเพื่อนได้ส่วนลดอะไร") are not in _COMPANY_OPERATIONAL_TOPIC_RE.
+    # Genuine general-knowledge questions do not FAQ-exact match (verified:
+    # "จีนอยู่ทวีปอะไร" -> no FAQ row).
+    _rag_faq_exact = bool(chunks and chunks[0].get("is_faq_exact"))
+
     # 4a. Escalation Rules, part 2 — "send to human when no answer is
     #     found" needs real confidence, only known now. Upgrades the SAME
     #     `policy` object from step 2 (never re-evaluates from scratch),
@@ -935,6 +1004,9 @@ def run_playground_turn(
               or _CHINA_SOURCED_ACTION_RE.search(question or "")
               or _URGENCY_SIGNAL_RE.search(question or "")
               or _COMPLAINT_SIGNAL_RE.search(question or "")
+              or _rag_strong_direct
+              or _rag_topic_continuity_followup
+              or _rag_faq_exact
               or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27;
         # moved ahead of the Answerability Gate 2026-08-27 same day — Final
@@ -1043,6 +1115,31 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
+    elif (answer_plan.get("response_shape") == "faq_direct" and chunks and chunks[0].get("is_faq_exact")
+          and not _faq_row_overspecified_for_transport(chunks[0].get("text") or "", question)):
+        # Direct FAQ Fidelity — deterministic return (2026-09-01). An
+        # exact/near-exact FAQ row IS a human-reviewed, customer-approved
+        # answer (rag/faq_matcher.py + the knowledge_items index). Sending
+        # it through the grounded-synthesis LLM was silently dropping its
+        # own trailing follow-up question and, on the raw Thai, lightly
+        # rewording it (spell-corrector artefacts, "ครีม" -> "ฟรีม"). The
+        # FAQ-exact chunk's text is always exactly
+        # "Question: <q>\nAnswer: <a>" (rag/searcher.py) — return <a>
+        # verbatim, no LLM call, same pattern as the other deterministic
+        # branches above. Non-FAQ retrieval still goes through synthesis
+        # unchanged. EXCEPTION (_faq_row_overspecified_for_transport): a
+        # generic multi-mode rate/duration FAQ row matched by a mode-
+        # specific question ("ทางรถเรทเท่าไหร่" near-matches "เรทเท่าไหร่คะ")
+        # must still be narrowed by the LLM using answer_plan — returning
+        # every mode verbatim there is the wrong answer.
+        _faq_text = chunks[0].get("text") or ""
+        answer_text = _faq_text.split("\nAnswer: ", 1)[1].strip() if "\nAnswer: " in _faq_text else _faq_text.strip()
+        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                             "exact FAQ row — customer-approved answer returned verbatim, no LLM call"))
+        services_used.append({"name": "LLMService", "status": "skipped"})
+        input_tokens = output_tokens = 0
+        llm_latency = 0.0
+        llm_failed = False
     else:
         try:
             llm = get_llm_service()
@@ -1096,6 +1193,9 @@ def run_playground_turn(
               or _CHINA_SOURCED_ACTION_RE.search(question or "")
               or _URGENCY_SIGNAL_RE.search(question or "")
               or _COMPLAINT_SIGNAL_RE.search(question or "")
+              or _rag_strong_direct
+              or _rag_topic_continuity_followup
+              or _rag_faq_exact
               or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (see the matching branch above) answers
         # from the LLM's own general knowledge with empty context — the
