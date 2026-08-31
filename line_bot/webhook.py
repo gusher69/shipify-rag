@@ -99,6 +99,7 @@ async def _user_worker(user_id: str):
     users' workers run fully independently. Self-terminates after a period
     of inactivity so a one-off/inactive user doesn't hold a queue/task
     forever."""
+    import time as _time
     queue = _user_queues[user_id]
     loop = asyncio.get_running_loop()
     try:
@@ -107,11 +108,16 @@ async def _user_worker(user_id: str):
                 event = await asyncio.wait_for(queue.get(), timeout=_USER_WORKER_IDLE_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
                 break
+            # TEMP LATENCY DIAGNOSTIC (2026-08-31) — remove once the
+            # production slowness investigation is resolved.
+            _t0 = _time.time()
+            print(f"[LATENCY_DEBUG] dequeued for {user_id!r} at {_t0:.3f}, submitting to executor")
             try:
                 await loop.run_in_executor(_EXECUTOR, handle_message, event)
             except Exception as e:
                 print(f"[webhook] per-user worker error for {user_id!r}: {e}")
             finally:
+                print(f"[LATENCY_DEBUG] executor call for {user_id!r} finished after {_time.time()-_t0:.3f}s")
                 text = _normalize_for_dedup(getattr(event.message, "text", None))
                 _pending_texts_by_user[user_id].discard(text)
                 queue.task_done()
@@ -143,6 +149,12 @@ def _dispatch_event(event) -> None:
     if text and text in _pending_texts_by_user[user_id]:
         print(f"[webhook] duplicate pending message from {user_id!r} ({text!r}) — skipping duplicate execution")
         return
+
+    # TEMP LATENCY DIAGNOSTIC (2026-08-31) — remove once the production
+    # slowness investigation is resolved.
+    import time as _time
+    print(f"[LATENCY_DEBUG] dispatch_event enqueueing for {user_id!r} at {_time.time():.3f}, "
+          f"existing_queue={_user_queues.get(user_id) is not None}, active_users={len(_user_queues)}")
 
     queue = _user_queues.get(user_id)
     if queue is None:
