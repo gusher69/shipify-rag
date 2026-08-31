@@ -52,17 +52,58 @@ def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> floa
     return (input_tokens / 1000) * rates["input"] + (output_tokens / 1000) * rates["output"]
 
 
+# Bounded transport timeout for the chat client (latency P0, 2026-08-31).
+# Production evidence: a healthy gpt-4o-mini call is ~1-3s, but the client
+# was built with NO timeout -> an effective 600s read, so an
+# intermittently half-open keep-alive connection to api.openai.com stalled
+# one real LINE turn ~83s before recovering. read=20s caps a dead call;
+# connect/pool are short because a reachable endpoint accepts immediately.
+_CHAT_TIMEOUT_KW = dict(connect=5.0, read=20.0, write=10.0, pool=5.0)
+
+
+def _build_openai_client(api_key: str):
+    import httpx
+    from openai import OpenAI
+    # max_retries=0: the SDK's own retry would reuse the same (possibly
+    # dead) connection pool; we do exactly ONE application-level retry
+    # with a FRESH client instead (see generate()), so a stalled turn is
+    # 1 original + 1 retry, never more.
+    return OpenAI(api_key=api_key, timeout=httpx.Timeout(**_CHAT_TIMEOUT_KW), max_retries=0)
+
+
 class OpenAIProvider(LLMProvider):
     def __init__(self, api_key: str):
-        from openai import OpenAI
-        self._client = OpenAI(api_key=api_key)
+        self._api_key = api_key
+        self._client = _build_openai_client(api_key)
 
     def generate(self, messages: List[Dict], *, model: str, temperature: float = 0.3,
                  max_tokens: int = 500) -> LLMResponse:
+        from openai import APITimeoutError, APIConnectionError
         t0 = time.time()
-        resp = self._client.chat.completions.create(
-            model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
-        )
+        try:
+            resp = self._client.chat.completions.create(
+                model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+            )
+        except (APITimeoutError, APIConnectionError) as first:
+            # Stale/half-open connection to api.openai.com — discard this
+            # client (fresh pool), retry ONCE. If the retry also fails,
+            # reset the module singleton so the NEXT turn starts clean and
+            # re-raise: the existing caller (RAG orchestrator / Decision
+            # Engine) already degrades safely and never shows a raw
+            # network error to the LINE customer.
+            print(f"[llm_service] OpenAI chat transport error ({first!r}) — fresh client, one retry")
+            try:
+                self._client = _build_openai_client(self._api_key)
+            except Exception:
+                reset_llm_service()
+                raise first
+            try:
+                resp = self._client.chat.completions.create(
+                    model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+                )
+            except (APITimeoutError, APIConnectionError) as second:
+                reset_llm_service()
+                raise second
         latency_ms = (time.time() - t0) * 1000
         usage = resp.usage
         return LLMResponse(
