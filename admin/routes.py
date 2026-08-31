@@ -3925,7 +3925,7 @@ async def hybrid_playground_ask(request: Request):
             is_new_conversation = (conversation.get("message_count") or 0) == 0
             pg_session_service.record_conversation_turn(
                 conversation["id"], question, decide_result, line_user_id=playground_user_id,
-                conversation_tier=(profile or {}).get("conversation_tier"))
+                conversation_tier=(profile or {}).get("conversation_tier"), session=conversation)
             conversation_fields = extract_conversation_fields(decide_result)
             update_profile_from_turn(playground_user_id, decide_result=decide_result,
                                       conversation_fields=conversation_fields,

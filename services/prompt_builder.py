@@ -288,6 +288,31 @@ def _get_sb():
     return _sb()
 
 
+# ── Prompt-config read cache (latency P0, 2026-08-31) ──────────────────
+# ai_prompt_assignments / ai_prompt_templates change only on an admin
+# edit, but a single LINE turn resolved the same template 3x from the DB
+# (get_active_prompt + get_template x2). 60s TTL — an admin edit shows up
+# within a minute; the identical row is returned in between.
+_PROMPT_CACHE: Dict[str, tuple] = {}
+_PROMPT_CACHE_TTL = 60.0
+
+
+def _pc_get(key: str, producer):
+    import time as _t
+    hit = _PROMPT_CACHE.get(key)
+    if hit is not None and hit[0] > _t.time():
+        return hit[1]
+    val = producer()
+    _PROMPT_CACHE[key] = (_t.time() + _PROMPT_CACHE_TTL, val)
+    return val
+
+
+def clear_prompt_cache():
+    """Called by the Prompt Studio save/assign routes so an admin edit
+    takes effect immediately rather than waiting out the TTL."""
+    _PROMPT_CACHE.clear()
+
+
 def list_templates() -> List[PromptTemplate]:
     try:
         res = _get_sb().table("ai_prompt_templates").select("*").is_("deleted_at", "null") \
@@ -302,16 +327,21 @@ def list_templates() -> List[PromptTemplate]:
 
 def get_template(template_id: Optional[str]) -> PromptTemplate:
     if template_id:
-        try:
-            res = _get_sb().table("ai_prompt_templates").select("*").eq("id", template_id) \
-                .is_("deleted_at", "null").execute()
-            if res.data:
-                return _row_to_template(res.data[0])
-        except Exception as e:
-            print(f"[prompt_builder] get_template({template_id}) DB query failed: {e}")
-        # template_id might be a legacy in-memory key (e.g. "line_oa_default")
-        if template_id in _FALLBACK_TEMPLATES:
-            return _FALLBACK_TEMPLATES[template_id]
+        def _fetch():
+            try:
+                res = _get_sb().table("ai_prompt_templates").select("*").eq("id", template_id) \
+                    .is_("deleted_at", "null").execute()
+                if res.data:
+                    return _row_to_template(res.data[0])
+            except Exception as e:
+                print(f"[prompt_builder] get_template({template_id}) DB query failed: {e}")
+            # template_id might be a legacy in-memory key (e.g. "line_oa_default")
+            if template_id in _FALLBACK_TEMPLATES:
+                return _FALLBACK_TEMPLATES[template_id]
+            return None
+        cached = _pc_get(f"tpl:{template_id}", _fetch)
+        if cached is not None:
+            return cached
     return get_default_template()
 
 
@@ -393,13 +423,15 @@ def get_active_prompt(*, channel: Optional[str] = None, tier: Optional[str] = No
     Default — never a manual per-conversation choice (users cannot select
     a prompt directly; see CLAUDE.md Phase 3.4). Falling through this
     chain is the ONLY way a prompt gets selected for real traffic."""
-    if tier:
-        tier_prompt = get_active_prompt_for_tier(tier)
-        if tier_prompt:
-            return tier_prompt
-    if channel:
-        return get_active_prompt_for_channel(channel)
-    return get_default_template()
+    def _resolve():
+        if tier:
+            tier_prompt = get_active_prompt_for_tier(tier)
+            if tier_prompt:
+                return tier_prompt
+        if channel:
+            return get_active_prompt_for_channel(channel)
+        return get_default_template()
+    return _pc_get(f"active:{channel}:{tier}", _resolve)
 
 
 @dataclass

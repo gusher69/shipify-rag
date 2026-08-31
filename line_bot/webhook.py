@@ -794,37 +794,45 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             messages=messages,
         ))
 
-    upsert_profile(user_id, {
-        "display_name": profile.get("display_name", "") if profile else "",
-        "order_count":  profile.get("order_count", 0) if profile else 0,
-        "total_spend":  profile.get("total_spend", 0) if profile else 0,
-        "notes":        f"ถามเรื่อง: {routing_type}",
-    })
-
-    # Phase 3.1-3.3 (2026-08-05, Conversation Intelligence sprint) — record
-    # this turn into Conversation History, update the customer's
-    # incremental profile stats, then re-score their Customer Tier. Runs
-    # AFTER the LINE reply is already sent, and every step degrades
-    # gracefully on its own (never raises) — analytics/tier persistence
-    # must never delay or break the customer-facing reply above.
+    # Phase 3.1 — Conversation History. Kept SYNCHRONOUS: the NEXT turn's
+    # continuity (SessionService.get_recent_history) depends on this
+    # turn's messages being persisted. It is now cheap (session dict
+    # reused, no get_session hydration — see record_conversation_turn).
+    is_new_conversation = bool(conversation) and (conversation.get("message_count") or 0) == 0
     try:
-        # `conversation` (and `session_service`) were already fetched at
-        # the top of this function for Context Continuity — reused here,
-        # not re-fetched.
-        is_new_conversation = bool(conversation) and (conversation.get("message_count") or 0) == 0
-        conversation_fields = None
         if conversation:
             session_service.record_conversation_turn(
                 conversation["id"], question, result, line_user_id=user_id,
-                conversation_tier=(profile or {}).get("conversation_tier"))
-            conversation_fields = extract_conversation_fields(result)
-
-        if conversation_fields is not None:
-            update_profile_from_turn(user_id, decide_result=result, conversation_fields=conversation_fields,
-                                      is_new_conversation=is_new_conversation)
-            update_tier_for_profile(user_id, message=question)
+                conversation_tier=(profile or {}).get("conversation_tier"),
+                session=conversation)
     except Exception as e:
-        print(f"[webhook] Phase 3 conversation-intelligence recording failed (non-fatal): {e}")
+        print(f"[webhook] record_conversation_turn failed (non-fatal): {e}")
+
+    # Phase 3.2-3.3 — profile 'notes', incremental profile stats, and
+    # customer-tier rescoring. Pure analytics/enrichment: nothing here is
+    # read for correctness or security by the next turn, so it runs on a
+    # detached daemon thread AFTER the reply and never holds the per-user
+    # worker (which was previously blocked ~10s by these writes).
+    def _post_reply_bookkeeping():
+        try:
+            upsert_profile(user_id, {
+                "display_name": profile.get("display_name", "") if profile else "",
+                "order_count":  profile.get("order_count", 0) if profile else 0,
+                "total_spend":  profile.get("total_spend", 0) if profile else 0,
+                "notes":        f"ถามเรื่อง: {routing_type}",
+            })
+            if conversation:
+                conversation_fields = extract_conversation_fields(result)
+                update_profile_from_turn(user_id, decide_result=result,
+                                          conversation_fields=conversation_fields,
+                                          is_new_conversation=is_new_conversation)
+                update_tier_for_profile(user_id, message=question)
+        except Exception as e:
+            print(f"[webhook] post-reply bookkeeping failed (non-fatal): {e}")
+
+    import threading as _threading
+    _threading.Thread(target=_post_reply_bookkeeping, daemon=True,
+                      name="line-post-reply-bookkeeping").start()
 
 
 if __name__ == "__main__":

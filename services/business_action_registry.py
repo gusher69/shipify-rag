@@ -209,6 +209,33 @@ class _EmptyResult:
     data: List = []
 
 
+# ── Config read cache (latency P0, 2026-08-31) ─────────────────────────
+# The Business Action config tables change only when an admin edits a
+# Business Action. A single DecisionEngine.decide() turn ran
+# search_candidate_actions() TWICE, each doing list() + get_parameters()
+# per action -> ~19 identical PostgREST round-trips for a plain greeting
+# (production trace). This process-wide TTL cache collapses those to one
+# fetch per table per 30s window; every write method below clears it, so
+# an admin edit propagates on the next turn (worst case 30s). Pure
+# caching — the exact same rows are returned.
+_CONFIG_CACHE: "Dict[str, tuple]" = {}
+_CONFIG_CACHE_TTL = 30.0
+
+
+def _cache_get(key: str, producer):
+    import time as _t
+    hit = _CONFIG_CACHE.get(key)
+    if hit is not None and hit[0] > _t.time():
+        return hit[1]
+    value = producer()
+    _CONFIG_CACHE[key] = (_t.time() + _CONFIG_CACHE_TTL, value)
+    return value
+
+
+def _cache_clear():
+    _CONFIG_CACHE.clear()
+
+
 class BusinessActionRegistry:
     """The ONLY interface a future Decision Engine may use. Every method
     is read-only with respect to execution — it returns configuration,
@@ -279,15 +306,16 @@ class BusinessActionRegistry:
         previously soft-deleted action, so update() can resurrect and
         overwrite it in one step instead of leaving a dangling deleted
         row indefinitely blocking that key."""
+        _cache_clear()  # BA config changed -> drop the read cache
         rows = self._sb.table("business_actions").update(
             {"deleted_at": None, "updated_by": updated_by}).eq("id", action_id).execute().data
         return rows[0] if rows else None
 
     def list(self) -> List[Dict]:
-        return self._resilient_read(
+        return _cache_get("list", lambda: self._resilient_read(
             lambda sb: sb.table("business_actions").select("*").is_("deleted_at", "null")
             .order("priority", desc=True).order("created_at")
-        ).data or []
+        ).data or [])
 
     def search(self, query: str) -> List[Dict]:
         """Deterministic substring search over name/display_name/
@@ -342,27 +370,33 @@ class BusinessActionRegistry:
 
     # ── Related records (used by the Admin UI editor + future Decision Engine) ──
     def get_examples(self, action_id: str) -> List[Dict]:
-        return self._sb.table("business_action_examples").select("*").eq("action_id", action_id) \
-            .order("sort_order").execute().data or []
+        return _cache_get(f"examples:{action_id}", lambda: (
+            self._sb.table("business_action_examples").select("*").eq("action_id", action_id)
+            .order("sort_order").execute().data or []))
 
     def get_parameters(self, action_id: str) -> List[Dict]:
-        return self._sb.table("business_action_parameters").select("*").eq("action_id", action_id) \
-            .order("sort_order").execute().data or []
+        return _cache_get(f"params:{action_id}", lambda: (
+            self._sb.table("business_action_parameters").select("*").eq("action_id", action_id)
+            .order("sort_order").execute().data or []))
 
     def get_execution(self, action_id: str, *, mask: bool = True) -> Optional[Dict]:
-        rows = self._sb.table("business_action_execution").select("*").eq("action_id", action_id).execute().data
+        rows = _cache_get(f"execution:{action_id}", lambda: (
+            self._sb.table("business_action_execution").select("*").eq("action_id", action_id).execute().data))
         execution = rows[0] if rows else None
         return mask_execution_secrets(execution) if mask else execution
 
     def get_response_mapping(self, action_id: str) -> List[Dict]:
-        return self._sb.table("business_action_response_mapping").select("*").eq("action_id", action_id) \
-            .order("sort_order").execute().data or []
+        return _cache_get(f"respmap:{action_id}", lambda: (
+            self._sb.table("business_action_response_mapping").select("*").eq("action_id", action_id)
+            .order("sort_order").execute().data or []))
 
     def get_validation_rules(self, action_id: str) -> List[Dict]:
-        return self._sb.table("business_action_validation").select("*").eq("action_id", action_id).execute().data or []
+        return _cache_get(f"validation:{action_id}", lambda: (
+            self._sb.table("business_action_validation").select("*").eq("action_id", action_id).execute().data or []))
 
     def get_tags(self, action_id: str) -> List[str]:
-        rows = self._sb.table("business_action_tags").select("tag").eq("action_id", action_id).execute().data or []
+        rows = _cache_get(f"tags:{action_id}", lambda: (
+            self._sb.table("business_action_tags").select("tag").eq("action_id", action_id).execute().data or []))
         return [r["tag"] for r in rows]
 
     def get_full(self, action_id: str, *, mask_secrets: bool = True) -> Optional[Dict]:
@@ -384,6 +418,7 @@ class BusinessActionRegistry:
 
     # ── CRUD (Admin UI surface) ──────────────────────────────────────
     def create(self, payload: Dict, *, created_by: Optional[str] = None) -> Dict:
+        _cache_clear()  # BA config changed -> drop the read cache
         row = {k: v for k, v in payload.items() if k in _ACTION_FIELDS}
         row.setdefault("action_type", "TOOL")
         row.setdefault("enabled", True)
@@ -394,6 +429,7 @@ class BusinessActionRegistry:
         return self._sb.table("business_actions").insert(row).execute().data[0]
 
     def update(self, action_id: str, payload: Dict, *, updated_by: Optional[str] = None) -> Optional[Dict]:
+        _cache_clear()  # BA config changed -> drop the read cache
         row = {k: v for k, v in payload.items() if k in _ACTION_FIELDS}
         if row.get("action_type") and row["action_type"] not in ACTION_TYPES:
             raise ValueError(f"action_type must be one of {ACTION_TYPES}")
@@ -412,6 +448,7 @@ class BusinessActionRegistry:
         unique-constraint level — see the getdatacustomer incident).
         hard=True here is the same one-statement cascade delete
         hard_delete_action() uses, minus its fixture guard/verification."""
+        _cache_clear()  # BA config changed -> drop the read cache
         if hard:
             self._sb.table("business_actions").delete().eq("id", action_id).execute()
         else:
@@ -482,6 +519,7 @@ class BusinessActionRegistry:
 
         Returns {"ok": True, "action_id", "action_key", "removed_dependent_counts",
         "audit_log_warning": Optional[str]}."""
+        _cache_clear()  # BA config changed -> drop the read cache
         action = self.get(action_id)
         if not action:
             raise ValueError("action_not_found")
@@ -521,10 +559,12 @@ class BusinessActionRegistry:
                 "removed_dependent_counts": removed_counts, "audit_log_warning": audit_log_warning}
 
     def set_enabled(self, action_id: str, enabled: bool) -> Optional[Dict]:
+        _cache_clear()  # BA config changed -> drop the read cache
         rows = self._sb.table("business_actions").update({"enabled": enabled}).eq("id", action_id).execute().data
         return rows[0] if rows else None
 
     def duplicate(self, action_id: str, *, created_by: Optional[str] = None) -> Optional[Dict]:
+        _cache_clear()  # BA config changed -> drop the read cache
         src = self.get_full(action_id, mask_secrets=False)
         if not src:
             return None
@@ -563,6 +603,7 @@ class BusinessActionRegistry:
         return self.get(new_id)
 
     def upsert_execution(self, action_id: str, execution: Dict) -> Dict:
+        _cache_clear()  # BA config changed -> drop the read cache
         payload = {k: v for k, v in execution.items() if k in _EXECUTION_FIELDS}
         payload["action_id"] = action_id
         if payload.get("http_method") and payload["http_method"] not in HTTP_METHODS:
@@ -738,6 +779,7 @@ class BusinessActionRegistry:
         return errors
 
     def replace_examples(self, action_id: str, examples: List[Dict]) -> List[Dict]:
+        _cache_clear()  # BA config changed -> drop the read cache
         self._sb.table("business_action_examples").delete().eq("action_id", action_id).execute()
         out = []
         for i, ex in enumerate(examples):
@@ -748,6 +790,7 @@ class BusinessActionRegistry:
         return out
 
     def replace_parameters(self, action_id: str, parameters: List[Dict]) -> List[Dict]:
+        _cache_clear()  # BA config changed -> drop the read cache
         self._sb.table("business_action_parameters").delete().eq("action_id", action_id).execute()
         out = []
         for i, p in enumerate(parameters):
@@ -786,6 +829,7 @@ class BusinessActionRegistry:
         a set of parameter names. Never specific to any one action;
         e.g. a future Order API's [order_number, tracking_number]
         AT_LEAST_ONE group uses the exact same mechanism."""
+        _cache_clear()  # BA config changed -> drop the read cache
         for g in groups:
             if g.get("rule") not in GROUP_RULES:
                 raise ValueError(f"group rule must be one of {GROUP_RULES}")
@@ -793,6 +837,7 @@ class BusinessActionRegistry:
         return groups
 
     def replace_response_mapping(self, action_id: str, mapping: List[Dict]) -> List[Dict]:
+        _cache_clear()  # BA config changed -> drop the read cache
         self._sb.table("business_action_response_mapping").delete().eq("action_id", action_id).execute()
         out = []
         for i, m in enumerate(mapping):
@@ -803,6 +848,7 @@ class BusinessActionRegistry:
         return out
 
     def replace_validation_rules(self, action_id: str, rules: List[Dict]) -> List[Dict]:
+        _cache_clear()  # BA config changed -> drop the read cache
         self._sb.table("business_action_validation").delete().eq("action_id", action_id).execute()
         out = []
         for r in rules:
@@ -815,6 +861,7 @@ class BusinessActionRegistry:
         return out
 
     def replace_tags(self, action_id: str, tags: List[str]) -> List[str]:
+        _cache_clear()  # BA config changed -> drop the read cache
         self._sb.table("business_action_tags").delete().eq("action_id", action_id).execute()
         for tag in tags:
             self._sb.table("business_action_tags").insert({"action_id": action_id, "tag": tag}).execute()

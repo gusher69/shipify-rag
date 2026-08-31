@@ -17,16 +17,35 @@ supabase = _LazySupabase()
 
 TABLE = "user_profiles"
 
+# ── Per-turn profile read cache (latency P0, 2026-08-31) ───────────────
+# One LINE turn read user_profiles 3x (webhook top, update_profile_from_
+# turn, update_tier_for_profile). Short 8s TTL collapses those to one
+# round-trip; any write in this module clears the entry so the same turn
+# never sees its own stale copy, and the next turn re-reads within 8s.
+_PROFILE_CACHE: Dict[str, tuple] = {}
+_PROFILE_CACHE_TTL = 8.0
+
+
+def _profile_cache_clear(line_user_id: str):
+    _PROFILE_CACHE.pop(line_user_id, None)
+
 
 def get_profile(line_user_id: str) -> Optional[Dict]:
+    import time as _t
+    hit = _PROFILE_CACHE.get(line_user_id)
+    if hit is not None and hit[0] > _t.time():
+        return hit[1]
     try:
         result = supabase.table(TABLE).select("*").eq("line_user_id", line_user_id).single().execute()
-        return result.data
+        val = result.data
     except Exception:
-        return None
+        val = None
+    _PROFILE_CACHE[line_user_id] = (_t.time() + _PROFILE_CACHE_TTL, val)
+    return val
 
 
 def upsert_profile(line_user_id: str, data: Dict):
+    _profile_cache_clear(line_user_id)
     try:
         row = {
             "line_user_id":  line_user_id,
@@ -160,6 +179,7 @@ def update_profile_from_turn(line_user_id: str, *, decide_result: Dict, conversa
         if primary_intent and primary_intent != "unknown":
             row["primary_intent"] = primary_intent
 
+        _profile_cache_clear(line_user_id)
         res = supabase.table(TABLE).update(row).eq("line_user_id", line_user_id).execute()
         return (res.data or [None])[0]
     except Exception as e:

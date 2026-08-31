@@ -605,7 +605,8 @@ class SessionService:
             print(f"[SessionService] set_handoff_status failed (non-fatal): {e}")
 
     def record_conversation_turn(self, session_id: Optional[str], question: str, decide_result: Dict,
-                                  *, line_user_id: Optional[str] = None, conversation_tier: Optional[str] = None) -> Optional[Dict]:
+                                  *, line_user_id: Optional[str] = None, conversation_tier: Optional[str] = None,
+                                  session: Optional[Dict] = None) -> Optional[Dict]:
         """The Decision Engine / LINE OA equivalent of record_turn() above.
         `decide_result` is the raw dict services.decision_engine.py::
         DecisionEngine.decide() returns (developer_mode=True in its
@@ -619,8 +620,13 @@ class SessionService:
         because there is nothing left to mask by the time it gets here."""
         try:
             sb = _get_sb()
-            session = None
-            if session_id:
+            # Latency P0 (2026-08-31): the caller (line_bot/webhook.py)
+            # already holds this session dict from
+            # get_or_create_active_conversation() at the top of the turn —
+            # accept it directly instead of re-SELECTing ai_sessions here.
+            if session is not None and session.get("id"):
+                pass
+            elif session_id:
                 sres = sb.table("ai_sessions").select("*").eq("id", session_id).execute()
                 session = (sres.data or [None])[0]
             if not session:
@@ -670,7 +676,11 @@ class SessionService:
                 "updated_at": _now_iso(), "last_message_at": _now_iso(),
             }).eq("id", session_id).execute()
 
-            return self.get_session(session_id)
+            # Latency P0 (2026-08-31): the LINE webhook caller discards
+            # this return value — don't pay for the full get_session()
+            # hydration (session + messages + events + traces, 4 more
+            # round-trips) just to satisfy an unused result.
+            return {"id": session_id, "message_count": new_count}
         except Exception as e:
             print(f"[SessionService] record_conversation_turn failed: {e}")
             return None

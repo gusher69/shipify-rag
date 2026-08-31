@@ -214,19 +214,38 @@ def get_policy_studio_service() -> PolicyStudioService:
     return _service_singleton
 
 
+_DEFAULT_SET_CACHE: Dict = {"ts": 0.0, "val": None}
+_DEFAULT_SET_TTL = 60.0
+
+
+def clear_default_policy_set_cache():
+    """Called by the policy-set save route so an admin edit applies now."""
+    _DEFAULT_SET_CACHE["ts"] = 0.0
+
+
 def get_default_policy_set() -> Dict:
     """The routing rule AI Playground and LINE OA both resolve through —
     never a hardcoded config. Falls back to the in-memory
     _FALLBACK_POLICY_SET (still DEFAULT_CONFIG's sensible values) if the
     DB/migration isn't reachable, so a misconfigured/missing policy set
-    never breaks either caller."""
+    never breaks either caller.
+
+    60s TTL cache (latency P0, 2026-08-31) — the default policy set
+    changes only on an admin edit but was read from the DB on every LINE
+    turn."""
+    import time as _t
+    if _DEFAULT_SET_CACHE["val"] is not None and _t.time() - _DEFAULT_SET_CACHE["ts"] < _DEFAULT_SET_TTL:
+        return dict(_DEFAULT_SET_CACHE["val"])
+    result = dict(_FALLBACK_POLICY_SET)
     try:
         res = _get_sb().table("ai_policy_sets").select("*").eq("is_default", True) \
             .is_("deleted_at", "null").limit(1).execute()
         if res.data:
             row = res.data[0]
             row["config"] = _merge_config(row.get("config"))
-            return row
+            result = row
     except Exception as e:
         print(f"[PolicyStudio] get_default_policy_set DB query failed, using fallback: {e}")
-    return dict(_FALLBACK_POLICY_SET)
+    _DEFAULT_SET_CACHE["ts"] = _t.time()
+    _DEFAULT_SET_CACHE["val"] = result
+    return dict(result)

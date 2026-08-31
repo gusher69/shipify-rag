@@ -87,7 +87,7 @@ def update_tier_for_profile(line_user_id: str, *, message: Optional[str] = None)
     stage_confidence/handoff_recommended/handoff_reason alongside the
     SAME conversation_tier/tier_score columns this function already
     wrote — no new stage column, no second cold/warm/hot/negative axis."""
-    from profiles.manager import get_profile, supabase, TABLE
+    from profiles.manager import get_profile, supabase, TABLE, _profile_cache_clear
     profile = get_profile(line_user_id) or {}
     aggregate = compute_tier(profile)
     result = dict(aggregate)
@@ -106,6 +106,7 @@ def update_tier_for_profile(line_user_id: str, *, message: Optional[str] = None)
         })
 
     try:
+        _profile_cache_clear(line_user_id)
         supabase.table(TABLE).update(update).eq("line_user_id", line_user_id).execute()
     except Exception as e:
         print(f"[customer_tier_service] update_tier_for_profile failed: {e}")
