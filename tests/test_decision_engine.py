@@ -489,34 +489,51 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         self.reg.upsert_execution(action_id, {"endpoint": "https://example.test/customer", "http_method": "GET"})
         return action_id
 
-    def test_field_keyword_follow_up_resumes_remembered_action_without_a_marker(self):
-        """"มีคูปองไหม" carries none of the generic reference markers
-        (no "ล่าสุด"/"ของผม"/etc) but DOES name a field the remembered
-        action's own response_mapping is configured to return — that
-        alone must be enough to resume it. A second, unrelated action is
-        also seeded so a shared CustCode in memory can't ALSO decide this
-        via ordinary fresh-search scoring alone (mirrors the real,
-        multi-action production registry) — proving the resolver, not a
-        lucky fresh-search tie, is what selects it."""
+    def test_field_keyword_follow_up_resumes_remembered_action_for_a_self_referencing_account_question(self):
+        """A SELF-REFERENCING customer-data follow-up ("ผมมีคูปองอะไรบ้าง")
+        carries none of the generic reference markers but DOES name a
+        field the remembered action's own response_mapping returns AND
+        classifies PRIVATE_ACTION — that must resume it. A second,
+        unrelated action is also seeded so a shared CustCode in memory
+        can't ALSO decide this via ordinary fresh-search scoring alone
+        (mirrors the real multi-action production registry) — proving the
+        resolver, not a lucky fresh-search tie, selects it.
+
+        Stale-identity-gated-action guard (P1 hotfix, 2026-09-01): the
+        message MUST be self-referencing. A bare "มีคูปองไหม" or a static
+        "ใช้คูปองยังไง" now classifies SHIPIFY_INFORMATION and is NOT
+        allowed to resurrect the remembered identity-gated lookup (see the
+        negative assertions below) — that exact bypass leaked a real
+        customer's wallet/phone/email on production LINE."""
         self._seed_customer_lookup_with_coupon_field()
         _seed_action(self.reg, key="unrelated_order_lookup", action_type="API", category="order")
         self.reg.replace_parameters(self.reg.get_by_key("unrelated_order_lookup")["id"], [
             {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
         ])
+        ctx = {"developer_mode": True,
+               "customer_context": {"last_business_action": "get_customer_full", "cust_code": "SP1014"},
+               "channel": "admin"}
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200,
                                            json=lambda: {"data": {"Wallet": 100, "Coupon": ["A10"]}})) as mock_req:
-            result = self.engine.decide("มีคูปองไหม", history=[],
-                                         context={"developer_mode": True,
-                                                   "customer_context": {"last_business_action": "get_customer_full",
-                                                                         "cust_code": "SP1014"},
-                                                   "channel": "admin"})
+            result = self.engine.decide("ผมมีคูปองอะไรบ้าง", history=[], context=dict(ctx))
         self.assertEqual(result["routing"]["type"], "API")
         mock_req.assert_called_once()
-        sent_params = mock_req.call_args.kwargs.get("params") or {}
-        self.assertEqual(sent_params.get("CustCode"), "SP1014")
-        dev = result.get("developer") or {}
-        self.assertEqual(dev.get("selection_source"), "conversation_reference")
+        self.assertEqual((mock_req.call_args.kwargs.get("params") or {}).get("CustCode"), "SP1014")
+        self.assertEqual((result.get("developer") or {}).get("selection_source"), "conversation_reference")
+
+        # New boundary: informational / static coupon questions must NOT
+        # resurrect the remembered identity-gated lookup, even though they
+        # still field-keyword/marker match it.
+        for informational in ("ใช้คูปองยังไง", "มีคูปองไหม"):
+            with patch("services.playground_orchestrator.run_playground_turn",
+                       return_value=_fake_playground_result(answer="คูปองใช้ที่หน้าสมาชิกค่ะ", confidence=0.9)):
+                r2 = self.engine.decide(informational, history=[], context=dict(ctx))
+            dev2 = r2.get("developer") or {}
+            self.assertNotEqual(r2["routing"]["type"], "API", informational)
+            self.assertNotEqual(dev2.get("selection_source"), "conversation_reference", informational)
+            self.assertEqual(dev2.get("stale_identity_gated_action_suppressed"),
+                              "conversation_reference/informational_turn", informational)
 
     def test_composer_never_shows_raw_json_and_labels_unflattened_list(self):
         self._seed_customer_lookup_with_coupon_field()

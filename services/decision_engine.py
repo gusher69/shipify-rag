@@ -2262,6 +2262,26 @@ class DecisionEngine:
                 except Exception:
                     detail_sibling_action = None
 
+            # Stale-identity-gated-action guard (P1 hotfix, 2026-09-01) —
+            # detail_sibling_action is also selected purely from the
+            # remembered customer_context["last_business_action"] +
+            # Identifier Memory (via _find_detail_sibling, which only ever
+            # returns API/WEBHOOK actions), before turn_intent is computed
+            # in the else-branch below. Same bypass class as the
+            # conversation_reference guard: on an informational turn a
+            # remembered identity-gated action must not be auto-selected.
+            # classify_turn_intent is a pure, regex-only function (no
+            # I/O) so the extra call here is negligible; the "แล้ว…ล่ะ"
+            # continuity coercion is not repeated because _DETAIL_INTENT_RE
+            # requires the literal word "รายละเอียด", which never co-occurs
+            # with that follow-up shape.
+            if detail_sibling_action \
+                    and detail_sibling_action.get("action_type") in _IDENTITY_GATED_ACTION_TYPES \
+                    and classify_turn_intent(message) == "SHIPIFY_INFORMATION":
+                developer_trace["stale_identity_gated_action_suppressed"] = \
+                    "detail_sibling/informational_turn"
+                detail_sibling_action = None
+
             if continuation_action:
                 selected = continuation_action
                 candidates = [selected]
@@ -2372,6 +2392,36 @@ class DecisionEngine:
                 # action (checked memory-FREE, so remembered identifiers
                 # can never manufacture that evidence on their own).
                 referenced = _resolve_conversation_reference(self.registry, message, customer_context)
+
+                # Stale-identity-gated-action guard (P1 hotfix, 2026-09-01)
+                # — _resolve_conversation_reference resurrects the
+                # remembered customer_context["last_business_action"] from
+                # (field-keyword | referring-marker) evidence alone, with
+                # no consultation of the current turn's informational
+                # intent. Proven live: a hot ERP customer
+                # (last_business_action="getdatacustomer", verified
+                # cust_code) asking "ขอเบอร์ติดต่อ" / "ใช้คูปองยังไง" /
+                # "แล้วจีนล่ะ" — each already classified SHIPIFY_INFORMATION
+                # here (turn_intent above) and RAG_ONLY by
+                # classify_question — still had getdatacustomer selected
+                # via this branch and executed, dumping the customer's own
+                # ERP record. Reuse the SAME exclude_private /
+                # _IDENTITY_GATED_ACTION_TYPES mechanism already threaded
+                # into every fresh candidate search: on an informational
+                # turn, a remembered identity-gated (API/WEBHOOK) action is
+                # never auto-resurrected — the turn falls through to the
+                # normal RAG path below. Genuine pending continuation
+                # (continuation_action, handled earlier) is untouched; an
+                # explicit private request classifies PRIVATE_ACTION (not
+                # SHIPIFY_INFORMATION), so exclude_private is None and this
+                # guard is inert for it; a bare identifier reply
+                # classifies AMBIGUOUS, likewise inert.
+                if referenced and exclude_private \
+                        and referenced.get("action_type") in exclude_private:
+                    developer_trace["stale_identity_gated_action_suppressed"] = \
+                        "conversation_reference/informational_turn"
+                    referenced = None
+
                 fresh_topic_beats_reference = False
                 # Pure Identifier Guard applied to continuation too: a
                 # message that IS, in its entirety, a bare identifier-
