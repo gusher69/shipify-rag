@@ -24,15 +24,34 @@ from config import SUPABASE_URL, SUPABASE_KEY
 # short — a reachable Supabase accepts immediately.
 CLIENT_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
 
+# Production evidence (2026-08-31): a fresh HTTP/1.1 request to Supabase
+# from the production host is ~0.2s, but supabase-py's default PostgREST
+# client uses ONE long-lived HTTP/2 connection — and when that single
+# multiplexed connection goes half-open, every request on it stalls (and
+# httpcore's HTTP/2 read-timeout handling for a dead stream is
+# unreliable), which is what produced the ~105–200s LINE worker hangs.
+# HTTP/1.1 with a short keep-alive expiry sidesteps that entirely: no
+# multiplexing stall, and a connection can't sit idle long enough to be
+# silently dropped by a NAT/firewall before we reuse it.
+_KEEPALIVE_EXPIRY = 15.0
+
 _client = None
+_httpx_client = None
 
 
 def _build():
+    global _httpx_client
     from supabase import create_client
     # supabase 2.31's create_client expects SyncClientOptions (the base
     # ClientOptions lacks .storage/.httpx_client and blows up inside
-    # create_client). Only the transport timeouts are overridden here.
-    from supabase.lib.client_options import SyncClientOptions
+    # create_client).
+    from supabase.lib.client_options import SyncClientOptions, SyncHttpxClient
+    _httpx_client = SyncHttpxClient(
+        http2=False,
+        timeout=CLIENT_TIMEOUT,
+        limits=httpx.Limits(max_keepalive_connections=10, max_connections=20,
+                            keepalive_expiry=_KEEPALIVE_EXPIRY),
+    )
     return create_client(
         SUPABASE_URL,
         SUPABASE_KEY,
@@ -40,6 +59,7 @@ def _build():
             postgrest_client_timeout=CLIENT_TIMEOUT,
             storage_client_timeout=20,
             function_client_timeout=10,
+            httpx_client=_httpx_client,
         ),
     )
 
@@ -56,20 +76,14 @@ def get_supabase():
 
 def reset_supabase():
     """Drop the cached client so the next ``get_supabase()`` rebuilds it
-    (fresh connection pool). Call this after a transport/timeout error so
-    a stale keep-alive connection is never reused. Best-effort close of
-    the old client's underlying httpx sessions; never raises."""
-    global _client
-    old, _client = _client, None
-    if old is None:
-        return
-    for attr in ("postgrest", "auth", "storage", "functions"):
-        sub = getattr(old, attr, None)
-        for sess_attr in ("session", "_session"):
-            sess = getattr(sub, sess_attr, None)
-            close = getattr(sess, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+    with a fresh connection pool. Call this after a transport/timeout
+    error so a stale keep-alive connection is never reused. Best-effort
+    close of the underlying httpx client; never raises."""
+    global _client, _httpx_client
+    old_hx, _httpx_client = _httpx_client, None
+    _client = None
+    if old_hx is not None:
+        try:
+            old_hx.close()
+        except Exception:
+            pass
