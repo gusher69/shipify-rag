@@ -202,6 +202,39 @@ def _expired_result() -> dict:
     return _synthetic_result("คำขอก่อนหน้าหมดเวลายืนยันแล้วค่ะ รบกวนแจ้งคำขอใหม่อีกครั้งนะคะ")
 
 
+@app.get("/debug/queue-status")
+async def debug_queue_status():
+    """TEMP diagnostic (2026-08-31) — introspects the live, in-process
+    _EXECUTOR/_user_queues/_user_tasks state to find why real messages
+    hang for minutes while every isolated reproduction (a fresh process,
+    a fresh executor) completes in seconds. Remove once the investigation
+    concludes. No side effects — pure read-only introspection of already-
+    running state, using ThreadPoolExecutor's own internal attributes
+    (undocumented but stable across CPython 3.x)."""
+    import threading
+    threads_info = []
+    for t in _EXECUTOR._threads:
+        threads_info.append({"name": t.name, "alive": t.is_alive()})
+    queue_info = {}
+    for uid, q in _user_queues.items():
+        task = _user_tasks.get(uid)
+        queue_info[uid] = {
+            "queue_size": q.qsize(),
+            "task_done": task.done() if task else None,
+            "task_cancelled": task.cancelled() if task else None,
+        }
+    all_threads = [{"name": t.name, "alive": t.is_alive(), "daemon": t.daemon}
+                    for t in threading.enumerate()]
+    return {
+        "executor_work_queue_size": _EXECUTOR._work_queue.qsize(),
+        "executor_threads": threads_info,
+        "executor_max_workers": _EXECUTOR._max_workers,
+        "user_queues": queue_info,
+        "pending_texts_by_user": {k: list(v) for k, v in _pending_texts_by_user.items()},
+        "all_process_threads": all_threads,
+    }
+
+
 @app.post("/webhook")
 async def webhook(request: Request):
     """Signature verification and payload parsing are unchanged (still
