@@ -74,5 +74,32 @@ class TestFollowupResolution(unittest.TestCase):
         self.assertEqual(resolved, "ขอเรททางรถ")
 
 
+class TestGenericRateDurationFollowupDoesNotInheritStaleTransport(unittest.TestCase):
+    """Real LINE OA failure (2026-08-31): after "ทางรถใช้เวลากี่วัน", a
+    generic "แล้วเรทนำเข้าเท่าไหร่คะ" (no transport in its OWN wording)
+    was resolved to the road-only "ขอเรททางรถ", so production answered
+    only the road rate. A stale carried transport must not narrow a
+    generic rate/duration follow-up; an explicit transport in the
+    current turn still wins."""
+
+    def test_generic_rate_followup_after_road_duration_is_not_narrowed(self):
+        history = _hist(("ทางรถใช้เวลากี่วัน", "ประมาณ 6–10 วันค่ะ"))
+        resolved = resolve_followup_query("แล้วเรทนำเข้าเท่าไหร่คะ", history)
+        self.assertNotIn("ทางรถ", resolved)
+        self.assertNotIn("ทางเรือ", resolved)
+
+    def test_generic_duration_followup_after_road_rate_is_not_narrowed(self):
+        history = _hist(("เรททางรถเท่าไหร่", "35 บาท/กก."))
+        resolved = resolve_followup_query("แล้วใช้เวลากี่วัน", history)
+        self.assertNotIn("ทางรถ", resolved)
+        self.assertNotIn("ทางเรือ", resolved)
+
+    def test_explicit_transport_in_current_turn_still_wins(self):
+        history = _hist(("ทางรถใช้เวลากี่วัน", "ประมาณ 6–10 วันค่ะ"))
+        self.assertEqual(resolve_followup_query("แล้วเรททางรถเท่าไหร่", history), "ขอเรททางรถ")
+        # elliptical, but "ทางเรือ" is in THIS turn's own wording -> narrows
+        self.assertIn("ทางเรือ", resolve_followup_query("แล้วทางเรือล่ะ", history))
+
+
 if __name__ == "__main__":
     unittest.main()

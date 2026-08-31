@@ -596,6 +596,20 @@ def resolve_conversation(question: str, history: Optional[List[Dict]] = None) ->
             merged.pop(key, None)
             carried.pop(key, None)
 
+    # A generic rate/duration follow-up whose OWN core names no transport
+    # mode must not inherit a STALE one carried from a prior turn (real
+    # LINE OA failure 2026-08-31: "ทางรถใช้เวลากี่วัน" then "แล้วเรทนำเข้า
+    # เท่าไหร่คะ" resolved to the road-only "ขอเรททางรถ"). Dropping the
+    # carried transport here makes _compose fall through its single-mode
+    # rate/duration templates, so the follow-up stays a generic
+    # rate/duration question and retrieval returns the full road+sea
+    # summary the customer asked for. An explicit transport word in THIS
+    # turn's own core ("แล้วเรททางรถเท่าไหร่") still wins — cur_entities
+    # ["transport"] is set in that case, so this guard does not fire.
+    if merged.get("attribute") in ("rate", "duration") and not cur_entities.get("transport"):
+        merged.pop("transport", None)
+        carried.pop("transport", None)
+
     resolved, confidence = _compose(merged, core, prev_q)
 
     if not resolved or confidence < 0.5:
