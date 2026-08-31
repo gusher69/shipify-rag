@@ -171,6 +171,31 @@ def search_excel_structured(question: str) -> List[Dict]:
             if not numeric_cols:
                 continue
 
+            # Q&A-Sheet Aggregate False-Positive fix (2026-08-31) —
+            # confirmed live: the master FAQ sheet's own bookkeeping
+            # "Source Row" column (the row's position in some upstream
+            # sheet, nothing to do with the FAQ content itself) is
+            # auto-detected as numeric, so the guard above alone never
+            # excludes it — for ANY question containing an analytical
+            # trigger word (is_analytical()'s pattern includes "จำนวน",
+            # a completely ordinary word meaning "quantity/amount," e.g.
+            # "สั่งแบตเตอรี่จำนวนเยอะได้ไหม") this produced a nonsense
+            # "sum/avg/min/max of Source Row" aggregate chunk with the
+            # SAME hardcoded score=1.0/is_structured=True the comment
+            # above already warns about, outranking and displacing the
+            # genuine, correctly-retrievable FAQ answer that exists for
+            # every one of these questions. A Q&A-formatted sheet's real
+            # content already reaches retrieval through the per-row FAQ
+            # chunking pipeline (ingestion/excel_extractor.py::
+            # workbook_to_summary_pages) — a whole-sheet numeric
+            # aggregate is never meaningful for it, regardless of which
+            # column happened to look numeric. Reuses the SAME sheet-
+            # classification check that pipeline itself uses, never a
+            # second definition of "is this a Q&A sheet."
+            from ingestion.excel_extractor import is_qa_sheet
+            if is_qa_sheet(headers):
+                continue
+
             # Pull all rows for this sheet
             rows_res = sb.table("excel_rows").select("row_data").eq("sheet_id", sheet_id).execute()
             rows = rows_res.data or []

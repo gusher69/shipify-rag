@@ -107,7 +107,22 @@ def _legacy_resolve(core: str, prev_q: str) -> Optional[str]:
 
 # ── Conversation Resolver 2.0 — entity tracking ─────────────────────────
 
-_TRANSPORT_RE = re.compile(r"เครื่องบิน|รถ|เรือ|อากาศ")
+# Substring False-Positive fix (2026-08-31) — confirmed live: "รถ" (car/
+# land transport) is a bare 2-character match with no word-boundary
+# protection (Thai has no spaces to anchor on), so it was matching INSIDE
+# "สามารถ" (a completely ordinary word meaning "can/able to" — สา-มา-รถ —
+# used constantly in normal conversation, e.g. "เราสามารถสั่ง...ได้ไหม").
+# This silently set entities["transport"]="รถ" for any question merely
+# containing "สามารถ", which then fed a real canonical-query REWRITE
+# (rag/canonical_query.py, gated on "rate + transport detected") that
+# replaced an entirely unrelated question ("เราสามารถสั่งแบตเตอรี่จำนวน
+# เยอะได้ไหมคะ") with a completely different one ("อัตราค่าขนส่งทางรถ
+# เท่าไหร่") — the customer's own question was never actually searched at
+# all. The negative lookbehind excludes ONLY this specific false-positive
+# shape ("สามา" immediately before "รถ"); a genuine transport mention
+# ("รถยนต์", "ทางรถ", "ส่งรถ") is never preceded by those exact 4
+# characters and is completely unaffected.
+_TRANSPORT_RE = re.compile(r"เครื่องบิน|(?<!สามา)รถ|เรือ|อากาศ")
 _TRANSPORT_CANONICAL = {"เครื่องบิน": "อากาศ", "รถ": "รถ", "เรือ": "เรือ", "อากาศ": "อากาศ"}
 _LOCATION_RE = re.compile(r"ไทย|จีน")
 
