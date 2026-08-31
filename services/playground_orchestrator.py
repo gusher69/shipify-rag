@@ -816,6 +816,7 @@ def run_playground_turn(
     answer_plan = plan_answer(
         canonical_question, intent_result["actionable_intent"], intent_result["requested_attributes"],
         intent_result["entities"], context_chunks, retrieval_confidence_result["retrieval_confidence"], policy_set,
+        raw_question=question,
     )
     stages.append(Stage("Answer Planner", "success", (time.time() - t0) * 1000,
                          f"goal={answer_plan['answer_goal']!r}, shape={answer_plan['response_shape']}"

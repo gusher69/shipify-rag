@@ -237,6 +237,7 @@ def plan_answer(
     chunks: Optional[List[Dict]] = None,
     retrieval_confidence: Optional[float] = None,
     policy_set: Optional[Dict] = None,
+    raw_question: Optional[str] = None,
 ) -> Dict:
     """Returns:
         {
@@ -251,7 +252,18 @@ def plan_answer(
     Never touches `chunks` — read-only, purely to decide WHICH facts to
     focus on and whether the question is too ambiguous to answer safely
     without asking. `chunks` should be the FINAL retrieved/context-built
-    evidence set."""
+    evidence set.
+
+    `raw_question` (2026-08-31) — the customer's own, never-rewritten
+    wording, used ONLY by _wants_both_transport_modes. `question` here is
+    normally the CANONICAL rewrite (services/playground_orchestrator.py
+    passes canonical_question), and rag/query_resolution.py's entity
+    model carries only ONE transport value even when the customer named
+    both (_extract_transport()'s .search() keeps the first match) — so a
+    canonical rewrite for "ทางรถกับทางเรือระยะเวลากี่วัน" legitimately
+    drops "เรือ" from the rewritten text entirely, and checking `question`
+    alone would silently miss this case. Falls back to `question` when
+    not given, so every existing caller/test is unaffected."""
     entities = entities or {}
     chunks = chunks or []
     requested_attributes = requested_attributes or []
@@ -339,7 +351,7 @@ def plan_answer(
     # happened to match first. "short_answer" is widened to "answer_then_
     # details" — a genuine two-part answer is never a "short" one — every
     # other intent/shape combination is completely unaffected.
-    if actionable_intent in ("shipping_rate", "shipping_duration") and _wants_both_transport_modes(question):
+    if actionable_intent in ("shipping_rate", "shipping_duration") and _wants_both_transport_modes(raw_question or question):
         goal = (_GOAL_TEMPLATES[actionable_intent].format(loc=loc, transport="")
                 + " for BOTH road (รถ) and sea (เรือ) transport — the customer asked about both, cover both")
         if response_shape == "short_answer":
