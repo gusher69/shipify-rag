@@ -30,6 +30,20 @@ _DETAILED_SUMMARY_RE = re.compile(r"แบบละเอียด|อย่า�
 def _wants_detailed_summary(question: str) -> bool:
     return bool(_DETAILED_SUMMARY_RE.search(question or ""))
 
+
+def _wants_both_transport_modes(question: str) -> bool:
+    """A question naming BOTH land and sea transport (e.g. "ทางรถกับ
+    ทางเรือระยะเวลากี่วัน") is asking to cover BOTH, not just whichever
+    rag/query_resolution.py::_extract_transport() happened to match first
+    (_TRANSPORT_RE.search() only ever returns the FIRST occurrence in the
+    text, so entities["transport"] is a single scalar value, never a
+    list). Confirmed live: this exact question was answered with land-
+    only duration despite the retrieved chunk having both durations,
+    because entities["transport"] came back as just "รถ" and the goal/
+    response_shape below narrowed the answer to that one mode alone."""
+    q = question or ""
+    return "รถ" in q and "เรือ" in q
+
 _CLARIFICATION_TEMPLATES = {
     "warehouse_ambiguous": "ต้องการที่อยู่โกดังไทยหรือโกดังจีนคะ",
     "bill_ambiguous": "ต้องการชำระบิลสั่งซื้อหรือบิลค่าขนส่งคะ",
@@ -315,13 +329,28 @@ def plan_answer(
     loc = f"{entities['location']} " if entities.get("location") else ""
     transport = f"{entities['transport']} " if entities.get("transport") else ""
     goal = _GOAL_TEMPLATES.get(actionable_intent, _GOAL_TEMPLATES["unknown"]).format(loc=loc, transport=transport)
+    response_shape = template["shape"]
+
+    # Both-Transport-Modes fix (2026-08-31) — see _wants_both_transport_
+    # modes' own docstring. Scoped to exactly the two intents whose goal
+    # template narrows to a single {transport} value; drops that narrowing
+    # (transport="") and appends an explicit "cover both" instruction
+    # instead of silently keeping whichever mode entities["transport"]
+    # happened to match first. "short_answer" is widened to "answer_then_
+    # details" — a genuine two-part answer is never a "short" one — every
+    # other intent/shape combination is completely unaffected.
+    if actionable_intent in ("shipping_rate", "shipping_duration") and _wants_both_transport_modes(question):
+        goal = (_GOAL_TEMPLATES[actionable_intent].format(loc=loc, transport="")
+                + " for BOTH road (รถ) and sea (เรือ) transport — the customer asked about both, cover both")
+        if response_shape == "short_answer":
+            response_shape = "answer_then_details"
 
     plan = {
         "answer_goal": goal,
         "required_facts": required,
         "optional_facts": optional,
         "excluded_facts": excluded,
-        "response_shape": template["shape"],
+        "response_shape": response_shape,
         "clarification_required": False,
         "clarification_question": None,
     }

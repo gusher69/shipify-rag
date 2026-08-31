@@ -744,6 +744,31 @@ _SELF_VERIFY_ASK_PHONE_TEXT = "เพื่อยืนยันตัวตน�
 _SELF_VERIFY_ASK_EMAIL_TEXT = "เบอร์โทรที่แจ้งมาไม่ตรงกับข้อมูลในระบบค่ะ รบกวนแจ้งอีเมลที่ผูกกับบัญชีลูกค้าแทนได้ไหมคะ"
 
 
+def _all_collected_values_seen_in_history(collected: Dict, history: List[Dict]) -> bool:
+    """True when every collected parameter value can be found verbatim in
+    SOME customer message within `history` — i.e., the customer actually
+    typed it in THIS conversation, rather than it being silently
+    inherited purely from customer_context/Identifier Memory prefill
+    (services/action_selection_primitives.py::IDENTIFIER_MEMORY_FIELDS).
+
+    Phantom-Identifier Disambiguation companion fix (2026-08-31) — used
+    ONLY by _resolve_continuation_action's Self-Service Identity
+    Verification branch above, to reject a candidate action whose
+    "fully collected" status is an illusion built entirely from stale,
+    cross-session memory rather than anything the customer said this
+    conversation. A value that isn't a non-empty string (None, a number,
+    a nested dict) is skipped, not treated as a failure — this only
+    guards against a PHANTOM identifier string, never penalizes an
+    ordinary parameter with nothing meaningful to check."""
+    user_texts = [str(t.get("content") or "") for t in (history or []) if t.get("role") == "user"]
+    for value in (collected or {}).values():
+        if not value or not isinstance(value, str):
+            continue
+        if not any(value in text for text in user_texts):
+            return False
+    return True
+
+
 def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: Optional[str] = None,
                                   customer_context: Optional[Dict] = None) -> Optional[Dict]:
     """Conversation Continuation without a persistence layer: if the
@@ -818,8 +843,30 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
                 # verification step. Reusing requires_verified_identity()
                 # keeps this scoped to only actions that could actually
                 # have asked this question in the first place.
+                #
+                # Phantom-Identifier Disambiguation companion fix
+                # (2026-08-31) — confirmed live: a STALE, cross-session
+                # OrderCode sitting in customer_context (from an entirely
+                # earlier, unrelated conversation's Identifier Memory —
+                # see services/action_selection_primitives.py::
+                # IDENTIFIER_MEMORY_FIELDS) made a COMPLETELY DIFFERENT
+                # action (e.g. an order lookup, sharing the SAME CustCode
+                # but with its own OrderCode silently seeded from that
+                # stale memory, never actually typed this conversation)
+                # look "fully collected" at the exact same moment THIS
+                # action's self-verification question was pending — both
+                # then qualified as `found` candidates, and the tie-break
+                # below picked the wrong one, executing against an
+                # identifier the customer never gave in this conversation
+                # at all. requires_verified_identity() alone can't tell
+                # them apart (both need identity verification); only a
+                # candidate whose EVERY collected value can actually be
+                # found in the customer's own messages this conversation
+                # is trusted here — a phantom value inherited purely from
+                # customer_context never survives this check.
                 from services.authorization_service import requires_verified_identity
-                if requires_verified_identity(full_action):
+                if requires_verified_identity(full_action) and _all_collected_values_seen_in_history(
+                        collected_so_far, replay_history):
                     found.append(full_action)
             elif next_param is None and allow_confirmation and _requires_confirmation(full_action):
                 # The last assistant turn was THIS action's confirmation-gate
