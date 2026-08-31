@@ -3557,6 +3557,84 @@ class TestResolveContinuationActionTieBreak(unittest.TestCase):
         self.assertEqual(result.get("action_key"), "searchdataorderlist")
 
 
+class TestContinuationReplayShortCircuit(unittest.TestCase):
+    """Latency P0 (2026-08-31) — _resolve_continuation_action must NOT run
+    the deep per-action, per-history-turn replay when the last assistant
+    turn is not an input request (greeting / independent RAG / General
+    message after old ERP history). The replay can only ever match one of
+    those generated question shapes, so skipping it there costs nothing
+    and removes dozens of Supabase calls per ordinary turn."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        _seed_order_shipment_tracking_actions(self.reg)
+        self.reg._calls = 0
+        _orig_get_full = self.reg.get_full
+
+        def _counting_get_full(*a, **k):
+            self.reg._calls += 1
+            return _orig_get_full(*a, **k)
+
+        self.reg.get_full = _counting_get_full
+
+    def _long_history(self, last_assistant_text):
+        # Realistic long history: an OLD ERP exchange, then many ordinary
+        # standalone turns whose assistant replies are NOT input requests
+        # (exactly the shape the affected real LINE user built by sending
+        # "สวัสดีครับ" repeatedly).
+        h = [
+            {"role": "user", "content": "เช็ค order ให้หน่อย"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+            {"role": "user", "content": "C00001"},
+            {"role": "assistant", "content": "สถานะออเดอร์ของคุณคือ กำลังจัดส่งค่ะ"},
+        ]
+        for _ in range(18):
+            h.append({"role": "user", "content": "สวัสดีครับ"})
+            h.append({"role": "assistant", "content": "สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ"})
+        h[-1] = {"role": "assistant", "content": last_assistant_text}
+        h.append({"role": "user", "content": "..."})
+        return h
+
+    def test_A_greeting_after_long_history_skips_deep_replay(self):
+        h = self._long_history("สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ")
+        result = _resolve_continuation_action(self.reg, h, workflow_hint=None)
+        self.assertIsNone(result)
+        self.assertEqual(self.reg._calls, 0)  # no get_full() -> no per-action DB fan-out
+
+    def test_B_independent_rag_answer_last_turn_skips_deep_replay(self):
+        h = self._long_history("ทางเรามีบริการตีลังไม้ให้ค่ะ เปิดบิลและกดเลือกตีลังไม้ได้เลย")
+        self.assertIsNone(_resolve_continuation_action(self.reg, h, workflow_hint=None))
+        self.assertEqual(self.reg._calls, 0)
+
+    def test_C_independent_general_answer_last_turn_skips_deep_replay(self):
+        h = self._long_history("จีนอยู่ในทวีปเอเชียค่ะ")
+        self.assertIsNone(_resolve_continuation_action(self.reg, h, workflow_hint=None))
+        self.assertEqual(self.reg._calls, 0)
+
+    def test_D_valid_parameter_request_still_runs_replay_and_continues(self):
+        h = [
+            {"role": "user", "content": "เช็ค order"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+        ]
+        result = _resolve_continuation_action(self.reg, h, workflow_hint=None)
+        self.assertIsNotNone(result)          # continuation resolved
+        self.assertGreater(self.reg._calls, 0)  # deep replay DID run
+
+    def test_E_recent_interruption_after_request_still_runs_replay(self):
+        # request, then ONE interruption pair, then the customer's answer:
+        # the look-back path must still fire.
+        h = [
+            {"role": "user", "content": "เช็ค order"},
+            {"role": "assistant", "content": "กรุณาแจ้งรหัสลูกค้าค่ะ"},
+            {"role": "user", "content": "CBM คืออะไร"},
+            {"role": "assistant", "content": "CBM คือปริมาตรสินค้าค่ะ"},
+            {"role": "user", "content": "C00001"},
+        ]
+        result = _resolve_continuation_action(self.reg, h, workflow_hint=None)
+        self.assertIsNotNone(result)
+        self.assertGreater(self.reg._calls, 0)
+
+
 class TestShippingAddressChangeRequest(unittest.TestCase):
     """Shipping Address Change Request (2026-08-20) — the entire flow is
     built from EXISTING generic mechanisms only: the Business Action

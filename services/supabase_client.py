@@ -33,7 +33,14 @@ CLIENT_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
 # HTTP/1.1 with a short keep-alive expiry sidesteps that entirely: no
 # multiplexing stall, and a connection can't sit idle long enough to be
 # silently dropped by a NAT/firewall before we reuse it.
-_KEEPALIVE_EXPIRY = 15.0
+#
+# Lowered 15 -> 5 (2026-08-31): real LINE turns still occasionally blocked
+# ~30-70s in ssl.recv() on a pooled HTTP/1.1 connection the peer had
+# half-closed. Manual customer messages are always >5s apart, so a pooled
+# connection is effectively never reused across turns anyway; within a
+# single turn (calls ~0.15s apart) it still stays warm and is reused, so
+# there is no per-request TCP/TLS cost on the healthy path.
+_KEEPALIVE_EXPIRY = 5.0
 
 _client = None
 _httpx_client = None

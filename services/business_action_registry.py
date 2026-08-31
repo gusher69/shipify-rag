@@ -209,17 +209,31 @@ class _EmptyResult:
     data: List = []
 
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
+
 # ── Config read cache (latency P0, 2026-08-31) ─────────────────────────
 # The Business Action config tables change only when an admin edits a
 # Business Action. A single DecisionEngine.decide() turn ran
-# search_candidate_actions() TWICE, each doing list() + get_parameters()
-# per action -> ~19 identical PostgREST round-trips for a plain greeting
-# (production trace). This process-wide TTL cache collapses those to one
-# fetch per table per 30s window; every write method below clears it, so
-# an admin edit propagates on the next turn (worst case 30s). Pure
-# caching — the exact same rows are returned.
+# search_candidate_actions() TWICE + _resolve_continuation_action()'s
+# per-action, per-history-turn replay -> dozens of identical PostgREST
+# round-trips for a plain greeting (production trace). This process-wide
+# TTL cache collapses those to one fetch per key per window; every write
+# method below clears it, so an admin edit propagates immediately via the
+# existing invalidation hook (never waits out the TTL). Pure caching —
+# the exact same rows are returned.
+#
+# TTL 30 -> 300 (2026-08-31): Business Action config is admin-edited
+# static configuration and manual customer messages are routinely >30s
+# apart, so a 30s TTL left it cold on nearly every real turn. Admin edits
+# still invalidate instantly through _cache_clear() in every mutator.
 _CONFIG_CACHE: "Dict[str, tuple]" = {}
-_CONFIG_CACHE_TTL = 30.0
+_CONFIG_CACHE_TTL = 300.0
+
+# Hard wall-clock bound for a single PostgREST read attempt (see
+# _resilient_read) — production proved httpx's read=15s is not reliably
+# enforced on a half-open pooled HTTP/1.1 socket.
+_READ_WALL_TIMEOUT = 18.0
+_READ_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ba-registry-read")
 
 
 def _cache_get(key: str, producer):
@@ -250,41 +264,50 @@ class BusinessActionRegistry:
         the live LINE message path (get / get_by_key / list — reached via
         DecisionEngine._resolve_continuation_action on nearly every turn).
 
-        On a Supabase transport/timeout error — a stale/half-open
-        keep-alive connection, the exact production hang of 2026-08-31 —
-        drop the shared client, rebuild it, and retry ONCE. If it still
-        fails, return an empty result (``.data == []``): every caller
-        here already treats that as "not found", and the DecisionEngine
-        then degrades to normal routing instead of the worker blocking
-        for minutes or a raw DB error reaching a LINE customer.
+        Each attempt is run under a HARD wall-clock bound (_READ_WALL_
+        TIMEOUT). Production proved the httpx read=15s is NOT reliably
+        enforced when a pooled HTTP/1.1 connection is half-open — the
+        worker sat 30-70s in ssl.recv(). If an attempt exceeds the wall
+        bound we abandon it, reset the shared client (fresh pool), and
+        retry ONCE. If the retry also exceeds it, return an empty result
+        (``.data == []``) — every caller here treats that as "not found"
+        and the DecisionEngine degrades to normal routing, instead of the
+        worker blocking or a raw DB error reaching a LINE customer.
 
-        Bounded: 1 original attempt + 1 recovery retry. No retry storm.
-        Read-only — write methods keep their existing semantics."""
+        Bounded: 1 original + 1 retry, each <= _READ_WALL_TIMEOUT. No
+        retry storm. Read-only — writes keep their existing semantics."""
         import httpx
-        try:
-            return build(self._sb).execute()
-        except (httpx.TransportError, httpx.TimeoutException) as first:
+        for attempt in (1, 2):
             try:
-                from services.supabase_client import get_supabase, reset_supabase
-                reset_supabase()
-                self._sb = get_supabase()
-                return build(self._sb).execute()
-            except (httpx.TransportError, httpx.TimeoutException) as second:
+                fut = _READ_POOL.submit(lambda: build(self._sb).execute())
+                return fut.result(timeout=_READ_WALL_TIMEOUT)
+            except (_FuturesTimeout, httpx.TransportError, httpx.TimeoutException) as err:
+                # abandon the stuck request; a leaked worker thread holding
+                # a dead socket is cheap and rare, and never blocks us.
+                fut.cancel()
+                if attempt == 1:
+                    try:
+                        from services.supabase_client import get_supabase, reset_supabase
+                        reset_supabase()
+                        self._sb = get_supabase()
+                        continue
+                    except Exception:
+                        pass
                 print(f"[business_action_registry] Supabase read unavailable "
-                      f"after 1 retry ({second!r}) — degrading to empty result")
+                      f"after 1 retry ({err!r}) — degrading to empty result")
                 return _EmptyResult()
 
     # ── Registry lookups (Decision Engine surface) ──────────────────
     def get(self, action_id: str) -> Optional[Dict]:
-        rows = self._resilient_read(
+        rows = _cache_get(f"get:{action_id}", lambda: self._resilient_read(
             lambda sb: sb.table("business_actions").select("*").eq("id", action_id).is_("deleted_at", "null")
-        ).data
+        ).data)
         return rows[0] if rows else None
 
     def get_by_key(self, action_key: str) -> Optional[Dict]:
-        rows = self._resilient_read(
+        rows = _cache_get(f"getkey:{action_key}", lambda: self._resilient_read(
             lambda sb: sb.table("business_actions").select("*").eq("action_key", action_key).is_("deleted_at", "null")
-        ).data
+        ).data)
         return rows[0] if rows else None
 
     def get_by_key_including_deleted(self, action_key: str) -> Optional[Dict]:

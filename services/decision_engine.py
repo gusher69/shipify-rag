@@ -587,6 +587,43 @@ def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Op
     return working
 
 
+def _last_assistant_turn_requests_input(text: str) -> bool:
+    """Cheap, no-DB pre-check: could the last assistant turn plausibly be
+    a parameter / confirmation / identity-verification request that a
+    customer's next message would be CONTINUING?
+
+    _resolve_continuation_action's deep replay (get_full() per enabled
+    API/WEBHOOK action + a 20-turn history walk = dozens of Supabase
+    calls) can ONLY ever return a match when the last assistant turn
+    matches one of these generated shapes (see _match_against /
+    _reply_matches_question). If it matches none of them, the replay is
+    guaranteed to return [] — so for an ordinary standalone message
+    (greeting / independent RAG / independent General question) that
+    merely happens to sit after old ERP history, we skip the replay
+    entirely. This is a shape/state check, never a hardcoded
+    greeting/keyword list. A genuine mid-collection continuation also
+    carries an explicit pending_confirmations row (handled by
+    line_bot/webhook.py before decide()), so nothing that truly continues
+    is lost here."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    # auto-generated parameter question  ->  f"กรุณาแจ้ง{display}ค่ะ"
+    # identity-verification asks          ->  contain "รบกวนแจ้ง...บัญชี"
+    if "แจ้ง" in t and ("กรุณา" in t or "รบกวน" in t):
+        return True
+    # confirmation question (_generate_confirmation_question)
+    if "ยืนยันการดำเนินการ" in t or "กรุณาตอบ 'ยืนยัน'" in t:
+        return True
+    # Collection Status Query reply (always ends with the same generated
+    # question, recognised by _reply_matches_question's "startswith" arm)
+    if "ข้อมูลที่ได้รับตอนนี้" in t or "ยังไม่ได้รับข้อมูลใดๆ" in t or "ข้อมูลที่ยังขาด" in t:
+        return True
+    if t in (_SELF_VERIFY_ASK_PHONE_TEXT, _SELF_VERIFY_ASK_EMAIL_TEXT):
+        return True
+    return False
+
+
 def _reply_matches_question(actual_text: str, expected_question: str) -> bool:
     """Tolerant match between an assistant turn's actual text and a
     generated parameter/confirmation question, used everywhere history-
@@ -792,6 +829,26 @@ def _resolve_continuation_action(registry, history: List[Dict], workflow_hint: O
     assistant_indices = [i for i, t in enumerate(history) if t.get("role") == "assistant"]
     if not assistant_indices:
         return None
+
+    # Latency short-circuit (2026-08-31) — the deep per-action, per-
+    # history-turn replay below only ever produces a match when the LAST
+    # assistant turn was itself a parameter / confirmation / identity
+    # request (that is the entire premise of _match_against). If it
+    # wasn't, there is nothing to continue: skip the replay instead of
+    # fetching get_full() for every enabled API/WEBHOOK action and
+    # walking 20 turns of history — dozens of Supabase calls — for an
+    # ordinary greeting / independent RAG / independent General message
+    # that merely follows old ERP history. Real mid-collection
+    # continuations reach decide() with an explicit pending_confirmations
+    # row (line_bot/webhook.py resolves it first), so this loses nothing.
+    # Check the last assistant turn, and — matching the one-interruption-
+    # pair look-back the _match_against branch further down already
+    # allows — the one before it (so "asked -> customer interrupted ->
+    # customer answers" still continues). Never scan further than that.
+    _recent_asst = assistant_indices[-2:]
+    if not any(_last_assistant_turn_requests_input(history[i].get("content")) for i in _recent_asst):
+        return None
+
     try:
         candidates = registry.enabled_actions()
     except Exception:
