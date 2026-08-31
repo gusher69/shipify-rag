@@ -86,7 +86,17 @@ STRICT_GROUNDING_RULES = (
     "described in the Context is treated as COMPLETE as given — you may summarize, reorder for "
     "readability, and make the wording natural, but never complete an apparently missing step using "
     "outside/industry knowledge. If the Context only covers PART of what was asked, answer that part "
-    "and say the rest is not confirmed, rather than filling the gap with plausible-sounding steps."
+    "and say the rest is not confirmed, rather than filling the gap with plausible-sounding steps.\n"
+    "- Refusing to answer a question the Context already answers directly is ALSO a grounding "
+    "failure, not a safety measure. When a Context entry's own Question line is clearly the same "
+    "question the customer asked (or a listed Alternative phrasing of it) and its Answer states a "
+    "plain fact, yes/no, or availability (e.g. \"ทางเรามีบริการ... ให้นะคะ\", \"ยังไม่มีบริการ...\"), "
+    "give that answer directly and confidently — do not say \"ไม่มีข้อมูล\"/refuse merely because the "
+    "SAME Answer also defers ONE secondary detail elsewhere (e.g. \"เงื่อนไขตามรูปภาพที่แอดมินส่งให้\", "
+    "\"ตรวจสอบเรทล่าสุดกับเจ้าหน้าที่ก่อน\", \"กรุณาแจ้งรายละเอียดเพิ่มเติม\"). State the confirmed part "
+    "exactly as the Context gives it, then mention the deferred detail exactly as the Context itself "
+    "phrases it — never invent what that deferred detail actually is, and never treat its mere "
+    "presence as a reason the whole answer is unconfirmed."
 )
 
 

@@ -134,6 +134,19 @@ _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     r"cbm|ทางรถ|ทางเรือ|ระยะเวลาขนส่ง|ขั้นต่ำ|"
     r"นำเข้า|ฝากสั่ง|ฝากโอน|"
     r"สั่ง|ซื้อ|ที่อยู่|"
+    # Missing Company-Topic Keywords fix (2026-08-31) — confirmed live via
+    # a customer test-question spreadsheet: several genuinely company-
+    # specific questions (does the company offer wooden crating, is a
+    # named item on the prohibited-goods list, is air freight available,
+    # can a tax invoice be issued, is doorstep delivery offered) carried
+    # NONE of this list's existing terms, so they fell through to General
+    # Chat Fallback (empty Context) instead of the real, correctly-
+    # retrieved RAG answer that already existed for every one of them —
+    # the LLM then correctly (per its own General Chat instructions) said
+    # "no information," which looked identical to a genuine knowledge-base
+    # gap but was actually a routing miss. Same low-collision, specific-
+    # term convention as every prior addition to this list.
+    r"ตีลังไม้|แบตเตอรี่|ใบกำกับ|จัดส่ง|ขนส่ง|เครื่องบิน|"
     # Final Systemic Routing Fix (2026-08-28) — "ที่อยู่" (shipping
     # address) was missing from this gate despite RequestShippingAddress
     # Change being a real, configured Business Action in this exact
