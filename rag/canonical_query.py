@@ -76,6 +76,25 @@ def rewrite_canonical_query(question: str, entities: Optional[Dict[str, Optional
         return {"canonical_query": question, "rewrite_applied": False,
                 "reason": "empty question", "confidence": 1.0}
 
+    # Both-Transport-Modes guard (2026-08-31, customer-acceptance pass) —
+    # the rate/duration templates in _canonical_from_entities compose a
+    # SINGLE {transport} value, and extract_entities()/_extract_transport()
+    # only ever return the FIRST match ("รถ"), so "ทางรถกับทางเรือ
+    # ระยะเวลากี่วัน" would be rewritten to "ขอทราบระยะเวลาขนส่งทางรถ" —
+    # silently dropping "เรือ". That road-only string then becomes the
+    # question the synthesis LLM must answer, and no downstream Answer-Plan
+    # hint reliably overrides an explicit single-mode question. When the
+    # customer's own wording names BOTH modes, keep it verbatim (the
+    # module's documented "if uncertain, keep the original" posture) —
+    # retrieval already matches the both-mode chunk on the original
+    # wording. Same rule as services/answer_planner.py::
+    # _wants_both_transport_modes, kept in sync deliberately rather than
+    # imported across the rag -> services boundary.
+    if "รถ" in question and "เรือ" in question:
+        return {"canonical_query": question, "rewrite_applied": False,
+                "reason": "question names both transport modes — kept verbatim so neither is dropped",
+                "confidence": 1.0}
+
     current_entities = extract_entities(question)
     merged = dict(entities or {})
     for key, value in current_entities.items():

@@ -77,5 +77,28 @@ class TestSafety(unittest.TestCase):
         self.assertEqual(r["canonical_query"], "อัตราค่าขนส่งทางรถเท่าไหร่")
 
 
+class TestBothTransportModesKeptVerbatim(unittest.TestCase):
+    """Customer-acceptance regression: the single-{transport} rate/
+    duration templates + _extract_transport()'s first-match-only scalar
+    would rewrite "ทางรถกับทางเรือระยะเวลากี่วัน" to
+    "ขอทราบระยะเวลาขนส่งทางรถ", dropping "เรือ" from the string the
+    synthesis LLM then answers. When both modes are named, keep it
+    verbatim so neither facet is lost."""
+
+    def test_both_modes_duration_kept_verbatim(self):
+        r = rewrite_canonical_query("ทางรถกับทางเรือระยะเวลากี่วัน")
+        self.assertFalse(r["rewrite_applied"])
+        self.assertEqual(r["canonical_query"], "ทางรถกับทางเรือระยะเวลากี่วัน")
+
+    def test_both_modes_rate_kept_verbatim(self):
+        r = rewrite_canonical_query("เรททางรถกับทางเรือเท่าไหร่")
+        self.assertFalse(r["rewrite_applied"])
+        self.assertEqual(r["canonical_query"], "เรททางรถกับทางเรือเท่าไหร่")
+
+    def test_single_mode_still_rewrites(self):
+        self.assertTrue(rewrite_canonical_query("ทางรถใช้เวลากี่วัน")["rewrite_applied"])
+        self.assertTrue(rewrite_canonical_query("ขอเรทเรือ")["rewrite_applied"])
+
+
 if __name__ == "__main__":
     unittest.main()

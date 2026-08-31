@@ -84,5 +84,31 @@ class TestFactSelection(unittest.TestCase):
             self.assertIsInstance(fact, str)
 
 
+class TestBothTransportModes(unittest.TestCase):
+    """Customer-acceptance regression: 'ทางรถกับทางเรือระยะเวลากี่วัน'
+    classifies as actionable_intent='unknown' (the intent classifier does
+    not tag a bare road+sea duration question), so gating the both-modes
+    answer_goal on shipping_rate/shipping_duration alone let synthesis
+    answer road-only even though the retrieved chunk carried both
+    durations. The trigger is now 'raw wording names BOTH รถ and เรือ',
+    independent of actionable_intent."""
+
+    def test_unknown_intent_still_gets_cover_both_goal(self):
+        r = plan_answer("ทางรถกับทางเรือระยะเวลากี่วัน", "unknown", [], {}, [{"text": "x"}],
+                        raw_question="ทางรถกับทางเรือระยะเวลากี่วัน")
+        self.assertIn("BOTH road", r["answer_goal"])
+        self.assertIn("cover both", r["answer_goal"])
+
+    def test_shipping_duration_intent_unchanged(self):
+        r = plan_answer("ระยะเวลาทางรถทางเรือ", "shipping_duration", [], {"transport": "รถ"}, [{"text": "x"}],
+                        raw_question="ทางรถกับทางเรือระยะเวลากี่วัน")
+        self.assertIn("BOTH road", r["answer_goal"])
+
+    def test_single_mode_question_is_untouched(self):
+        for q in ("ทางรถใช้เวลากี่วัน", "ส่งทางรถได้ไหม", "สามารถช่วยได้ไหมคะ"):
+            r = plan_answer(q, "unknown", [], {}, [{"text": "x"}], raw_question=q)
+            self.assertNotIn("BOTH road", r["answer_goal"], q)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -344,16 +344,27 @@ def plan_answer(
     response_shape = template["shape"]
 
     # Both-Transport-Modes fix (2026-08-31) — see _wants_both_transport_
-    # modes' own docstring. Scoped to exactly the two intents whose goal
-    # template narrows to a single {transport} value; drops that narrowing
-    # (transport="") and appends an explicit "cover both" instruction
+    # modes' own docstring. Appends an explicit "cover both" instruction
     # instead of silently keeping whichever mode entities["transport"]
     # happened to match first. "short_answer" is widened to "answer_then_
-    # details" — a genuine two-part answer is never a "short" one — every
-    # other intent/shape combination is completely unaffected.
-    if actionable_intent in ("shipping_rate", "shipping_duration") and _wants_both_transport_modes(raw_question or question):
-        goal = (_GOAL_TEMPLATES[actionable_intent].format(loc=loc, transport="")
-                + " for BOTH road (รถ) and sea (เรือ) transport — the customer asked about both, cover both")
+    # details" — a genuine two-part answer is never a "short" one.
+    #
+    # Widened (2026-08-31, customer-acceptance pass): the customer's own
+    # wording "ทางรถกับทางเรือระยะเวลากี่วัน" classifies as
+    # actionable_intent="unknown" (rag/query_understanding.py does not tag
+    # a bare road+sea duration question), so gating this on the two
+    # shipping intents alone still dropped one mode for the exact case it
+    # was built for. The trigger is now _wants_both_transport_modes alone
+    # — already a narrow condition (BOTH "รถ" AND "เรือ" present in the raw
+    # wording): a single-mode question ("ทางรถใช้เวลากี่วัน",
+    # "ส่งทางรถได้ไหม") never contains "เรือ" and is untouched, and the
+    # "เรือ" half also neutralises the "สามารถ"-contains-"รถ" substring
+    # trap for this check.
+    if _wants_both_transport_modes(raw_question or question):
+        base_goal = (_GOAL_TEMPLATES[actionable_intent].format(loc=loc, transport="")
+                     if actionable_intent in ("shipping_rate", "shipping_duration")
+                     else "Provide the shipping duration/rate the customer asked about")
+        goal = base_goal + " for BOTH road (รถ) and sea (เรือ) transport — the customer asked about both, cover both"
         if response_shape == "short_answer":
             response_shape = "answer_then_details"
 
