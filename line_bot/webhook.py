@@ -212,6 +212,8 @@ async def debug_queue_status():
     running state, using ThreadPoolExecutor's own internal attributes
     (undocumented but stable across CPython 3.x)."""
     import threading
+    import sys
+    import traceback
     threads_info = []
     for t in _EXECUTOR._threads:
         threads_info.append({"name": t.name, "alive": t.is_alive()})
@@ -225,6 +227,18 @@ async def debug_queue_status():
         }
     all_threads = [{"name": t.name, "alive": t.is_alive(), "daemon": t.daemon}
                     for t in threading.enumerate()]
+
+    # sys._current_frames() needs no ptrace/attach permission (unlike
+    # py-spy, which this container's capabilities block) — it reads each
+    # thread's live frame from inside this same process.
+    frames = sys._current_frames()
+    stacks = {}
+    for t in threading.enumerate():
+        frame = frames.get(t.ident)
+        stacks[f"{t.name} (ident={t.ident})"] = (
+            "".join(traceback.format_stack(frame)) if frame else None
+        )
+
     return {
         "executor_work_queue_size": _EXECUTOR._work_queue.qsize(),
         "executor_threads": threads_info,
@@ -232,6 +246,7 @@ async def debug_queue_status():
         "user_queues": queue_info,
         "pending_texts_by_user": {k: list(v) for k, v in _pending_texts_by_user.items()},
         "all_process_threads": all_threads,
+        "thread_stacks": stacks,
     }
 
 
