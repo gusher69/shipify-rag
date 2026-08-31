@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from rag.query_resolution import resolve_followup_query
+from rag.query_resolution import resolve_followup_query, requested_transport_modes
 
 
 def _hist(*pairs):
@@ -99,6 +99,31 @@ class TestGenericRateDurationFollowupDoesNotInheritStaleTransport(unittest.TestC
         self.assertEqual(resolve_followup_query("แล้วเรททางรถเท่าไหร่", history), "ขอเรททางรถ")
         # elliptical, but "ทางเรือ" is in THIS turn's own wording -> narrows
         self.assertIn("ทางเรือ", resolve_followup_query("แล้วทางเรือล่ะ", history))
+
+
+class TestRequestedTransportModes(unittest.TestCase):
+    """Single source of truth for "which transport facet(s) did the
+    customer ask about this turn" — consumed by _compose here,
+    rag/canonical_query.py and services/answer_planner.py so those
+    layers can never disagree."""
+
+    def test_generic_names_none(self):
+        self.assertEqual(requested_transport_modes("เรทนำเข้าเท่าไหร่"), [])
+        self.assertEqual(requested_transport_modes("แล้วเรทนำเข้าเท่าไหร่คะ"), [])
+
+    def test_single_mode(self):
+        self.assertEqual(requested_transport_modes("เรททางรถเท่าไหร่"), ["รถ"])
+        self.assertEqual(requested_transport_modes("เรททางเรือเท่าไหร่"), ["เรือ"])
+
+    def test_both_modes(self):
+        self.assertEqual(requested_transport_modes("ทางรถกับทางเรือกี่วัน"), ["รถ", "เรือ"])
+
+    def test_samarth_substring_is_not_a_transport_mode(self):
+        # "สามารถ" contains "รถ" — must not register as land transport
+        self.assertEqual(requested_transport_modes("เราสามารถสั่งแบตเตอรี่จำนวนเยอะได้ไหมคะ"), [])
+
+    def test_negated_mode_is_excluded(self):
+        self.assertNotIn("เรือ", requested_transport_modes("ไม่เอาทางเรือ ขอทางรถ"))
 
 
 if __name__ == "__main__":

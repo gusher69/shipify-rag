@@ -181,6 +181,28 @@ def _extract_transport(text: str) -> Optional[str]:
     return _TRANSPORT_CANONICAL[m.group(0)] if m else None
 
 
+def requested_transport_modes(text: str) -> List[str]:
+    """The SET of transport modes the given wording EXPLICITLY names,
+    canonicalised — ``[]`` (generic / none), ``["รถ"]``, ``["เรือ"]``,
+    ``["อากาศ"]``, or a combination.
+
+    The single source of truth for "which transport facet(s) did the
+    customer ask about this turn". Every rate/duration path that used to
+    re-derive this — ``_compose`` here, ``rag/canonical_query.py``, and
+    ``services/answer_planner.py`` — reads THIS instead of inspecting a
+    first-match scalar or doing its own substring check, so those layers
+    can never disagree about it again. Same ``_TRANSPORT_RE`` /
+    ``_TRANSPORT_CANONICAL`` and same negation stripping as
+    ``extract_entities()``; ``_extract_transport()`` stays as the
+    first-match scalar accessor its own existing callers still expect."""
+    seen: List[str] = []
+    for m in _TRANSPORT_RE.finditer(strip_negated_spans(text or "")):
+        canon = _TRANSPORT_CANONICAL[m.group(0)]
+        if canon not in seen:
+            seen.append(canon)
+    return seen
+
+
 def _extract_location(text: str) -> Optional[str]:
     m = _LOCATION_RE.search(text)
     return m.group(0) if m else None
@@ -596,18 +618,19 @@ def resolve_conversation(question: str, history: Optional[List[Dict]] = None) ->
             merged.pop(key, None)
             carried.pop(key, None)
 
-    # A generic rate/duration follow-up whose OWN core names no transport
-    # mode must not inherit a STALE one carried from a prior turn (real
-    # LINE OA failure 2026-08-31: "ทางรถใช้เวลากี่วัน" then "แล้วเรทนำเข้า
-    # เท่าไหร่คะ" resolved to the road-only "ขอเรททางรถ"). Dropping the
-    # carried transport here makes _compose fall through its single-mode
-    # rate/duration templates, so the follow-up stays a generic
-    # rate/duration question and retrieval returns the full road+sea
-    # summary the customer asked for. An explicit transport word in THIS
-    # turn's own core ("แล้วเรททางรถเท่าไหร่") still wins — cur_entities
-    # ["transport"] is set in that case, so this guard does not fire.
-    if merged.get("attribute") in ("rate", "duration") and not cur_entities.get("transport"):
-        merged.pop("transport", None)
+    # Transport facet — single source of truth (requested_transport_modes).
+    # A rate/duration follow-up is narrowed to one mode ONLY when THIS
+    # turn's own core names exactly one. Names none ("แล้วเรทนำเข้า
+    # เท่าไหร่คะ") -> generic, drop any carried mode. Names two ("ทางรถ
+    # กับทางเรือกี่วัน") -> keep it generic too (retrieval + the answer
+    # plan cover both). The current message is authoritative over a mode
+    # carried from a prior turn.
+    if merged.get("attribute") in ("rate", "duration"):
+        cur_modes = requested_transport_modes(core)
+        if len(cur_modes) == 1:
+            merged["transport"] = cur_modes[0]
+        else:
+            merged.pop("transport", None)
         carried.pop("transport", None)
 
     resolved, confidence = _compose(merged, core, prev_q)

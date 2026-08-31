@@ -32,17 +32,14 @@ def _wants_detailed_summary(question: str) -> bool:
 
 
 def _wants_both_transport_modes(question: str) -> bool:
-    """A question naming BOTH land and sea transport (e.g. "ทางรถกับ
-    ทางเรือระยะเวลากี่วัน") is asking to cover BOTH, not just whichever
-    rag/query_resolution.py::_extract_transport() happened to match first
-    (_TRANSPORT_RE.search() only ever returns the FIRST occurrence in the
-    text, so entities["transport"] is a single scalar value, never a
-    list). Confirmed live: this exact question was answered with land-
-    only duration despite the retrieved chunk having both durations,
-    because entities["transport"] came back as just "รถ" and the goal/
-    response_shape below narrowed the answer to that one mode alone."""
-    q = question or ""
-    return "รถ" in q and "เรือ" in q
+    """True when the wording names 2+ transport modes (e.g. "ทางรถกับ
+    ทางเรือระยะเวลากี่วัน") — the answer must cover them all. Reads the
+    shared transport-facet source of truth
+    (rag/query_resolution.requested_transport_modes) instead of an
+    ad-hoc substring check, so this layer can never disagree with query
+    resolution / canonical query about how many modes were asked for."""
+    from rag.query_resolution import requested_transport_modes
+    return len(requested_transport_modes(question)) >= 2
 
 _CLARIFICATION_TEMPLATES = {
     "warehouse_ambiguous": "ต้องการที่อยู่โกดังไทยหรือโกดังจีนคะ",
