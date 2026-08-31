@@ -9,10 +9,10 @@ _supabase = None
 
 
 def _get_supabase():
-    global _supabase
-    if _supabase is None:
-        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _supabase
+    # Shared bounded-timeout client (services/supabase_client.py) —
+    # services/retrieval_settings.py imports this on the RAG hot path.
+    from services.supabase_client import get_supabase
+    return get_supabase()
 
 
 FILES_TABLE  = "knowledge_files"

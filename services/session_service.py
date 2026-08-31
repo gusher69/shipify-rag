@@ -27,11 +27,12 @@ _supabase = None
 
 
 def _get_sb():
-    global _supabase
-    if _supabase is None:
-        from supabase import create_client
-        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _supabase
+    # Shared bounded-timeout client (services/supabase_client.py) — this
+    # runs on every LINE turn (conversation-history recording); a
+    # stale-connection hang here would block the worker just like the
+    # BusinessActionRegistry one did.
+    from services.supabase_client import get_supabase
+    return get_supabase()
 
 
 def _now_iso() -> str:

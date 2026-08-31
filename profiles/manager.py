@@ -1,10 +1,19 @@
 from typing import Dict, Optional
 from datetime import datetime, timezone
-from supabase import create_client
 
-from config import SUPABASE_URL, SUPABASE_KEY
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+class _LazySupabase:
+    """Module-level ``supabase`` is dereferenced on every LINE turn
+    (get_profile / upsert_profile). Route it through the shared
+    bounded-timeout client (services/supabase_client.py) instead of a
+    bare, no-timeout create_client() done at import time."""
+
+    def __getattr__(self, name):
+        from services.supabase_client import get_supabase
+        return getattr(get_supabase(), name)
+
+
+supabase = _LazySupabase()
 
 TABLE = "user_profiles"
 

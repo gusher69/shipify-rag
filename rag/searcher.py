@@ -21,10 +21,11 @@ def _get_model():
 
 
 def _get_supabase():
-    global _supabase
-    if _supabase is None:
-        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _supabase
+    # Shared bounded-timeout client (services/supabase_client.py) — RAG
+    # retrieval runs on every LINE turn; a 120s/stale-connection read here
+    # would block the worker the same way the BusinessActionRegistry one did.
+    from services.supabase_client import get_supabase
+    return get_supabase()
 
 
 _allowed_file_ids_cache: Dict[str, "tuple[float, set]"] = {}
@@ -616,6 +617,16 @@ def search(question: str, top_k: int = TOP_K, trace: Optional[list] = None,
     except Exception as e:
         print(f"Search failed: {e}")
         _trace_stage(trace, "embedding_vector_search", "failed", t0, str(e))
+        # Stale-connection recovery — if this failed on a dead Supabase
+        # keep-alive connection, drop the shared client so the next
+        # retrieval rebuilds a fresh pool instead of reusing the dead one.
+        try:
+            import httpx
+            from services.supabase_client import reset_supabase
+            if isinstance(e, (httpx.TransportError, httpx.TimeoutException)):
+                reset_supabase()
+        except Exception:
+            pass
 
     # Parallel lexical retrieval (rag/lexical_search.py, Part 7) — finds
     # chunks by keyword/heading match that the vector search may have

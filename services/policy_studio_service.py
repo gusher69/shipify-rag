@@ -16,11 +16,8 @@ _supabase = None
 
 
 def _get_sb():
-    global _supabase
-    if _supabase is None:
-        from supabase import create_client
-        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _supabase
+    from services.supabase_client import get_supabase  # shared bounded-timeout client
+    return get_supabase()
 
 
 def _now_iso() -> str:

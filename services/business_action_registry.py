@@ -202,6 +202,13 @@ def build_embedding_source_text(action: Dict, examples: Optional[List[Dict]] = N
     return "\n".join(p for p in parts if p)
 
 
+class _EmptyResult:
+    """Stand-in for a PostgREST APIResponse when a resilient Registry read
+    fails after its one retry — shaped just enough (``.data``) for the
+    lookup callers, which then behave as "not found"."""
+    data: List = []
+
+
 class BusinessActionRegistry:
     """The ONLY interface a future Decision Engine may use. Every method
     is read-only with respect to execution — it returns configuration,
@@ -211,13 +218,46 @@ class BusinessActionRegistry:
     def __init__(self, sb):
         self._sb = sb
 
+    def _resilient_read(self, build):
+        """Run ``build(sb).execute()`` for a Registry lookup that sits on
+        the live LINE message path (get / get_by_key / list — reached via
+        DecisionEngine._resolve_continuation_action on nearly every turn).
+
+        On a Supabase transport/timeout error — a stale/half-open
+        keep-alive connection, the exact production hang of 2026-08-31 —
+        drop the shared client, rebuild it, and retry ONCE. If it still
+        fails, return an empty result (``.data == []``): every caller
+        here already treats that as "not found", and the DecisionEngine
+        then degrades to normal routing instead of the worker blocking
+        for minutes or a raw DB error reaching a LINE customer.
+
+        Bounded: 1 original attempt + 1 recovery retry. No retry storm.
+        Read-only — write methods keep their existing semantics."""
+        import httpx
+        try:
+            return build(self._sb).execute()
+        except (httpx.TransportError, httpx.TimeoutException) as first:
+            try:
+                from services.supabase_client import get_supabase, reset_supabase
+                reset_supabase()
+                self._sb = get_supabase()
+                return build(self._sb).execute()
+            except (httpx.TransportError, httpx.TimeoutException) as second:
+                print(f"[business_action_registry] Supabase read unavailable "
+                      f"after 1 retry ({second!r}) — degrading to empty result")
+                return _EmptyResult()
+
     # ── Registry lookups (Decision Engine surface) ──────────────────
     def get(self, action_id: str) -> Optional[Dict]:
-        rows = self._sb.table("business_actions").select("*").eq("id", action_id).is_("deleted_at", "null").execute().data
+        rows = self._resilient_read(
+            lambda sb: sb.table("business_actions").select("*").eq("id", action_id).is_("deleted_at", "null")
+        ).data
         return rows[0] if rows else None
 
     def get_by_key(self, action_key: str) -> Optional[Dict]:
-        rows = self._sb.table("business_actions").select("*").eq("action_key", action_key).is_("deleted_at", "null").execute().data
+        rows = self._resilient_read(
+            lambda sb: sb.table("business_actions").select("*").eq("action_key", action_key).is_("deleted_at", "null")
+        ).data
         return rows[0] if rows else None
 
     def get_by_key_including_deleted(self, action_key: str) -> Optional[Dict]:
@@ -244,8 +284,10 @@ class BusinessActionRegistry:
         return rows[0] if rows else None
 
     def list(self) -> List[Dict]:
-        return self._sb.table("business_actions").select("*").is_("deleted_at", "null") \
-            .order("priority", desc=True).order("created_at").execute().data or []
+        return self._resilient_read(
+            lambda sb: sb.table("business_actions").select("*").is_("deleted_at", "null")
+            .order("priority", desc=True).order("created_at")
+        ).data or []
 
     def search(self, query: str) -> List[Dict]:
         """Deterministic substring search over name/display_name/

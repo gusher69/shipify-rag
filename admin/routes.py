@@ -275,10 +275,12 @@ def _jf_bulk_create(job_id: str, file_rows: list) -> dict:
     return jf_ids
 
 def get_sb():
-    global _sb
-    if _sb is None:
-        _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _sb
+    # Delegates to the shared bounded-timeout client (services/
+    # supabase_client.py) so admin AND the LINE-path BusinessActionRegistry
+    # (get_registry() -> this) get a read timeout instead of the 120s/
+    # ~200s stale-connection hang. Same client, only the transport is bounded.
+    from services.supabase_client import get_supabase
+    return get_supabase()
 
 
 def _cancel_active_job(job_id: Optional[str] = None, reason: str = "Cancelled by user"):
