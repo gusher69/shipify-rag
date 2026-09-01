@@ -260,5 +260,63 @@ class FaqDifferentProductSynthesizes(unittest.TestCase):
         self.assertEqual(plan["response_shape"], "faq_direct")
 
 
+class CategoryPolicyHotfix(unittest.TestCase):
+    def test_colloquial_eligibility_marker(self):
+        from rag.query_resolution import _ELIGIBILITY_INTENT_RE
+        from rag.query_understanding import classify_actionable_intent
+        self.assertTrue(_ELIGIBILITY_INTENT_RE.search("น้ำจิ้ม น้ำปลา เข้าได้ไหม"))
+        self.assertFalse(_ELIGIBILITY_INTENT_RE.search("ฝากนำเข้าได้ไหมคะ"))
+        self.assertEqual(classify_actionable_intent("น้ำจิ้ม น้ำปลาเข้าได้ไหม")["actionable_intent"],
+                          "prohibited_goods")
+
+    def test_colloquial_multi_entity_decomposes(self):
+        s = decompose_request("น้ำจิ้ม น้ำปลา เข้าได้ไหม", raw_question="น้ำจิ้ม น้ำปลา เข้าได้ไหม")
+        self.assertEqual(s.entities, ["น้ำจิ้ม", "น้ำปลา"])
+
+    def test_enrichment_covers_category_vocab(self):
+        from rag.query_resolution import single_eligibility_component
+        s = decompose_request("น้ำยาซักผ้า นำเข้าได้ไหม", raw_question="น้ำยาซักผ้า นำเข้าได้ไหม")
+        q = single_eligibility_component(s)[1]
+        for term in ("ของเหลว", "อาหาร", "เครื่องดื่ม", "เครื่องสำอาง"):
+            self.assertIn(term, q)
+
+    def test_prompt_two_step_category_instruction(self):
+        block = _build_answer_plan_block({
+            "answer_goal": "g", "response_shape": "answer_then_details",
+            "required_facts": [], "optional_facts": [], "excluded_facts": [],
+            "requested_components": ["น้ำปลา / eligibility"],
+        })
+        self.assertIn("two steps", block)
+        self.assertIn("beverages", block)
+        self.assertIn("prohibited-goods LIST only tells you what is NOT allowed", block)
+
+
+class ProductListContinuation(unittest.TestCase):
+    ELIG_HISTORY = [{"role": "user", "content": "น้ำปลา นำเข้าได้ไหม"},
+                    {"role": "assistant", "content": "น้ำปลาเป็นของเหลว ไม่สามารถนำเข้าได้ค่ะ"}]
+
+    def _r(self, msg, history):
+        from rag.query_resolution import reconstruct_product_list_continuation
+        return reconstruct_product_list_continuation(msg, history)
+
+    def test_bare_list_inherits_eligibility(self):
+        self.assertEqual(self._r("น้ำเปล่า ละ น้ำมัน น้ำมันงา", self.ELIG_HISTORY),
+                          "น้ำเปล่า น้ำมัน น้ำมันงา นำเข้าได้ไหม")
+
+    def test_single_item_not_reconstructed(self):
+        self.assertIsNone(self._r("น้ำเปล่า", self.ELIG_HISTORY))
+
+    def test_no_prior_eligibility_context(self):
+        hist = [{"role": "user", "content": "สวัสดีครับ"},
+                {"role": "assistant", "content": "สวัสดีค่ะ"}]
+        self.assertIsNone(self._r("น้ำมัน น้ำเปล่า", hist))
+
+    def test_standalone_no_history(self):
+        self.assertIsNone(self._r("น้ำมัน น้ำเปล่า", None))
+
+    def test_message_with_its_own_question_not_reconstructed(self):
+        self.assertIsNone(self._r("น้ำมัน ราคาเท่าไหร่", self.ELIG_HISTORY))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -118,7 +118,8 @@ _P2_PROHIBITED_VERDICT_RE = re.compile(
 _P2_UNCONFIRMED_VERDICT_RE = re.compile(
     r"ยังไม่ยืนยัน|ไม่มีการยืนยัน|ยังไม่มีการยืนยัน|ยังไม่มีข้อมูลยืนยัน|ยังไม่มีการระบุ|"
     r"ไม่มีข้อมูลยืนยัน|ยังไม่มีข้อมูล|ยังไม่แน่ชัด|ยังไม่ยืนยันแน่ชัด|ควรตรวจสอบ.{0,6}เจ้าหน้าที่|"
-    r"สอบถามเจ้าหน้าที่เพื่อความ")
+    r"สอบถามเจ้าหน้าที่เพื่อความ|ไม่เข้าข่ายสินค้าที่ห้าม|ไม่อยู่ในหมวด|ไม่อยู่ในรายการสินค้าต้องห้าม|"
+    r"ไม่ได้อยู่ในรายการสินค้าต้องห้าม")
 
 
 def _apply_p2_followup(answer_text: str, followup: Optional[Dict]) -> "tuple[str, str]":
@@ -577,6 +578,19 @@ def run_playground_turn(
                          + ", ".join(f"{c['from']}->{c['to']}" for c in spell_result["corrections"])
                          if spell_result["corrections"] else "no corrections needed"))
 
+    # 0-. Bare product-list continuation of an import-eligibility thread
+    #     ("น้ำปลา นำเข้าได้ไหม" -> "น้ำเปล่า ละ น้ำมัน น้ำมันงา"): rebuild
+    #     the full eligibility question so decomposition + multi-target
+    #     retrieval + completeness treat every listed product. Fires ONLY
+    #     when the immediately preceding USER turn was itself an eligibility
+    #     question — a bare list with no such context is left untouched.
+    from rag.query_resolution import reconstruct_product_list_continuation
+    _list_cont = reconstruct_product_list_continuation(corrected_question, history)
+    if _list_cont and _list_cont != corrected_question:
+        stages.append(Stage("List Continuation", "success", 0.0,
+                             f"{corrected_question!r} -> {_list_cont!r} (product list inherits eligibility goal)"))
+        corrected_question = _list_cont
+
 
     # 0. Follow-up / Entity Resolution — Conversation Resolver 2.0 (rag/
     #    query_resolution.py::resolve_conversation()). Deterministic, no
@@ -826,7 +840,7 @@ def run_playground_turn(
             # dedup + a strict overall cap. No new LLM calls. The single
             # top-level canonical_question path is untouched for every
             # normal message.
-            per_component_k = max(2, effective_top_k // 2)
+            per_component_k = max(3, effective_top_k)
             overall_cap = min(10, 3 + 2 * len(request_components))
             merged_chunks: List[Dict] = []
             seen_keys = set()
@@ -1265,6 +1279,7 @@ def run_playground_turn(
               or _rag_strong_direct
               or _rag_topic_continuity_followup
               or _rag_faq_exact
+              or multi_component_request or (single_elig is not None)
               or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27;
         # moved ahead of the Answerability Gate 2026-08-27 same day — Final
@@ -1509,6 +1524,7 @@ def run_playground_turn(
               or _rag_strong_direct
               or _rag_topic_continuity_followup
               or _rag_faq_exact
+              or multi_component_request or (single_elig is not None)
               or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (see the matching branch above) answers
         # from the LLM's own general knowledge with empty context — the

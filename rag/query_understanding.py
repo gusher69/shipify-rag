@@ -273,7 +273,10 @@ _PROHIBITED_RE = re.compile(r"สินค้าต้องห้าม|ห้�
 # prohibited/category evidence instead of falling through to a generic
 # service_information answer. "ฝากนำเข้าได้ไหม" (the import-agent SERVICE
 # question) is excluded via the lookbehind.
-_IMPORT_ELIGIBILITY_RE = re.compile(r"(?<!ฝาก)นำเข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)")
+_IMPORT_ELIGIBILITY_RE = re.compile(
+    r"(?<!ฝาก)นำเข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)"
+    r"|(?<!นำ)เข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)"
+    r"|เอาเข้า(?:มา)?ได้(?:ไหม|มั้ย)")
 _TRACKING_RE = re.compile(r"ติดตามพัสดุ|เช็คสถานะ|ตรวจสอบสถานะ|tracking", re.IGNORECASE)
 _SUMMARY_RE = re.compile(r"สรุป|โดยรวมแล้ว")
 _CREDIT_CARD_RE = re.compile(r"บัตรเครดิต")

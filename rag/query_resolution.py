@@ -721,16 +721,28 @@ from dataclasses import dataclass, field
 # ("ฝากนำเข้าได้ไหมคะ") out of this.
 _ELIGIBILITY_INTENT_RE = re.compile(
     r"(?<!ฝาก)นำเข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)"
-    r"|ส่งเข้าไทยได้(?:ไหม|มั้ย)|ห้ามนำเข้า(?:ไหม|มั้ย|หรือเปล่า)"
+    r"|(?<!นำ)เข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)"
+    r"|ส่งเข้าไทยได้(?:ไหม|มั้ย)|ห้ามนำเข้า(?:ไหม|มั้ย|หรือเปล่า)|เอาเข้า(?:มา)?ได้(?:ไหม|มั้ย)"
 )
 # Trailing eligibility phrase stripped off a product list to leave just
 # the goods: "แบตเตอรี่ น้ำหอม นำเข้าได้ไหมคะ" -> "แบตเตอรี่ น้ำหอม".
+# "(?:นำ)?เข้า" also strips the colloquial "…เข้าได้ไหม" (no "นำ").
 _ELIGIBILITY_TAIL_RE = re.compile(
-    r"\s*(?:พวก|สินค้า|ของ)?\s*(?:นำเข้า|ส่งเข้าไทย)\s*"
+    r"\s*(?:พวก|สินค้า|ของ)?\s*(?:(?:นำ)?เข้า|ส่งเข้าไทย|เอาเข้า(?:มา)?)\s*"
     r"ได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)\s*(?:คะ|ครับ|ค่ะ|บ้าง)?\s*$"
 )
 _LEADING_ASK_RE = re.compile(r"^\s*(?:ขอถามว่า|อยากถามว่า|สอบถามว่า|ถามว่า|รบกวนถามว่า)\s*")
 _LIST_SEP_RE = re.compile(r"\s*(?:แล้วก็|และก็|และ|กับ|,|、|/)\s*|\s+")
+
+# Trusted prohibited-category vocabulary appended to an eligibility
+# retrieval query so the category-policy chunks (the "สินค้าที่ห้ามนำเข้า"
+# list + the ของเหลว / อาหาร FAQ rows) reliably surface for ANY concrete
+# product — never a per-product mapping, just the category names the
+# trusted knowledge itself uses.
+ELIGIBILITY_CATEGORY_TERMS = (
+    "นำเข้าได้ไหม สินค้าต้องห้าม ของเหลว อาหาร ของกิน เครื่องดื่ม เครื่องสำอาง "
+    "ยาเวชภัณฑ์ วัตถุไวไฟ แบตเตอรี่ ของมีคม สิ่งมีชีวิต พืช"
+)
 _LIST_FILLER = {"ก็", "แล้ว", "และ", "กับ", "พวก", "สินค้า", "ของ", "หรือ", "รวมถึง"}
 
 _MINIMUM_RE = re.compile(r"ขั้นต่ำ|ขั้นตํ่า|ขั้นตำ่|ยอดขั้นต่ำ|minimum", re.IGNORECASE)
@@ -911,7 +923,7 @@ def build_request_components(spec: RequestSpec) -> List["tuple[str, str]"]:
 
     if len(spec.entities) >= 2:
         for e in spec.entities:
-            comps.append((f"{e} / eligibility", f"{e} นำเข้าได้ไหม สินค้าต้องห้าม ของเหลว"))
+            comps.append((f"{e} / eligibility", f"{e} {ELIGIBILITY_CATEGORY_TERMS}"))
         return comps
 
     if len(spec.transport_modes) >= 2 and (facets or spec.comparison):
@@ -957,8 +969,46 @@ def single_eligibility_component(spec: RequestSpec) -> Optional["tuple[str, str]
     still applies (glass stays unconfirmed, perfume/shampoo -> liquid)."""
     if len(spec.entities) == 1 and not spec.sub_questions and not spec.transport_modes:
         e = spec.entities[0]
-        return (f"{e} / eligibility", f"{e} นำเข้าได้ไหม สินค้าต้องห้าม ของเหลว")
+        return (f"{e} / eligibility", f"{e} {ELIGIBILITY_CATEGORY_TERMS}")
     return None
+
+
+# ── Bare product-list continuation of an import-eligibility thread ──────
+# "น้ำปลา นำเข้าได้ไหม" -> "น้ำเปล่า ละ น้ำมัน น้ำมันงา": the second turn
+# is just a short list of product nouns, no question of its own. When the
+# IMMEDIATELY preceding USER turn was an eligibility question, carry that
+# goal forward for the whole list. Extends the existing "แล้ว X ล่ะ"
+# behaviour to N items. Never fires without that context (a bare list on
+# its own stays a bare list).
+_LIST_CONT_SEP_RE = re.compile(r"\s*(?:แล้วก็|และก็|แล้ว|และ|ละ|กับ|,|、|/|\+)\s*|\s+")
+_LIST_CONT_STOP_RE = re.compile(
+    r"ไหม|มั้ย|มัย|ยังไง|อย่างไร|เท่าไหร่|เท่าไร|กี่|ทำไม|\?|ราคา|ค่าส่ง|นำเข้าได้|ส่งได้|"
+    r"เข้าได้|ขอบคุณ|สวัสดี|ครับผมขอ")
+_LIST_CONT_DROP = {"ก็", "ละ", "แล้ว", "และ", "กับ", "พวก", "อัน", "ตัว", "นี้", "นั้น", "ด้วย",
+                   "อีก", "ที", "หน่อย", "ครับ", "ค่ะ", "คะ", "นะ", "น่ะ"}
+
+
+def reconstruct_product_list_continuation(message: str, history: Optional[List[Dict]]) -> Optional[str]:
+    """-> "<a> <b> <c> นำเข้าได้ไหม" when the last USER turn was an
+    import-eligibility question and `message` is a short bare list of
+    2+ product-noun tokens with no question / verb of its own. Else None."""
+    if not message or not history:
+        return None
+    last_user = next((t.get("content") or "" for t in reversed(history)
+                       if t.get("role") == "user"), "")
+    if not _ELIGIBILITY_INTENT_RE.search(last_user):
+        return None
+    txt = message.strip()
+    if len(txt) > 60 or _LIST_CONT_STOP_RE.search(txt) or _ELIGIBILITY_INTENT_RE.search(txt):
+        return None
+    tokens: List[str] = []
+    for raw in _LIST_CONT_SEP_RE.split(txt):
+        tok = (raw or "").strip()
+        if len(tok) >= 2 and tok not in _LIST_CONT_DROP and tok not in tokens:
+            tokens.append(tok)
+    if len(tokens) < 2:
+        return None
+    return " ".join(tokens) + " นำเข้าได้ไหม"
 
 
 # ── P2A blocker fix — shared regexes for consuming a reply to a P2

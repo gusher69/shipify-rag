@@ -584,24 +584,28 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
         lines.append("Requested components — give EVERY one an explicit verdict:\n"
                      + "\n".join(f"- {c}" for c in answer_plan["requested_components"]))
         lines.append(
-            "A component IS supported when the Retrieved Context states a policy for the item "
-            "ITSELF or for a general CATEGORY it clearly belongs to (e.g. liquids, flammable / "
-            "hazardous goods). When the Context gives a category policy, apply it to every listed "
-            "item in that category, using the SAME verdict and wording the Context uses — do not "
-            "leave such an item unconfirmed just because it is not named literally. Mark a "
-            "component 'ยังไม่ยืนยัน' ONLY when neither the item nor any category it belongs to has "
-            "a policy in the Context; never reply that there is no information for the whole question.")
+            "For EACH component, work in two steps: (1) using ordinary knowledge, decide the "
+            "general category the item belongs to — e.g. liquids, beverages, food / condiment / "
+            "sauce, cosmetics, medicine, batteries, flammables, sharp objects, plants / living "
+            "things, counterfeit / copyright-problem goods; (2) check the Retrieved Context for a policy "
+            "on the ITEM itself OR on that CATEGORY, and give the Context's verdict. If the "
+            "Context prohibits that category, the item is prohibited even when it is not named "
+            "literally (a fish sauce is a food AND a liquid; a shampoo / detergent / sesame oil "
+            "is a liquid; plain drinking water is a beverage / liquid). Apply the category "
+            "verdict to every listed item that belongs to it, using the SAME wording the Context "
+            "uses. A clearly-classifiable item (a liquid, a food, a battery, …) whose category is "
+            "prohibited by the Context is PROHIBITED — treat that as a confirmed verdict for it, "
+            "the same as an item named literally; do not report it as 'ยังไม่มีข้อมูล'. Never "
+            "reply 'no information' for the whole question.")
         lines.append(
-            "You may use ordinary knowledge to decide which general category a named item belongs "
-            "to (perfume / shampoo / detergent are liquids; a drinking glass is fragile glassware, "
-            "not a liquid); but the accept / prohibit verdict itself must come from a policy "
-            "actually present in the Retrieved Context — for the item or its category — never "
-            "from outside knowledge. A prohibited-goods LIST only tells you what is NOT allowed — "
-            "it can never be used to conclude that an item not on it IS allowed. When the item is "
-            "not covered by any prohibition and no rule in the Context affirmatively permits it "
-            "either, say its import eligibility is not confirmed (ยังไม่ยืนยัน) — but this does NOT "
-            "apply when the item belongs to a category the Context prohibits (a liquid under a "
-            "liquid ban is still prohibited even if not named): give that verdict.")
+            "The accept / prohibit verdict itself must come from a policy actually present in the "
+            "Retrieved Context — for the item or its category — never from outside knowledge. A "
+            "prohibited-goods LIST only tells you what is NOT allowed — it can NEVER be used to "
+            "conclude that an item merely absent from it IS allowed. Mark a component "
+            "'ยังไม่ยืนยัน' ONLY when the Context has no policy for the item AND none for any "
+            "category it clearly belongs to (e.g. a drinking glass is fragile glassware, not a "
+            "liquid — if nothing in the Context covers glassware, its eligibility is not "
+            "confirmed). Do not stretch a category label onto an item just to produce a verdict.")
     if answer_plan.get("conflicting_components"):
         # P1.2B — the Retrieved Context carries INCOMPATIBLE trusted values
         # for these. Do not choose one; say plainly it is not confirmed.
