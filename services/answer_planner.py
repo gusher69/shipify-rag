@@ -282,6 +282,8 @@ def plan_answer(
     retrieval_confidence: Optional[float] = None,
     policy_set: Optional[Dict] = None,
     raw_question: Optional[str] = None,
+    requested_components: Optional[List[str]] = None,
+    comparison: Optional[str] = None,
 ) -> Dict:
     """Returns:
         {
@@ -311,6 +313,8 @@ def plan_answer(
     entities = entities or {}
     chunks = chunks or []
     requested_attributes = requested_attributes or []
+    requested_components = requested_components or []
+    _multi_component = len(requested_components) >= 2
 
     if _needs_warehouse_clarification(actionable_intent, entities, chunks, raw_question or question):
         subject = _WAREHOUSE_CLARIFICATION_SUBJECT.get(actionable_intent, "ที่อยู่")
@@ -340,7 +344,7 @@ def plan_answer(
     _named_sub = _named.group(0) if _named else None
     _multi_loc_evidence = _distinct_warehouse_locations_in_evidence(chunks) >= 2
 
-    if _is_faq_exact_match(chunks) and not (_named_sub and _multi_loc_evidence):
+    if _is_faq_exact_match(chunks) and not (_named_sub and _multi_loc_evidence) and not _multi_component:
         # A confirmed exact/near-exact FAQ row IS the answer — trust it
         # fully rather than second-guessing with a narrower fact list.
         # Direct FAQ Fidelity Mode (P0, 2026-07-21): the row's own answer
@@ -456,6 +460,27 @@ def plan_answer(
         if response_shape == "short_answer":
             response_shape = "answer_then_details"
 
+    # Multi-component request (P1.2A) — generalises the road+sea "cover
+    # both" instruction above to ANY set of requested components (several
+    # products for an eligibility question, rate/duration/minimum facets,
+    # two related sub-questions). Synthesis is told to answer EVERY
+    # supported component and to mark ONLY unsupported ones as unconfirmed
+    # — never a single blanket "no information" reply. Values still come
+    # 100% from Retrieved Context (grounding rules unchanged).
+    if _multi_component:
+        goal = ("Answer EVERY requested component that trusted Retrieved Context supports. "
+                "For any component with no support in the Context, name ONLY that specific "
+                "component as unconfirmed (ยังไม่ยืนยัน) — never reply that there is no "
+                "information for the whole question. Components: " + "; ".join(requested_components))
+        if comparison:
+            _dir = {"cheaper": "cheaper (ถูกกว่า)", "more_expensive": "more expensive (แพงกว่า)",
+                    "faster": "faster (เร็วกว่า)", "slower": "slower (ช้ากว่า)"}.get(comparison, comparison)
+            goal += (f". Then state which option is {_dir}, comparing ONLY the exact values present "
+                     "in Retrieved Context — never a general/real-world assumption.")
+            response_shape = "comparison"
+        elif response_shape == "short_answer":
+            response_shape = "answer_then_details"
+
     plan = {
         "answer_goal": goal,
         "required_facts": required,
@@ -464,6 +489,7 @@ def plan_answer(
         "response_shape": response_shape,
         "clarification_required": False,
         "clarification_question": None,
+        "requested_components": list(requested_components),
     }
     # Answer Plan Validator (Part 9, P0 2026-07-21) — defense in depth:
     # `goal` above is built ONLY by interpolating `entities` (already the

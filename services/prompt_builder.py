@@ -576,6 +576,27 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
         lines.append("May include if relevant:\n" + "\n".join(f"- {f}" for f in answer_plan["optional_facts"]))
     if answer_plan.get("excluded_facts"):
         lines.append("Do not include:\n" + "\n".join(f"- {f}" for f in answer_plan["excluded_facts"]))
+    if answer_plan.get("requested_components"):
+        # P1.2A — the customer asked several things in one message. Answer
+        # EVERY component the Retrieved Context supports; for any it does
+        # not support, say ONLY that one component is unconfirmed — never a
+        # blanket "no information" reply for the whole question.
+        lines.append("Requested components — give EVERY one an explicit verdict:\n"
+                     + "\n".join(f"- {c}" for c in answer_plan["requested_components"]))
+        lines.append(
+            "A component IS supported when the Retrieved Context states a policy for the item "
+            "ITSELF or for a general CATEGORY it clearly belongs to (e.g. liquids, flammable / "
+            "hazardous goods). When the Context gives a category policy, apply it to every listed "
+            "item in that category, using the SAME verdict and wording the Context uses — do not "
+            "leave such an item unconfirmed just because it is not named literally. Mark a "
+            "component 'ยังไม่ยืนยัน' ONLY when neither the item nor any category it belongs to has "
+            "a policy in the Context; never reply that there is no information for the whole question.")
+        lines.append(
+            "You may use ordinary knowledge to decide which general category a named item belongs "
+            "to (perfume / shampoo / detergent are liquids; a drinking glass is fragile glassware, "
+            "not a liquid); but the accept / prohibit verdict itself must come from a policy "
+            "actually present in the Retrieved Context — for the item or its category — never "
+            "from outside knowledge.")
     shape = answer_plan.get("response_shape")
     if shape:
         lines.append(f"Response shape: {shape}")

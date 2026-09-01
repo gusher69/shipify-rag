@@ -394,6 +394,13 @@ def _detect_marker(normalized: str) -> Optional[str]:
     if len(normalized) <= _BARE_LENGTH_LIMIT and not _extract_topic(normalized):
         if _extract_attribute(normalized) or _extract_transport(normalized) or _extract_location(normalized):
             return "bare-entity"
+    # Bare NOUN + "ล่ะ/ละ" with no "แล้ว" wrapper — "น้ำหอมล่ะ", "แชมพูล่ะ"
+    # (P1.2A product follow-up). Only ever acted on when the immediately
+    # preceding USER turn is an import-eligibility question (guarded in
+    # resolve_conversation) — otherwise returned completely unchanged, so
+    # ordinary chit-chat ending in "ละ" is never rewritten.
+    if re.search(r"(ล่ะ|ละ)$", normalized) and len(normalized) <= _BARE_LENGTH_LIMIT + 6:
+        return "bare-suffix-followup"
     return None
 
 
@@ -492,6 +499,17 @@ def _compose(merged: Dict[str, Optional[str]], core: str, prev_q: Optional[str])
     if attribute == "location" and location:
         return f"ขอแผนที่{location}", 0.7
 
+    # Product-eligibility follow-up (P1.2A) — "แบตเตอรี่นำเข้าได้ไหม" then
+    # "แล้วแชมพูล่ะ" / "น้ำหอมล่ะ": the previous USER turn is an
+    # import-eligibility question and `core` is a bare product noun with no
+    # recognised attribute/transport/location of its own — carry the
+    # eligibility intent forward. `_ELIGIBILITY_INTENT_RE` is defined later
+    # in this module (resolved at call time, module fully loaded).
+    if (prev_q and _ELIGIBILITY_INTENT_RE.search(prev_q)
+            and not (attribute or transport or location)
+            and 1 <= len(core) <= 20):
+        return f"{core}นำเข้าได้ไหม", 0.8
+
     legacy = _legacy_resolve(core, prev_q) if prev_q else None
     if legacy:
         return legacy, 0.6
@@ -573,6 +591,11 @@ def resolve_conversation(question: str, history: Optional[List[Dict]] = None) ->
     if not prev_q:
         return _empty_result(original, marker, 1.0, prev_topic)
 
+    if marker == "bare-suffix-followup" and not (prev_q and _ELIGIBILITY_INTENT_RE.search(prev_q)):
+        # Not a product-eligibility follow-up context — leave the message
+        # exactly as typed (followup_type None), never guess a rewrite.
+        return _empty_result(original, None, 1.0, prev_topic)
+
     if marker in ("meta-summary-followup", "meta-detail-followup",
                   "meta-simplify-followup", "meta-partial-followup"):
         # Reuses ONLY the previous USER question's own wording — never
@@ -610,6 +633,10 @@ def resolve_conversation(question: str, history: Optional[List[Dict]] = None) ->
         core = normalized[len("แล้ว"):].strip()
     else:
         core = normalized
+    # Trailing "ล่ะ/ละ" particle carries no meaning once it's been used as
+    # the follow-up marker — strip it so a bare-noun follow-up ("น้ำหอมล่ะ")
+    # composes cleanly.
+    core = re.sub(r"(ล่ะ|ละ)$", "", core).strip()
 
     cur_entities = extract_entities(core)
     cur_excluded = extract_excluded_entities(core)
@@ -639,19 +666,23 @@ def resolve_conversation(question: str, history: Optional[List[Dict]] = None) ->
             carried.pop(key, None)
 
     # Transport facet — single source of truth (requested_transport_modes).
-    # A rate/duration follow-up is narrowed to one mode ONLY when THIS
-    # turn's own core names exactly one. Names none ("แล้วเรทนำเข้า
-    # เท่าไหร่คะ") -> generic, drop any carried mode. Names two ("ทางรถ
-    # กับทางเรือกี่วัน") -> keep it generic too (retrieval + the answer
-    # plan cover both). The current message is authoritative over a mode
-    # carried from a prior turn.
+    # This turn names exactly one mode -> use it. This turn names two, OR
+    # is a "แล้ว…"/contrastive wrapper that switches to a new GENERIC facet
+    # ("แล้วเรทนำเข้าเท่าไหร่คะ" after a road-duration answer) -> drop any
+    # stale carried mode so it isn't narrowed. But a BARE attribute
+    # follow-up ("กี่วัน" / "เท่าไหร่") that merely supplies the missing
+    # attribute for the SAME established context ("ทางรถส่งจากจีนมาไทย" ->
+    # "กี่วัน") must KEEP the carried mode.
     if merged.get("attribute") in ("rate", "duration"):
         cur_modes = requested_transport_modes(core)
+        _wrapper_switch = (marker or "").startswith("แล้ว") or "contrastive" in (marker or "")
         if len(cur_modes) == 1:
             merged["transport"] = cur_modes[0]
-        else:
+            carried.pop("transport", None)
+        elif len(cur_modes) >= 2 or _wrapper_switch:
             merged.pop("transport", None)
-        carried.pop("transport", None)
+            carried.pop("transport", None)
+        # else: bare attribute follow-up — keep the carried transport mode.
 
     resolved, confidence = _compose(merged, core, prev_q)
 
@@ -670,3 +701,245 @@ def resolve_followup_query(question: str, history: Optional[List[Dict]] = None) 
     caller that only needs the resolved string (no Explainability
     detail) — same public contract as before Conversation Resolver 2.0."""
     return resolve_conversation(question, history)["resolved_question"]
+
+
+# ── P1.2A — RequestSpec: minimal multi-valued request representation ────
+# A real customer can put several components in one message ("แบตเตอรี่
+# น้ำหอม น้ำยาซักผ้า นำเข้าได้ไหม", "ทางรถกับทางเรือราคาเท่าไหร่ ใช้กี่วัน",
+# "ใบกำกับออกได้ไหม แล้วโหลดจากไหน"). The single-value entity model above
+# stays exactly as-is for every existing caller; this is an ADDITIVE
+# decomposition read by services/answer_planner.py and
+# services/playground_orchestrator.py to (a) tell synthesis about every
+# requested component and (b) run multi-target retrieval ONLY when there
+# genuinely is more than one evidence target. Deterministic, no LLM call.
+# Reuses requested_transport_modes() as the single transport source of
+# truth — never a second transport parser.
+from dataclasses import dataclass, field
+
+# Import-eligibility intent ("<goods> นำเข้าได้ไหม" / "ส่งเข้าไทยได้ไหม").
+# Negative lookbehind on "ฝาก" keeps the ฝากนำเข้า *service* question
+# ("ฝากนำเข้าได้ไหมคะ") out of this.
+_ELIGIBILITY_INTENT_RE = re.compile(
+    r"(?<!ฝาก)นำเข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)"
+    r"|ส่งเข้าไทยได้(?:ไหม|มั้ย)|ห้ามนำเข้า(?:ไหม|มั้ย|หรือเปล่า)"
+)
+# Trailing eligibility phrase stripped off a product list to leave just
+# the goods: "แบตเตอรี่ น้ำหอม นำเข้าได้ไหมคะ" -> "แบตเตอรี่ น้ำหอม".
+_ELIGIBILITY_TAIL_RE = re.compile(
+    r"\s*(?:พวก|สินค้า|ของ)?\s*(?:นำเข้า|ส่งเข้าไทย)\s*"
+    r"ได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)\s*(?:คะ|ครับ|ค่ะ|บ้าง)?\s*$"
+)
+_LEADING_ASK_RE = re.compile(r"^\s*(?:ขอถามว่า|อยากถามว่า|สอบถามว่า|ถามว่า|รบกวนถามว่า)\s*")
+_LIST_SEP_RE = re.compile(r"\s*(?:แล้วก็|และก็|และ|กับ|,|、|/)\s*|\s+")
+_LIST_FILLER = {"ก็", "แล้ว", "และ", "กับ", "พวก", "สินค้า", "ของ", "หรือ", "รวมถึง"}
+
+_MINIMUM_RE = re.compile(r"ขั้นต่ำ|ขั้นตํ่า|ขั้นตำ่|ยอดขั้นต่ำ|minimum", re.IGNORECASE)
+
+_COMPARISON_MAP = [
+    (re.compile(r"ถูกกว่า|ถูกที่สุด|คุ้มกว่า|ประหยัดกว่า|ราคาดีกว่า"), "cheaper"),
+    (re.compile(r"แพงกว่า|แพงที่สุด|แพงสุด"), "more_expensive"),
+    (re.compile(r"เร็วกว่า|เร็วที่สุด|ไวกว่า|เร็วสุด"), "faster"),
+    (re.compile(r"ช้ากว่า|ช้าที่สุด|นานกว่า|นานสุด"), "slower"),
+]
+_COMPARISON_FACET = {"cheaper": "rate", "more_expensive": "rate", "faster": "duration", "slower": "duration"}
+
+# Multi-topic sentence split — an explicit "แล้ว/และ" JOIN between two
+# self-contained sub-questions. A bare short follow-up ("แล้วเรือล่ะ")
+# never survives the >=2 substantive-segment test below.
+_SUBQ_SPLIT_RE = re.compile(r"\s+(?:แล้ว|และ|อีกอย่าง|อีกเรื่อง)\s*")
+_SUBQ_MARKER_RE = re.compile(r"ไหม|มั้ย|ยังไง|อย่างไร|จากไหน|ที่ไหน|อะไร|กี่|เท่าไหร่|เท่าไร|หรือไม่|คืนได้|ได้ไม")
+
+# Explicit correction: "ไม่ได้ถาม X ... ถาม/เอา/หมายถึง Y".
+_NEG_CORR_RE = re.compile(r"ไม่(?:ได้ถาม|เอา|ใช่|ต้องการ)\s*(.{1,12}?)(?=\s|$|ถาม|เอา|หมายถึง)")
+_POS_CORR_RE = re.compile(r"(?<!ไม่ได้)(?<!ไม่)(?:ถาม|เอา|หมายถึง)\s*(.{1,12}?)(?=\s|$|ไม่)")
+_COUPON_MINE_RE = re.compile(r"คูปอง.*(?:ของผม|ของฉัน|ของดิฉัน|ที่ผมมี|ที่ฉันมี)|(?:ของผม|ของฉัน).*คูปอง")
+_COUPON_USAGE_RE = re.compile(r"วิธีใช้|ใช้ยังไง|ใช้งาน|ใช้อย่างไร")
+
+
+def _facets_in(text: str) -> List[str]:
+    out: List[str] = []
+    if _RATE_RE.search(text):
+        out.append("rate")
+    if _DURATION_RE.search(text):
+        out.append("duration")
+    if _MINIMUM_RE.search(text):
+        out.append("minimum")
+    return out
+
+
+def _entities_in(text: str) -> List[str]:
+    """Product/goods nouns named in an import-eligibility message. Empty
+    for any message that is not an eligibility question — this never fires
+    for a normal rate/duration/contact question."""
+    if not _ELIGIBILITY_INTENT_RE.search(text):
+        return []
+    body = _ELIGIBILITY_TAIL_RE.sub("", text)
+    body = _LEADING_ASK_RE.sub("", body).strip()
+    ents: List[str] = []
+    for raw in _LIST_SEP_RE.split(body):
+        p = re.sub(r"^(?:ก็|แล้ว|และ|กับ)\s*", "", (raw or "").strip()).strip().strip(",")
+        if len(p) < 2 or p in _LIST_FILLER:
+            continue
+        # A residual verb/question fragment is not a product noun.
+        if _ELIGIBILITY_INTENT_RE.search(p) or _SUBQ_MARKER_RE.search(p):
+            continue
+        if p not in ents:
+            ents.append(p)
+    return ents
+
+
+def _sub_questions_in(text: str) -> List[str]:
+    segs = [s.strip() for s in _SUBQ_SPLIT_RE.split(text or "") if s and s.strip()]
+    substantive = [s for s in segs if _SUBQ_MARKER_RE.search(s) or len(s) >= 12]
+    return substantive if len(substantive) >= 2 else []
+
+
+def _corrections_in(text: str) -> Dict:
+    c = {
+        "removed_facets": [], "added_facets": [],
+        "removed_transport": [], "added_transport": [],
+        "removed_location": [], "added_location": [],
+        "interpretation": None,
+    }
+    if not re.search(r"ไม่(?:ได้ถาม|เอา|ใช่|ต้องการ)|หมายถึง", text or ""):
+        return c
+    for span in _NEG_CORR_RE.findall(text):
+        c["removed_facets"] += _facets_in(span)
+        c["removed_transport"] += requested_transport_modes(span)
+        loc = _LOCATION_RE.search(span)
+        if loc:
+            c["removed_location"].append(loc.group(0))
+        if _COUPON_MINE_RE.search(span) or ("คูปอง" in span and re.search(r"ของผม|ของฉัน", span)):
+            c["interpretation"] = "rag"
+    for span in _POS_CORR_RE.findall(text):
+        c["added_facets"] += _facets_in(span)
+        c["added_transport"] += requested_transport_modes(span)
+        loc = _LOCATION_RE.search(span)
+        if loc:
+            c["added_location"].append(loc.group(0))
+        if _COUPON_USAGE_RE.search(span):
+            c["interpretation"] = "rag"
+    for k in ("removed_facets", "added_facets", "removed_transport", "added_transport",
+              "removed_location", "added_location"):
+        c[k] = list(dict.fromkeys(c[k]))
+    return c
+
+
+@dataclass
+class RequestSpec:
+    entities: List[str] = field(default_factory=list)
+    facets: List[str] = field(default_factory=list)
+    transport_modes: List[str] = field(default_factory=list)
+    sub_questions: List[str] = field(default_factory=list)
+    comparison: Optional[str] = None
+    corrections: Dict = field(default_factory=dict)
+
+    def effective_facets(self) -> List[str]:
+        """Facets after applying an explicit in-message correction
+        ("ไม่ได้ถามราคา ถามระยะเวลา" -> ['duration'])."""
+        added = self.corrections.get("added_facets") or []
+        removed = set(self.corrections.get("removed_facets") or [])
+        if added:
+            return list(added)
+        return [f for f in self.facets if f not in removed] or list(self.facets)
+
+    def is_multi_component(self) -> bool:
+        facets = self.effective_facets()
+        return bool(
+            len(self.entities) >= 2
+            or len(self.sub_questions) >= 2
+            or (len(self.transport_modes) >= 2 and (facets or self.comparison))
+            or len(facets) >= 2
+        )
+
+
+def decompose_request(question: str, history: Optional[List[Dict]] = None,
+                       raw_question: Optional[str] = None) -> RequestSpec:
+    """Deterministic multi-component decomposition of ONE resolved user
+    message. `question` should be the post-follow-up-resolution / canonical
+    text (so "แล้วแชมพูล่ะ" is already "แชมพูนำเข้าได้ไหม").
+
+    `raw_question` (the customer's own never-rewritten wording) is consulted
+    ALONGSIDE `question` for transport-mode and comparison detection only —
+    same defensive pattern services/answer_planner.py already uses, since
+    spell correction can corrupt a bare transport word ("เรือ" -> "เรทอ")
+    before this layer ever sees it."""
+    text = question or ""
+    raw = raw_question or ""
+    corrections = _corrections_in(text)
+
+    modes = list(dict.fromkeys(requested_transport_modes(text) + requested_transport_modes(raw)))
+    comparison = None
+    for rx, label in _COMPARISON_MAP:
+        if rx.search(text) or rx.search(raw):
+            comparison = label
+            break
+    if comparison and len(modes) < 2 and history:
+        seen: List[str] = []
+        for turn in history:
+            if turn.get("role") != "user":
+                continue
+            for m in requested_transport_modes(turn.get("content") or ""):
+                if m not in seen:
+                    seen.append(m)
+        if len(seen) >= 2:
+            modes = seen
+
+    return RequestSpec(
+        entities=_entities_in(text),
+        facets=_facets_in(text),
+        transport_modes=modes,
+        sub_questions=_sub_questions_in(text),
+        comparison=comparison,
+        corrections=corrections,
+    )
+
+
+_FACET_QUERY = {
+    "rate": ("อัตราค่าขนส่งทาง{m}เท่าไหร่", "ค่าขนส่งราคาเท่าไหร่"),
+    "duration": ("ระยะเวลาขนส่งทาง{m}ใช้กี่วัน", "ขนส่งใช้เวลากี่วัน"),
+    "minimum": ("ขนส่งทาง{m}มีขั้นต่ำไหม", "การขนส่งมีขั้นต่ำไหม"),
+}
+
+
+def build_request_components(spec: RequestSpec) -> List["tuple[str, str]"]:
+    """[(component_label, focused_retrieval_query), ...] — empty when the
+    request is single-component (caller then uses the existing single
+    retrieval path unchanged). Never composes an LLM call."""
+    comps: List["tuple[str, str]"] = []
+    facets = spec.effective_facets()
+
+    if len(spec.entities) >= 2:
+        for e in spec.entities:
+            comps.append((f"{e} / eligibility", f"{e} นำเข้าได้ไหม สินค้าต้องห้าม ของเหลว"))
+        return comps
+
+    if len(spec.transport_modes) >= 2 and (facets or spec.comparison):
+        use_facets = facets or [_COMPARISON_FACET.get(spec.comparison, "rate")]
+        for m in spec.transport_modes:
+            for f in use_facets:
+                tmpl, _ = _FACET_QUERY.get(f, ("การขนส่งทาง{m}", ""))
+                comps.append((f"{m} / {f}", tmpl.format(m=m)))
+        return comps
+
+    if len(facets) >= 2:
+        for f in facets:
+            _, generic = _FACET_QUERY.get(f, ("", ""))
+            comps.append((f, generic or f))
+        return comps
+
+    if len(spec.sub_questions) >= 2:
+        # Carry the first sub-question's subject noun into the later,
+        # terser fragments ("ใบกำกับออกได้ไหม" + "แล้วโหลดจากไหน" -> the
+        # 2nd retrieval query / label becomes "ใบกำกับ โหลดจากไหน") so an
+        # elliptical second question is not searched / shown context-free.
+        subj = re.split(r"ออก|ใช้|โหลด|ดาวน์โหลด|มี|คืน|ได้|ยังไง|จาก|ไหม|เท่าไหร่|กี่",
+                        spec.sub_questions[0])[0].strip()
+        for i, sq in enumerate(spec.sub_questions):
+            if i == 0 or len(subj) < 2 or subj in sq:
+                comps.append((sq, sq))
+            else:
+                comps.append((f"{sq} ({subj})", f"{subj} {sq}"))
+        return comps
+
+    return comps

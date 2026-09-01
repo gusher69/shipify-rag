@@ -639,6 +639,31 @@ def run_playground_turn(
                          f"broad={intent_result['broad_intent']}, actionable={intent_result['actionable_intent']} "
                          f"(conf={intent_result['confidence']:.2f})"))
 
+    # 0c2. Request decomposition (P1.2A, rag/query_resolution.py) —
+    #      deterministic, no LLM call. A minimal multi-valued view of the
+    #      resolved/canonical question (products, facets, transport modes,
+    #      sub-questions, comparison, in-message corrections). Drives
+    #      multi-target retrieval + the Answer Planner's completeness
+    #      instruction ONLY when there is genuinely more than one evidence
+    #      target; a normal single-component question is a complete no-op.
+    from rag.query_resolution import decompose_request, build_request_components
+    request_spec = decompose_request(canonical_question, history, raw_question=question)
+    request_components = build_request_components(request_spec)
+    multi_component_request = len(request_components) >= 2
+    stages.append(Stage("Request Decomposition", "success", 0.0,
+                         (f"{len(request_components)} components: "
+                          + "; ".join(l for l, _ in request_components))
+                         if multi_component_request else "single-component — existing retrieval path"))
+
+    # For a multi-component turn the single-intent Canonical Query Rewrite
+    # (e.g. it collapsed "รถกับเรืออันไหนถูกกว่า" -> "อัตราค่าขนส่งทางรถ
+    # เท่าไหร่") is the WRONG question to hand synthesis — the Answer Plan
+    # already carries every component. Use the customer's own wording for
+    # the prompt/plan instead; retrieval is the multi-target union either
+    # way, and the routing gates below still read canonical_question.
+    synthesis_question = (question if (multi_component_request and canonical_result["rewrite_applied"])
+                          else canonical_question)
+
     # Conversation State refinement — the FINAL, most precise
     # actionable_intent/attribute (computed just above, on the final
     # canonical_question) supersedes build_conversation_state()'s
@@ -723,10 +748,46 @@ def run_playground_turn(
         effective_top_k = max(top_k, RAG_SUMMARY_TOP_K)
 
     try:
-        chunks = rag.retrieve(canonical_question, top_k=effective_top_k, trace=retrieval_trace,
-                               excluded_terms=excluded_terms or None,
-                               actionable_intent=intent_result["actionable_intent"],
-                               original_question=corrected_question)
+        if multi_component_request:
+            # Multi-target retrieval (P1.2A) — one focused query per
+            # component through the EXISTING retrieve(), then union +
+            # dedup + a strict overall cap. No new LLM calls. The single
+            # top-level canonical_question path is untouched for every
+            # normal message.
+            per_component_k = max(2, effective_top_k // 2)
+            overall_cap = min(10, 3 + 2 * len(request_components))
+            merged_chunks: List[Dict] = []
+            seen_keys = set()
+            for _label, _cquery in request_components:
+                try:
+                    _cc = rag.retrieve(_cquery, top_k=per_component_k, trace=None,
+                                        excluded_terms=excluded_terms or None,
+                                        actionable_intent=intent_result["actionable_intent"],
+                                        original_question=_cquery)
+                except Exception:
+                    _cc = []
+                for _c in _cc:
+                    _key = _c.get("chunk_id") or (_c.get("text") or "")[:160]
+                    if _key in seen_keys:
+                        for _ex in merged_chunks:
+                            if (_ex.get("chunk_id") or (_ex.get("text") or "")[:160]) == _key:
+                                _ex.setdefault("_components", [])
+                                if _label not in _ex["_components"]:
+                                    _ex["_components"].append(_label)
+                                break
+                        continue
+                    seen_keys.add(_key)
+                    _c.setdefault("_components", []).append(_label)
+                    merged_chunks.append(_c)
+            chunks = merged_chunks[:overall_cap]
+            retrieval_trace.append({"stage": "multi_target_retrieval", "status": "success",
+                                     "duration_ms": (time.time() - t0) * 1000,
+                                     "detail": f"{len(request_components)} components -> {len(chunks)} unioned chunks"})
+        else:
+            chunks = rag.retrieve(canonical_question, top_k=effective_top_k, trace=retrieval_trace,
+                                   excluded_terms=excluded_terms or None,
+                                   actionable_intent=intent_result["actionable_intent"],
+                                   original_question=corrected_question)
         services_used.append({"name": "RAGService", "status": "success"})
     except Exception as e:
         chunks = []
@@ -960,9 +1021,11 @@ def run_playground_turn(
     #     what's already present in `context_chunks`.
     t0 = time.time()
     answer_plan = plan_answer(
-        canonical_question, intent_result["actionable_intent"], intent_result["requested_attributes"],
+        synthesis_question, intent_result["actionable_intent"], intent_result["requested_attributes"],
         intent_result["entities"], context_chunks, retrieval_confidence_result["retrieval_confidence"], policy_set,
         raw_question=question,
+        requested_components=[l for l, _ in request_components] if multi_component_request else None,
+        comparison=request_spec.comparison,
     )
     stages.append(Stage("Answer Planner", "success", (time.time() - t0) * 1000,
                          f"goal={answer_plan['answer_goal']!r}, shape={answer_plan['response_shape']}"
@@ -976,7 +1039,7 @@ def run_playground_turn(
     # history contaminating RAG answers).
     t0 = time.time()
     context = rag.build_context(context_chunks)
-    built_prompt = build_prompt(canonical_question, context, template_id=template_id, policy_notes=policy.notes,
+    built_prompt = build_prompt(synthesis_question, context, template_id=template_id, policy_notes=policy.notes,
                                  history=history,
                                  retrieval_confidence=retrieval_confidence_result["retrieval_confidence"],
                                  answer_plan=answer_plan)
@@ -1128,7 +1191,20 @@ def run_playground_turn(
             input_tokens = output_tokens = 0
             llm_latency = 0.0
             llm_failed = True
-    elif conf_result.answerability == "no_information":
+    elif conf_result.answerability == "no_information" and not (
+            multi_component_request and any(
+                c.get("has_literal_evidence") or c.get("is_faq_exact")
+                or c.get("classification") in ("direct_evidence", "structured_deterministic")
+                for c in chunks)):
+        # Partial answerability (P1.2A) — a MULTI-COMPONENT request with at
+        # least one component that has literal evidence goes to synthesis
+        # (the Answer Plan tells the LLM to answer the supported components
+        # and mark only the unsupported ones as unconfirmed), instead of a
+        # single blanket "no information" reply. A single-component
+        # question, or a multi-component one with zero literal evidence
+        # anywhere, still takes the deterministic safe-fallback unchanged —
+        # no global confidence threshold is touched.
+        #
         # Every message reaching this branch already matched the company/
         # operational/urgency/complaint check above (the General Chat
         # Fallback branch, immediately above, is what catches everything
