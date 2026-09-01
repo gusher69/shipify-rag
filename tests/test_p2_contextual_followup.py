@@ -8,6 +8,7 @@ separately/live, not here.
 import unittest
 
 from rag.query_resolution import decompose_request
+from rag.query_understanding import classify_actionable_intent
 from services.answer_planner import (
     decide_followup, render_followup_question, plan_answer,
 )
@@ -349,3 +350,35 @@ class FirmCategoryHedge(unittest.TestCase):
         from services.playground_orchestrator import _firm_prohibited_category_hedge
         s = "- **x**: จัดเป็นของเหลว ซึ่งอาจเข้าข่ายสินค้าต้องห้าม"
         self.assertEqual(_firm_prohibited_category_hedge(s, "no policy here"), s)
+
+
+class VerbFirstEligibility(unittest.TestCase):
+    """'(เรา)สามารถนำเข้า <goods> ได้ไหม' — product AFTER the verb."""
+    def _spec(self, q):
+        return decompose_request(q, raw_question=q)
+
+    def test_battery_verb_first_is_eligibility(self):
+        from rag.query_resolution import single_eligibility_component
+        s = self._spec("สามารถนำเข้า แบตเตอรี่ได้ไหม")
+        self.assertEqual(s.entities, ["แบตเตอรี่"])
+        self.assertIsNotNone(single_eligibility_component(s))
+        self.assertEqual(classify_actionable_intent("สามารถนำเข้า แบตเตอรี่ได้ไหม")["actionable_intent"],
+                          "prohibited_goods")
+
+    def test_verb_first_liquid(self):
+        self.assertEqual(self._spec("สามารถนำเข้า น้ำหอมได้ไหม").entities, ["น้ำหอม"])
+
+    def test_samarth_is_not_transport(self):
+        from rag.query_resolution import requested_transport_modes
+        self.assertEqual(requested_transport_modes("สามารถนำเข้า แบตเตอรี่ได้ไหม"), [])
+        self.assertEqual(self._spec("สามารถนำเข้า แบตเตอรี่ได้ไหม").transport_modes, [])
+
+    def test_fak_service_still_excluded(self):
+        self.assertEqual(self._spec("ฝากนำเข้าแบตเตอรี่ได้ไหม").entities, [])
+
+    def test_generic_import_from_china_not_eligibility(self):
+        self.assertEqual(self._spec("นำเข้าจากจีนได้ไหม").entities, [])
+        self.assertEqual(self._spec("นำเข้าสินค้าจากจีนได้ไหม").entities, [])
+
+    def test_product_first_unchanged(self):
+        self.assertEqual(self._spec("แบตเตอรี่ นำเข้าได้ไหม").entities, ["แบตเตอรี่"])

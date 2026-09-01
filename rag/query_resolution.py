@@ -719,10 +719,19 @@ from dataclasses import dataclass, field
 # Import-eligibility intent ("<goods> นำเข้าได้ไหม" / "ส่งเข้าไทยได้ไหม").
 # Negative lookbehind on "ฝาก" keeps the ฝากนำเข้า *service* question
 # ("ฝากนำเข้าได้ไหมคะ") out of this.
+# Verb-first eligibility form — "(เรา)สามารถนำเข้า <goods> ได้ไหม" — the
+# product sits BETWEEN the verb and "ได้ไหม", not before it. The negative
+# lookahead keeps a generic service question ("นำเข้าจากจีนได้ไหม",
+# "นำเข้าสินค้าจากจีนได้ไหม") out; "ฝากนำเข้า" is out via (?<!ฝาก).
+_VERB_FIRST_ELIG_RE = re.compile(
+    r"(?<!ฝาก)นำเข้า\s*(?P<goods>(?!จาก|มาจาก|สินค้าจาก|ของจาก|เข้ามาจาก)\S[^\n]{0,24}?)\s*"
+    r"ได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)\s*(?:คะ|ครับ|ค่ะ)?\s*$"
+)
 _ELIGIBILITY_INTENT_RE = re.compile(
     r"(?<!ฝาก)นำเข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)"
     r"|(?<!นำ)เข้าได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)"
     r"|ส่งเข้าไทยได้(?:ไหม|มั้ย)|ห้ามนำเข้า(?:ไหม|มั้ย|หรือเปล่า)|เอาเข้า(?:มา)?ได้(?:ไหม|มั้ย)"
+    r"|(?<!ฝาก)นำเข้า\s*(?!จาก|มาจาก|สินค้าจาก|ของจาก)\S[^\n]{0,24}?ได้(?:ไหม|มั้ย|มัย|รึเปล่า|หรือเปล่า|หรือไม่|ป่าว)\s*(?:คะ|ครับ|ค่ะ)?\s*$"
 )
 # Trailing eligibility phrase stripped off a product list to leave just
 # the goods: "แบตเตอรี่ น้ำหอม นำเข้าได้ไหมคะ" -> "แบตเตอรี่ น้ำหอม".
@@ -785,7 +794,12 @@ def _entities_in(text: str) -> List[str]:
     for a normal rate/duration/contact question."""
     if not _ELIGIBILITY_INTENT_RE.search(text):
         return []
-    body = _ELIGIBILITY_TAIL_RE.sub("", text)
+    _vf = _VERB_FIRST_ELIG_RE.search(text)
+    if _vf:
+        # "(สามารถ)นำเข้า <goods> ได้ไหม" — the goods are the middle span.
+        body = _vf.group("goods")
+    else:
+        body = _ELIGIBILITY_TAIL_RE.sub("", text)
     body = _LEADING_ASK_RE.sub("", body).strip()
     ents: List[str] = []
     for raw in _LIST_SEP_RE.split(body):
