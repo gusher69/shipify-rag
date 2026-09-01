@@ -252,6 +252,64 @@ _LEADING_NOINFO_HEDGE_RE = re.compile(
     r"[^\n。]*?(?:ในระบบ)?\s*(?:ค่ะ|ครับ|นะคะ|นะครับ)[\s,–\-]*"
 )
 
+_PRODUCT_ANSWER_NOUN_OK_RE = re.compile(r"^[฀-๿A-Za-z0-9 ]{2,25}$")
+
+# A GENUINE "we cannot import this" verdict — narrower than
+# _P2_PROHIBITED_VERDICT_RE, which also matches a NEGATED list reference
+# ("ไม่อยู่ในรายการสินค้าที่ห้ามนำเข้า"). Used only to decide whether a
+# product-answer continuation should keep an eligibility verdict.
+_P51_FIRM_PROHIBITED_RE = re.compile(
+    r"ทางเราไม่สามารถนำเข้า|ไม่สามารถนำเข้าสินค้า|ไม่สามารถนำเข้าได้|นำเข้าไม่ได้|"
+    r"ไม่รับนำเข้า|เป็นสินค้าต้องห้าม|จัดเป็นสินค้าต้องห้าม|ห้ามนำเข้าเด็ดขาด")
+
+
+def _product_answer_continuation_noun(followup_type: Optional[str], history, single_elig,
+                                       request_spec) -> Optional[str]:
+    """P5.1 — this turn is a bare product reply to the assistant's OWN
+    immediately-preceding `elicit_product_type` question (Clarification
+    State Engine resolved it), so it is a CONTEXTUAL PRODUCT ANSWER, not a
+    standalone eligibility question. Returns the product noun, or None.
+    Reuses the existing P2 purpose marker (`_purpose_recently_served`) and
+    the eligibility RequestSpec — no new dialogue engine."""
+    if followup_type != "clarification-answer":
+        return None
+    try:
+        from services.answer_planner import _purpose_recently_served
+        if not _purpose_recently_served("elicit_product_type", history):
+            return None
+    except Exception:
+        return None
+    noun = ""
+    if single_elig:
+        noun = (single_elig[0].split(" / ")[0] or "").strip()
+    if not noun:
+        ents = list(getattr(request_spec, "entities", []) or [])
+        noun = (ents[0] if ents else "").strip()
+    if noun and _PRODUCT_ANSWER_NOUN_OK_RE.match(noun):
+        return noun
+    return None
+
+
+def _product_answer_service_continuation(noun: str, *, lead_stage: Optional[str],
+                                          sentiment_status: Optional[str], history,
+                                          transport_known: bool) -> "tuple[str, str]":
+    """Deterministic Branch-B reply: acknowledge the product, then ONE
+    useful Shipify service next-step. Never invents an eligibility verdict;
+    road/sea are trusted Shipify service facts. NEGATIVE -> acknowledge
+    only (P5 suppression). HOT / known-transport / prohibited-category
+    noun / already-asked -> no transport question."""
+    stage = (lead_stage or "").upper()
+    if (sentiment_status or "").upper() == "NEGATIVE":
+        return f"รับทราบค่ะ เป็น{noun}นะคะ 😊 หากต้องการให้ช่วยตรวจสอบเพิ่มเติม แจ้งได้เลยค่ะ", "negative-ack-only"
+    ack = (f"รับทราบค่ะ เป็น{noun}นะคะ 😊 หากต้องการนำเข้ากับ Shipify "
+           f"มีบริการขนส่งทั้งทางรถและทางเรือค่ะ")
+    from services.answer_planner import render_followup_question, _purpose_recently_served
+    if (stage != "HOT" and not transport_known and noun not in _PROHIBITED_CATEGORY_WORDS
+            and not _purpose_recently_served("elicit_transport_mode", history)):
+        q = render_followup_question("elicit_transport_mode")
+        return ack + "\n\n" + q, "appended:elicit_transport_mode"
+    return ack, "ack-service-only"
+
 
 def _strip_contradictory_noinfo_hedge(answer_text: str, answerability: str) -> str:
     """Deterministic false-hedge suppression (2026-09-01). Confirmed live:
@@ -1225,6 +1283,19 @@ def run_playground_turn(
                          + (f", followup={_fu['purpose']}" if _fu.get("needed") else "")))
     query_expansion_debug["followup"] = answer_plan.get("followup")
 
+    # P5.1 — is THIS turn a bare product reply to the assistant's own
+    # elicit_product_type question? (Clarification State Engine already
+    # resolved it.) Computed once; consulted by BOTH the deterministic
+    # no_information branch and the synthesis "leaned-allowed but
+    # unproven" rewrite below, so a contextual product answer with no
+    # trusted policy continues the service conversation instead of a
+    # "ไม่มีข้อมูลยืนยัน" reply. A prohibited product (น้ำหอม -> liquid)
+    # keeps its prohibited verdict and never reaches either path.
+    _pac_noun = _product_answer_continuation_noun(
+        conversation.get("followup_type"), history, single_elig, request_spec)
+    _pac_transport_known = bool(merged_entities.get("transport")
+                                 or (request_spec.transport_modes or []))
+
     # 5. Prompt Builder — needs the retrieved context, so it runs AFTER retrieval.
     # retrieval_confidence (Phase 2 Part 3, computed just above) is passed
     # through so build_prompt() can suppress/summarize conversation
@@ -1451,14 +1522,28 @@ def run_playground_turn(
         # sentence reusing the SAME safe phrasing families CS-02/CS-03
         # already established elsewhere in the prompt (never invents a
         # cause, never claims a status, never escalates).
-        answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
-        if _COMPLAINT_SIGNAL_RE.search(question or ""):
-            answer_text = "รับทราบเรื่องที่แจ้งมาค่ะ " + answer_text + " หากมีเลขที่คำสั่งซื้อหรือรายละเอียดเพิ่มเติม รบกวนแจ้งเพิ่มเติมได้เลยค่ะ จะช่วยตรวจสอบให้ค่ะ"
-        elif _URGENCY_SIGNAL_RE.search(question or ""):
-            answer_text = "เข้าใจว่าเรื่องนี้เร่งด่วนสำหรับคุณค่ะ " + answer_text + " จะติดตามและแจ้งความคืบหน้าให้เร็วที่สุดค่ะ"
-        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
-                             "no chunk carries reliable evidence for this question (Answerability Gate) — "
-                             "deterministic safe-fallback used, no LLM call, no chunks used as evidence"))
+        # P5.1 — a bare product reply to the assistant's own
+        # elicit_product_type question that carries NO trusted prohibited-
+        # policy evidence is a CONTEXTUAL PRODUCT ANSWER, not a standalone
+        # eligibility question — it must continue the Shipify service
+        # conversation, never answer "no information". (A prohibited product
+        # like น้ำหอม surfaces its liquid-policy evidence and never reaches
+        # this no_information branch.)
+        if _pac_noun:
+            answer_text, _pac_note = _product_answer_service_continuation(
+                _pac_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
+                history=history, transport_known=_pac_transport_known)
+            stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                                 f"P5.1 product-answer continuation ({_pac_note}) — no LLM call"))
+        else:
+            answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
+            if _COMPLAINT_SIGNAL_RE.search(question or ""):
+                answer_text = "รับทราบเรื่องที่แจ้งมาค่ะ " + answer_text + " หากมีเลขที่คำสั่งซื้อหรือรายละเอียดเพิ่มเติม รบกวนแจ้งเพิ่มเติมได้เลยค่ะ จะช่วยตรวจสอบให้ค่ะ"
+            elif _URGENCY_SIGNAL_RE.search(question or ""):
+                answer_text = "เข้าใจว่าเรื่องนี้เร่งด่วนสำหรับคุณค่ะ " + answer_text + " จะติดตามและแจ้งความคืบหน้าให้เร็วที่สุดค่ะ"
+            stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                                 "no chunk carries reliable evidence for this question (Answerability Gate) — "
+                                 "deterministic safe-fallback used, no LLM call, no chunks used as evidence"))
         services_used.append({"name": "LLMService", "status": "skipped"})
         input_tokens = output_tokens = 0
         llm_latency = 0.0
@@ -1552,6 +1637,23 @@ def run_playground_turn(
                         # "ไม่สามารถนำเข้า" and never reach here).
                         answer_text = (f"ตอนนี้ยังไม่มีข้อมูลยืนยันว่า{_prod}นำเข้าได้หรือไม่ค่ะ "
                                         f"รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ")
+                # P5.1 — this turn is a bare product ANSWER to the
+                # assistant's own elicit_product_type question, NOT an
+                # explicit "<x>นำเข้าได้ไหม". Unless trusted evidence firmly
+                # says the product is PROHIBITED (น้ำหอม -> ของเหลว ->
+                # "ไม่สามารถนำเข้า"), continue the Shipify service
+                # conversation instead of any eligibility verdict —
+                # positive ("สามารถนำเข้าได้"), unconfirmed
+                # ("ยังไม่มีข้อมูลยืนยัน") or "not on the list" are all wrong
+                # here because the customer never asked about eligibility.
+                if _pac_noun:
+                    _is_prohibited_verdict = bool(
+                        _P51_FIRM_PROHIBITED_RE.search(answer_text or "")
+                        and not _P2_UNCONFIRMED_VERDICT_RE.search(answer_text or ""))
+                    if not _is_prohibited_verdict:
+                        answer_text, _ = _product_answer_service_continuation(
+                            _pac_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
+                            history=history, transport_known=_pac_transport_known)
                 # P2 follow-up on the synthesis path — "elicit_product_type"
                 # was already phrased by the LLM (prompt); this only appends
                 # "offer_alternative_product" AFTER a real prohibited verdict
