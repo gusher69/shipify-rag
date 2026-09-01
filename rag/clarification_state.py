@@ -48,6 +48,18 @@ _ORDINAL_RE = re.compile(r"^(อันแรก|อันที่\s?1|อัน
 _BRAND_RE = re.compile(r"shipify|fasttrade", re.IGNORECASE)
 _MAX_CLARIFICATION_REPLY_LEN = 20
 
+# A message carrying its own interrogative marker (Thai "ไหม"/"มั้ย"/
+# "เท่าไหร่"/"กี่..."/"ยังไง"/"หรือเปล่า"/"รึเปล่า", or a literal "?") is a
+# complete, self-contained question that owns its own answer — it is
+# NEVER a bare reply to the assistant's previous clarification, however
+# short and however much it also happens to name a product/place. Without
+# this guard, "น้ำหอมนำเข้าได้ไหม" right after an A6 answer that ended
+# "...ต้องการขนส่งสินค้าประเภทไหนคะ" was mis-resolved as a clarification
+# answer, prepending A6's stale air-freight core into the retrieval query.
+# Same marker set the elicit-product composer below already applies
+# (`_compose_clarification_answer`) — kept in sync deliberately.
+_SELF_CONTAINED_QUESTION_RE = re.compile(r"ไหม|มั้ย|\?|ยังไง|เท่าไหร่|กี่|หรือเปล่า|รึเปล่า")
+
 
 def _is_clarification_question(text: str) -> bool:
     return bool(_CLARIFICATION_QUESTION_RE.search((text or "").strip()))
@@ -56,6 +68,10 @@ def _is_clarification_question(text: str) -> bool:
 def _looks_like_clarification_reply(text: str, entities: Dict) -> bool:
     text = (text or "").strip()
     if not text:
+        return False
+    # Current-turn authority: a fully-formed standalone question answers
+    # itself, not the prior clarification — see note on the regex above.
+    if _SELF_CONTAINED_QUESTION_RE.search(text):
         return False
     if _YES_NO_RE.match(text) or _ORDINAL_RE.match(text) or _BRAND_RE.search(text):
         return True

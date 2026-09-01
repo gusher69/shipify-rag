@@ -154,6 +154,58 @@ class TestExplicitTopicChange(unittest.TestCase):
         self.assertNotEqual(r["followup_type"], "clarification-answer")
 
 
+class TestSelfContainedQuestionIsNotAClarificationReply(unittest.TestCase):
+    """Real LINE regression (P8.1, 2026-09-02): A6 "มีขนส่งทางเครื่องบินไหม"
+    was answered with a canned FAQ ending "...ต้องการขนส่งสินค้าประเภทไหนคะ".
+    A7 "น้ำหอมนำเข้าได้ไหม" — a fully self-contained eligibility question —
+    was then mis-resolved as a bare answer to that elicitation, so the
+    resolver prepended A6's core ("มีขนส่งทางเครื่องบิน") onto the retrieval
+    query, pulling the air-freight FAQ chunk into A7's evidence and
+    bleeding "ไม่มีบริการขนส่งทางเครื่องบิน" into the perfume answer.
+
+    Invariant: a message carrying its own interrogative marker
+    (ไหม/มั้ย/เท่าไหร่/กี่/ยังไง/หรือเปล่า/?) owns its own answer and is
+    never a bare clarification reply — however short, and even if it also
+    names a product noun. A genuine bare reply ("รองเท้า") is unaffected.
+    """
+
+    _A6_AIR_FAQ_ANSWER = ("ตอนนี้ทางเรามีบริการขนส่งทางรถและทางเรือเท่านั้นค่ะ "
+                          "ยังไม่มีบริการขนส่งทางเครื่องบินนะคะ "
+                          "คุณลูกค้าต้องการขนส่งสินค้าประเภทไหนคะ")
+
+    def _hist(self, user_q, assistant_a):
+        return [{"role": "user", "content": user_q},
+                {"role": "assistant", "content": assistant_a}]
+
+    def test_a6_air_freight_then_a7_perfume_does_not_inherit(self):
+        history = self._hist("มีขนส่งทางเครื่องบินไหม", self._A6_AIR_FAQ_ANSWER)
+        r = resolve_conversation("น้ำหอมนำเข้าได้ไหม", history)
+        self.assertEqual(r["resolved_question"], "น้ำหอมนำเข้าได้ไหม")
+        self.assertNotEqual(r["followup_type"], "clarification-answer")
+        self.assertNotIn("เครื่องบิน", r["resolved_question"])
+
+    def test_reverse_perfume_then_air_freight_does_not_inherit(self):
+        history = self._hist(
+            "น้ำหอมนำเข้าได้ไหม",
+            "น้ำหอมจัดเป็นสินค้าประเภทของเหลว ทางเราไม่สามารถนำเข้าได้ค่ะ มีสินค้าอื่นที่ต้องการให้ช่วยเช็กไหมคะ")
+        r = resolve_conversation("มีขนส่งทางเครื่องบินไหม", history)
+        self.assertEqual(r["resolved_question"], "มีขนส่งทางเครื่องบินไหม")
+        self.assertNotIn("น้ำหอม", r["resolved_question"])
+
+    def test_rate_then_self_contained_product_question_does_not_inherit(self):
+        history = self._hist("ค่าขนส่งเท่าไหร่",
+                             "ทางรถ 35 บาท/กก. ทางเรือ 19 บาท/กก. ค่ะ")
+        r = resolve_conversation("น้ำหอมนำเข้าได้ไหม", history)
+        self.assertEqual(r["resolved_question"], "น้ำหอมนำเข้าได้ไหม")
+
+    def test_genuine_bare_product_reply_still_resolves_as_clarification_answer(self):
+        history = self._hist("อยากนำเข้าสินค้าจากจีน",
+                             "รับทราบค่ะ ต้องการนำเข้าสินค้าประเภทไหนคะ")
+        r = resolve_conversation("รองเท้า", history)
+        self.assertEqual(r["resolved_question"], "รองเท้านำเข้าได้ไหม")
+        self.assertEqual(r["followup_type"], "clarification-answer")
+
+
 class TestClarificationQuestionWording(unittest.TestCase):
     """The clarification question itself must match what was actually
     asked (phone vs address vs map), not always say "ที่อยู่"."""
