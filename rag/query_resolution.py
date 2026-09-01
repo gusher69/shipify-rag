@@ -461,6 +461,21 @@ def _is_meta_followup(text: str) -> bool:
 
 _EXISTENCE_RE = re.compile(r"มี.*ไหม")
 
+# P7 — general-knowledge elliptical follow-up. The previous USER turn is a
+# self-contained "<subject> <predicate> <interrogative>" world-knowledge
+# question ("จีนอยู่ทวีปอะไร", "กรุงเทพอยู่ภาคอะไร") and the current turn is
+# a bare "แล้ว <noun> ล่ะ" — swap ONLY the leading subject, keep the whole
+# predicate + interrogative so it stays the SAME kind of general question
+# about a different subject. Never fires for a Shipify/company-context
+# prior turn (that has its own resolver branches / General Chat gate).
+_GENERAL_SUBJECT_SWAP_RE = re.compile(
+    r"^\s*\S{1,20}?\s*(?P<rest>(?:ตั้งอยู่|อยู่|คือ|เป็น|มี)[^\n]{0,32}?"
+    r"(?:อะไร|ที่ไหน|ไหน|กี่[ก-๙]{0,10}|เท่าไหร่|เท่าไร|ยังไง|อย่างไร)\s*(?:คะ|ครับ|ค่ะ)?)\s*$")
+_SHIPIFY_CONTEXT_RE = re.compile(
+    r"โกดัง|ขนส่ง|นำเข้า|ฝากสั่ง|คูปอง|บิล|ใบกำกับ|ภาษี|ศุลกากร|พัสดุ|ตีลัง|แพ็ก|"
+    r"ค่าส่ง|ค่าขนส่ง|ค่าบริการ|เรท|ทางรถ|ทางเรือ|shipify|fasttrade|taobao|1688|tmall",
+    re.IGNORECASE)
+
 
 def _compose(merged: Dict[str, Optional[str]], core: str, prev_q: Optional[str]) -> Tuple[Optional[str], float]:
     """Specific, natural-phrasing templates for the attribute/transport/
@@ -509,6 +524,19 @@ def _compose(merged: Dict[str, Optional[str]], core: str, prev_q: Optional[str])
             and not (attribute or transport or location)
             and 1 <= len(core) <= 20):
         return f"{core}นำเข้าได้ไหม", 0.8
+
+    # P7 — general-knowledge elliptical follow-up ("จีนอยู่ทวีปอะไร" ->
+    # "แล้วญี่ปุ่นล่ะ" -> "ญี่ปุ่นอยู่ทวีปอะไร"). Fires only when the prior
+    # turn is a NON-Shipify "<subject> <predicate> <interrogative>"
+    # question and this fragment names no attribute/transport/topic of its
+    # own (a carried location word like "จีน" from the prior turn is fine).
+    if (prev_q and not (attribute or transport or topic)
+            and not _SHIPIFY_CONTEXT_RE.search(prev_q)):
+        _noun = re.sub(r"(ล่ะ|ละ|ครับ|ค่ะ|คะ|นะ|น่ะ|อ่ะ|อะ)+$", "", core).strip()
+        gm = _GENERAL_SUBJECT_SWAP_RE.match(prev_q.strip())
+        if gm and 1 <= len(_noun) <= 25 and not re.search(
+                r"อะไร|ไหน|กี่|เท่าไหร่|ยังไง|อย่างไร|ไหม|\?", _noun):
+            return f"{_noun}{gm.group('rest')}", 0.75
 
     legacy = _legacy_resolve(core, prev_q) if prev_q else None
     if legacy:
