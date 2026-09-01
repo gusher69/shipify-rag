@@ -841,7 +841,8 @@ def run_playground_turn(
     #      multi-target retrieval + the Answer Planner's completeness
     #      instruction ONLY when there is genuinely more than one evidence
     #      target; a normal single-component question is a complete no-op.
-    from rag.query_resolution import decompose_request, build_request_components, single_eligibility_component
+    from rag.query_resolution import (decompose_request, build_request_components,
+                                      single_eligibility_component, generic_process_component)
     request_spec = decompose_request(canonical_question, history, raw_question=question)
     request_components = build_request_components(request_spec)
     multi_component_request = len(request_components) >= 2
@@ -853,12 +854,19 @@ def run_playground_turn(
     # the P1.2A classification / "unconfirmed only if no policy" clause
     # still governs an unknown product.
     single_elig = None if multi_component_request else single_eligibility_component(request_spec)
+    # P5.3 — generic ordering/import PROCESS question: enrich retrieval only
+    # (never a marketplace/link-specific one) so the process-journey FAQ
+    # ranks above the "สั่งจากเว็บจีน / วางลิงก์" sub-flow chunk.
+    process_comp = (None if (multi_component_request or single_elig)
+                    else generic_process_component(question)
+                    or generic_process_component(canonical_question))
     stages.append(Stage("Request Decomposition", "success", 0.0,
                          (f"{len(request_components)} components: "
                           + "; ".join(l for l, _ in request_components))
                          if multi_component_request
                          else (f"single eligibility: {single_elig[0]}" if single_elig
-                               else "single-component — existing retrieval path")))
+                               else ("generic process — retrieval enriched" if process_comp
+                                     else "single-component — existing retrieval path"))))
 
     # For a multi-component turn the single-intent Canonical Query Rewrite
     # (e.g. it collapsed "รถกับเรืออันไหนถูกกว่า" -> "อัตราค่าขนส่งทางรถ
@@ -989,7 +997,9 @@ def run_playground_turn(
                                      "duration_ms": (time.time() - t0) * 1000,
                                      "detail": f"{len(request_components)} components -> {len(chunks)} unioned chunks"})
         else:
-            _retrieval_query = single_elig[1] if single_elig else canonical_question
+            _retrieval_query = (single_elig[1] if single_elig
+                                else process_comp[1] if process_comp
+                                else canonical_question)
             chunks = rag.retrieve(_retrieval_query, top_k=effective_top_k, trace=retrieval_trace,
                                    excluded_terms=excluded_terms or None,
                                    actionable_intent=intent_result["actionable_intent"],
@@ -1412,7 +1422,7 @@ def run_playground_turn(
               or _rag_strong_direct
               or _rag_topic_continuity_followup
               or _rag_faq_exact
-              or multi_component_request or (single_elig is not None)
+              or multi_component_request or (single_elig is not None) or (process_comp is not None)
               or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27;
         # moved ahead of the Answerability Gate 2026-08-27 same day — Final
@@ -1703,7 +1713,7 @@ def run_playground_turn(
               or _rag_strong_direct
               or _rag_topic_continuity_followup
               or _rag_faq_exact
-              or multi_component_request or (single_elig is not None)
+              or multi_component_request or (single_elig is not None) or (process_comp is not None)
               or _is_ambiguous_rag_continuity_followup(question, history)):
         # General Chat Fallback (see the matching branch above) answers
         # from the LLM's own general knowledge with empty context — the

@@ -987,6 +987,48 @@ def single_eligibility_component(spec: RequestSpec) -> Optional["tuple[str, str]
     return None
 
 
+# ── P5.3 — generic ordering/import PROCESS question ────────────────────
+# "ขอขั้นตอนในการสั่งซื้อสินค้าหน่อย" asks for the high-level Shipify
+# service journey, but its wording ("สั่งซื้อสินค้า") is lexically closest
+# to the marketplace/link FAQ ("สั่งสินค้าจากเว็บจีนอะไรได้บ้าง" ->
+# Taobao/1688/Tmall), so retrieval returns that sub-flow instead of the
+# process journey. Same enrichment pattern as single_eligibility_component:
+# only the retrieval query is swapped (intent/routing/synthesis question
+# unchanged), so the "ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทย" journey FAQ
+# ranks first. A marketplace/link-SPECIFIC question is deliberately
+# excluded so "สั่งของจาก Taobao ยังไง" / "วางลิงก์สินค้ายังไง" keep their
+# own answer.
+_PROCESS_INTENT_RE = re.compile(
+    r"ขั้นตอน|มีขั้นตอน|ทำ\s*(?:ยัง|อย่าง)ไง|ต้องทำอะไร(?:บ้าง)?|ต้องทำยังไง|"
+    r"เริ่ม[^\n]{0,14}(?:ยังไง|อย่างไร|ต้องทำ|ใช้บริการ)|วิธี(?:การ)?(?:ใช้บริการ|นำเข้า|สั่ง)")
+_PROCESS_OBJECT_RE = re.compile(
+    r"สั่งซื้อสินค้า|สั่งสินค้า|สั่งของ|สั่งซื้อของ|นำเข้าสินค้า|นำเข้าของ|นำเข้าจากจีน|"
+    r"ฝากนำเข้า|ฝากสั่ง|ใช้บริการ\s*shipify|ใช้บริการนำเข้า|import", re.IGNORECASE)
+# Marketplace / product-link SPECIFIC — never enrich these (E/F must stay
+# a specific sourcing answer, not the generic journey).
+_MARKETPLACE_SPECIFIC_RE = re.compile(
+    r"taobao|1688|tmall|เถาเป่า|เถาเป่าว|ทีมอลล์|ทมอลล์|"
+    r"ลิงก์|ลิ้งก์|ลิงค์|\blink\b|"
+    r"เว็บจีน|เว็บไหน|เว็บอะไร|เว็บไซต์ไหน|มาร์เก็ตเพลส|ร้านจีนไหน|รองรับเว็บ", re.IGNORECASE)
+
+_PROCESS_JOURNEY_TERMS = (
+    "ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยทำอย่างไร ฝากนำเข้า ที่อยู่โกดังจีน "
+    "ร้านจีนจัดส่งเข้าโกดังจีน ขนส่งจีนไทย ทางรถ ทางเรือ สินค้าถึงไทย ชำระค่าขนส่ง รับสินค้า")
+
+
+def generic_process_component(question: str) -> Optional["tuple[str, str]"]:
+    """(component_label, enriched_retrieval_query) for a GENERIC ordering/
+    import process question, else None. Excludes marketplace/link-specific
+    wording. Deterministic; no LLM."""
+    q = question or ""
+    if _MARKETPLACE_SPECIFIC_RE.search(q):
+        return None
+    if _PROCESS_INTENT_RE.search(q) and _PROCESS_OBJECT_RE.search(q):
+        return ("import_process",
+                f"ขั้นตอนการนำเข้าสินค้าจากจีนเข้าไทยทำอย่างไร {_PROCESS_JOURNEY_TERMS}")
+    return None
+
+
 # ── Bare product-list continuation of an import-eligibility thread ──────
 # "น้ำปลา นำเข้าได้ไหม" -> "น้ำเปล่า ละ น้ำมัน น้ำมันงา": the second turn
 # is just a short list of product nouns, no question of its own. When the
