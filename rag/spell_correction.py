@@ -215,6 +215,17 @@ _FUZZY_CORRECTION_PHRASE_GUARDS = [
     # apart, "เรท" a registered vocabulary/tag term) — confirmed live to
     # corrupt "เริ่มนำเข้า..." into "เรท่มนำเข้า...".
     re.compile(r"เริ่ม"),
+    # P5.2 multi-turn context hotfix (2026-09-01) — same class, same
+    # mechanism — "การสั่ง"/"การสั่งซื้อ" ("the ordering / to place an
+    # order", the ordinary Thai gerund "การ" + verb, e.g. "ขอขั้นตอนใน
+    # การสั่งซื้อสินค้าหน่อย") had its "การสั่ง" window fuzzy-corrected into
+    # the registered vocabulary term "ฝากสั่ง" (the specific proxy-buy
+    # SERVICE) at confidence 0.71 — history-independent, confirmed on an
+    # empty conversation. That silently rewrote a generic ordering-process
+    # question into a "ฝากสั่งซื้อ" one, shifting retrieval and producing a
+    # false no_information. Generic ordering and the explicit ฝากสั่ง
+    # service are distinct; the customer must name ฝากสั่ง themselves.
+    re.compile(r"การสั่ง"),
 ]
 
 
