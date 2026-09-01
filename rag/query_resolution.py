@@ -132,6 +132,13 @@ _LOCATION_RE = re.compile(r"ไทย|จีน")
 # first to avoid a duration/location question being misread as a rate one.
 _DURATION_RE = re.compile(r"กี่วัน|ระยะเวลา|นานแค่ไหน")
 _LOCATION_ATTR_RE = re.compile(r"แผนที่|โลเคชั่น|พิกัด|ที่อยู่|อยู่ไหน|ที่นี่|google\s*map|gps", re.IGNORECASE)
+# Contact/phone as a REQUESTED ATTRIBUTE (2026-09-01) — so an elliptical
+# follow-up preserves the "phone/contact" subject, not just the topic:
+# "ขอเบอร์โกดัง" -> "ไทย" -> "แล้วจีนล่ะ" must reconstruct to
+# "ขอเบอร์ติดต่อโกดังจีน" (China + warehouse + CONTACT), never fall back
+# to the warehouse ADDRESS. Checked before _RATE_RE so a "เบอร์…เท่าไหร่"
+# phrasing is not misread as a rate question.
+_CONTACT_ATTR_RE = re.compile(r"เบอร์|โทรศัพท์|ติดต่อ|contact|call\s*center", re.IGNORECASE)
 _RATE_RE = re.compile(r"เรท|ราคา|ค่าขนส่ง|ค่าส่ง|อัตราค่าขนส่ง|เท่าไหร่|เท่าไร|กี่บาท")
 
 # Short, content-free follow-up phrases — resolved purely by carrying
@@ -160,6 +167,8 @@ _ATTRIBUTE_ONLY_GROUPS = {"location"}
 def _extract_attribute(text: str) -> Optional[str]:
     if _DURATION_RE.search(text):
         return "duration"
+    if _CONTACT_ATTR_RE.search(text):
+        return "contact"
     if _LOCATION_ATTR_RE.search(text):
         return "location"
     if _EXISTENCE_RE.search(text) and _extract_topic(text) == "โกดัง":
@@ -461,6 +470,17 @@ def _compose(merged: Dict[str, Optional[str]], core: str, prev_q: Optional[str])
         return f"ขอเรททาง{transport}", 0.9
     if attribute == "duration" and transport:
         return f"ขอทราบระยะเวลาขนส่งทาง{transport}", 0.9
+    if attribute == "contact" and topic == "โกดัง":
+        # Subject preservation for an elliptical warehouse-phone follow-up
+        # ("ขอเบอร์โกดัง" -> "ไทย" -> "แล้วจีนล่ะ"). Keeps "เบอร์ติดต่อ" as
+        # the subject but pairs it with "ที่อยู่": a warehouse's contact
+        # info lives in the SAME trusted FAQ row as its address (the Thai
+        # rows carry the phone inline; the China row's contact route is
+        # its website menu), so this phrasing retrieves that row and
+        # answers with whatever contact info exists — instead of the
+        # phone-only phrasing being rejected as "no information".
+        return (f"ขอเบอร์ติดต่อและที่อยู่โกดัง{location}" if location
+                else "ขอเบอร์ติดต่อและที่อยู่โกดัง"), 0.85
     if attribute == "location" and topic == "โกดัง":
         if location and _EXISTENCE_RE.search(core):
             # "มีไหม" (existence question) — e.g. "แล้วในประเทศไทยล่ะ มีไหม

@@ -204,8 +204,34 @@ def _chunk_text(chunks: List[Dict]) -> str:
     return " ".join(c.get("text") or "" for c in chunks)
 
 
+def _faq_exact_question(chunks: List[Dict]) -> str:
+    """The 'Question:' line of a single confirmed FAQ-exact chunk (rag/
+    searcher.py builds its text as 'Question: <q>\\nAnswer: <a>'). '' when
+    the chunk list is not a lone FAQ-exact hit."""
+    if not _is_faq_exact_match(chunks):
+        return ""
+    first = (chunks[0].get("text") or "").split("\n", 1)[0]
+    if first.startswith("Question:"):
+        return first[len("Question:"):].strip()
+    return chunks[0].get("section_title") or ""
+
+
 def _needs_warehouse_clarification(actionable_intent: str, entities: Dict, chunks: List[Dict]) -> bool:
     if actionable_intent not in ("warehouse_location", "warehouse_map", "warehouse_contact"):
+        return False
+    # A confirmed exact/near-exact FAQ match whose OWN question already
+    # stands alone — i.e. it is NOT a bare, country-less warehouse
+    # question — is unambiguous and must never be overridden with a
+    # ไทย/จีน clarification. Real regression (2026-09-01): "ขอเบอร์ติดต่อ"
+    # sent right after a warehouse exchange inherits prev_topic="โกดัง",
+    # gets reclassified warehouse_contact, and was asked
+    # "ต้องการเบอร์ติดต่อโกดังไทยหรือโกดังจีนคะ" — even though it
+    # exact-matched the generic company-contact FAQ row ("ขอเบอร์ติดต่อ",
+    # no "โกดัง" in it). A genuine bare warehouse question ("ขอเบอร์โกดัง")
+    # does NOT FAQ-exact match any row, so it still reaches the
+    # clarification below.
+    faq_q = _faq_exact_question(chunks)
+    if faq_q and "โกดัง" not in faq_q:
         return False
     # Deliberately does NOT look at what retrieval/FAQ matching happened
     # to guess — a near-exact FAQ match can silently pick ONE warehouse

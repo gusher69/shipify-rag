@@ -281,7 +281,16 @@ def _faq_row_overspecified_for_transport(faq_text: str, raw_question: str) -> bo
     modes = requested_transport_modes(raw_question or "")
     if len(modes) != 1:
         return False
-    return ("ทางรถ" in faq_text or "ทางบก" in faq_text) and "ทางเรือ" in faq_text
+    if not (("ทางรถ" in faq_text or "ทางบก" in faq_text) and "ทางเรือ" in faq_text):
+        return False
+    # Only narrow when the FAQ row actually carries a per-mode value for
+    # the ONE mode the customer asked about (its canonical term appears in
+    # the answer, e.g. "ทางรถ 35 บาท/กก / ทางเรือ 19 …"). An availability
+    # answer that merely lists the modes we DO run in order to say another
+    # mode is unavailable ("มีขนส่งทางเครื่องบินไหม" -> "…ทางรถและทางเรือ
+    # เท่านั้น ยังไม่มี…เครื่องบิน…") is a complete answer that must be
+    # returned verbatim, follow-up question and all.
+    return modes[0] in faq_text
 
 
 def _has_direct_structured_evidence(chunks: List[Dict]) -> bool:

@@ -126,5 +126,33 @@ class TestRequestedTransportModes(unittest.TestCase):
         self.assertNotIn("เรือ", requested_transport_modes("ไม่เอาทางเรือ ขอทางรถ"))
 
 
+class TestContactAttributeFollowup(unittest.TestCase):
+    """Subject preservation for an elliptical warehouse-CONTACT follow-up
+    (2026-09-01): "ขอเบอร์โกดัง" -> "ไทย" -> "แล้วจีนล่ะ" must keep the
+    PHONE/CONTACT subject, not collapse to the warehouse ADDRESS."""
+
+    def test_warehouse_phone_followup_preserves_contact_subject(self):
+        history = _hist(("ขอเบอร์โกดัง", "ต้องการเบอร์ติดต่อโกดังไทยหรือโกดังจีนคะ"),
+                        ("ไทย", "เบอร์โกดังไทย: อ่อนนุช โทร 064-224-7205 ค่ะ"))
+        resolved = resolve_followup_query("แล้วจีนล่ะ", history)
+        self.assertIn("เบอร์ติดต่อ", resolved)
+        self.assertIn("จีน", resolved)
+        self.assertNotIn("ไทย", resolved)
+
+    def test_warehouse_address_followup_still_resolves_to_address(self):
+        history = _hist(("ขอที่อยู่โกดัง", "ต้องการที่อยู่โกดังไทยหรือโกดังจีนคะ"),
+                        ("ไทย", "มีโกดังไทย 2 ที่นะคะ พิกัด อ่อนนุช 46 ..."))
+        resolved = resolve_followup_query("แล้วจีนล่ะ", history)
+        self.assertIn("ที่อยู่", resolved)
+        self.assertIn("จีน", resolved)
+        self.assertNotIn("เบอร์", resolved)
+
+    def test_transport_rate_and_duration_followups_unchanged(self):
+        rate_h = _hist(("ทางรถเรทเท่าไหร่", "35 บาท/กก."))
+        self.assertIn("ทางเรือ", resolve_followup_query("แล้วเรือล่ะ", rate_h))
+        dur_h = _hist(("ทางรถใช้เวลากี่วัน", "7–10 วันค่ะ"))
+        self.assertIn("ทางเรือ", resolve_followup_query("แล้วเรือล่ะ", dur_h))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -39,6 +39,34 @@ class TestClarification(unittest.TestCase):
                          {"location": "ไทย"}, BOTH_WAREHOUSES_CHUNK)
         self.assertFalse(r["clarification_required"])
 
+    def test_company_contact_faq_exact_is_not_asked_for_a_warehouse_clarification(self):
+        """Regression (2026-09-01): "ขอเบอร์ติดต่อ" sent right after a
+        warehouse exchange inherits prev_topic="โกดัง" and is reclassified
+        warehouse_contact — but it exact-matched the generic company-
+        contact FAQ row, whose own Question ("ขอเบอร์ติดต่อ") has no
+        "โกดัง" in it. That self-contained exact match must win, not a
+        ไทย/จีน clarification."""
+        company_contact_faq = [{
+            "text": "Question: ขอเบอร์ติดต่อ\nAnswer: Shipify 02-026-6426 / Fasttrade 02-026-6425",
+            "is_faq_exact": True,
+        }]
+        r = plan_answer("ขอเบอร์ติดต่อ", "warehouse_contact", ["phone"], {}, company_contact_faq)
+        self.assertFalse(r["clarification_required"])
+        self.assertEqual(r["response_shape"], "faq_direct")
+
+    def test_bare_warehouse_phone_question_still_clarifies(self):
+        """"ขอเบอร์โกดัง" does NOT FAQ-exact match any row (no warehouse-
+        phone knowledge_items) — 3 hybrid chunks, no is_faq_exact — so the
+        country clarification still fires."""
+        hybrid_chunks = [
+            {"text": "Question: ขอที่อยู่โกดังหน่อย\nAnswer: มีโกดังไทย 2 ที่ เบอร์ 064..."},
+            {"text": "Question: ขอที่อยู่โกดังจีน\nAnswer: เข้าเมนูที่อยู่โกดังจีน"},
+            {"text": "อื่นๆ"},
+        ]
+        r = plan_answer("ขอเบอร์โกดัง", "warehouse_contact", ["phone"], {}, hybrid_chunks)
+        self.assertTrue(r["clarification_required"])
+        self.assertEqual(r["clarification_question"], "ต้องการเบอร์ติดต่อโกดังไทยหรือโกดังจีนคะ")
+
     def test_ambiguous_bill_requests_clarification(self):
         r = plan_answer("จ่ายบิลยังไง", "payment_instruction", ["payment_steps"], {}, BOTH_BILLS_CHUNK)
         self.assertTrue(r["clarification_required"])
