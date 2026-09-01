@@ -54,6 +54,33 @@ class TestClarification(unittest.TestCase):
         self.assertFalse(r["clarification_required"])
         self.assertEqual(r["response_shape"], "faq_direct")
 
+    def test_generic_thai_warehouse_request_aggregates_all_locations(self):
+        """"ขอเบอร์โกดัง" -> "ไทย": warehouse intent, a country but no named
+        pickup point, and the evidence carries 2 pickup points -> the plan
+        must aggregate (goal names EVERY location; short_answer widened)."""
+        multi = [{"text": "โกดังไทยมี 2 ที่ อ่อนนุช 46 โทร 064-224-7205 ... โกดังนนทบุรี โทร 091-5050-775"}]
+        r = plan_answer("ขอเบอร์โกดังไทย", "warehouse_contact", ["phone"], {"location": "ไทย"}, multi)
+        self.assertFalse(r["clarification_required"])
+        self.assertIn("EVERY", r["answer_goal"])
+        self.assertNotEqual(r["response_shape"], "short_answer")
+        self.assertIn("warehouse_name", r["required_facts"])
+
+    def test_specific_pickup_point_stays_narrow_even_with_multi_location_evidence(self):
+        multi = [{"text": "โกดังไทยมี 2 ที่ อ่อนนุช 46 โทร 064-224-7205 ... โกดังนนทบุรี โทร 091-5050-775"}]
+        r = plan_answer("ขอเบอร์โกดังนนทบุรี", "warehouse_contact", ["phone"], {}, multi)
+        self.assertFalse(r["clarification_required"])   # named point resolves the country
+        self.assertIn("นนทบุรี", r["answer_goal"])
+        self.assertIn("ignore", r["answer_goal"].lower())
+
+    def test_specific_pickup_point_does_not_return_a_multi_location_faq_verbatim(self):
+        faq_both = [{
+            "text": "Question: ขอที่อยู่โกดังหน่อย\nAnswer: มีโกดังไทย 2 ที่ อ่อนนุช 46 ... นนทบุรี 76 ...",
+            "is_faq_exact": True,
+        }]
+        r = plan_answer("ขอแผนที่โกดังนนทบุรี", "warehouse_map", ["map_url"], {}, faq_both)
+        self.assertNotEqual(r["response_shape"], "faq_direct")
+        self.assertIn("นนทบุรี", r["answer_goal"])
+
     def test_bare_warehouse_phone_question_still_clarifies(self):
         """"ขอเบอร์โกดัง" does NOT FAQ-exact match any row (no warehouse-
         phone knowledge_items) — 3 hybrid chunks, no is_faq_exact — so the

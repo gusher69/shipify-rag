@@ -204,6 +204,21 @@ def _chunk_text(chunks: List[Dict]) -> str:
     return " ".join(c.get("text") or "" for c in chunks)
 
 
+# Named Thai pickup points (same low-collision convention as the keyword
+# lists elsewhere — extend the list if trusted RAG gains another named
+# warehouse; the aggregation itself stays count-agnostic). Used ONLY to
+# tell a GENERIC "ขอเบอร์โกดัง" apart from a SPECIFIC "ขอเบอร์โกดังอ่อนนุช".
+_WAREHOUSE_SUBLOCATION_RE = re.compile(r"อ่อนนุช|นนทบุรี|บางใหญ่|บางม่วง|ลาดกระบัง")
+
+
+def _distinct_warehouse_locations_in_evidence(chunks: List[Dict]) -> int:
+    names = set()
+    for c in chunks:
+        for m in _WAREHOUSE_SUBLOCATION_RE.finditer(c.get("text") or ""):
+            names.add(m.group(0))
+    return len(names)
+
+
 def _faq_exact_question(chunks: List[Dict]) -> str:
     """The 'Question:' line of a single confirmed FAQ-exact chunk (rag/
     searcher.py builds its text as 'Question: <q>\\nAnswer: <a>'). '' when
@@ -216,8 +231,14 @@ def _faq_exact_question(chunks: List[Dict]) -> str:
     return chunks[0].get("section_title") or ""
 
 
-def _needs_warehouse_clarification(actionable_intent: str, entities: Dict, chunks: List[Dict]) -> bool:
+def _needs_warehouse_clarification(actionable_intent: str, entities: Dict, chunks: List[Dict],
+                                   question: str = "") -> bool:
     if actionable_intent not in ("warehouse_location", "warehouse_map", "warehouse_contact"):
+        return False
+    # A named pickup point ("อ่อนนุช", "นนทบุรี") already resolves the
+    # country ambiguity (every named point is a Thai one) — answer it
+    # narrowly, never ask ไทย/จีน. (2026-09-01)
+    if _WAREHOUSE_SUBLOCATION_RE.search(question or ""):
         return False
     # A confirmed exact/near-exact FAQ match whose OWN question already
     # stands alone — i.e. it is NOT a bare, country-less warehouse
@@ -291,7 +312,7 @@ def plan_answer(
     chunks = chunks or []
     requested_attributes = requested_attributes or []
 
-    if _needs_warehouse_clarification(actionable_intent, entities, chunks):
+    if _needs_warehouse_clarification(actionable_intent, entities, chunks, raw_question or question):
         subject = _WAREHOUSE_CLARIFICATION_SUBJECT.get(actionable_intent, "ที่อยู่")
         return {
             "answer_goal": "Ask which warehouse location the customer means",
@@ -309,7 +330,17 @@ def plan_answer(
             "clarification_question": _CLARIFICATION_TEMPLATES["bill_ambiguous"],
         }
 
-    if _is_faq_exact_match(chunks):
+    # Named-sublocation narrowing (2026-09-01) — a request that names ONE
+    # pickup point ("ขอแผนที่โกดังนนทบุรี") must be answered for THAT point
+    # only. If the single evidence row happens to be a multi-location FAQ
+    # (its verbatim text lists 2+ pickup points), do NOT return it
+    # verbatim — fall through to synthesis with a goal scoped to the
+    # named point so the other locations are left out.
+    _named = _WAREHOUSE_SUBLOCATION_RE.search(raw_question or question or "")
+    _named_sub = _named.group(0) if _named else None
+    _multi_loc_evidence = _distinct_warehouse_locations_in_evidence(chunks) >= 2
+
+    if _is_faq_exact_match(chunks) and not (_named_sub and _multi_loc_evidence):
         # A confirmed exact/near-exact FAQ row IS the answer — trust it
         # fully rather than second-guessing with a narrower fact list.
         # Direct FAQ Fidelity Mode (P0, 2026-07-21): the row's own answer
@@ -365,6 +396,40 @@ def plan_answer(
     transport = f"{entities['transport']} " if entities.get("transport") else ""
     goal = _GOAL_TEMPLATES.get(actionable_intent, _GOAL_TEMPLATES["unknown"]).format(loc=loc, transport=transport)
     response_shape = template["shape"]
+
+    # Multi-location warehouse aggregation (2026-09-01) — a GENERIC
+    # collection-level warehouse request ("ขอเบอร์โกดัง" -> "ไทย":
+    # warehouse intent, a country but NO specific pickup point named) must
+    # return EVERY matching warehouse location the evidence carries, not
+    # just the top chunk (the "telephone" / short_answer plan was
+    # collapsing 2 Thai pickup points to 1 phone). Count-agnostic: the
+    # goal says "every location in the evidence", so a future 3rd row is
+    # covered automatically. A SPECIFIC request ("ขอเบอร์โกดังอ่อนนุช",
+    # "โกดังนนทบุรีเปิดกี่โมง") names a pickup point and stays narrow.
+    if (actionable_intent in ("warehouse_location", "warehouse_map", "warehouse_contact")
+            and not _WAREHOUSE_SUBLOCATION_RE.search(question or "")
+            and not _WAREHOUSE_SUBLOCATION_RE.search(raw_question or "")
+            and _distinct_warehouse_locations_in_evidence(chunks) >= 2):
+        _subj = {"warehouse_contact": "phone number",
+                 "warehouse_map": "map and address",
+                 "warehouse_location": "address"}[actionable_intent]
+        goal = (f"List EVERY {loc}warehouse pickup location present in the evidence, each "
+                f"with its {_subj} — name each location, do not stop at the first one")
+        if "warehouse_name" not in required:
+            required = ["warehouse_name"] + required
+        if response_shape == "short_answer":
+            response_shape = "answer_then_details"
+    elif (actionable_intent in ("warehouse_location", "warehouse_map", "warehouse_contact")
+          and _named_sub and _multi_loc_evidence):
+        # Named ONE pickup point but the evidence lists several — scope the
+        # answer to the named one only.
+        _subj = {"warehouse_contact": "phone number",
+                 "warehouse_map": "map and address",
+                 "warehouse_location": "address"}[actionable_intent]
+        goal = (f"Provide ONLY the โกดัง{_named_sub} location's {_subj} — the evidence also lists "
+                f"other warehouse locations; ignore them, answer for โกดัง{_named_sub} only")
+        if response_shape == "short_answer":
+            response_shape = "answer_then_details"
 
     # Both-Transport-Modes fix (2026-08-31) — see _wants_both_transport_
     # modes' own docstring. Appends an explicit "cover both" instruction
