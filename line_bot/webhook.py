@@ -878,6 +878,17 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                         history=recent_history)
                 except Exception as e:
                     print(f"[webhook] lead-stage update failed (non-fatal): {e}")
+                # P4.1 — negative-customer detection + one Admin LINE alert.
+                # Same detached thread, analytical side-channel: the customer
+                # reply is already sent and is not altered.
+                try:
+                    from services.sentiment_service import update_sentiment_from_turn
+                    update_sentiment_from_turn(
+                        user_id, question=question,
+                        display_name=display_name or (profile or {}).get("display_name"),
+                        cust_code=(verified_binding or {}).get("cust_code"))
+                except Exception as e:
+                    print(f"[webhook] sentiment update failed (non-fatal): {e}")
         except Exception as e:
             print(f"[webhook] post-reply bookkeeping failed (non-fatal): {e}")
 

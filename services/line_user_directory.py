@@ -56,7 +56,9 @@ _VISIBLE_ROLES = ("user", "assistant")
 # PostgREST 42703 the whole request.
 _PROFILE_COLS = ("line_user_id,display_name,first_seen,message_count,"
                  "conversation_count,last_active,created_at,"
-                 "lead_stage,lead_score,lead_reasons,lead_stage_updated_at")
+                 "lead_stage,lead_score,lead_reasons,lead_stage_updated_at,"
+                 "sentiment_status,sentiment_reasons,sentiment_updated_at,"
+                 "negative_last_detected_at,negative_last_alert_at")
 _BINDING_COLS = "external_user_id,cust_code,status,verification_method,verified_at,updated_at"
 _SESSION_COLS = ("id,name,channel,line_user_id,message_count,"
                  "created_at,updated_at,last_message_at,deleted_at")
@@ -159,6 +161,7 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
             "message_count": p.get("message_count") or 0,
             "lead_stage": (p.get("lead_stage") or "COLD"),
             "lead_score": int(p.get("lead_score") or 0),
+            "sentiment": (p.get("sentiment_status") or "NORMAL"),
         })
 
     rows.sort(key=lambda r: (r["last_seen"] or ""), reverse=True)
@@ -224,6 +227,31 @@ def get_line_user_detail(line_user_id: str, sb=None) -> Optional[Dict]:
         },
         "session": session_summary,
         "lead": _lead_block(p),
+        "sentiment": _sentiment_block(p),
+    }
+
+
+def _json_list(v) -> list:
+    if isinstance(v, str):
+        import json
+        try:
+            return json.loads(v)
+        except Exception:
+            return []
+    return list(v or [])
+
+
+def _sentiment_block(p: Dict) -> Dict:
+    """P4.1 read-only sentiment block for the detail view."""
+    from services.sentiment_service import reason_labels
+    reasons = _json_list(p.get("sentiment_reasons"))
+    return {
+        "status": p.get("sentiment_status") or "NORMAL",
+        "reasons": reason_labels(reasons),
+        "reason_keys": reasons,
+        "updated_at": p.get("sentiment_updated_at"),
+        "last_detected_at": p.get("negative_last_detected_at"),
+        "last_alert_at": p.get("negative_last_alert_at"),
     }
 
 

@@ -35,7 +35,12 @@ def _seed(sb):
          "cust_code": "TYPED9999",   # legacy typed cache — must NEVER show as verified
          "lead_stage": "WARM", "lead_score": 55,
          "lead_reasons": ["product_identified", "rate_interest", "duration_interest"],
-         "lead_stage_updated_at": "2026-09-01T10:00:00Z"},
+         "lead_stage_updated_at": "2026-09-01T10:00:00Z",
+         "sentiment_status": "NEGATIVE",
+         "sentiment_reasons": ["repeated_wrong_answer", "human_requested"],
+         "sentiment_updated_at": "2026-09-01T18:30:00Z",
+         "negative_last_detected_at": "2026-09-01T18:30:00Z",
+         "negative_last_alert_at": "2026-09-01T18:30:05Z"},
         {"line_user_id": _UB, "display_name": "Anna Wong",
          "first_seen": "2026-08-10T00:00:00Z", "last_active": "2026-09-02T09:00:00Z",
          "message_count": 4, "conversation_count": 1, "created_at": "2026-08-10T00:00:00Z"},
@@ -287,6 +292,26 @@ class Detail(unittest.TestCase):
                          ["ระบุสินค้าแล้ว", "ถามค่าขนส่ง / ค่าบริการ", "ถามระยะเวลาขนส่ง"])
         self.assertEqual(lead["reason_keys"],
                          ["product_identified", "rate_interest", "duration_interest"])
+
+    # P4.1 — Acceptance L (admin surface)
+    def test_list_row_carries_sentiment(self):
+        u = next(x for x in list_line_users(sb=self.sb)["users"] if x["line_user_id"] == _UA)
+        self.assertEqual(u["sentiment"], "NEGATIVE")
+        v = next(x for x in list_line_users(sb=self.sb)["users"] if x["line_user_id"] == _UB)
+        self.assertEqual(v["sentiment"], "NORMAL")   # default when column absent
+
+    def test_detail_sentiment_block(self):
+        s = get_line_user_detail(_UA, sb=self.sb)["sentiment"]
+        self.assertEqual(s["status"], "NEGATIVE")
+        self.assertEqual(s["reasons"], ["แจ้งว่าระบบตอบผิดซ้ำ", "ขอคุยกับเจ้าหน้าที่"])
+        self.assertEqual(s["reason_keys"], ["repeated_wrong_answer", "human_requested"])
+        self.assertEqual(s["last_detected_at"], "2026-09-01T18:30:00Z")
+        self.assertEqual(s["last_alert_at"], "2026-09-01T18:30:05Z")
+
+    def test_detail_sentiment_defaults_normal(self):
+        s = get_line_user_detail(_UB, sb=self.sb)["sentiment"]
+        self.assertEqual(s["status"], "NORMAL")
+        self.assertEqual(s["reasons"], [])
 
 
 # ── P3.2 — Conversation History Viewer ────────────────────────────────

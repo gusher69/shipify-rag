@@ -80,6 +80,12 @@
 .lu-lead-score{font-size:10px;color:rgba(232,237,245,.4);margin-left:5px}
 .lu-lead-reasons{margin:6px 0 0;padding-left:18px;font-size:12px;color:#e8edf5}
 .lu-lead-reasons li{margin:2px 0}
+
+/* P4.1 — sentiment */
+.lu-sent{font-size:9px;padding:2px 7px;border-radius:10px;font-weight:800;letter-spacing:.03em}
+.lu-sent-NORMAL{background:rgba(232,237,245,.10);color:rgba(232,237,245,.5)}
+.lu-sent-NEGATIVE{background:rgba(248,113,113,.22);color:#f87171}
+.lu-sent-row td{background:rgba(248,113,113,.05)}
 </style>
 {% endblock %}
 
@@ -115,12 +121,13 @@
         <th>CustCode</th>
         <th>สถานะ</th>
         <th>Lead Stage</th>
+        <th>Sentiment</th>
         <th>ข้อความล่าสุด / Last Seen</th>
         <th style="text-align:right">จัดการ</th>
       </tr>
     </thead>
     <tbody id="lu-tbody">
-      <tr><td colspan="6" class="lu-empty">กำลังโหลด…</td></tr>
+      <tr><td colspan="7" class="lu-empty">กำลังโหลด…</td></tr>
     </tbody>
   </table>
 </div>
@@ -165,13 +172,13 @@ async function luLoad(){
   const q = encodeURIComponent(document.getElementById('lu-search').value.trim());
   const st = document.getElementById('lu-status').value;
   const tb = document.getElementById('lu-tbody');
-  tb.innerHTML = '<tr><td colspan="6" class="lu-empty">กำลังโหลด…</td></tr>';
+  tb.innerHTML = '<tr><td colspan="7" class="lu-empty">กำลังโหลด…</td></tr>';
   const data = await luJSON(`/admin/api/line-users?search=${q}&status=${st}&limit=50`);
   if(!data.ok){
     document.getElementById('lu-sum-total').textContent = '0';
     document.getElementById('lu-sum-verified').textContent = '0';
     document.getElementById('lu-sum-unverified').textContent = '0';
-    tb.innerHTML = '<tr><td colspan="6" class="lu-empty">โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</td></tr>'; return;
+    tb.innerHTML = '<tr><td colspan="7" class="lu-empty">โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</td></tr>'; return;
   }
   const s = data.summary || {};
   document.getElementById('lu-sum-total').textContent = s.total ?? '–';
@@ -180,18 +187,25 @@ async function luLoad(){
   const rows = data.users || [];
   if(!rows.length){
     const msg = document.getElementById('lu-search').value.trim() ? 'ไม่พบผู้ใช้งานที่ค้นหา' : 'ยังไม่มีข้อมูลผู้ใช้งาน LINE';
-    tb.innerHTML = `<tr><td colspan="6" class="lu-empty">${msg}</td></tr>`; return;
+    tb.innerHTML = `<tr><td colspan="7" class="lu-empty">${msg}</td></tr>`; return;
   }
   tb.innerHTML = rows.map(u => `
-    <tr>
+    <tr class="${(u.sentiment === 'NEGATIVE') ? 'lu-sent-row' : ''}">
       <td><div class="lu-name">${luEsc(u.display_name) || '<span class="lu-muted">(ไม่มีชื่อ)</span>'}</div>
           <div class="lu-uid">${luEsc(u.line_user_id_masked)}</div></td>
       <td class="lu-cc">${u.cust_code ? luEsc(u.cust_code) : '<span class="lu-muted">—</span>'}</td>
       <td><span class="lu-badge ${u.verified ? 'lu-badge-yes' : 'lu-badge-no'}">${luEsc(u.status_label)}</span></td>
       <td>${luLeadBadge(u.lead_stage, u.lead_score)}</td>
+      <td>${luSentBadge(u.sentiment)}</td>
       <td class="lu-muted">${luFmt(u.last_seen)}</td>
       <td style="text-align:right"><button class="lu-view" onclick="luOpen('${luEsc(u.line_user_id)}')">ดูรายละเอียด</button></td>
     </tr>`).join('');
+}
+
+function luSentBadge(sentiment){
+  const s = (sentiment || 'NORMAL').toUpperCase();
+  const cls = (s === 'NEGATIVE') ? 'NEGATIVE' : 'NORMAL';
+  return `<span class="lu-sent lu-sent-${cls}">${cls === 'NEGATIVE' ? 'NEGATIVE' : 'NORMAL'}</span>`;
 }
 
 const LU_LEAD_TH = { COLD: 'เริ่มสนใจ', WARM: 'สนใจจริง', HOT: 'พร้อมดำเนินการ' };
@@ -217,6 +231,9 @@ async function luOpen(uid){
   const d = data.detail, p = d.profile, b = d.binding, se = d.session || {}, lead = d.lead || {};
   const leadStage = (lead.stage || 'COLD').toUpperCase();
   const leadReasons = (lead.reasons || []);
+  const sent = d.sentiment || {};
+  const sentStatus = (sent.status || 'NORMAL').toUpperCase();
+  const sentReasons = (sent.reasons || []);
   box.innerHTML = `
     <div style="font-size:15px;font-weight:700;margin-bottom:2px">${luEsc(p.display_name) || '(ไม่มีชื่อ)'}</div>
     <div class="lu-sec">
@@ -252,6 +269,19 @@ async function luOpen(uid){
           ? '<ul class="lu-lead-reasons">' + leadReasons.map(r => `<li>${luEsc(r)}</li>`).join('') + '</ul>'
           : '<span class="lu-muted">—</span>'}</div>
         <div class="lu-k">อัปเดตล่าสุด</div><div class="lu-v">${luFmt(lead.updated_at)}</div>
+      </div>
+    </div>
+    <div class="lu-sec">
+      <div class="lu-sec-title">Sentiment</div>
+      <div class="lu-kv">
+        <div class="lu-k">สถานะ</div>
+        <div class="lu-v"><span class="lu-sent lu-sent-${sentStatus === 'NEGATIVE' ? 'NEGATIVE' : 'NORMAL'}">${sentStatus}</span></div>
+        <div class="lu-k">เหตุผล</div>
+        <div class="lu-v">${sentReasons.length
+          ? '<ul class="lu-lead-reasons">' + sentReasons.map(r => `<li>${luEsc(r)}</li>`).join('') + '</ul>'
+          : '<span class="lu-muted">—</span>'}</div>
+        <div class="lu-k">ตรวจพบล่าสุด</div><div class="lu-v">${luFmt(sent.last_detected_at)}</div>
+        <div class="lu-k">แจ้ง Admin ล่าสุด</div><div class="lu-v">${luFmt(sent.last_alert_at)}</div>
       </div>
     </div>
     <div class="lu-sec">
