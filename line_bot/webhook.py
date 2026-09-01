@@ -452,6 +452,38 @@ def _handle_message_legacy(event: MessageEvent):
     })
 
 
+# ── LINE display-name capture (P3.1 data-integrity, 2026-09-01) ───────
+# user_profiles.display_name was never populated for real webhook users:
+# the post-reply bookkeeping only ever copied the name from the profile
+# row back onto itself. A LINE webhook event identifies the user by
+# source.userId only — the human-readable name needs one Profile API
+# call. This runs exclusively inside the detached post-reply thread
+# (never the reply path), at most once per user per cooldown window, and
+# every failure is swallowed: the user stays identified by line_user_id
+# and the name is retried on a later turn.
+_DISPLAY_NAME_LOOKUP_COOLDOWN: dict = {}
+_DISPLAY_NAME_LOOKUP_COOLDOWN_SEC = 3600.0
+
+
+def _lookup_line_display_name(user_id: str):
+    """Return the user's current LINE display name, or None. Cooldown-
+    guarded (a blocked OA / transient 5xx must not trigger a retry
+    storm) and never raises."""
+    import time as _t
+    now = _t.monotonic()
+    last = _DISPLAY_NAME_LOOKUP_COOLDOWN.get(user_id)
+    if last is not None and (now - last) < _DISPLAY_NAME_LOOKUP_COOLDOWN_SEC:
+        return None
+    _DISPLAY_NAME_LOOKUP_COOLDOWN[user_id] = now
+    try:
+        with ApiClient(configuration) as api_client:
+            resp = MessagingApi(api_client).get_profile(user_id)
+        return (getattr(resp, "display_name", "") or "").strip() or None
+    except Exception as e:
+        print(f"[webhook] LINE display-name lookup failed for {user_id[:12]}… (non-fatal): {e}")
+        return None
+
+
 # ── Decision Engine adapter (Production Integration Sprint, 2026-08-02,
 # Phase 1 Step E/F) — active only when DECISION_ENGINE_LIVE_ROUTING=true.
 # Routes through services/decision_engine.py::DecisionEngine.decide(),
@@ -815,8 +847,14 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # worker (which was previously blocked ~10s by these writes).
     def _post_reply_bookkeeping():
         try:
+            display_name = (profile.get("display_name", "") if profile else "") or ""
+            if not display_name.strip():
+                # First real turn (or a still-nameless profile): resolve the
+                # LINE display name once, off the reply path. None on
+                # failure/cooldown — the row is still written, name filled later.
+                display_name = _lookup_line_display_name(user_id) or ""
             upsert_profile(user_id, {
-                "display_name": profile.get("display_name", "") if profile else "",
+                "display_name": display_name,
                 "order_count":  profile.get("order_count", 0) if profile else 0,
                 "total_spend":  profile.get("total_spend", 0) if profile else 0,
                 "notes":        f"ถามเรื่อง: {routing_type}",

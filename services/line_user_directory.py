@@ -15,14 +15,28 @@ internal per-turn trace (ai_session_traces: chunks / prompt / policy / erp
 payloads) and pipeline events (ai_session_events) are simply never queried
 here, so no system/RAG/debug data can reach the Admin transcript view.
 
+REAL LINE USERS ONLY (P3.1 data-integrity, 2026-09-01). user_profiles also
+holds synthetic rows — AI Playground / Real User Journey UAT ("playground:*"
+labels) and developer probe scripts that posted fabricated "Uprobe…" /
+"Uhardgate…" ids straight at the webhook. A profile is surfaced here only
+when BOTH hold:
+  1. provenance — it has a real LINE channel footprint: an ai_sessions row
+     with channel='line', or a customer_channel_bindings row with
+     channel='line'. (This is the primary signal; the webhook is the only
+     thing that writes channel='line' sessions for a HMAC-verified userId.)
+  2. shape — line_user_id matches ^U[0-9a-f]{32}$, the LINE userId format.
+     Secondary only: it removes the probe scripts that also created
+     channel='line' sessions. Never the sole rule.
+
 No writes. Query shape:
-  * list_line_users        — 2 reads  (all verified line bindings + profiles)
-  * get_line_user_detail   — 3 reads  (profile + bindings + newest session)
+  * list_line_users        — 3 reads  (line bindings + profiles + line-session ids)
+  * get_line_user_detail   — 4 reads  (line-session ids + profile + bindings + newest session)
   * list_user_sessions     — 1 read   (this user's line sessions)
   * get_user_session_messages — 2 reads (ownership check + bounded transcript)
 never one binding/message query per row.
 """
-from typing import Dict, List, Optional
+import re
+from typing import Dict, List, Optional, Iterable
 
 _PROFILE_HARD_CAP = 5000        # viewer, not an export — bounded but above
                                # current deployment volume so summary counts
@@ -47,12 +61,36 @@ _SESSION_COLS = ("id,name,channel,line_user_id,message_count,"
                  "created_at,updated_at,last_message_at,deleted_at")
 _MSG_COLS = "role,content,turn_index,created_at"
 
+# A real LINE userId is 'U' + 32 lowercase hex. Shape is a SECONDARY filter
+# (it strips developer probe ids like "Uprobe…"/"Uhardgate…" that also have
+# channel='line' sessions) — provenance below is the primary rule.
+_REAL_LINE_ID_RE = re.compile(r"^U[0-9a-f]{32}$")
+
 
 def _sb(sb=None):
     if sb is not None:
         return sb
     from services.supabase_client import get_supabase
     return get_supabase()
+
+
+def _is_real_line_shape(uid: Optional[str]) -> bool:
+    return bool(_REAL_LINE_ID_RE.match(uid or ""))
+
+
+def _line_provenance_ids(client, extra: Iterable[str] = ()) -> set:
+    """The set of line_user_ids with a real LINE channel footprint:
+    every ai_sessions row with channel='line', plus `extra` (the
+    channel='line' binding ids the caller already has). ONE read."""
+    rows = (client.table("ai_sessions").select("line_user_id")
+            .eq("channel", "line").execute().data or [])
+    ids = {r.get("line_user_id") for r in rows if r.get("line_user_id")}
+    ids.update(x for x in extra if x)
+    return ids
+
+
+def _is_real_line_user(uid: Optional[str], provenance_ids: set) -> bool:
+    return _is_real_line_shape(uid) and (uid in provenance_ids)
 
 
 def _mask_line_user_id(uid: Optional[str]) -> str:
@@ -73,16 +111,23 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
     substring. Read-only."""
     client = _sb(sb)
 
-    # Query 1 — every VERIFIED LINE binding (small table; one shot).
-    verified_binds = (client.table("customer_channel_bindings").select(_BINDING_COLS)
-                      .eq("channel", "line").eq("status", "verified")
-                      .execute().data or [])
-    bmap = {b["external_user_id"]: b for b in verified_binds if b.get("external_user_id")}
+    # Query 1 — every LINE binding (small table; one shot). Verified ones
+    # drive the CustCode/status columns; all of them count as provenance.
+    line_binds = (client.table("customer_channel_bindings").select(_BINDING_COLS)
+                  .eq("channel", "line").execute().data or [])
+    bmap = {b["external_user_id"]: b for b in line_binds
+            if b.get("external_user_id") and b.get("status") == "verified"}
+    bind_ids = {b["external_user_id"] for b in line_binds if b.get("external_user_id")}
 
     # Query 2 — LINE user profiles, most-recently-active first, bounded.
     profiles = (client.table("user_profiles").select(_PROFILE_COLS)
                 .order("last_active", desc=True)
                 .execute().data or [])[:_PROFILE_HARD_CAP]
+
+    # Query 3 — provenance: keep only rows that actually came from LINE.
+    provenance_ids = _line_provenance_ids(client, extra=bind_ids)
+    profiles = [p for p in profiles
+                if _is_real_line_user(p.get("line_user_id"), provenance_ids)]
 
     total = len(profiles)
     verified_count = sum(1 for p in profiles if p.get("line_user_id") in bmap)
@@ -123,10 +168,20 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
 
 def get_line_user_detail(line_user_id: str, sb=None) -> Optional[Dict]:
     """Full durable profile + verified-binding status + newest LINE
-    session summary for one user. Read-only. None if no profile row."""
-    if not line_user_id:
+    session summary for one user. Read-only. None if this is not a real
+    LINE user (no profile row, wrong id shape, or no LINE provenance) —
+    the endpoint cannot be used to inspect a synthetic profile."""
+    if not line_user_id or not _is_real_line_shape(line_user_id):
         return None
     client = _sb(sb)
+
+    binds = (client.table("customer_channel_bindings").select(_BINDING_COLS + ",created_at")
+             .eq("channel", "line").eq("external_user_id", line_user_id)
+             .order("verified_at", desc=True).execute().data or [])
+
+    # Provenance: a channel='line' session OR any channel='line' binding.
+    if not binds and line_user_id not in _line_provenance_ids(client):
+        return None
 
     prof_rows = (client.table("user_profiles").select("*")
                  .eq("line_user_id", line_user_id).execute().data or [])
@@ -134,9 +189,6 @@ def get_line_user_detail(line_user_id: str, sb=None) -> Optional[Dict]:
         return None
     p = prof_rows[0]
 
-    binds = (client.table("customer_channel_bindings").select(_BINDING_COLS + ",created_at")
-             .eq("channel", "line").eq("external_user_id", line_user_id)
-             .order("verified_at", desc=True).execute().data or [])
     verified = next((b for b in binds if b.get("status") == "verified"), None)
 
     session_summary = {"has_active": False, "last_interaction": None}
@@ -187,8 +239,9 @@ def list_user_sessions(line_user_id: str, sb=None) -> List[Dict]:
     """Every non-deleted LINE conversation session for one user, most
     recent first. ONE read of ai_sessions, scoped server-side by
     line_user_id + channel='line' (never fetch-all-then-filter, never a
-    per-session query). Read-only. `[]` for an unknown user."""
-    if not line_user_id:
+    per-session query). Read-only. `[]` for an unknown or non-LINE-shape
+    user."""
+    if not line_user_id or not _is_real_line_shape(line_user_id):
         return []
     client = _sb(sb)
     rows = (client.table("ai_sessions").select(_SESSION_COLS)
@@ -224,7 +277,7 @@ def get_user_session_messages(line_user_id: str, session_id: str, sb=None) -> Op
     chunks, prompts, policy, ERP payloads, pipeline timings, tokens) are
     never read here. TWO reads: the ownership check, then one bounded
     transcript read. Read-only."""
-    if not line_user_id or not session_id:
+    if not line_user_id or not session_id or not _is_real_line_shape(line_user_id):
         return None
     client = _sb(sb)
     s = _owned_line_session(client, line_user_id, session_id)
