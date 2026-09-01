@@ -3749,17 +3749,26 @@ class DecisionEngine:
         # directly (no manual per-conversation override, per spec).
         template_id = None
         channel = context.get("channel")
-        tier = (context.get("customer_context") or {}).get("conversation_tier")
+        _cc = context.get("customer_context") or {}
+        tier = _cc.get("conversation_tier")
         if channel or tier:
             try:
                 template_id = get_active_prompt(channel=channel, tier=tier).id
             except Exception:
                 template_id = None
 
+        # P5 — stage-aware follow-up DEPTH only. Read-only preference
+        # signals from the profile the caller already loaded this turn
+        # (no extra Supabase read here); they never change the factual
+        # answer, retrieval, ERP behavior or prompt selection.
+        pg_lead_stage = _cc.get("lead_stage")
+        pg_sentiment = _cc.get("sentiment_status")
+
         pg_history = [{"role": t.get("role"), "content": t.get("content")} for t in (history or [])]
         t0 = time.time()
         try:
-            result = run_playground_turn(message, template_id=template_id, history=pg_history)
+            result = run_playground_turn(message, template_id=template_id, history=pg_history,
+                                          lead_stage=pg_lead_stage, sentiment_status=pg_sentiment)
             latency_ms = round((time.time() - t0) * 1000, 2)
             cited = [c.get("citation") for c in (result.chunks or []) if c.get("cited") and c.get("citation")]
             exec_result = {

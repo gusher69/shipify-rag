@@ -70,6 +70,8 @@ _NAMED_PRODUCT_HINT_RE = re.compile(
 _FOLLOWUP_QUESTION_TH = {
     "elicit_product_type": "คุณลูกค้าต้องการนำเข้าสินค้าประเภทไหนคะ",
     "offer_alternative_product": "มีสินค้าอย่างอื่นที่ต้องการให้ช่วยเช็กไหมคะ",
+    # P5 — WARM decision-support: one missing decision-relevant fact.
+    "elicit_transport_mode": "สนใจส่งทางรถหรือทางเรือคะ",
 }
 _FOLLOWUP_GOAL = {
     "elicit_product_type": ("ask, in ONE short natural question, what type / kind of product "
@@ -77,6 +79,8 @@ _FOLLOWUP_GOAL = {
     "offer_alternative_product": ("offer, in ONE short natural question, to check whether "
                                    "another product can be imported — never ask for size, "
                                    "quantity or details of the item already ruled out"),
+    "elicit_transport_mode": ("ask, in ONE short natural question, whether the customer wants "
+                               "road or sea freight — never ask for quantity, weight or size"),
 }
 _FOLLOWUP_PURPOSE_MARKERS = {
     "elicit_product_type": re.compile(
@@ -85,7 +89,20 @@ _FOLLOWUP_PURPOSE_MARKERS = {
     "offer_alternative_product": re.compile(
         r"สินค้า.{0,6}อื่น|ตัวอื่น|รายการอื่น|อย่างอื่น.{0,14}(เช็ก|เช็ค|ตรวจสอบ|ดู|นำเข้า)|"
         r"มี.{0,12}อื่น.{0,10}(นำเข้า|เช็ก|เช็ค|ตรวจ)|นำเข้าเพิ่มไหม|ตรวจสอบการนำเข้าไหม"),
+    "elicit_transport_mode": re.compile(
+        r"ทางรถหรือทางเรือ|รถหรือเรือ|เรือหรือรถ|ส่งทางไหน|ขนส่งแบบไหน|เลือกขนส่ง"),
 }
+
+# P5 stage-aware follow-up depth: which purposes each lead stage may use.
+# COLD/WARM keep the existing P2 exploratory purposes; HOT gets none of
+# them (its next step is operational, decided by the ERP workflow at a
+# higher priority, never an exploratory sales question here).
+_STAGE_ALLOWED_PURPOSES = {
+    "COLD": {"elicit_product_type"},
+    "WARM": {"elicit_product_type", "offer_alternative_product", "elicit_transport_mode"},
+    "HOT": set(),
+}
+_RATE_DURATION_INTENTS = ("shipping_rate", "shipping_calculation", "shipping_duration")
 
 
 _FOLLOWUP_LEADING_VERB_RE = re.compile(
@@ -121,18 +138,52 @@ def _purpose_recently_served(purpose: str, history: Optional[List[Dict]]) -> boo
     return any(marker.search(t) for t in recent_assistant)
 
 
+def _product_known(request_spec, entities: Optional[Dict], raw_question: str) -> bool:
+    """The conversation already has a concrete product — from this turn's
+    RequestSpec entities, a carried session topic, or a named-product hint
+    in the wording. Used so P5 never re-asks a fact already known."""
+    if list(getattr(request_spec, "entities", []) or []):
+        return True
+    topic = (entities or {}).get("topic")
+    if topic and topic not in ("บริษัท", "โกดัง", "Tracking", "ใบกำกับ"):
+        return True
+    return bool(_NAMED_PRODUCT_HINT_RE.search(raw_question or ""))
+
+
+def _transport_known(request_spec, entities: Optional[Dict]) -> bool:
+    return bool(list(getattr(request_spec, "transport_modes", []) or [])
+               or (entities or {}).get("transport"))
+
+
 def decide_followup(actionable_intent: str, request_spec, raw_question: Optional[str],
                      history: Optional[List[Dict]], answerability: Optional[str],
                      conflicting_components: Optional[List[str]],
-                     clarification_required: bool = False) -> Dict:
+                     clarification_required: bool = False,
+                     lead_stage: Optional[str] = None,
+                     sentiment_status: Optional[str] = None,
+                     entities: Optional[Dict] = None) -> Dict:
     """{"needed": bool, "purpose": Optional[str], "question_goal": Optional[str]}.
     OFF unless one narrow trigger fires AND its purpose was not already
-    served in the last 1-2 assistant turns."""
+    served in the last 1-2 assistant turns.
+
+    P5 stage-aware depth (deterministic, no LLM): `lead_stage`
+    (COLD/WARM/HOT) narrows WHICH purpose is appropriate — HOT gets no
+    exploratory question here (its next step is operational, owned by the
+    ERP workflow); WARM may additionally ask ONE missing decision-relevant
+    fact (transport mode). `sentiment_status == "NEGATIVE"` suppresses
+    every optional stage-based follow-up — complaint / apology / handoff
+    behavior is unchanged and owned elsewhere. Facts, verdicts and ERP
+    behavior are never touched by any of this."""
     off = {"needed": False, "purpose": None, "question_goal": None}
     if clarification_required or conflicting_components or answerability == "no_information":
         return off
+    # P5 — NEGATIVE override: never append a sales/exploratory question
+    # while the customer is dissatisfied.
+    if (sentiment_status or "").upper() == "NEGATIVE":
+        return off
     q = raw_question or ""
     spec_entities = list(getattr(request_spec, "entities", []) or [])
+    stage = (lead_stage or "").upper()
 
     purpose: Optional[str] = None
     if _import_interest_without_product(q):
@@ -141,8 +192,19 @@ def decide_followup(actionable_intent: str, request_spec, raw_question: Optional
         purpose = "elicit_product_type"                    # B — air unavailable, redirect, product unknown
     elif actionable_intent == "prohibited_goods":
         purpose = "offer_alternative_product"              # C — prohibited item, offer another
+    elif (stage == "WARM" and actionable_intent in _RATE_DURATION_INTENTS
+          and _product_known(request_spec, entities, q)
+          and not _transport_known(request_spec, entities)):
+        purpose = "elicit_transport_mode"                  # D — WARM decision support, ONE missing fact
 
-    if not purpose or _purpose_recently_served(purpose, history):
+    if not purpose:
+        return off
+    # P5 — stage gate: only keep a purpose the current lead stage permits.
+    # No stage known (playground / not yet scored) -> keep existing P2
+    # behavior unchanged (all P2 purposes allowed).
+    if stage in _STAGE_ALLOWED_PURPOSES and purpose not in _STAGE_ALLOWED_PURPOSES[stage]:
+        return off
+    if _purpose_recently_served(purpose, history):
         return off
     return {"needed": True, "purpose": purpose, "question_goal": _FOLLOWUP_GOAL[purpose]}
 
@@ -401,6 +463,8 @@ def plan_answer(
     history: Optional[List[Dict]] = None,
     request_spec: Optional[object] = None,
     answerability: Optional[str] = None,
+    lead_stage: Optional[str] = None,
+    sentiment_status: Optional[str] = None,
 ) -> Dict:
     """Returns:
         {
@@ -439,7 +503,8 @@ def plan_answer(
     # own wording (the trigger must be semantic, never phrase-specific).
     followup = decide_followup(
         actionable_intent, request_spec, raw_question or question, history,
-        answerability, conflicting_components)
+        answerability, conflicting_components,
+        lead_stage=lead_stage, sentiment_status=sentiment_status, entities=entities)
 
     if _needs_warehouse_clarification(actionable_intent, entities, chunks, raw_question or question):
         subject = _WAREHOUSE_CLARIFICATION_SUBJECT.get(actionable_intent, "ที่อยู่")

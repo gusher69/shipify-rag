@@ -604,6 +604,8 @@ def run_playground_turn(
     temperature: float = 0.3,
     max_tokens: int = 500,
     history: Optional[List[Dict]] = None,
+    lead_stage: Optional[str] = None,
+    sentiment_status: Optional[str] = None,
 ) -> PlaygroundResult:
     stages: List[Stage] = []
     services_used: List[Dict] = []
@@ -1214,6 +1216,7 @@ def run_playground_turn(
         conflicting_components=conflicting_components or None,
         history=history, request_spec=request_spec,
         answerability=conf_result.answerability,
+        lead_stage=lead_stage, sentiment_status=sentiment_status,
     )
     _fu = answer_plan.get("followup") or {}
     stages.append(Stage("Answer Planner", "success", (time.time() - t0) * 1000,
