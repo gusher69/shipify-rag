@@ -47,6 +47,17 @@ from rag.hybrid_scoring import has_strong_company_profile_evidence
 _URGENCY_SIGNAL_RE = re.compile(r"รีบ|ด่วน|ตามมาหลาย|ตามอยู่|ไม่ทันใช้", re.IGNORECASE)
 _COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำรุด|เสียหาย|ของผิด|ของขาด|ตกหล่น|ไม่ครบ", re.IGNORECASE)
 
+# P7.1 — a company GUARANTEE / WARRANTY / RESPONSIBILITY yes-no question
+# ("Shipify รับประกันว่า…ไหม", "…รับผิดชอบเรื่อง…ไหม", "…การันตี…ไหม"). Such a
+# question is a binary company-POLICY fact — when the KB actually holds a
+# policy it is a curated (exact/near-exact) FAQ row; without one, synthesis
+# would infer a policy (positive OR negative) from generic company chunks
+# plus world knowledge — an invented company fact either way.
+_COMPANY_GUARANTEE_Q_RE = re.compile(
+    r"(รับประกัน|การันตี|การันตี|รับรองได้|รับผิดชอบ|ยืนยันได้ไหมว่า|guarantee|warrant)"
+    r"[^\n]{0,45}?(ไหม|มั้ย|มัย|หรือไม่|รึเปล่า|หรือเปล่า|ได้ไหม|ได้มั้ย)",
+    re.IGNORECASE)
+
 # Deterministic Grounding Safety Net (P0 Final Blocker Closure, 2026-08-28)
 # — confirmed live: for a "X คืออะไร"-shaped question where the trusted
 # Context only mentions X in passing (e.g. RAG-035's own trusted answer
@@ -1586,6 +1597,24 @@ def run_playground_turn(
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                              "exact FAQ row — customer-approved answer returned verbatim, no LLM call"
                              + (f" (P2 {_p2_note})" if _p2_note != "not-needed" else "")))
+        services_used.append({"name": "LLMService", "status": "skipped"})
+        input_tokens = output_tokens = 0
+        llm_latency = 0.0
+        llm_failed = False
+    elif (_COMPANY_GUARANTEE_Q_RE.search(question or "")
+          and not any(c.get("is_faq_exact") for c in (chunks or []))):
+        # P7.1 — a company guarantee/responsibility yes-no question with NO
+        # exact-FAQ policy row behind it. Do NOT let synthesis manufacture a
+        # positive or negative company policy from generic company chunks +
+        # world knowledge — use the existing grounded no-information wording.
+        # (Ordinary category-semantics -> trusted-prohibited-policy is a
+        # DIFFERENT class and keeps its own path; a supported guarantee fact
+        # is a curated FAQ row and answers normally.)
+        answer_text = ("ตอนนี้ยังไม่มีข้อมูลยืนยันนโยบายเรื่องนี้ในระบบค่ะ "
+                       "รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ")
+        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                             "P7.1 — company guarantee/responsibility question, no exact-FAQ policy "
+                             "evidence — grounded no-information, no LLM call"))
         services_used.append({"name": "LLMService", "status": "skipped"})
         input_tokens = output_tokens = 0
         llm_latency = 0.0
