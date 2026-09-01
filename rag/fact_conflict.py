@@ -119,15 +119,51 @@ def _duration_segment(span: str, mode: Optional[str]) -> Optional[str]:
     return None  # unpinned -> not comparable this phase
 
 
+# Local clause/segment breaks — a marker on the far side of one of these
+# from the phone is not "the entity of THAT phone".
+_CLAUSE_SEP_RE = re.compile(r"[/|,;\n\r•]|และ|หรือ")
+# Costs
+_FOLLOWING_BIAS = 25      # a marker AFTER the number is weaker than one before it
+_CLAUSE_BREAK_PENALTY = 200
+_MAX_ATTRIBUTION_COST = 200  # at/above this the marker is a different clause -> no attribution
+
+
 def _phone_entity(text: str, start: int, end: int) -> Optional[str]:
-    window = text[max(0, start - 60): end + 20]
-    sub = _SUBLOC_RE.search(window)
-    if sub:
-        return sub.group(0)
+    """Attribute one phone span to the entity marker most SPECIFICALLY
+    associated with THAT number: the closest sublocation/company marker,
+    preferring one that immediately precedes the number and is in the same
+    local clause. When the nearest marker sits across a clause break
+    ("/", ",", "และ", newline, ...), the number is left unattributed
+    rather than forced onto an entity — that would be exactly what turns
+    a combined "Shipify 02-… / Fasttrade 02-…" row into a false conflict."""
+    markers: List = []  # (pos_start, pos_end, label)
+    for m in _SUBLOC_RE.finditer(text):
+        markers.append((m.start(), m.end(), m.group(0)))
     for rx, name in _COMPANY_CANON:
-        if rx.search(window):
-            return name
-    return None
+        for m in rx.finditer(text):
+            markers.append((m.start(), m.end(), name))
+    if not markers:
+        return None
+
+    best_label: Optional[str] = None
+    best_cost: Optional[int] = None
+    for ms, me, label in markers:
+        if me <= start:                    # marker precedes the number
+            gap = text[me:start]
+            cost = (start - me)
+        elif ms >= end:                    # marker follows the number
+            gap = text[end:ms]
+            cost = (ms - end) + _FOLLOWING_BIAS
+        else:
+            gap, cost = "", 0
+        if _CLAUSE_SEP_RE.search(gap):
+            cost += _CLAUSE_BREAK_PENALTY
+        if best_cost is None or cost < best_cost:
+            best_cost, best_label = cost, label
+
+    if best_cost is None or best_cost >= _MAX_ATTRIBUTION_COST:
+        return None                        # ambiguous -> never force an entity
+    return best_label
 
 
 def extract_facts(text: str, source_id: str) -> List[Dict]:

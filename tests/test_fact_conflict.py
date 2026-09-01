@@ -38,6 +38,17 @@ class DetectorTrueConflicts(unittest.TestCase):
         self.assertTrue(r.has_conflict())
         self.assertEqual(r.conflicts[0].key, "phone|นนทบุรี")
 
+    def test_C_same_company_true_conflict_still_flags(self):
+        # Hotfix must not disable real phone conflicts.
+        r = detect_conflicts(_ev("Shipify โทร 02-026-6426", "Shipify โทร 02-999-9999"))
+        self.assertTrue(r.has_conflict())
+        self.assertEqual(r.conflicts[0].key, "phone|shipify")
+
+    def test_C2_same_company_conflict_one_chunk(self):
+        r = detect_conflicts(_ev("Shipify 02-026-6426\nShipify 02-999-9999"))
+        self.assertTrue(r.has_conflict())
+        self.assertEqual(r.conflicts[0].key, "phone|shipify")
+
 
 class DetectorFalsePositives(unittest.TestCase):
     def test_B_rate_different_units(self):
@@ -61,6 +72,31 @@ class DetectorFalsePositives(unittest.TestCase):
     def test_I_different_companies(self):
         self.assertFalse(detect_conflicts(
             _ev("Shipify 02-026-6426", "Fasttrade 02-026-6425")).has_conflict())
+
+    def test_I2_same_chunk_two_companies_no_conflict(self):
+        # P1.2B hotfix (2026-09-01) — the class test_I missed: ONE evidence
+        # text containing BOTH companies AND BOTH numbers (the real
+        # "ขอเบอร์ติดต่อ" FAQ row). Each phone must map to its own company.
+        r = detect_conflicts(_ev(
+            "Shipify Customer Service 02-026-6426 / Fasttrade Call 02-026-6425"))
+        self.assertFalse(r.has_conflict())
+        keyed = {f["key"]: f["normalized"] for f in r.all_facts}
+        self.assertEqual(keyed.get("phone|shipify"), "020266426")
+        self.assertEqual(keyed.get("phone|fasttrade"), "020266425")
+
+    def test_I3_same_chunk_two_companies_reversed_order(self):
+        # Proximity-based, not order-hardcoded.
+        r = detect_conflicts(_ev(
+            "Fasttrade โทร 02-026-6425 / Shipify โทร 02-026-6426"))
+        self.assertFalse(r.has_conflict())
+        keyed = {f["key"]: f["normalized"] for f in r.all_facts}
+        self.assertEqual(keyed.get("phone|fasttrade"), "020266425")
+        self.assertEqual(keyed.get("phone|shipify"), "020266426")
+
+    def test_I4_real_prod_row_shape_whitespace_separated(self):
+        r = detect_conflicts(_ev(
+            "ติดต่อ Shipify โทร 02-026-6426 ติดต่อ Fasttrade โทร 02-026-6425"))
+        self.assertFalse(r.has_conflict())
 
     def test_real_both_mode_rate_row_is_clean(self):
         self.assertFalse(detect_conflicts(_ev(
