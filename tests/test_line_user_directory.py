@@ -32,7 +32,10 @@ def _seed(sb):
         {"line_user_id": _UA, "display_name": "สมชาย ใจดี",
          "first_seen": "2026-08-01T00:00:00Z", "last_active": "2026-09-01T10:00:00Z",
          "message_count": 12, "conversation_count": 3, "created_at": "2026-08-01T00:00:00Z",
-         "cust_code": "TYPED9999"},   # legacy typed cache — must NEVER show as verified
+         "cust_code": "TYPED9999",   # legacy typed cache — must NEVER show as verified
+         "lead_stage": "WARM", "lead_score": 55,
+         "lead_reasons": ["product_identified", "rate_interest", "duration_interest"],
+         "lead_stage_updated_at": "2026-09-01T10:00:00Z"},
         {"line_user_id": _UB, "display_name": "Anna Wong",
          "first_seen": "2026-08-10T00:00:00Z", "last_active": "2026-09-02T09:00:00Z",
          "message_count": 4, "conversation_count": 1, "created_at": "2026-08-10T00:00:00Z"},
@@ -263,6 +266,27 @@ class Detail(unittest.TestCase):
 
     def test_unknown_user_returns_none(self):
         self.assertIsNone(get_line_user_detail("U" + "e" * 32, sb=self.sb))
+
+    # P4 — Acceptance L (admin surface)
+    def test_list_row_carries_lead_stage_and_score(self):
+        u = next(x for x in list_line_users(sb=self.sb)["users"] if x["line_user_id"] == _UA)
+        self.assertEqual(u["lead_stage"], "WARM")
+        self.assertEqual(u["lead_score"], 55)
+
+    def test_list_row_defaults_lead_stage_when_absent(self):
+        u = next(x for x in list_line_users(sb=self.sb)["users"] if x["line_user_id"] == _UB)
+        self.assertEqual(u["lead_stage"], "COLD")
+        self.assertEqual(u["lead_score"], 0)
+
+    def test_detail_lead_block(self):
+        lead = get_line_user_detail(_UA, sb=self.sb)["lead"]
+        self.assertEqual(lead["stage"], "WARM")
+        self.assertEqual(lead["score"], 55)
+        self.assertEqual(lead["updated_at"], "2026-09-01T10:00:00Z")
+        self.assertEqual(lead["reasons"],
+                         ["ระบุสินค้าแล้ว", "ถามค่าขนส่ง / ค่าบริการ", "ถามระยะเวลาขนส่ง"])
+        self.assertEqual(lead["reason_keys"],
+                         ["product_identified", "rate_interest", "duration_interest"])
 
 
 # ── P3.2 — Conversation History Viewer ────────────────────────────────

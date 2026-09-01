@@ -55,7 +55,8 @@ _VISIBLE_ROLES = ("user", "assistant")
 # first_seen / created_at as fallbacks. Selecting a non-existent column makes
 # PostgREST 42703 the whole request.
 _PROFILE_COLS = ("line_user_id,display_name,first_seen,message_count,"
-                 "conversation_count,last_active,created_at")
+                 "conversation_count,last_active,created_at,"
+                 "lead_stage,lead_score,lead_reasons,lead_stage_updated_at")
 _BINDING_COLS = "external_user_id,cust_code,status,verification_method,verified_at,updated_at"
 _SESSION_COLS = ("id,name,channel,line_user_id,message_count,"
                  "created_at,updated_at,last_message_at,deleted_at")
@@ -156,6 +157,8 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
             "status_label": "ยืนยันแล้ว" if is_verified else "ยังไม่ยืนยัน",
             "last_seen": _last_seen(p),
             "message_count": p.get("message_count") or 0,
+            "lead_stage": (p.get("lead_stage") or "COLD"),
+            "lead_score": int(p.get("lead_score") or 0),
         })
 
     rows.sort(key=lambda r: (r["last_seen"] or ""), reverse=True)
@@ -220,6 +223,26 @@ def get_line_user_detail(line_user_id: str, sb=None) -> Optional[Dict]:
             "verified_at": verified.get("verified_at") if verified else None,
         },
         "session": session_summary,
+        "lead": _lead_block(p),
+    }
+
+
+def _lead_block(p: Dict) -> Dict:
+    """P4 read-only lead-analysis block for the detail view."""
+    from services.lead_stage_service import stage_reason_labels
+    reasons = p.get("lead_reasons") or []
+    if isinstance(reasons, str):          # tolerate a JSON string from some clients
+        import json
+        try:
+            reasons = json.loads(reasons)
+        except Exception:
+            reasons = []
+    return {
+        "stage": p.get("lead_stage") or "COLD",
+        "score": int(p.get("lead_score") or 0),
+        "reasons": stage_reason_labels(reasons),
+        "reason_keys": list(reasons),
+        "updated_at": p.get("lead_stage_updated_at"),
     }
 
 

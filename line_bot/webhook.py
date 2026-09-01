@@ -865,6 +865,19 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                                           conversation_fields=conversation_fields,
                                           is_new_conversation=is_new_conversation)
                 update_tier_for_profile(user_id, message=question)
+                # P4 — Cold/Warm/Hot lead analysis. Analytical side-channel:
+                # reuses the SAME conversation_fields already extracted, adds
+                # no network/LLM call, and nothing in the reply path reads
+                # its output (separate lead_* columns, not conversation_tier).
+                try:
+                    from services.lead_stage_service import update_lead_stage_from_turn
+                    update_lead_stage_from_turn(
+                        user_id, decide_result=result,
+                        conversation_fields=conversation_fields,
+                        question=question, is_verified=bool(verified_binding),
+                        history=recent_history)
+                except Exception as e:
+                    print(f"[webhook] lead-stage update failed (non-fatal): {e}")
         except Exception as e:
             print(f"[webhook] post-reply bookkeeping failed (non-fatal): {e}")
 
