@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active = "line-users" %}
-{% block title %}ผู้ใช้งาน LINE — Shipify Admin{% endblock %}
-{% block topbar_title %}ผู้ใช้งาน LINE{% endblock %}
+{% block title %}LINE User Profile — Shipify Admin{% endblock %}
+{% block topbar_title %}LINE User Profile{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -43,14 +43,42 @@
 .lu-kv{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:12.5px}
 .lu-k{color:rgba(232,237,245,.45)}
 .lu-v{color:#e8edf5;word-break:break-all}
+
+/* P3.2 — conversation history */
+.lu-sess-table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:4px}
+.lu-sess-table th{text-align:left;padding:6px 8px;color:rgba(232,237,245,.4);font-size:9.5px;
+  text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid rgba(255,255,255,.08)}
+.lu-sess-table td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04);color:#e8edf5;vertical-align:top}
+.lu-sess-id{font-family:'SF Mono','Fira Code',monospace;color:rgba(232,237,245,.55)}
+.lu-open{font-size:10.5px;padding:4px 9px;border:1px solid rgba(27,79,155,.4);border-radius:6px;
+  background:rgba(27,79,155,.15);color:#e8edf5;cursor:pointer;white-space:nowrap}
+.lu-open:hover{background:rgba(27,79,155,.3)}
+
+.lu-ov2{display:none;position:fixed;inset:0;z-index:2100;background:rgba(6,14,30,.94);align-items:flex-start;
+  justify-content:center;overflow-y:auto;padding:30px 16px}
+.lu-ov2.open{display:flex}
+.lu-box2{background:#0f1e38;border:1px solid rgba(27,79,155,.4);border-radius:16px;padding:20px 22px;
+  width:620px;max-width:96vw;margin-bottom:30px}
+.lu-tr-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.lu-back{background:none;border:1px solid rgba(255,255,255,.14);color:#e8edf5;border-radius:7px;
+  padding:4px 10px;font-size:11.5px;cursor:pointer}
+.lu-back:hover{background:rgba(255,255,255,.06)}
+.lu-msg{margin-bottom:12px;max-width:82%}
+.lu-msg.user{margin-left:auto;text-align:right}
+.lu-msg-role{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:rgba(232,237,245,.4);margin-bottom:3px}
+.lu-msg-body{display:inline-block;padding:8px 12px;border-radius:12px;font-size:12.5px;line-height:1.5;
+  white-space:pre-wrap;word-break:break-word;text-align:left}
+.lu-msg.user .lu-msg-body{background:rgba(27,79,155,.28);border:1px solid rgba(27,79,155,.4)}
+.lu-msg.ai .lu-msg-body{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+.lu-msg-at{font-size:9px;color:rgba(232,237,245,.3);margin-top:3px}
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="page-header">
   <div>
-    <div class="page-title">ผู้ใช้งาน LINE</div>
-    <div class="page-sub">ดูข้อมูลผู้ใช้งานและสถานะการเชื่อมบัญชีลูกค้า</div>
+    <div class="page-title">LINE User Profile</div>
+    <div class="page-sub">ดูข้อมูลผู้ใช้งาน สถานะการเชื่อมบัญชีลูกค้า และประวัติการสนทนา</div>
   </div>
 </div>
 
@@ -93,6 +121,16 @@
     <div id="lu-detail"><div class="lu-empty">กำลังโหลด…</div></div>
   </div>
 </div>
+
+<div class="lu-ov2" id="lu-ov2" onclick="if(event.target===this)luCloseTranscript()">
+  <div class="lu-box2">
+    <div class="lu-tr-head">
+      <button class="lu-back" onclick="luCloseTranscript()">← กลับ</button>
+      <div class="lu-sec-title" style="margin:0" id="lu-tr-title">ประวัติการสนทนา</div>
+    </div>
+    <div id="lu-transcript"><div class="lu-empty">กำลังโหลด…</div></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -100,16 +138,31 @@
 function luFmt(ts){ if(!ts) return '—'; try{ return new Date(ts).toLocaleString('th-TH'); }catch(e){ return ts; } }
 function luEsc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+// Never let a caller hang on the "loading…" placeholder: a network failure,
+// a non-2xx status, or a non-JSON body (e.g. a plain-text 500 or an auth
+// redirect to an HTML login page) all resolve to {ok:false} instead of an
+// unhandled throw.
+async function luJSON(url){
+  try{
+    const r = await fetch(url);
+    const d = await r.json().catch(() => null);
+    if(!r.ok || !d || typeof d !== 'object') return { ok:false, status:r.status };
+    return d;
+  }catch(e){ return { ok:false, status:0 }; }
+}
+
 async function luLoad(){
   const q = encodeURIComponent(document.getElementById('lu-search').value.trim());
   const st = document.getElementById('lu-status').value;
   const tb = document.getElementById('lu-tbody');
   tb.innerHTML = '<tr><td colspan="5" class="lu-empty">กำลังโหลด…</td></tr>';
-  let res;
-  try{ res = await fetch(`/admin/api/line-users?search=${q}&status=${st}&limit=50`); }
-  catch(e){ tb.innerHTML = '<tr><td colspan="5" class="lu-empty">โหลดข้อมูลไม่สำเร็จ</td></tr>'; return; }
-  const data = await res.json();
-  if(!data.ok){ tb.innerHTML = '<tr><td colspan="5" class="lu-empty">โหลดข้อมูลไม่สำเร็จ</td></tr>'; return; }
+  const data = await luJSON(`/admin/api/line-users?search=${q}&status=${st}&limit=50`);
+  if(!data.ok){
+    document.getElementById('lu-sum-total').textContent = '0';
+    document.getElementById('lu-sum-verified').textContent = '0';
+    document.getElementById('lu-sum-unverified').textContent = '0';
+    tb.innerHTML = '<tr><td colspan="5" class="lu-empty">โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</td></tr>'; return;
+  }
   const s = data.summary || {};
   document.getElementById('lu-sum-total').textContent = s.total ?? '–';
   document.getElementById('lu-sum-verified').textContent = s.verified ?? '–';
@@ -133,15 +186,15 @@ async function luLoad(){
 let luT;
 function luDebouncedLoad(){ clearTimeout(luT); luT = setTimeout(luLoad, 250); }
 
+let luCurrentUid = null;
+
 async function luOpen(uid){
+  luCurrentUid = uid;
   const ov = document.getElementById('lu-ov'); ov.classList.add('open');
   const box = document.getElementById('lu-detail');
   box.innerHTML = '<div class="lu-empty">กำลังโหลด…</div>';
-  let res;
-  try{ res = await fetch(`/admin/api/line-users/${encodeURIComponent(uid)}`); }
-  catch(e){ box.innerHTML = '<div class="lu-empty">โหลดข้อมูลไม่สำเร็จ</div>'; return; }
-  const data = await res.json();
-  if(!data.ok){ box.innerHTML = '<div class="lu-empty">ไม่พบผู้ใช้งาน</div>'; return; }
+  const data = await luJSON(`/admin/api/line-users/${encodeURIComponent(uid)}`);
+  if(!data.ok){ box.innerHTML = '<div class="lu-empty">โหลดข้อมูลไม่สำเร็จ</div>'; return; }
   const d = data.detail, p = d.profile, b = d.binding, se = d.session || {};
   box.innerHTML = `
     <div style="font-size:15px;font-weight:700;margin-bottom:2px">${luEsc(p.display_name) || '(ไม่มีชื่อ)'}</div>
@@ -172,10 +225,68 @@ async function luOpen(uid){
         <div class="lu-k">Current Session</div><div class="lu-v">${se.has_active ? 'Active' : 'None'}</div>
         <div class="lu-k">Last Interaction</div><div class="lu-v">${luFmt(se.last_interaction)}</div>
       </div>
+    </div>
+    <div class="lu-sec">
+      <div class="lu-sec-title">ประวัติการสนทนา</div>
+      <div id="lu-sessions"><div class="lu-empty">กำลังโหลด…</div></div>
     </div>`;
+  luLoadSessions(uid);
 }
-function luClose(){ document.getElementById('lu-ov').classList.remove('open'); }
-document.addEventListener('keydown', e => { if(e.key === 'Escape') luClose(); });
+
+async function luLoadSessions(uid){
+  const host = document.getElementById('lu-sessions');
+  if(!host) return;
+  const data = await luJSON(`/admin/api/line-users/${encodeURIComponent(uid)}/sessions`);
+  if(!data.ok){ host.innerHTML = '<div class="lu-empty">โหลดข้อมูลไม่สำเร็จ</div>'; return; }
+  const rows = data.sessions || [];
+  if(!rows.length){ host.innerHTML = '<div class="lu-empty">ยังไม่มีประวัติการสนทนา</div>'; return; }
+  host.innerHTML = `
+    <table class="lu-sess-table">
+      <thead><tr>
+        <th>Session</th><th>เริ่มสนทนา</th><th>ใช้งานล่าสุด</th><th>จำนวนข้อความ</th><th></th>
+      </tr></thead>
+      <tbody>${rows.map(s => `
+        <tr>
+          <td><span class="lu-sess-id">#${luEsc((s.session_id||'').slice(0,8))}</span></td>
+          <td class="lu-muted">${luFmt(s.started_at)}</td>
+          <td class="lu-muted">${luFmt(s.last_active_at)}</td>
+          <td>${s.message_count ?? 0} ข้อความ</td>
+          <td style="text-align:right"><button class="lu-open"
+              onclick="luOpenTranscript('${luEsc(s.session_id)}')">ดูบทสนทนา</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+async function luOpenTranscript(sid){
+  if(!luCurrentUid) return;
+  const ov2 = document.getElementById('lu-ov2'); ov2.classList.add('open');
+  document.getElementById('lu-tr-title').textContent = 'ประวัติการสนทนา · #' + (sid||'').slice(0,8);
+  const box = document.getElementById('lu-transcript');
+  box.innerHTML = '<div class="lu-empty">กำลังโหลด…</div>';
+  const data = await luJSON(`/admin/api/line-users/${encodeURIComponent(luCurrentUid)}/sessions/${encodeURIComponent(sid)}`);
+  if(!data.ok){ box.innerHTML = '<div class="lu-empty">ไม่พบบทสนทนานี้</div>'; return; }
+  const msgs = data.messages || [];
+  if(!msgs.length){ box.innerHTML = '<div class="lu-empty">ไม่พบข้อความที่บันทึกไว้สำหรับ Session นี้</div>'; return; }
+  box.innerHTML = msgs.map(m => {
+    const isUser = m.role === 'user';
+    return `<div class="lu-msg ${isUser ? 'user' : 'ai'}">
+      <div class="lu-msg-role">${isUser ? 'ลูกค้า' : 'AI'}</div>
+      <div class="lu-msg-body">${luEsc(m.content)}</div>
+      <div class="lu-msg-at">${luFmt(m.at)}</div>
+    </div>`;
+  }).join('');
+}
+function luCloseTranscript(){ document.getElementById('lu-ov2').classList.remove('open'); }
+
+function luClose(){
+  document.getElementById('lu-ov2').classList.remove('open');
+  document.getElementById('lu-ov').classList.remove('open');
+}
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Escape') return;
+  const ov2 = document.getElementById('lu-ov2');
+  if(ov2.classList.contains('open')) luCloseTranscript(); else luClose();
+});
 
 luLoad();
 </script>
