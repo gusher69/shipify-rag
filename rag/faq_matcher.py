@@ -126,7 +126,36 @@ def match_faq_exact(question: str, extra_queries: Optional[List[str]] = None) ->
         if not result:
             continue
         if result["match_type"] == "exact":
-            return result
+            best = result
+            break
         if best is None or result["score"] > best["score"]:
             best = result
+    if not best:
+        return None
+
+    # P1.2B source-of-truth conflict guard — before the caller short-
+    # circuits to this single row's Answer verbatim, gather EVERY other
+    # knowledge_items row that is also exact/near-exact for any candidate
+    # query (an equivalent duplicate question). The Answer texts of all
+    # such rows are returned in `eligible_answers` (chosen row first) so
+    # rag/searcher.py -> rag/fact_conflict.py can detect a same-fact
+    # incompatible value between duplicates that would otherwise be
+    # resolved silently by iteration/similarity order. Never changes which
+    # row is chosen when there is no conflict.
+    eligible_answers: List[str] = [best["row"].get("answer") or ""]
+    _seen_ids = {best["row"].get("id")}
+    for q in candidates:
+        nq = normalize_faq_text(q)
+        if not nq:
+            continue
+        for row in rows:
+            if row.get("id") in _seen_ids:
+                continue
+            for cand in [row.get("question")] + list(row.get("alt_questions") or []):
+                ncand = normalize_faq_text(cand)
+                if ncand and (ncand == nq or _similarity(nq, ncand) >= NEAR_EXACT_THRESHOLD):
+                    eligible_answers.append(row.get("answer") or "")
+                    _seen_ids.add(row.get("id"))
+                    break
+    best["eligible_answers"] = eligible_answers
     return best

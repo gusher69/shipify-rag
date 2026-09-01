@@ -1012,6 +1012,44 @@ def run_playground_turn(
     stages.append(Stage("Retrieval Confidence", "success", (time.time() - t0) * 1000,
                          f"{retrieval_confidence_result['retrieval_confidence']:.2f}"))
 
+    # 4d2. Source-of-truth conflict guard (P1.2B, rag/fact_conflict.py) —
+    #      deterministic, no LLM. Over the SAME final evidence set (plus a
+    #      FAQ-exact chunk's equivalently-eligible duplicate answers, if
+    #      any), detect a high-risk structured fact (transport rate /
+    #      duration / an entity's phone) that two trusted sources give
+    #      INCOMPATIBLE values for. A flagged component is threaded into
+    #      the P1.2A answer plan so synthesis states it as unconfirmed
+    #      instead of silently choosing a value; every other component is
+    #      answered normally.
+    t0 = time.time()
+    from rag.fact_conflict import detect_conflicts_in_chunks, components_with_conflict
+    fact_conflict_result = detect_conflicts_in_chunks(context_chunks)
+    conflicting_components = components_with_conflict(
+        request_components if multi_component_request else [], fact_conflict_result, request_spec)
+    if fact_conflict_result.has_conflict():
+        # Ensure synthesis actually SEES both sides — a FAQ-exact chunk
+        # carries only its own chosen answer; append the conflicting
+        # duplicate answers as extra evidence so the model cannot resolve
+        # the disagreement by omission.
+        _existing = {(c.get("text") or "") for c in context_chunks}
+        for _c in list(context_chunks):
+            for _j, _alt in enumerate(_c.get("faq_conflict_texts") or []):
+                if _alt and _alt not in _existing:
+                    context_chunks.append({"text": _alt, "source": f"FAQ-duplicate-{_j}",
+                                            "citation": f"Source: FAQ duplicate row {_j}",
+                                            "is_faq_exact": False, "category": "faq",
+                                            "attachments": []})
+                    _existing.add(_alt)
+    stages.append(Stage("Fact Conflict", "success", (time.time() - t0) * 1000,
+                         ("; ".join(c.key for c in fact_conflict_result.conflicts)
+                          + f" -> {conflicting_components}")
+                         if fact_conflict_result.has_conflict()
+                         else "no source-of-truth conflict in evidence"))
+    # Developer trace (P1.2B) — fact key, normalized + original conflicting
+    # values, source ids. Never surfaced in the customer-facing reply.
+    query_expansion_debug["fact_conflicts"] = fact_conflict_result.as_trace()
+    query_expansion_debug["conflicting_components"] = conflicting_components
+
     # 4e. Answer Planner (services/answer_planner.py) — selects/organizes
     #     which FACT LABELS (never fact values) the LLM should focus on,
     #     from the actionable_intent/entities/final retrieved evidence.
@@ -1026,6 +1064,7 @@ def run_playground_turn(
         raw_question=question,
         requested_components=[l for l, _ in request_components] if multi_component_request else None,
         comparison=request_spec.comparison,
+        conflicting_components=conflicting_components or None,
     )
     stages.append(Stage("Answer Planner", "success", (time.time() - t0) * 1000,
                          f"goal={answer_plan['answer_goal']!r}, shape={answer_plan['response_shape']}"
@@ -1269,7 +1308,8 @@ def run_playground_turn(
         llm_latency = 0.0
         llm_failed = False
     elif (answer_plan.get("response_shape") == "faq_direct" and chunks and chunks[0].get("is_faq_exact")
-          and not _faq_row_overspecified_for_transport(chunks[0].get("text") or "", question)):
+          and not _faq_row_overspecified_for_transport(chunks[0].get("text") or "", question)
+          and not fact_conflict_result.has_conflict()):
         # Direct FAQ Fidelity — deterministic return (2026-09-01). An
         # exact/near-exact FAQ row IS a human-reviewed, customer-approved
         # answer (rag/faq_matcher.py + the knowledge_items index). Sending

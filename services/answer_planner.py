@@ -284,6 +284,7 @@ def plan_answer(
     raw_question: Optional[str] = None,
     requested_components: Optional[List[str]] = None,
     comparison: Optional[str] = None,
+    conflicting_components: Optional[List[str]] = None,
 ) -> Dict:
     """Returns:
         {
@@ -314,6 +315,7 @@ def plan_answer(
     chunks = chunks or []
     requested_attributes = requested_attributes or []
     requested_components = requested_components or []
+    conflicting_components = conflicting_components or []
     _multi_component = len(requested_components) >= 2
 
     if _needs_warehouse_clarification(actionable_intent, entities, chunks, raw_question or question):
@@ -344,7 +346,8 @@ def plan_answer(
     _named_sub = _named.group(0) if _named else None
     _multi_loc_evidence = _distinct_warehouse_locations_in_evidence(chunks) >= 2
 
-    if _is_faq_exact_match(chunks) and not (_named_sub and _multi_loc_evidence) and not _multi_component:
+    if (_is_faq_exact_match(chunks) and not (_named_sub and _multi_loc_evidence)
+            and not _multi_component and not conflicting_components):
         # A confirmed exact/near-exact FAQ row IS the answer — trust it
         # fully rather than second-guessing with a narrower fact list.
         # Direct FAQ Fidelity Mode (P0, 2026-07-21): the row's own answer
@@ -481,6 +484,12 @@ def plan_answer(
         elif response_shape == "short_answer":
             response_shape = "answer_then_details"
 
+    if conflicting_components:
+        # P1.2B — trusted sources disagree on these; synthesis must not
+        # pick a value. A conflict on one component never blocks the rest.
+        if response_shape == "short_answer":
+            response_shape = "answer_then_details"
+
     plan = {
         "answer_goal": goal,
         "required_facts": required,
@@ -490,6 +499,7 @@ def plan_answer(
         "clarification_required": False,
         "clarification_question": None,
         "requested_components": list(requested_components),
+        "conflicting_components": list(conflicting_components),
     }
     # Answer Plan Validator (Part 9, P0 2026-07-21) — defense in depth:
     # `goal` above is built ONLY by interpolating `entities` (already the

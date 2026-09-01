@@ -472,6 +472,13 @@ def search(question: str, top_k: int = TOP_K, trace: Optional[list] = None,
             "is_faq_exact":  True,
             "faq_match_type": faq_match["match_type"],
             "faq_matched_text": faq_match["matched_text"],
+            # P1.2B — every equivalently-eligible duplicate FAQ row's Answer
+            # (chosen row first). Only populated when there is more than one;
+            # rag/fact_conflict.detect_conflicts_in_chunks() reads it so a
+            # duplicate row carrying a conflicting recognised fact is caught
+            # before the orchestrator short-circuits to faq_direct.
+            "faq_conflict_texts": (faq_match.get("eligible_answers")
+                                    if len(faq_match.get("eligible_answers") or []) > 1 else []),
             "attachments":   [],
             # This chunk never goes through rag/hybrid_scoring.py's
             # apply_hybrid_ranking() (the short-circuit skips it entirely

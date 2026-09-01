@@ -597,6 +597,18 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
             "not a liquid); but the accept / prohibit verdict itself must come from a policy "
             "actually present in the Retrieved Context — for the item or its category — never "
             "from outside knowledge.")
+    if answer_plan.get("conflicting_components"):
+        # P1.2B — the Retrieved Context carries INCOMPATIBLE trusted values
+        # for these. Do not choose one; say plainly it is not confirmed.
+        lines.append(
+            "SOURCE CONFLICT — the Retrieved Context contains DIFFERENT, incompatible values for "
+            "the following. Do NOT state or choose any single value for these; say plainly that "
+            "the trusted information is currently inconsistent / not yet confirmed and (if "
+            "appropriate) suggest confirming with staff:\n"
+            + "\n".join(f"- {c}" for c in answer_plan["conflicting_components"]))
+        lines.append(
+            "Answer every OTHER requested part normally from the Context — a conflict on one part "
+            "never blocks the rest of the answer, and never triggers a blanket no-information reply.")
     shape = answer_plan.get("response_shape")
     if shape:
         lines.append(f"Response shape: {shape}")
