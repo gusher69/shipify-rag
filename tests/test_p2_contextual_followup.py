@@ -286,8 +286,8 @@ class CategoryPolicyHotfix(unittest.TestCase):
             "required_facts": [], "optional_facts": [], "excluded_facts": [],
             "requested_components": ["น้ำปลา / eligibility"],
         })
-        self.assertIn("two steps", block)
-        self.assertIn("beverages", block)
+        self.assertIn("run this checklist", block)
+        self.assertIn("UNCONFIRMED", block)
         self.assertIn("prohibited-goods LIST only tells you what is NOT allowed", block)
 
 
@@ -320,3 +320,32 @@ class ProductListContinuation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FirmCategoryHedge(unittest.TestCase):
+    CTX = ("Question: สินค้าที่ห้ามนำเข้ามีอะไรบ้าง\nAnswer: ทางเราไม่รับนำเข้า ... "
+           "ของกิน อาหาร ของเหลว เครื่องดื่ม ... "
+           "Question: ครีมอาบน้ำนำเข้าได้ไหม\nAnswer: จัดเป็นของเหลว ไม่สามารถนำเข้าได้")
+
+    def _f(self, text):
+        from services.playground_orchestrator import _firm_prohibited_category_hedge
+        return _firm_prohibited_category_hedge(text, self.CTX)
+
+    def test_firms_classified_liquid_hedge(self):
+        out = self._f("- **น้ำยาซักผ้า**: จัดเป็นของเหลว ซึ่งอาจเข้าข่ายสินค้าต้องห้าม")
+        self.assertIn("ไม่สามารถนำเข้าได้", out)
+        self.assertNotIn("อาจเข้าข่าย", out)
+
+    def test_leaves_conditional_untouched(self):
+        # "หากมีของเหลวอยู่ภายใน" is a conditional, not a classification.
+        s = "แก้วน้ำอาจเข้าข่ายสินค้าต้องห้ามหากมีของเหลวอยู่ภายใน"
+        self.assertEqual(self._f(s), s)
+
+    def test_leaves_unclassified_hedge_untouched(self):
+        s = "สำหรับ **น้ำยาซักผ้า** ตอนนี้ยังไม่มีข้อมูลยืนยันในระบบค่ะ"
+        self.assertEqual(self._f(s), s)
+
+    def test_no_effect_when_context_has_no_prohibition(self):
+        from services.playground_orchestrator import _firm_prohibited_category_hedge
+        s = "- **x**: จัดเป็นของเหลว ซึ่งอาจเข้าข่ายสินค้าต้องห้าม"
+        self.assertEqual(_firm_prohibited_category_hedge(s, "no policy here"), s)

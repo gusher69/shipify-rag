@@ -584,28 +584,32 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
         lines.append("Requested components — give EVERY one an explicit verdict:\n"
                      + "\n".join(f"- {c}" for c in answer_plan["requested_components"]))
         lines.append(
-            "For EACH component, work in two steps: (1) using ordinary knowledge, decide the "
-            "general category the item belongs to — e.g. liquids, beverages, food / condiment / "
-            "sauce, cosmetics, medicine, batteries, flammables, sharp objects, plants / living "
-            "things, counterfeit / copyright-problem goods; (2) check the Retrieved Context for a policy "
-            "on the ITEM itself OR on that CATEGORY, and give the Context's verdict. If the "
-            "Context prohibits that category, the item is prohibited even when it is not named "
-            "literally (a fish sauce is a food AND a liquid; a shampoo / detergent / sesame oil "
-            "is a liquid; plain drinking water is a beverage / liquid). Apply the category "
-            "verdict to every listed item that belongs to it, using the SAME wording the Context "
-            "uses. A clearly-classifiable item (a liquid, a food, a battery, …) whose category is "
-            "prohibited by the Context is PROHIBITED — treat that as a confirmed verdict for it, "
-            "the same as an item named literally; do not report it as 'ยังไม่มีข้อมูล'. Never "
+            "Before writing the reply, run this checklist SILENTLY for EACH requested item "
+            "(do not show the checklist to the customer — only the concise result):\n"
+            "  1. CATEGORY: from ordinary real-world knowledge, name the item's general product "
+            "category (liquid, beverage, food / sauce / condiment, cosmetic, medicine, battery, "
+            "flammable, sharp object, plant / living thing, counterfeit goods, …). If you cannot "
+            "confidently place it in any such category, skip to step 4B.\n"
+            "  2. POLICY: search the Retrieved Context for a rule about the item itself OR about "
+            "that category (or a broader category it clearly falls under).\n"
+            "  3. APPLY: if such a rule PROHIBITS it, the verdict is PROHIBITED — state it plainly, "
+            "the SAME as for an item named word-for-word in the Context. The item NOT appearing "
+            "literally in the Context is IRRELEVANT and is NEVER a reason to withhold this verdict. "
+            "If the rule PERMITS it, the verdict is allowed.\n"
+            "  4. UNCONFIRMED (ยังไม่ยืนยัน) is permitted ONLY in these two cases:\n"
+            "     4A. you cannot confidently classify the item into any relevant category, or\n"
+            "     4B. no Context rule covers the item or any category it clearly belongs to.\n"
+            "Worked example: 'น้ำยาซักผ้า' -> category = liquid; Context = 'ของเหลวไม่สามารถนำเข้าได้' "
+            "-> verdict = PROHIBITED (do NOT say 'ยังไม่ยืนยัน' just because 'น้ำยาซักผ้า' is not a "
+            "literal Context row). Contrast: 'แก้วน้ำ' -> category = drinking glass / glassware, "
+            "NOT a liquid (the 'น้ำ' in its name is irrelevant); if nothing in the Context covers "
+            "glassware -> verdict = UNCONFIRMED (case 4B). Never invent a verdict, and never "
             "reply 'no information' for the whole question.")
         lines.append(
-            "The accept / prohibit verdict itself must come from a policy actually present in the "
-            "Retrieved Context — for the item or its category — never from outside knowledge. A "
-            "prohibited-goods LIST only tells you what is NOT allowed — it can NEVER be used to "
-            "conclude that an item merely absent from it IS allowed. Mark a component "
-            "'ยังไม่ยืนยัน' ONLY when the Context has no policy for the item AND none for any "
-            "category it clearly belongs to (e.g. a drinking glass is fragile glassware, not a "
-            "liquid — if nothing in the Context covers glassware, its eligibility is not "
-            "confirmed). Do not stretch a category label onto an item just to produce a verdict.")
+            "The verdict itself must always come from a policy actually present in the Retrieved "
+            "Context (on the item or a category) — never from outside knowledge. A prohibited-goods "
+            "LIST only tells you what is NOT allowed — it can NEVER be used to conclude that an "
+            "item merely absent from it IS allowed.")
     if answer_plan.get("conflicting_components"):
         # P1.2B — the Retrieved Context carries INCOMPATIBLE trusted values
         # for these. Do not choose one; say plainly it is not confirmed.

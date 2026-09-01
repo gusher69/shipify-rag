@@ -86,6 +86,65 @@ def _find_ungrounded_risk_term(answer_text: str, context_text: str) -> Optional[
 # Phone-shaped run: 9–10 digits, optionally grouped with - or spaces.
 _PHONE_RUN_RE = re.compile(r"\d[\d\-\s]{7,13}\d")
 
+# Final category-verdict hotfix (2026-09-01) — for a MULTI-product
+# eligibility answer, deterministically FIRM a soft/unconfirmed verdict
+# when the answer's OWN text has already classified that item into a
+# real-world category ("<x>เป็นของเหลว", "…เป็นอาหาร") that the trusted
+# Context prohibits. This reads the model's own classification from its
+# output — it is NOT a hardcoded product->category map. Same family as
+# _restore_verbatim_scalar_values / _strip_contradictory_noinfo_hedge.
+_PROHIBITED_CATEGORY_WORDS = (
+    "ของเหลว", "อาหาร", "ของกิน", "เครื่องดื่ม", "เครื่องสำอาง", "วัตถุไวไฟ",
+    "วัตถุอันตราย", "แบตเตอรี่", "แบตเตอร์รี่", "ยาเวชภัณฑ์", "ของมีคม",
+    "สิ่งมีชีวิต", "พืช",
+)
+# "<item> (จัด)เป็น (สินค้าประเภท)? <CATEGORY>" — a firm classification of
+# the item itself, not a conditional ("หาก…เป็น", "อาจมี…").
+_ITEM_IS_CATEGORY_RE = re.compile(
+    r"(?<!หาก)(?<!ถ้า)(?<!อาจมี)(?:จัดเป็น|เป็น|คือ)\s*(?:สินค้าประเภท)?\s*"
+    r"(" + "|".join(_PROHIBITED_CATEGORY_WORDS) + r")")
+# Exact soft-verdict phrases -> replaced 1:1 with a firm prohibition on a
+# line that already carries a prohibited-category classification.
+_SOFT_TO_FIRM = [
+    ("จึงอาจเข้าข่ายสินค้าต้องห้ามเช่นกัน", "จึงไม่สามารถนำเข้าได้ค่ะ"),
+    ("ซึ่งอาจเข้าข่ายสินค้าต้องห้ามเช่นกัน", "ซึ่งไม่สามารถนำเข้าได้ค่ะ"),
+    ("จึงอาจเข้าข่ายสินค้าต้องห้าม", "จึงไม่สามารถนำเข้าได้ค่ะ"),
+    ("ซึ่งอาจเข้าข่ายสินค้าต้องห้าม", "ซึ่งไม่สามารถนำเข้าได้ค่ะ"),
+    ("อาจเข้าข่ายสินค้าต้องห้ามเช่นกัน", "ไม่สามารถนำเข้าได้ค่ะ"),
+    ("อาจเข้าข่ายสินค้าต้องห้ามด้วย", "ไม่สามารถนำเข้าได้ค่ะ"),
+    ("อาจเข้าข่ายสินค้าต้องห้าม", "ไม่สามารถนำเข้าได้ค่ะ"),
+    ("อาจเข้าข่ายเช่นกัน", "ไม่สามารถนำเข้าได้ค่ะ"),
+    ("อาจจะไม่สามารถนำเข้าได้", "ไม่สามารถนำเข้าได้"),
+    ("น่าจะไม่สามารถนำเข้าได้", "ไม่สามารถนำเข้าได้"),
+    ("อาจไม่สามารถนำเข้าได้", "ไม่สามารถนำเข้าได้"),
+]
+
+
+def _firm_prohibited_category_hedge(answer_text: str, context_text: str) -> str:
+    """On a MULTI-product eligibility answer: if a line has classified an
+    item into a category the trusted Context prohibits AND then softened
+    that item's verdict, swap the soft phrase for a firm prohibition.
+    Reads the model's OWN classification from its output — never a
+    hardcoded product->category map. No effect on an unclassified line
+    (e.g. bare 'ยังไม่มีข้อมูล') or a conditional ('หากมีของเหลว…')."""
+    if not answer_text or not context_text:
+        return answer_text
+    if not any(k in context_text for k in ("ไม่รับนำเข้า", "ห้ามนำเข้า", "ไม่สามารถนำเข้า")):
+        return answer_text
+    prohibited_here = {c for c in _PROHIBITED_CATEGORY_WORDS if c in context_text}
+    if not prohibited_here:
+        return answer_text
+    out = []
+    for line in answer_text.split("\n"):
+        m = _ITEM_IS_CATEGORY_RE.search(line)
+        if m and m.group(1) in prohibited_here:
+            for soft, firm in _SOFT_TO_FIRM:
+                if soft in line:
+                    line = line.replace(soft, firm)
+        out.append(line)
+    return "\n".join(out)
+
+
 # P2A blocker — a single-product eligibility answer must not conclude
 # "can be imported" without an AFFIRMATIVE permission in the Context;
 # inferring "allowed" from mere absence in a prohibited-goods list is not
@@ -1436,8 +1495,16 @@ def run_playground_turn(
     else:
         try:
             llm = get_llm_service()
+            # Import-eligibility synthesis is a strict deterministic
+            # classify->apply-policy task — run it at temperature 0 so the
+            # per-component category verdict is stable across identical
+            # turns (the multi-product REAL LINE variance). Not a new call.
+            _synth_temp = (0.0 if (intent_result["actionable_intent"] == "prohibited_goods"
+                                    or all(str(c).endswith("eligibility")
+                                           for c in (answer_plan.get("requested_components") or ["x"])))
+                            else temperature)
             llm_response = llm.generate(built_prompt.messages, model=OPENAI_CHAT_MODEL,
-                                         temperature=temperature, max_tokens=max_tokens)
+                                         temperature=_synth_temp, max_tokens=max_tokens)
             answer_text = llm_response.text
             _risk_term = _find_ungrounded_risk_term(answer_text, context)
             if _risk_term:
@@ -1453,6 +1520,13 @@ def run_playground_turn(
                 # branches above never mutate a value or hedge).
                 answer_text = _restore_verbatim_scalar_values(answer_text, context)
                 answer_text = _strip_contradictory_noinfo_hedge(answer_text, conf_result.answerability)
+                # Final category-verdict hotfix — for a multi-product
+                # eligibility answer, firm a hedge on an item the answer
+                # itself classified into a Context-prohibited category
+                # ("<x>เป็นของเหลว … อาจเข้าข่าย" -> "<x> … ไม่สามารถนำเข้าได้").
+                if len(answer_plan.get("requested_components") or []) >= 2 and all(
+                        str(c).endswith("eligibility") for c in answer_plan["requested_components"]):
+                    answer_text = _firm_prohibited_category_hedge(answer_text, context)
                 # P2A blocker — a single-product eligibility answer must not
                 # infer "ALLOWED" merely because the product is absent from a
                 # prohibited-goods list. Deterministic, no extra LLM call —

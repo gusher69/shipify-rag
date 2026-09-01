@@ -195,7 +195,7 @@ class PlannerIntegration(unittest.TestCase):
         })
         self.assertIn("แบตเตอรี่ / eligibility", block)
         self.assertIn("Retrieved Context", block)
-        self.assertIn("liquids", block)
+        self.assertIn("CATEGORY", block)  # two-step category classification checklist
 
 
 if __name__ == "__main__":
