@@ -6604,6 +6604,30 @@ async def api_line_user_detail(request: Request, line_user_id: str):
     return JSONResponse({"ok": True, "detail": detail})
 
 
+# P3.2 — Conversation History Viewer. Reuses the existing ai_sessions /
+# ai_session_messages tables (services/session_service.py writes them every
+# turn). Read-only: session list is lazy-loaded when User Detail opens, one
+# transcript is fetched only when a session is opened. Session ownership is
+# verified server-side against the URL's line_user_id — a session_id from
+# the frontend is never trusted alone.
+@app.get("/admin/api/line-users/{line_user_id}/sessions")
+async def api_line_user_sessions(request: Request, line_user_id: str):
+    if (r := auth(request)): return r
+    from services.line_user_directory import list_user_sessions
+    return JSONResponse({"ok": True, "sessions": list_user_sessions(line_user_id)})
+
+
+@app.get("/admin/api/line-users/{line_user_id}/sessions/{session_id}")
+async def api_line_user_session_transcript(request: Request, line_user_id: str, session_id: str):
+    if (r := auth(request)): return r
+    from services.line_user_directory import get_user_session_messages
+    data = get_user_session_messages(line_user_id, session_id)
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Session not found for this user"},
+                            status_code=404)
+    return JSONResponse({"ok": True, **data})
+
+
 @app.get("/admin/playground/sessions/{session_id}")
 async def get_session_detail(request: Request, session_id: str):
     if (r := auth(request)): return r

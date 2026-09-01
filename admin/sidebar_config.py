@@ -205,8 +205,8 @@ _DYNAMIC_GROUP_META: Dict[str, dict] = {
 # still decided in exactly one place.
 SIDEBAR_CONFIG: List[dict] = [
     _leaf("dashboard", "Dashboard", "/admin/dashboard", "home"),
-    # P3.1 — read-only LINE user / customer-binding viewer.
-    _leaf("line-users", "ผู้ใช้งาน LINE", "/admin/line-users", "user"),
+    # P3.1 / P3.2 — read-only LINE user profile + conversation-history viewer.
+    _leaf("line-users", "LINE User Profile", "/admin/line-users", "user"),
 
     _group("knowledge", "Knowledge", "Manage all knowledge sources and synchronization.", "book", [
         _leaf("documents", "Knowledge Base", "/admin/documents", "database"),
