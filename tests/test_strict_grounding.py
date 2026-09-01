@@ -80,6 +80,56 @@ class TestStrictGroundingForbidsIndustryFiller(unittest.TestCase):
                                  template=template)
         self.assertIn("never complete an apparently missing step", built.final_prompt_text)
 
+    def test_grounding_rules_require_verbatim_scalar_values(self):
+        text = pb.STRICT_GROUNDING_RULES
+        self.assertIn("VERBATIM", text)
+        self.assertIn("091-5050-775", text)  # the worked example for regrouping
+        self.assertIn("never reformat, regroup, round", text)
+
+    def test_grounding_rules_forbid_a_hedge_then_answer(self):
+        text = pb.STRICT_GROUNDING_RULES
+        self.assertIn("Never begin an answer with a", text)
+        self.assertIn("ยังไม่มีข้อมูล", text)
+
+
+class TestDeterministicEvidenceFidelity(unittest.TestCase):
+    """Pure post-processors in services/playground_orchestrator.py — no
+    LLM call. Restore a trusted value the model regrouped; drop a
+    contradictory leading no-information hedge."""
+
+    def setUp(self):
+        import services.playground_orchestrator as po
+        self.restore = po._restore_verbatim_scalar_values
+        self.strip = po._strip_contradictory_noinfo_hedge
+
+    def test_regrouped_phone_is_restored_to_the_context_form(self):
+        ctx = "สอบถามเส้นทางได้ที่ เบอร์ 091-5050-775 นะคะ"
+        out = self.restore("โกดังนนทบุรี เบอร์โทร: 091-505-0775 ค่ะ", ctx)
+        self.assertIn("091-5050-775", out)
+        self.assertNotIn("091-505-0775", out)
+
+    def test_bare_digit_context_number_keeps_the_models_grouping(self):
+        ctx = "เบอร์เจ้าหน้าที่โกดัง 0642247205 (อยู่ในตลาด)"
+        out = self.restore("โกดังอ่อนนุช เบอร์โทร: 064-224-7205 ค่ะ", ctx)
+        self.assertIn("064-224-7205", out)   # no "-" form in the context to enforce
+
+    def test_matching_phone_is_left_untouched(self):
+        ctx = "เบอร์ 091-5050-775"
+        out = self.restore("ติดต่อได้ที่ 091-5050-775 ค่ะ", ctx)
+        self.assertEqual(out, "ติดต่อได้ที่ 091-5050-775 ค่ะ")
+
+    def test_false_hedge_is_stripped_when_answerable(self):
+        ans = ("ตอนนี้ยังไม่มีข้อมูลที่อยู่และแผนที่โกดังจีนในระบบค่ะ "
+               "คุณสามารถเข้าที่หน้าเว็บในเมนู \"ที่อยู่โกดังจีน\" เพื่อคัดลอกที่อยู่ได้เลยค่ะ")
+        out = self.strip(ans, "direct_answer")
+        self.assertTrue(out.startswith("คุณสามารถเข้าที่หน้าเว็บ"))
+        self.assertNotIn("ยังไม่มีข้อมูล", out)
+
+    def test_genuine_no_information_reply_is_kept(self):
+        ans = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
+        self.assertEqual(self.strip(ans, "no_information"), ans)
+        self.assertEqual(self.strip(ans, "direct_answer"), ans)  # nothing substantive follows
+
 
 if __name__ == "__main__":
     unittest.main()

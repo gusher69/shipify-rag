@@ -82,6 +82,74 @@ def _find_ungrounded_risk_term(answer_text: str, context_text: str) -> Optional[
             return term
     return None
 
+
+# Phone-shaped run: 9–10 digits, optionally grouped with - or spaces.
+_PHONE_RUN_RE = re.compile(r"\d[\d\-\s]{7,13}\d")
+
+
+def _restore_verbatim_scalar_values(answer_text: str, context_text: str) -> str:
+    """Deterministic evidence-value fidelity (2026-09-01). Synthesis may
+    freely rephrase Thai prose but must NOT mutate a trusted factual
+    value. Confirmed live: the Nonthaburi phone written "091-5050-775" in
+    the Context came back "091-505-0775" (digits preserved, grouping
+    changed) in the aggregated answer.
+
+    This restores phone numbers only — the one value class with a proven
+    live regression and an unambiguous shape. For every phone-shaped run
+    in the answer whose digit string matches a phone-shaped run in the
+    Context AND whose Context form carries explicit "-" grouping, the
+    answer's token is replaced with the Context's exact string. A
+    bare-digit Context number (no "-") has no canonical grouping to
+    enforce, so the model's grouping of it is left alone. Other value
+    types (prices, rates, durations, dates) are covered by the
+    STRICT_GROUNDING_RULES "preserve VERBATIM" instruction; no heuristic
+    rewrite is attempted for them here."""
+    if not answer_text or not context_text:
+        return answer_text
+    ctx_forms: Dict[str, str] = {}
+    for m in _PHONE_RUN_RE.finditer(context_text):
+        raw = m.group(0).strip()
+        digits = re.sub(r"\D", "", raw)
+        if 9 <= len(digits) <= 10 and "-" in raw:
+            ctx_forms.setdefault(digits, raw)
+    if not ctx_forms:
+        return answer_text
+
+    def _sub(mm):
+        tok = mm.group(0)
+        digits = re.sub(r"\D", "", tok)
+        canon = ctx_forms.get(digits)
+        if canon and canon != tok.strip():
+            return tok.replace(tok.strip(), canon)
+        return tok
+
+    return _PHONE_RUN_RE.sub(_sub, answer_text)
+
+
+_LEADING_NOINFO_HEDGE_RE = re.compile(
+    r"^\s*(?:ตอนนี้|ขณะนี้|ในขณะนี้)?\s*(?:ยังไม่มีข้อมูลยืนยัน|ยังไม่มีข้อมูล|ไม่มีข้อมูลยืนยัน|ไม่มีข้อมูล)"
+    r"[^\n。]*?(?:ในระบบ)?\s*(?:ค่ะ|ครับ|นะคะ|นะครับ)[\s,–\-]*"
+)
+
+
+def _strip_contradictory_noinfo_hedge(answer_text: str, answerability: str) -> str:
+    """Deterministic false-hedge suppression (2026-09-01). Confirmed live:
+    for the China-warehouse address/contact route, synthesis sometimes
+    prepended "ตอนนี้ยังไม่มีข้อมูล…ในระบบค่ะ" and then immediately gave
+    the trusted website/menu route — internally contradictory. When
+    retrieval judged the turn answerable (answerability != no_information)
+    and a substantive answer follows the hedge, drop just the leading
+    hedge sentence. A genuine no-information turn (answerability ==
+    no_information, or nothing of substance after the hedge) is left
+    untouched."""
+    if not answer_text or answerability == "no_information":
+        return answer_text
+    m = _LEADING_NOINFO_HEDGE_RE.match(answer_text)
+    if not m:
+        return answer_text
+    rest = answer_text[m.end():].strip()
+    return rest if len(rest) >= 15 else answer_text
+
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
 # 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization;
 # broadened again 2026-08-27 same day — Semantic RAG Retrieval fix) — a
@@ -1162,6 +1230,13 @@ def run_playground_turn(
                                  f"(Deterministic Grounding Safety Net)")
                 answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ในระบบค่ะ"
             else:
+                # Deterministic evidence-value fidelity + false-hedge
+                # suppression (2026-09-01) — pure post-processing on the
+                # model's own text, no extra LLM call. Applied only on
+                # this genuine-synthesis path (the deterministic
+                # branches above never mutate a value or hedge).
+                answer_text = _restore_verbatim_scalar_values(answer_text, context)
+                answer_text = _strip_contradictory_noinfo_hedge(answer_text, conf_result.answerability)
                 stage_detail = f"model={llm_response.model}"
             stages.append(Stage("LLM", "success", (time.time() - t0) * 1000, stage_detail))
             services_used.append({"name": "LLMService", "status": "success"})
