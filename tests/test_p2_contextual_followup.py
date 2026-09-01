@@ -211,5 +211,54 @@ class BlockerConsumeFollowupAnswer(unittest.TestCase):
         self.assertIsNone(self._resolve("แล้วแชมพูล่ะ", hist))
 
 
+class OfferAlternativeVerdictGate(unittest.TestCase):
+    FU = {"needed": True, "purpose": "offer_alternative_product", "question_goal": "x"}
+
+    def _apply(self, text):
+        from services.playground_orchestrator import _apply_p2_followup
+        return _apply_p2_followup(text, self.FU)
+
+    def test_appended_after_prohibited(self):
+        out, note = self._apply("น้ำหอมจัดเป็นของเหลว ไม่สามารถนำเข้าได้ค่ะ")
+        self.assertEqual(note, "appended:offer_alternative_product")
+        self.assertIn("อย่างอื่น", out)
+
+    def test_suppressed_when_unconfirmed(self):
+        _, note = self._apply("ตอนนี้ยังไม่มีข้อมูลยืนยันว่าแก้วน้ำนำเข้าได้หรือไม่ค่ะ")
+        self.assertEqual(note, "suppressed-verdict-not-prohibited")
+
+    def test_suppressed_when_unconfirmed_phrased_as_not_prohibited(self):
+        _, note = self._apply("แก้วน้ำไม่ได้อยู่ในรายการ ยังไม่มีการยืนยันว่าห้ามนำเข้าค่ะ")
+        self.assertEqual(note, "suppressed-verdict-not-prohibited")
+
+    def test_suppressed_when_plain_positive(self):
+        _, note = self._apply("แก้วน้ำสามารถนำเข้าได้ค่ะ")
+        self.assertEqual(note, "suppressed-verdict-not-prohibited")
+
+    def test_not_duplicated(self):
+        _, note = self._apply("ไม่สามารถนำเข้า มีสินค้าอย่างอื่นที่ต้องการให้ช่วยเช็กไหมคะ")
+        self.assertEqual(note, "already-served")
+
+
+class FaqDifferentProductSynthesizes(unittest.TestCase):
+    def test_shampoo_row_named_other_product_not_faq_direct(self):
+        # A FAQ-exact chunk whose Question names ครีมอาบน้ำ, matched for a
+        # "แชมพู" eligibility turn -> plan must NOT be faq_direct.
+        faq_chunk = {"text": "Question: ครีมอาบน้ำนำเข้าได้ไหม\nAnswer: ครีมอาบน้ำจัดเป็นของเหลว…",
+                      "is_faq_exact": True}
+        plan = plan_answer("แชมพูนำเข้าได้ไหม", "prohibited_goods", ["prohibited_list"], {},
+                            chunks=[faq_chunk], raw_question="แชมพูนำเข้าได้ไหม",
+                            requested_components=["แชมพู / eligibility"])
+        self.assertNotEqual(plan["response_shape"], "faq_direct")
+
+    def test_same_product_faq_still_direct(self):
+        faq_chunk = {"text": "Question: แบตเตอรี่นำเข้าได้ไหม\nAnswer: แบตเตอรี่เป็นสินค้าต้องห้าม",
+                      "is_faq_exact": True}
+        plan = plan_answer("แบตเตอรี่นำเข้าได้ไหม", "prohibited_goods", ["prohibited_list"], {},
+                            chunks=[faq_chunk], raw_question="แบตเตอรี่นำเข้าได้ไหม",
+                            requested_components=["แบตเตอรี่ / eligibility"])
+        self.assertEqual(plan["response_shape"], "faq_direct")
+
+
 if __name__ == "__main__":
     unittest.main()

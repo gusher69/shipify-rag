@@ -105,6 +105,48 @@ _AFFIRMATIVE_PERMISSION_RE = re.compile(
     r"(?<!ไม่)รับนำเข้าสินค้า(?!ผิด)(?!ต้องห้าม)|นำเข้าได้ทุกประเภท|(?<!ไม่)อนุญาตให้นำเข้า"
     r"|สินค้าทั่วไป[^\n]{0,10}นำเข้าได้|รายการสินค้าที่รับนำเข้า")
 
+# P2A — a finalized eligibility answer that STATES a prohibition verdict
+# (and is not an "unconfirmed" answer). Used to gate the
+# "offer_alternative_product" follow-up: it may only be appended after an
+# actual prohibited verdict, never after an unconfirmed one.
+_P2_PROHIBITED_VERDICT_RE = re.compile(
+    r"(?<!ว่า)ไม่สามารถนำเข้า|นำเข้าไม่ได้|(?<!ว่า)ห้ามนำเข้า|เป็นสินค้าต้องห้าม|"
+    r"จัดเป็นสินค้าต้องห้าม|อยู่ในรายการสินค้าที่ห้าม|อยู่ในรายการสินค้าต้องห้าม|(?<!ไม่)ไม่รับนำเข้า")
+# Any "not confirmed / uncertain / check with staff" outcome — checked
+# FIRST, so a phrase like "ยังไม่มีการยืนยันว่าห้ามนำเข้า" is treated as
+# unconfirmed, never as a prohibition.
+_P2_UNCONFIRMED_VERDICT_RE = re.compile(
+    r"ยังไม่ยืนยัน|ไม่มีการยืนยัน|ยังไม่มีการยืนยัน|ยังไม่มีข้อมูลยืนยัน|ยังไม่มีการระบุ|"
+    r"ไม่มีข้อมูลยืนยัน|ยังไม่มีข้อมูล|ยังไม่แน่ชัด|ยังไม่ยืนยันแน่ชัด|ควรตรวจสอบ.{0,6}เจ้าหน้าที่|"
+    r"สอบถามเจ้าหน้าที่เพื่อความ")
+
+
+def _apply_p2_followup(answer_text: str, followup: Optional[Dict]) -> "tuple[str, str]":
+    """Deterministically append a P2 contextual follow-up question to a
+    FINALIZED answer (FAQ-direct verbatim, or post-synthesis). Returns
+    (answer_text, note). Rules:
+      - never a duplicate (the answer already asks an equivalent question);
+      - "offer_alternative_product" only after an actual PROHIBITED verdict,
+        never after an "unconfirmed" one;
+      - "elicit_product_type" on synthesis is already phrased by the LLM
+        (prompt instruction) so it is skipped here via the duplicate check.
+    """
+    if not followup or not followup.get("needed"):
+        return answer_text, "not-needed"
+    purpose = followup.get("purpose")
+    from services.answer_planner import render_followup_question, _FOLLOWUP_PURPOSE_MARKERS
+    marker = _FOLLOWUP_PURPOSE_MARKERS.get(purpose)
+    if marker and marker.search(answer_text or ""):
+        return answer_text, "already-served"
+    if purpose == "offer_alternative_product":
+        if (not _P2_PROHIBITED_VERDICT_RE.search(answer_text or "")
+                or _P2_UNCONFIRMED_VERDICT_RE.search(answer_text or "")):
+            return answer_text, "suppressed-verdict-not-prohibited"
+    q = render_followup_question(purpose)
+    if not q or q in (answer_text or ""):
+        return answer_text, "already-present"
+    return (answer_text or "").rstrip() + "\n\n" + q, f"appended:{purpose}"
+
 
 def _restore_verbatim_scalar_values(answer_text: str, context_text: str) -> str:
     """Deterministic evidence-value fidelity (2026-09-01). Synthesis may
@@ -1365,26 +1407,13 @@ def run_playground_turn(
         _faq_text = chunks[0].get("text") or ""
         answer_text = _faq_text.split("\nAnswer: ", 1)[1].strip() if "\nAnswer: " in _faq_text else _faq_text.strip()
         # P2 contextual follow-up on the verbatim FAQ path — appended
-        # deterministically from a purpose-keyed approved question (no
-        # synthesis call, FAQ wording untouched). ONLY when the Answer
-        # Planner flagged a follow-up as useful for this turn.
-        _p2 = answer_plan.get("followup") or {}
-        _p2_appended = False
-        if _p2.get("needed"):
-            from services.answer_planner import render_followup_question, _FOLLOWUP_PURPOSE_MARKERS
-            _p2q = render_followup_question(_p2.get("purpose"))
-            _already = _FOLLOWUP_PURPOSE_MARKERS.get(_p2.get("purpose"))
-            # Skip the overlay when the human-written FAQ answer ALREADY
-            # asks a question serving this purpose (e.g. the air-freight
-            # row ends with "…ต้องการขนส่งสินค้าประเภทไหนคะ") — never a
-            # duplicate question.
-            if _p2q and _p2q not in answer_text and not (_already and _already.search(answer_text)):
-                answer_text = answer_text.rstrip() + "\n\n" + _p2q
-                _p2_appended = True
+        # deterministically (no synthesis call, FAQ wording untouched),
+        # gated by _apply_p2_followup (no duplicate; offer only after a
+        # real prohibited verdict).
+        answer_text, _p2_note = _apply_p2_followup(answer_text, answer_plan.get("followup"))
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                              "exact FAQ row — customer-approved answer returned verbatim, no LLM call"
-                             + (f" (+ P2 follow-up: {_p2['purpose']})" if _p2_appended
-                                else " (P2 follow-up: FAQ already serves it)" if _p2.get("needed") else "")))
+                             + (f" (P2 {_p2_note})" if _p2_note != "not-needed" else "")))
         services_used.append({"name": "LLMService", "status": "skipped"})
         input_tokens = output_tokens = 0
         llm_latency = 0.0
@@ -1415,19 +1444,29 @@ def run_playground_turn(
                 # same family as the two guards above. Replaces only the
                 # invented verdict; any P2 follow-up already lives on a
                 # separate line and is re-appended.
-                if single_elig and (
-                        _ABSENCE_ALLOW_RE.search(answer_text)
-                        or (_POSITIVE_VERDICT_RE.search(answer_text)
-                            and not _AFFIRMATIVE_PERMISSION_RE.search(context))):
+                if single_elig:
                     _prod = single_elig[0].split(" / ")[0]
-                    _tail = ""
-                    _fu2 = answer_plan.get("followup") or {}
-                    if _fu2.get("needed"):
-                        from services.answer_planner import render_followup_question
-                        _tail = "\n\n" + render_followup_question(_fu2.get("purpose"))
-                    answer_text = (f"ตอนนี้ยังไม่มีข้อมูลยืนยันว่า{_prod}นำเข้าได้หรือไม่ค่ะ "
-                                    f"รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ") + _tail
-                stage_detail = f"model={llm_response.model}"
+                    _pos_verdict = bool(
+                        _ABSENCE_ALLOW_RE.search(answer_text)
+                        or re.search(rf"{re.escape(_prod)}[^\n]{{0,25}}(?<!ไม่)สามารถนำเข้าได้", answer_text)
+                        or re.search(rf"{re.escape(_prod)}[^\n]{{0,20}}(?<!ไม่)นำเข้าได้(ค่ะ|ครับ|นะคะ|\s|$)", answer_text)
+                        or re.match(rf"\s*{re.escape(_prod)}\s*(?:จัดเป็น[^\n]{{0,15}})?(?<!ไม่)สามารถนำเข้าได้", answer_text))
+                    if _pos_verdict and not _AFFIRMATIVE_PERMISSION_RE.search(context):
+                        # No affirmative permission anywhere in the trusted
+                        # Context — a positive verdict for this product can
+                        # only be an "absent from the list, therefore
+                        # allowed" inference. Replace with an honest
+                        # unconfirmed answer (perfume/shampoo say
+                        # "ไม่สามารถนำเข้า" and never reach here).
+                        answer_text = (f"ตอนนี้ยังไม่มีข้อมูลยืนยันว่า{_prod}นำเข้าได้หรือไม่ค่ะ "
+                                        f"รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ")
+                # P2 follow-up on the synthesis path — "elicit_product_type"
+                # was already phrased by the LLM (prompt); this only appends
+                # "offer_alternative_product" AFTER a real prohibited verdict
+                # (never after the unconfirmed rewrite above).
+                answer_text, _p2_note = _apply_p2_followup(answer_text, answer_plan.get("followup"))
+                stage_detail = f"model={llm_response.model}" + (
+                    f" (P2 {_p2_note})" if _p2_note not in ("not-needed",) else "")
             stages.append(Stage("LLM", "success", (time.time() - t0) * 1000, stage_detail))
             services_used.append({"name": "LLMService", "status": "success"})
             input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens

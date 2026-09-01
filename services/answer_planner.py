@@ -471,8 +471,25 @@ def plan_answer(
     _named_sub = _named.group(0) if _named else None
     _multi_loc_evidence = _distinct_warehouse_locations_in_evidence(chunks) >= 2
 
+    # P2A fidelity — a SINGLE-product eligibility question ("แชมพูนำเข้าได้ไหม")
+    # can FAQ-exact match a DIFFERENT product's row via that row's curated
+    # alt-questions (the shampoo alt on the ครีมอาบน้ำ / liquid row). The
+    # row's Answer text then names ครีมอาบน้ำ, not the customer's แชมพู —
+    # returning it verbatim presents another product as the customer's.
+    # Route through synthesis so the answer names the actual item, using
+    # the row + liquid policy as evidence. Only when the matched row's own
+    # Question does not mention the customer's product.
+    _single_elig_entity = (
+        requested_components[0].split(" / ")[0].strip()
+        if (len(requested_components) == 1 and requested_components[0].endswith("eligibility"))
+        else None)
+    _faq_names_other_product = bool(
+        _single_elig_entity and _is_faq_exact_match(chunks)
+        and _single_elig_entity not in _faq_exact_question(chunks))
+
     if (_is_faq_exact_match(chunks) and not (_named_sub and _multi_loc_evidence)
-            and not _multi_component and not conflicting_components):
+            and not _multi_component and not conflicting_components
+            and not _faq_names_other_product):
         # A confirmed exact/near-exact FAQ row IS the answer — trust it
         # fully rather than second-guessing with a narrower fact list.
         # Direct FAQ Fidelity Mode (P0, 2026-07-21): the row's own answer

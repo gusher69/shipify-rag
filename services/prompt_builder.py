@@ -596,10 +596,12 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
             "to (perfume / shampoo / detergent are liquids; a drinking glass is fragile glassware, "
             "not a liquid); but the accept / prohibit verdict itself must come from a policy "
             "actually present in the Retrieved Context — for the item or its category — never "
-            "from outside knowledge. Do NOT conclude an item is ALLOWED just because it is not "
-            "named in a prohibited-goods list — absence from a list is not a permission. If no "
-            "rule in the Context affirmatively permits OR prohibits the item or a category it "
-            "belongs to, mark that component unconfirmed (ยังไม่ยืนยัน).")
+            "from outside knowledge. A prohibited-goods LIST only tells you what is NOT allowed — "
+            "it can never be used to conclude that an item not on it IS allowed. When the item is "
+            "not covered by any prohibition and no rule in the Context affirmatively permits it "
+            "either, say its import eligibility is not confirmed (ยังไม่ยืนยัน) — but this does NOT "
+            "apply when the item belongs to a category the Context prohibits (a liquid under a "
+            "liquid ban is still prohibited even if not named): give that verdict.")
     if answer_plan.get("conflicting_components"):
         # P1.2B — the Retrieved Context carries INCOMPATIBLE trusted values
         # for these. Do not choose one; say plainly it is not confirmed.
@@ -613,7 +615,12 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
             "Answer every OTHER requested part normally from the Context — a conflict on one part "
             "never blocks the rest of the answer, and never triggers a blanket no-information reply.")
     _fu = answer_plan.get("followup") or {}
-    if _fu.get("needed") and _fu.get("question_goal"):
+    # Only the "elicit_product_type" purpose needs the LLM to phrase a
+    # question — it is unconditionally useful for an import-interest turn.
+    # "offer_alternative_product" is verdict-conditional (only after an
+    # actual PROHIBITED answer) and is appended deterministically by
+    # services/playground_orchestrator.py, never through this prompt.
+    if _fu.get("needed") and _fu.get("question_goal") and _fu.get("purpose") == "elicit_product_type":
         # P2 — the ONLY sanctioned exception to BASE_CONVERSATION_RULES'
         # no-auto-trailing-question rule. Narrow, plan-gated, single question.
         lines.append(
