@@ -335,8 +335,9 @@ class TestSidebarIntegration(unittest.TestCase):
         with patch.dict(os.environ, _no_env(DEVELOPER_MODE="true"), clear=True):
             from admin.sidebar_config import get_sidebar
             keys = [e["key"] for e in get_sidebar()]
-            self.assertEqual(keys, ["dashboard", "knowledge", "integrations", "ai",
-                                     "developer-tools", "settings"])
+            # P3.1 — read-only "ผู้ใช้งาน LINE" viewer sits directly under Dashboard.
+            self.assertEqual(keys, ["dashboard", "line-users", "knowledge", "integrations",
+                                     "ai", "developer-tools", "settings"])
 
     def test_normal_admin_menus_always_present_regardless_of_mode(self):
         for dev_mode in ("true", "false"):

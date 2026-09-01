@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% set active = "line-users" %}
+{% block title %}ผู้ใช้งาน LINE — Shipify Admin{% endblock %}
+{% block topbar_title %}ผู้ใช้งาน LINE{% endblock %}
+
+{% block extra_head %}
+<style>
+.lu-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px}
+.lu-stat-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px 14px}
+.lu-stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:rgba(232,237,245,.4);margin-bottom:4px}
+.lu-stat-value{font-size:20px;font-weight:700;color:#e8edf5}
+.lu-panel{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:16px}
+.lu-toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.lu-input,.lu-select{background:rgba(255,255,255,.05);border:1px solid rgba(27,79,155,.3);color:#e8edf5;
+  border-radius:8px;padding:7px 10px;font-size:12.5px;outline:none}
+.lu-input{min-width:260px}
+.lu-table{width:100%;border-collapse:collapse;font-size:12px}
+.lu-table th{text-align:left;padding:8px 10px;color:rgba(232,237,245,.4);font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.03em;border-bottom:1px solid rgba(255,255,255,.08)}
+.lu-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.04);color:#e8edf5}
+.lu-table tr:hover td{background:rgba(255,255,255,.03)}
+.lu-name{font-weight:600}
+.lu-uid{font-size:10.5px;color:rgba(232,237,245,.45);font-family:'SF Mono','Fira Code',monospace}
+.lu-badge{font-size:9px;padding:2px 7px;border-radius:10px;font-weight:700}
+.lu-badge-yes{background:rgba(52,211,153,.15);color:#34d399}
+.lu-badge-no{background:rgba(232,237,245,.10);color:rgba(232,237,245,.55)}
+.lu-cc{font-family:'SF Mono','Fira Code',monospace}
+.lu-muted{color:rgba(232,237,245,.4)}
+.lu-view{font-size:11.5px;padding:5px 11px;border:1px solid rgba(27,79,155,.4);border-radius:7px;background:rgba(27,79,155,.15);
+  color:#e8edf5;cursor:pointer}
+.lu-view:hover{background:rgba(27,79,155,.3)}
+.lu-empty{padding:26px;text-align:center;color:rgba(232,237,245,.4);font-size:12.5px}
+
+.lu-ov{display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);align-items:flex-start;
+  justify-content:center;overflow-y:auto;padding:30px 16px}
+.lu-ov.open{display:flex}
+.lu-box{background:#0f1e38;border:1px solid rgba(27,79,155,.4);border-radius:16px;padding:22px 26px;
+  width:560px;max-width:96vw;margin-bottom:30px}
+.lu-box-close{float:right;background:none;border:none;color:rgba(232,237,245,.4);cursor:pointer;font-size:18px}
+.lu-sec{margin-top:16px}
+.lu-sec-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  color:rgba(232,237,245,.4);margin-bottom:8px}
+.lu-kv{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:12.5px}
+.lu-k{color:rgba(232,237,245,.45)}
+.lu-v{color:#e8edf5;word-break:break-all}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">ผู้ใช้งาน LINE</div>
+    <div class="page-sub">ดูข้อมูลผู้ใช้งานและสถานะการเชื่อมบัญชีลูกค้า</div>
+  </div>
+</div>
+
+<div class="lu-stats" id="lu-stats">
+  <div class="lu-stat-card"><div class="lu-stat-label">ผู้ใช้งานทั้งหมด</div><div class="lu-stat-value" id="lu-sum-total">–</div></div>
+  <div class="lu-stat-card"><div class="lu-stat-label">ยืนยันแล้ว</div><div class="lu-stat-value" id="lu-sum-verified">–</div></div>
+  <div class="lu-stat-card"><div class="lu-stat-label">ยังไม่ยืนยัน</div><div class="lu-stat-value" id="lu-sum-unverified">–</div></div>
+</div>
+
+<div class="lu-panel">
+  <div class="lu-toolbar">
+    <input class="lu-input" id="lu-search" type="text" placeholder="ค้นหาชื่อ หรือ CustCode"
+           oninput="luDebouncedLoad()">
+    <select class="lu-select" id="lu-status" onchange="luLoad()">
+      <option value="all">ทั้งหมด</option>
+      <option value="verified">ยืนยันแล้ว</option>
+      <option value="unverified">ยังไม่ยืนยัน</option>
+    </select>
+  </div>
+
+  <table class="lu-table">
+    <thead>
+      <tr>
+        <th>ผู้ใช้งาน</th>
+        <th>CustCode</th>
+        <th>สถานะ</th>
+        <th>ข้อความล่าสุด / Last Seen</th>
+        <th style="text-align:right">จัดการ</th>
+      </tr>
+    </thead>
+    <tbody id="lu-tbody">
+      <tr><td colspan="5" class="lu-empty">กำลังโหลด…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="lu-ov" id="lu-ov" onclick="if(event.target===this)luClose()">
+  <div class="lu-box">
+    <button class="lu-box-close" onclick="luClose()">&times;</button>
+    <div id="lu-detail"><div class="lu-empty">กำลังโหลด…</div></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function luFmt(ts){ if(!ts) return '—'; try{ return new Date(ts).toLocaleString('th-TH'); }catch(e){ return ts; } }
+function luEsc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function luLoad(){
+  const q = encodeURIComponent(document.getElementById('lu-search').value.trim());
+  const st = document.getElementById('lu-status').value;
+  const tb = document.getElementById('lu-tbody');
+  tb.innerHTML = '<tr><td colspan="5" class="lu-empty">กำลังโหลด…</td></tr>';
+  let res;
+  try{ res = await fetch(`/admin/api/line-users?search=${q}&status=${st}&limit=50`); }
+  catch(e){ tb.innerHTML = '<tr><td colspan="5" class="lu-empty">โหลดข้อมูลไม่สำเร็จ</td></tr>'; return; }
+  const data = await res.json();
+  if(!data.ok){ tb.innerHTML = '<tr><td colspan="5" class="lu-empty">โหลดข้อมูลไม่สำเร็จ</td></tr>'; return; }
+  const s = data.summary || {};
+  document.getElementById('lu-sum-total').textContent = s.total ?? '–';
+  document.getElementById('lu-sum-verified').textContent = s.verified ?? '–';
+  document.getElementById('lu-sum-unverified').textContent = s.unverified ?? '–';
+  const rows = data.users || [];
+  if(!rows.length){
+    const msg = document.getElementById('lu-search').value.trim() ? 'ไม่พบผู้ใช้งานที่ค้นหา' : 'ยังไม่มีข้อมูลผู้ใช้งาน LINE';
+    tb.innerHTML = `<tr><td colspan="5" class="lu-empty">${msg}</td></tr>`; return;
+  }
+  tb.innerHTML = rows.map(u => `
+    <tr>
+      <td><div class="lu-name">${luEsc(u.display_name) || '<span class="lu-muted">(ไม่มีชื่อ)</span>'}</div>
+          <div class="lu-uid">${luEsc(u.line_user_id_masked)}</div></td>
+      <td class="lu-cc">${u.cust_code ? luEsc(u.cust_code) : '<span class="lu-muted">—</span>'}</td>
+      <td><span class="lu-badge ${u.verified ? 'lu-badge-yes' : 'lu-badge-no'}">${luEsc(u.status_label)}</span></td>
+      <td class="lu-muted">${luFmt(u.last_seen)}</td>
+      <td style="text-align:right"><button class="lu-view" onclick="luOpen('${luEsc(u.line_user_id)}')">ดูรายละเอียด</button></td>
+    </tr>`).join('');
+}
+
+let luT;
+function luDebouncedLoad(){ clearTimeout(luT); luT = setTimeout(luLoad, 250); }
+
+async function luOpen(uid){
+  const ov = document.getElementById('lu-ov'); ov.classList.add('open');
+  const box = document.getElementById('lu-detail');
+  box.innerHTML = '<div class="lu-empty">กำลังโหลด…</div>';
+  let res;
+  try{ res = await fetch(`/admin/api/line-users/${encodeURIComponent(uid)}`); }
+  catch(e){ box.innerHTML = '<div class="lu-empty">โหลดข้อมูลไม่สำเร็จ</div>'; return; }
+  const data = await res.json();
+  if(!data.ok){ box.innerHTML = '<div class="lu-empty">ไม่พบผู้ใช้งาน</div>'; return; }
+  const d = data.detail, p = d.profile, b = d.binding, se = d.session || {};
+  box.innerHTML = `
+    <div style="font-size:15px;font-weight:700;margin-bottom:2px">${luEsc(p.display_name) || '(ไม่มีชื่อ)'}</div>
+    <div class="lu-sec">
+      <div class="lu-sec-title">ข้อมูลผู้ใช้งาน</div>
+      <div class="lu-kv">
+        <div class="lu-k">Display Name</div><div class="lu-v">${luEsc(p.display_name) || '—'}</div>
+        <div class="lu-k">LINE User ID</div><div class="lu-v lu-cc">${luEsc(p.line_user_id)}</div>
+        <div class="lu-k">First Seen</div><div class="lu-v">${luFmt(p.first_seen)}</div>
+        <div class="lu-k">Last Seen</div><div class="lu-v">${luFmt(p.last_seen)}</div>
+        <div class="lu-k">Message Count</div><div class="lu-v">${p.message_count ?? 0}</div>
+        <div class="lu-k">Conversation Count</div><div class="lu-v">${p.conversation_count ?? 0}</div>
+      </div>
+    </div>
+    <div class="lu-sec">
+      <div class="lu-sec-title">การเชื่อมบัญชีลูกค้า</div>
+      <div class="lu-kv">
+        <div class="lu-k">CustCode</div><div class="lu-v lu-cc">${b.cust_code ? luEsc(b.cust_code) : '—'}</div>
+        <div class="lu-k">สถานะการยืนยัน</div>
+        <div class="lu-v"><span class="lu-badge ${b.verified ? 'lu-badge-yes' : 'lu-badge-no'}">${luEsc(b.status_label)}</span></div>
+        <div class="lu-k">Verification Method</div><div class="lu-v">${b.verification_method ? luEsc(b.verification_method) : '—'}</div>
+        <div class="lu-k">Verified At</div><div class="lu-v">${luFmt(b.verified_at)}</div>
+      </div>
+    </div>
+    <div class="lu-sec">
+      <div class="lu-sec-title">Conversation / Session</div>
+      <div class="lu-kv">
+        <div class="lu-k">Current Session</div><div class="lu-v">${se.has_active ? 'Active' : 'None'}</div>
+        <div class="lu-k">Last Interaction</div><div class="lu-v">${luFmt(se.last_interaction)}</div>
+      </div>
+    </div>`;
+}
+function luClose(){ document.getElementById('lu-ov').classList.remove('open'); }
+document.addEventListener('keydown', e => { if(e.key === 'Escape') luClose(); });
+
+luLoad();
+</script>
+{% endblock %}

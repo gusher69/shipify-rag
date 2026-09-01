@@ -6571,6 +6571,39 @@ async def conversations_page(request: Request):
     return render("conversations.html", {"request": request, "active": "conversations"})
 
 
+# ── P3.1 — Admin User Profile Viewer (read-only) ─────────────────────
+# Joins the two EXISTING tables (user_profiles + customer_channel_bindings)
+# via services/line_user_directory.py. No writes, no new storage.
+@app.get("/admin/line-users", response_class=HTMLResponse)
+async def line_users_page(request: Request):
+    if (r := auth(request)): return r
+    return render("line_users.html", {"request": request, "active": "line-users"})
+
+
+@app.get("/admin/api/line-users")
+async def api_line_users(request: Request):
+    if (r := auth(request)): return r
+    from services.line_user_directory import list_line_users
+    q = dict(request.query_params)
+    try:
+        limit = int(q.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    data = list_line_users(search=q.get("search") or None,
+                            status=q.get("status") or None, limit=limit)
+    return JSONResponse({"ok": True, **data})
+
+
+@app.get("/admin/api/line-users/{line_user_id}")
+async def api_line_user_detail(request: Request, line_user_id: str):
+    if (r := auth(request)): return r
+    from services.line_user_directory import get_line_user_detail
+    detail = get_line_user_detail(line_user_id)
+    if not detail:
+        return JSONResponse({"ok": False, "error": "User not found"}, status_code=404)
+    return JSONResponse({"ok": True, "detail": detail})
+
+
 @app.get("/admin/playground/sessions/{session_id}")
 async def get_session_detail(request: Request, session_id: str):
     if (r := auth(request)): return r
