@@ -142,6 +142,36 @@ class TestStaleErpOverRagBoundary(unittest.TestCase):
         self.assertNotEqual(result["routing"]["type"], "API")
         mock_req.assert_not_called()
 
+    # ── G/H/I: P1.2A informational transport comparison / multi-facet
+    #    turns must stay RAG with a stale last_business_action (real LINE
+    #    regression 2026-09-01 — the comparison form hit no question marker
+    #    -> AMBIGUOUS, the multi-facet form tripped the multi-clause
+    #    private-evidence branch -> PRIVATE_ACTION; both left an identity-
+    #    gated ERP lookup eligible and leaked bill / shipment / tracking /
+    #    total). classify_turn_intent now recognises them as
+    #    SHIPIFY_INFORMATION via the P1.2A RequestSpec.
+    def test_G_transport_rate_comparison_with_stale_erp_context_stays_rag(self):
+        result, mock_req = self._decide("รถกับเรืออันไหนถูกกว่า")
+        self.assertNotEqual(result["routing"]["type"], "API")
+        mock_req.assert_not_called()
+
+    def test_H_transport_duration_comparison_with_stale_erp_context_stays_rag(self):
+        result, mock_req = self._decide("รถกับเรืออันไหนเร็วกว่า")
+        self.assertNotEqual(result["routing"]["type"], "API")
+        mock_req.assert_not_called()
+
+    def test_I_transport_multi_facet_with_stale_erp_context_stays_rag(self):
+        result, mock_req = self._decide("ทางรถกับทางเรือราคาเท่าไหร่ ใช้กี่วัน")
+        self.assertNotEqual(result["routing"]["type"], "API")
+        mock_req.assert_not_called()
+
+    def test_J_private_transport_comparison_is_not_coerced_informational(self):
+        # "ผม" present -> the P1.2A informational shortcut must NOT fire;
+        # existing private/ambiguous handling is unchanged.
+        from services.decision_engine import classify_turn_intent
+        self.assertNotEqual(
+            classify_turn_intent("ผมส่งของทางรถกับเรือ ของผมอันไหนถูกกว่า"), "SHIPIFY_INFORMATION")
+
 
 if __name__ == "__main__":
     unittest.main()

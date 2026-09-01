@@ -1723,6 +1723,35 @@ def classify_turn_intent(message: str) -> str:
     _self_registered = bool(re.search(r"ผม|ฉัน|ดิฉัน|ลงทะเบียน|ที่ผูก|บัญชีของ|โปรไฟล์|ในระบบ", text)) \
         or bool(_REFERENCE_MARKER_RE.search(text))
 
+    # P1.2A informational transport comparison / multi-facet question
+    # (2026-09-01 hotfix) — "รถกับเรืออันไหนถูกกว่า" hits no
+    # _QUESTION_MARKER_RE ("อันไหน…กว่า") so it fell to the AMBIGUOUS
+    # early-return below; "ทางรถกับทางเรือราคาเท่าไหร่ ใช้กี่วัน" has a
+    # question marker but two clauses, so the multi-clause branch of
+    # private_action_evidence tagged it PRIVATE_ACTION. Both are company
+    # shipping rate/duration questions about transport MODES carrying no
+    # self-reference / identifier / reference marker, yet neither reached
+    # SHIPIFY_INFORMATION — so exclude_private was never set and a verified
+    # customer's stale last_business_action could resurrect an identity-
+    # gated ERP lookup (real LINE regression). Reuse the P1.2A RequestSpec
+    # (never a new parser): >=2 transport modes AND (a cheaper/faster
+    # comparison OR a rate/duration/minimum facet) AND no private evidence
+    # of any kind -> a confirmed informational/RAG turn.
+    if not _self_registered and not _PRIVATE_STATE_QUERY_RE.search(text):
+        try:
+            from rag.query_resolution import decompose_request as _p12a_decompose
+            _p12a = _p12a_decompose(text, raw_question=text)
+            _p12a_info = (
+                len(_p12a.transport_modes) >= 2
+                and (_p12a.comparison in ("cheaper", "more_expensive", "faster", "slower")
+                     or any(f in ("rate", "duration", "minimum") for f in _p12a.facets))
+                and not any(_validate_generic_identifier(tok) and not tok.isdigit()
+                            for tok in _TOKEN_SPLIT_RE.split(text) if tok))
+        except Exception:
+            _p12a_info = False
+        if _p12a_info:
+            return "SHIPIFY_INFORMATION"
+
     if not (has_question_marker or has_declarative_intent or _contact_request):
         return "AMBIGUOUS"
 
