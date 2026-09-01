@@ -609,6 +609,16 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
         lines.append(
             "Answer every OTHER requested part normally from the Context — a conflict on one part "
             "never blocks the rest of the answer, and never triggers a blanket no-information reply.")
+    _fu = answer_plan.get("followup") or {}
+    if _fu.get("needed") and _fu.get("question_goal"):
+        # P2 — the ONLY sanctioned exception to BASE_CONVERSATION_RULES'
+        # no-auto-trailing-question rule. Narrow, plan-gated, single question.
+        lines.append(
+            "CONTEXTUAL FOLLOW-UP — after the factual answer above, ask EXACTLY ONE short, "
+            f"natural question whose goal is: {_fu['question_goal']}. Ask only this one question "
+            "and nothing else — no other closing line, no generic 'มีอะไรให้ช่วยอีกไหม' / "
+            "'สอบถามเพิ่มเติมได้'. If the factual answer already fully resolves the customer's "
+            "need, ask nothing.")
     shape = answer_plan.get("response_shape")
     if shape:
         lines.append(f"Response shape: {shape}")

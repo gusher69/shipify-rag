@@ -41,6 +41,118 @@ def _wants_both_transport_modes(question: str) -> bool:
     from rag.query_resolution import requested_transport_modes
     return len(requested_transport_modes(question)) >= 2
 
+
+# ── P2 — Contextual follow-up ("correct answer + ONE useful next question")
+# Deterministic, no LLM. OFF by default; ON only for a small set of
+# semantic/intent + RequestSpec triggers. ERP / clarification / slot-
+# filling / no-information / conflict turns never reach these (the caller
+# gates), and each trigger is additionally repetition-guarded against the
+# last 1-2 assistant turns. See docs/customer-service/02_CS_RESPONSE_POLICY.md
+# (NEXT_STEP state).
+_IMPORT_INTEREST_RE = re.compile(
+    r"อยาก.{0,6}(นำเข้า|สั่งของ|สั่งซื้อ|ชิป|ขนส่ง|ใช้บริการ)"
+    r"|สนใจ.{0,6}(นำเข้า|บริการ|สั่งของ)"
+    r"|ต้องการ.{0,8}นำเข้า"
+    r"|อยากนำเข้า|สนใจนำเข้า|ขอใช้บริการนำเข้า|อยากใช้บริการ")
+_AIR_QUERY_RE = re.compile(r"เครื่องบิน|ทางอากาศ|air\s*freight|แอร์คาร์โก", re.IGNORECASE)
+# Residual after stripping intent / origin / mode words is one of these
+# (or empty) -> the customer has NOT named a concrete product yet.
+_GENERIC_GOODS_RE = re.compile(
+    r"^(สินค้า|ของ|สิ่งของ|พัสดุ|อะไร|อะไรบ้าง|บางอย่าง|หลายอย่าง|ทั่วไป|จากจีน)?$")
+# A common product category named in the message -> product IS known.
+# Deliberately no bare 2-char terms (e.g. "ยา" is a substring of "อยาก") —
+# same Thai-no-word-boundary caution as rag/query_resolution.py.
+_NAMED_PRODUCT_HINT_RE = re.compile(
+    r"เสื้อผ้า|เครื่องสำอาง|น้ำหอม|อาหาร|ขนม|แบตเตอรี่|อะไหล่|เฟอร์นิเจอร์|มือถือ|โทรศัพท์|"
+    r"ของเล่น|เครื่องมือ|เวชภัณฑ์|อุปกรณ์|รองเท้า|กระเป๋า|เครื่องใช้ไฟฟ้า|เครื่องประดับ|นาฬิกา|"
+    r"เครื่องหนัง|สินค้าแบรนด์|อาหารเสริม")
+
+_FOLLOWUP_QUESTION_TH = {
+    "elicit_product_type": "คุณลูกค้าต้องการนำเข้าสินค้าประเภทไหนคะ",
+    "offer_alternative_product": "มีสินค้าอย่างอื่นที่ต้องการให้ช่วยเช็กไหมคะ",
+}
+_FOLLOWUP_GOAL = {
+    "elicit_product_type": ("ask, in ONE short natural question, what type / kind of product "
+                             "the customer wants to import or ship"),
+    "offer_alternative_product": ("offer, in ONE short natural question, to check whether "
+                                   "another product can be imported — never ask for size, "
+                                   "quantity or details of the item already ruled out"),
+}
+_FOLLOWUP_PURPOSE_MARKERS = {
+    "elicit_product_type": re.compile(
+        r"สินค้าประเภท|ประเภทไหน|ประเภทอะไร|สินค้าอะไร|นำเข้าสินค้าอะไร|ขนส่งสินค้าประเภท|"
+        r"สินค้าชนิดไหน|ของประเภทไหน"),
+    "offer_alternative_product": re.compile(
+        r"สินค้า(อย่าง)?อื่น|ตัวอื่น|รายการอื่น|อย่างอื่น.{0,12}(เช็ก|เช็ค|ตรวจสอบ|ดู)"),
+}
+
+
+_FOLLOWUP_LEADING_VERB_RE = re.compile(
+    r"^(นำเข้า|สั่งซื้อ|สั่งของ|สั่ง|ส่งของ|ส่ง|ชิป|ขนส่ง|ฝากสั่ง|ฝากนำเข้า|ใช้บริการ|บริการ|"
+    r"อยาก|ต้องการ|สนใจ|จะ)\s*")
+
+
+def _followup_residual_product(text: str) -> str:
+    core = re.sub(r"(อยาก|ต้องการ|สนใจ|จะ|ขอ|ช่วย|หน่อย|ครับ|ค่ะ|คะ|นะ|น่ะ|ด้วย)\s*", "", text or "")
+    core = re.sub(r"(จากจีน|จากประเทศจีน|ประเทศจีน|จีน|มาไทย|เข้าไทย|มาที่ไทย)\s*", "", core).strip()
+    for _ in range(4):  # peel stacked verbs: "ใช้บริการนำเข้า" -> "นำเข้า" -> ""
+        stripped = _FOLLOWUP_LEADING_VERB_RE.sub("", core).strip()
+        if stripped == core:
+            break
+        core = stripped
+    return core.strip()
+
+
+def _import_interest_without_product(text: str) -> bool:
+    if not _IMPORT_INTEREST_RE.search(text or ""):
+        return False
+    if _NAMED_PRODUCT_HINT_RE.search(text or ""):
+        return False
+    residual = _followup_residual_product(text)
+    return not residual or bool(_GENERIC_GOODS_RE.match(residual))
+
+
+def _purpose_recently_served(purpose: str, history: Optional[List[Dict]]) -> bool:
+    marker = _FOLLOWUP_PURPOSE_MARKERS.get(purpose)
+    if not marker or not history:
+        return False
+    recent_assistant = [t.get("content") or "" for t in history if t.get("role") == "assistant"][-2:]
+    return any(marker.search(t) for t in recent_assistant)
+
+
+def decide_followup(actionable_intent: str, request_spec, raw_question: Optional[str],
+                     history: Optional[List[Dict]], answerability: Optional[str],
+                     conflicting_components: Optional[List[str]],
+                     clarification_required: bool = False) -> Dict:
+    """{"needed": bool, "purpose": Optional[str], "question_goal": Optional[str]}.
+    OFF unless one narrow trigger fires AND its purpose was not already
+    served in the last 1-2 assistant turns."""
+    off = {"needed": False, "purpose": None, "question_goal": None}
+    if clarification_required or conflicting_components or answerability == "no_information":
+        return off
+    q = raw_question or ""
+    spec_entities = list(getattr(request_spec, "entities", []) or [])
+
+    purpose: Optional[str] = None
+    if _import_interest_without_product(q):
+        purpose = "elicit_product_type"                    # A — import/service interest, no product
+    elif _AIR_QUERY_RE.search(q) and not spec_entities and not _NAMED_PRODUCT_HINT_RE.search(q):
+        purpose = "elicit_product_type"                    # B — air unavailable, redirect, product unknown
+    elif actionable_intent == "prohibited_goods":
+        purpose = "offer_alternative_product"              # C — prohibited item, offer another
+
+    if not purpose or _purpose_recently_served(purpose, history):
+        return off
+    return {"needed": True, "purpose": purpose, "question_goal": _FOLLOWUP_GOAL[purpose]}
+
+
+def render_followup_question(purpose: Optional[str]) -> str:
+    """Purpose -> approved Thai question. Used ONLY on the deterministic
+    FAQ-direct path (which has no synthesis call to phrase it); normal
+    synthesis turns get `question_goal` in the prompt instead."""
+    return _FOLLOWUP_QUESTION_TH.get(purpose or "", "")
+
+
 _CLARIFICATION_TEMPLATES = {
     "warehouse_ambiguous": "ต้องการที่อยู่โกดังไทยหรือโกดังจีนคะ",
     "bill_ambiguous": "ต้องการชำระบิลสั่งซื้อหรือบิลค่าขนส่งคะ",
@@ -285,6 +397,9 @@ def plan_answer(
     requested_components: Optional[List[str]] = None,
     comparison: Optional[str] = None,
     conflicting_components: Optional[List[str]] = None,
+    history: Optional[List[Dict]] = None,
+    request_spec: Optional[object] = None,
+    answerability: Optional[str] = None,
 ) -> Dict:
     """Returns:
         {
@@ -317,6 +432,13 @@ def plan_answer(
     requested_components = requested_components or []
     conflicting_components = conflicting_components or []
     _multi_component = len(requested_components) >= 2
+    # P2 contextual follow-up — decided once here from data already
+    # available this turn; OFF for every branch except the 3 narrow
+    # triggers, and repetition-guarded. `raw_question` is the customer's
+    # own wording (the trigger must be semantic, never phrase-specific).
+    followup = decide_followup(
+        actionable_intent, request_spec, raw_question or question, history,
+        answerability, conflicting_components)
 
     if _needs_warehouse_clarification(actionable_intent, entities, chunks, raw_question or question):
         subject = _WAREHOUSE_CLARIFICATION_SUBJECT.get(actionable_intent, "ที่อยู่")
@@ -326,6 +448,7 @@ def plan_answer(
             "response_shape": "clarification",
             "clarification_required": True,
             "clarification_question": f"ต้องการ{subject}โกดังไทยหรือโกดังจีนคะ",
+            "followup": {"needed": False, "purpose": None, "question_goal": None},
         }
     if _needs_bill_clarification(actionable_intent, entities, chunks):
         return {
@@ -334,6 +457,7 @@ def plan_answer(
             "response_shape": "clarification",
             "clarification_required": True,
             "clarification_question": _CLARIFICATION_TEMPLATES["bill_ambiguous"],
+            "followup": {"needed": False, "purpose": None, "question_goal": None},
         }
 
     # Named-sublocation narrowing (2026-09-01) — a request that names ONE
@@ -368,6 +492,7 @@ def plan_answer(
             "optional_facts": type_facts["optional"], "excluded_facts": [],
             "response_shape": "faq_direct",
             "clarification_required": False, "clarification_question": None,
+            "followup": followup,
         }
 
     template = _PLAN_TEMPLATES.get(actionable_intent, _PLAN_TEMPLATES["unknown"])
@@ -500,6 +625,7 @@ def plan_answer(
         "clarification_question": None,
         "requested_components": list(requested_components),
         "conflicting_components": list(conflicting_components),
+        "followup": followup,
     }
     # Answer Plan Validator (Part 9, P0 2026-07-21) — defense in depth:
     # `goal` above is built ONLY by interpolating `entities` (already the

@@ -1065,10 +1065,15 @@ def run_playground_turn(
         requested_components=[l for l, _ in request_components] if multi_component_request else None,
         comparison=request_spec.comparison,
         conflicting_components=conflicting_components or None,
+        history=history, request_spec=request_spec,
+        answerability=conf_result.answerability,
     )
+    _fu = answer_plan.get("followup") or {}
     stages.append(Stage("Answer Planner", "success", (time.time() - t0) * 1000,
                          f"goal={answer_plan['answer_goal']!r}, shape={answer_plan['response_shape']}"
-                         + (", clarification requested" if answer_plan["clarification_required"] else "")))
+                         + (", clarification requested" if answer_plan["clarification_required"] else "")
+                         + (f", followup={_fu['purpose']}" if _fu.get("needed") else "")))
+    query_expansion_debug["followup"] = answer_plan.get("followup")
 
     # 5. Prompt Builder — needs the retrieved context, so it runs AFTER retrieval.
     # retrieval_confidence (Phase 2 Part 3, computed just above) is passed
@@ -1327,8 +1332,27 @@ def run_playground_turn(
         # every mode verbatim there is the wrong answer.
         _faq_text = chunks[0].get("text") or ""
         answer_text = _faq_text.split("\nAnswer: ", 1)[1].strip() if "\nAnswer: " in _faq_text else _faq_text.strip()
+        # P2 contextual follow-up on the verbatim FAQ path — appended
+        # deterministically from a purpose-keyed approved question (no
+        # synthesis call, FAQ wording untouched). ONLY when the Answer
+        # Planner flagged a follow-up as useful for this turn.
+        _p2 = answer_plan.get("followup") or {}
+        _p2_appended = False
+        if _p2.get("needed"):
+            from services.answer_planner import render_followup_question, _FOLLOWUP_PURPOSE_MARKERS
+            _p2q = render_followup_question(_p2.get("purpose"))
+            _already = _FOLLOWUP_PURPOSE_MARKERS.get(_p2.get("purpose"))
+            # Skip the overlay when the human-written FAQ answer ALREADY
+            # asks a question serving this purpose (e.g. the air-freight
+            # row ends with "…ต้องการขนส่งสินค้าประเภทไหนคะ") — never a
+            # duplicate question.
+            if _p2q and _p2q not in answer_text and not (_already and _already.search(answer_text)):
+                answer_text = answer_text.rstrip() + "\n\n" + _p2q
+                _p2_appended = True
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
-                             "exact FAQ row — customer-approved answer returned verbatim, no LLM call"))
+                             "exact FAQ row — customer-approved answer returned verbatim, no LLM call"
+                             + (f" (+ P2 follow-up: {_p2['purpose']})" if _p2_appended
+                                else " (P2 follow-up: FAQ already serves it)" if _p2.get("needed") else "")))
         services_used.append({"name": "LLMService", "status": "skipped"})
         input_tokens = output_tokens = 0
         llm_latency = 0.0
