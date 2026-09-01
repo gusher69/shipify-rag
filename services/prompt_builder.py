@@ -596,7 +596,10 @@ def _build_answer_plan_block(answer_plan: Optional[Dict]) -> str:
             "to (perfume / shampoo / detergent are liquids; a drinking glass is fragile glassware, "
             "not a liquid); but the accept / prohibit verdict itself must come from a policy "
             "actually present in the Retrieved Context — for the item or its category — never "
-            "from outside knowledge.")
+            "from outside knowledge. Do NOT conclude an item is ALLOWED just because it is not "
+            "named in a prohibited-goods list — absence from a list is not a permission. If no "
+            "rule in the Context affirmatively permits OR prohibits the item or a category it "
+            "belongs to, mark that component unconfirmed (ยังไม่ยืนยัน).")
     if answer_plan.get("conflicting_components"):
         # P1.2B — the Retrieved Context carries INCOMPATIBLE trusted values
         # for these. Do not choose one; say plainly it is not confirmed.

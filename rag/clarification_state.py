@@ -25,7 +25,10 @@ prevents any other flow's entities from leaking in.
 import re
 from typing import Dict, List, Optional
 
-from rag.query_resolution import extract_entities, _strip_suffix
+from rag.query_resolution import (
+    extract_entities, _strip_suffix,
+    _ELICIT_MARKER_RE, _IMPORT_INTEREST_RE, _PRODUCT_REPLY_STRIP_RE,
+)
 
 # A clarification question this codebase asks is either an "A หรือ B"
 # disambiguation, or an open "which one do you mean" question (มีคำว่า
@@ -129,7 +132,8 @@ def resolve_clarification_answer(reply_text: str, history: Optional[List[Dict]])
         return None
 
     resolved = _compose_clarification_answer(
-        pending["original_question"], pending_topic, reply_entities, normalized)
+        pending["original_question"], pending_topic, reply_entities, normalized,
+        pending["clarification_question"])
     if not resolved:
         return None
 
@@ -138,12 +142,25 @@ def resolve_clarification_answer(reply_text: str, history: Optional[List[Dict]])
 
 
 def _compose_clarification_answer(original_question: str, topic: Optional[str],
-                                   reply_entities: Dict, reply_text: str) -> str:
+                                   reply_entities: Dict, reply_text: str,
+                                   clarification_question: str = "") -> str:
     """Combines the ORIGINAL user question (never a later or stale one)
     with whatever new entity the reply supplies. Every word used here
     comes from the original question, the clarification question (via
     `topic`, already resolved by the caller), or the reply itself —
     nothing is invented."""
+    # P2A blocker — the assistant's own question was a P2 "which product
+    # type do you want to import?" follow-up (_ELICIT_MARKER_RE) and the
+    # original goal is import/service interest (_IMPORT_INTEREST_RE): a
+    # bare product-noun reply becomes a standalone eligibility question so
+    # the pipeline runs normal single-product eligibility reasoning
+    # ("แก้วน้ำครับ" -> "แก้วน้ำนำเข้าได้ไหม"). Not order/phrase specific.
+    if (_ELICIT_MARKER_RE.search(clarification_question or "")
+            and _IMPORT_INTEREST_RE.search(original_question or "")):
+        noun = _PRODUCT_REPLY_STRIP_RE.sub("", reply_text.strip()).strip()
+        noun = re.sub(r"^(เป็น|คือ|ขอ|เอา|อยากได้)\s*", "", noun).strip()
+        if 2 <= len(noun) <= 25 and not re.search(r"ไหม|มั้ย|\?|ยังไง|เท่าไหร่|กี่", noun):
+            return f"{noun}นำเข้าได้ไหม"
     # Deliberately does NOT strip a filler prefix ("ขอ") here — unlike the
     # legacy follow-up resolver, this composer is re-attaching a topic/
     # entity word directly onto the ORIGINAL question, so keeping "ขอ..."

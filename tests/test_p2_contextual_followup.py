@@ -150,5 +150,66 @@ class PlanWiring(unittest.TestCase):
         self.assertFalse(plan["followup"]["needed"])
 
 
+class BlockerSingleEligibility(unittest.TestCase):
+    def test_single_product_gets_enriched_query(self):
+        from rag.query_resolution import single_eligibility_component
+        s = decompose_request("น้ำหอมนำเข้าได้ไหม", raw_question="น้ำหอมนำเข้าได้ไหม")
+        c = single_eligibility_component(s)
+        self.assertIsNotNone(c)
+        self.assertEqual(c[0], "น้ำหอม / eligibility")
+        self.assertIn("ของเหลว", c[1])
+        self.assertIn("สินค้าต้องห้าม", c[1])
+
+    def test_unknown_product_also_enriched(self):
+        from rag.query_resolution import single_eligibility_component
+        s = decompose_request("แก้วน้ำ นำเข้าได้ไหม", raw_question="แก้วน้ำ นำเข้าได้ไหม")
+        self.assertEqual(single_eligibility_component(s)[0], "แก้วน้ำ / eligibility")
+
+    def test_multi_entity_returns_none(self):
+        from rag.query_resolution import single_eligibility_component
+        s = decompose_request("แบตเตอรี่ น้ำหอม นำเข้าได้ไหม", raw_question="แบตเตอรี่ น้ำหอม นำเข้าได้ไหม")
+        self.assertIsNone(single_eligibility_component(s))
+
+    def test_non_eligibility_returns_none(self):
+        from rag.query_resolution import single_eligibility_component
+        s = decompose_request("ค่าส่งทางรถเท่าไหร่", raw_question="ค่าส่งทางรถเท่าไหร่")
+        self.assertIsNone(single_eligibility_component(s))
+
+
+class BlockerConsumeFollowupAnswer(unittest.TestCase):
+    H = [{"role": "user", "content": "อยากนำเข้าสินค้าจากจีน"},
+         {"role": "assistant", "content": "ยินดีค่ะ คุณลูกค้าต้องการนำเข้าสินค้าประเภทไหนคะ"}]
+
+    def _resolve(self, msg, history=None):
+        from rag.clarification_state import resolve_clarification_answer
+        return resolve_clarification_answer(msg, history or self.H)
+
+    def test_F_perfume_reply_becomes_eligibility_question(self):
+        self.assertEqual(self._resolve("น้ำหอมครับ")["resolved_question"], "น้ำหอมนำเข้าได้ไหม")
+
+    def test_G_shampoo_reply(self):
+        self.assertEqual(self._resolve("แชมพูครับ")["resolved_question"], "แชมพูนำเข้าได้ไหม")
+
+    def test_H_unknown_product_reply(self):
+        self.assertEqual(self._resolve("แก้วน้ำครับ")["resolved_question"], "แก้วน้ำนำเข้าได้ไหม")
+
+    def test_I_no_elicitation_no_reconstruction(self):
+        hist = [{"role": "user", "content": "สวัสดีครับ"},
+                {"role": "assistant", "content": "สวัสดีค่ะ ยินดีให้บริการค่ะ"}]
+        self.assertIsNone(self._resolve("น้ำหอมครับ", hist))
+
+    def test_warehouse_clarification_still_works(self):
+        hist = [{"role": "user", "content": "ขอเบอร์ติดต่อ"},
+                {"role": "assistant", "content": "ต้องการเบอร์ติดต่อโกดังไทยหรือโกดังจีนคะ"}]
+        self.assertIn("ไทย", self._resolve("ไทย", hist)["resolved_question"])
+
+    def test_laew_shampoo_untouched_by_composer(self):
+        # No elicit-marker question in history -> composer's P2 branch must
+        # not fire; the existing P1.2A "แล้ว…ล่ะ" path owns this.
+        hist = [{"role": "user", "content": "แบตเตอรี่นำเข้าได้ไหม"},
+                {"role": "assistant", "content": "ไม่ได้ครับ เป็นสินค้าต้องห้าม"}]
+        self.assertIsNone(self._resolve("แล้วแชมพูล่ะ", hist))
+
+
 if __name__ == "__main__":
     unittest.main()

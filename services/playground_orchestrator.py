@@ -86,6 +86,25 @@ def _find_ungrounded_risk_term(answer_text: str, context_text: str) -> Optional[
 # Phone-shaped run: 9–10 digits, optionally grouped with - or spaces.
 _PHONE_RUN_RE = re.compile(r"\d[\d\-\s]{7,13}\d")
 
+# P2A blocker — a single-product eligibility answer must not conclude
+# "can be imported" without an AFFIRMATIVE permission in the Context;
+# inferring "allowed" from mere absence in a prohibited-goods list is not
+# grounded. Matched on the ANSWER text; single-product eligibility turns
+# only. (a) a non-negated positive verdict for the item; (b) the classic
+# "not on the list, therefore allowed" shape.
+_POSITIVE_VERDICT_RE = re.compile(
+    r"(?<!ไม่)สามารถนำเข้าได้|(?<!ไม่)นำเข้าได้(ค่ะ|ครับ|นะคะ|เลย|อยู่)")
+_ABSENCE_ALLOW_RE = re.compile(
+    r"(นำเข้าได้|สามารถนำเข้าได้)[^\n]{0,45}(ไม่ได้อยู่ใน|ไม่อยู่ใน|ไม่ได้ระบุ|ไม่พบใน|ไม่ปรากฏใน)"
+    r"[^\n]{0,20}(รายการ|สินค้าต้องห้าม|ต้องห้าม|ระบบ)"
+    r"|(ไม่ได้อยู่ใน|ไม่อยู่ใน|ไม่ปรากฏใน|ไม่พบใน)[^\n]{0,25}(รายการ|สินค้าต้องห้าม|ต้องห้าม)"
+    r"[^\n]{0,35}(จึงนำเข้าได้|จึงสามารถนำเข้าได้|สามารถนำเข้าได้|นำเข้าได้)")
+# An explicit POSITIVE-permission statement in the Context (never a
+# negated one — "ไม่รับนำเข้า" / "ไม่สามารถนำเข้า" must not count).
+_AFFIRMATIVE_PERMISSION_RE = re.compile(
+    r"(?<!ไม่)รับนำเข้าสินค้า(?!ผิด)(?!ต้องห้าม)|นำเข้าได้ทุกประเภท|(?<!ไม่)อนุญาตให้นำเข้า"
+    r"|สินค้าทั่วไป[^\n]{0,10}นำเข้าได้|รายการสินค้าที่รับนำเข้า")
+
 
 def _restore_verbatim_scalar_values(answer_text: str, context_text: str) -> str:
     """Deterministic evidence-value fidelity (2026-09-01). Synthesis may
@@ -516,6 +535,7 @@ def run_playground_turn(
                          + ", ".join(f"{c['from']}->{c['to']}" for c in spell_result["corrections"])
                          if spell_result["corrections"] else "no corrections needed"))
 
+
     # 0. Follow-up / Entity Resolution — Conversation Resolver 2.0 (rag/
     #    query_resolution.py::resolve_conversation()). Deterministic, no
     #    LLM call. Uses ONLY prior USER turns from `history` (never a
@@ -646,14 +666,24 @@ def run_playground_turn(
     #      multi-target retrieval + the Answer Planner's completeness
     #      instruction ONLY when there is genuinely more than one evidence
     #      target; a normal single-component question is a complete no-op.
-    from rag.query_resolution import decompose_request, build_request_components
+    from rag.query_resolution import decompose_request, build_request_components, single_eligibility_component
     request_spec = decompose_request(canonical_question, history, raw_question=question)
     request_components = build_request_components(request_spec)
     multi_component_request = len(request_components) >= 2
+    # Single concrete product + eligibility question ("น้ำหอมนำเข้าได้ไหม")
+    # — reuse the SAME eligibility-focused retrieval enrichment the
+    # multi-product path already gives each entity (P2A blocker). Not
+    # multi-component: single retrieval path + normal plan, only the
+    # retrieval query is enriched and the one component label is passed so
+    # the P1.2A classification / "unconfirmed only if no policy" clause
+    # still governs an unknown product.
+    single_elig = None if multi_component_request else single_eligibility_component(request_spec)
     stages.append(Stage("Request Decomposition", "success", 0.0,
                          (f"{len(request_components)} components: "
                           + "; ".join(l for l, _ in request_components))
-                         if multi_component_request else "single-component — existing retrieval path"))
+                         if multi_component_request
+                         else (f"single eligibility: {single_elig[0]}" if single_elig
+                               else "single-component — existing retrieval path")))
 
     # For a multi-component turn the single-intent Canonical Query Rewrite
     # (e.g. it collapsed "รถกับเรืออันไหนถูกกว่า" -> "อัตราค่าขนส่งทางรถ
@@ -784,7 +814,8 @@ def run_playground_turn(
                                      "duration_ms": (time.time() - t0) * 1000,
                                      "detail": f"{len(request_components)} components -> {len(chunks)} unioned chunks"})
         else:
-            chunks = rag.retrieve(canonical_question, top_k=effective_top_k, trace=retrieval_trace,
+            _retrieval_query = single_elig[1] if single_elig else canonical_question
+            chunks = rag.retrieve(_retrieval_query, top_k=effective_top_k, trace=retrieval_trace,
                                    excluded_terms=excluded_terms or None,
                                    actionable_intent=intent_result["actionable_intent"],
                                    original_question=corrected_question)
@@ -1062,7 +1093,8 @@ def run_playground_turn(
         synthesis_question, intent_result["actionable_intent"], intent_result["requested_attributes"],
         intent_result["entities"], context_chunks, retrieval_confidence_result["retrieval_confidence"], policy_set,
         raw_question=question,
-        requested_components=[l for l, _ in request_components] if multi_component_request else None,
+        requested_components=([l for l, _ in request_components] if multi_component_request
+                               else ([single_elig[0]] if single_elig else None)),
         comparison=request_spec.comparison,
         conflicting_components=conflicting_components or None,
         history=history, request_spec=request_spec,
@@ -1377,6 +1409,24 @@ def run_playground_turn(
                 # branches above never mutate a value or hedge).
                 answer_text = _restore_verbatim_scalar_values(answer_text, context)
                 answer_text = _strip_contradictory_noinfo_hedge(answer_text, conf_result.answerability)
+                # P2A blocker — a single-product eligibility answer must not
+                # infer "ALLOWED" merely because the product is absent from a
+                # prohibited-goods list. Deterministic, no extra LLM call —
+                # same family as the two guards above. Replaces only the
+                # invented verdict; any P2 follow-up already lives on a
+                # separate line and is re-appended.
+                if single_elig and (
+                        _ABSENCE_ALLOW_RE.search(answer_text)
+                        or (_POSITIVE_VERDICT_RE.search(answer_text)
+                            and not _AFFIRMATIVE_PERMISSION_RE.search(context))):
+                    _prod = single_elig[0].split(" / ")[0]
+                    _tail = ""
+                    _fu2 = answer_plan.get("followup") or {}
+                    if _fu2.get("needed"):
+                        from services.answer_planner import render_followup_question
+                        _tail = "\n\n" + render_followup_question(_fu2.get("purpose"))
+                    answer_text = (f"ตอนนี้ยังไม่มีข้อมูลยืนยันว่า{_prod}นำเข้าได้หรือไม่ค่ะ "
+                                    f"รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ") + _tail
                 stage_detail = f"model={llm_response.model}"
             stages.append(Stage("LLM", "success", (time.time() - t0) * 1000, stage_detail))
             services_used.append({"name": "LLMService", "status": "success"})

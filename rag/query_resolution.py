@@ -943,3 +943,34 @@ def build_request_components(spec: RequestSpec) -> List["tuple[str, str]"]:
         return comps
 
     return comps
+
+
+def single_eligibility_component(spec: RequestSpec) -> Optional["tuple[str, str]"]:
+    """P2A blocker fix — the SAME eligibility-focused retrieval enrichment
+    build_request_components() gives each entity of a MULTI-product
+    question, applied to a SINGLE concrete product too ("น้ำหอมนำเข้าได้ไหม"
+    on its own). Returns (component_label, focused_retrieval_query) or
+    None. Not multi-component: the caller keeps the single retrieval path
+    and normal answer plan, only swapping in the enriched query + passing
+    the one component label so the P1.2A semantic-classification /
+    'unconfirmed only if neither item nor category has policy' clause
+    still applies (glass stays unconfirmed, perfume/shampoo -> liquid)."""
+    if len(spec.entities) == 1 and not spec.sub_questions and not spec.transport_modes:
+        e = spec.entities[0]
+        return (f"{e} / eligibility", f"{e} นำเข้าได้ไหม สินค้าต้องห้าม ของเหลว")
+    return None
+
+
+# ── P2A blocker fix — shared regexes for consuming a reply to a P2
+#    "elicit_product_type" follow-up. The consumption itself is done by
+#    rag/clarification_state.py (which already owns "reply answers the
+#    assistant's own last question"); these live here so both modules use
+#    one definition. _IMPORT_INTEREST_RE mirrors the canonical one in
+#    services/answer_planner.py (1-line copy, avoids an import cycle).
+_PRODUCT_REPLY_STRIP_RE = re.compile(r"\s*(ครับผม|ครับ|ค่ะ|คะ|ค่า|นะ|น่ะ|จ้า|จ้ะ|เลย|อ่ะ|อะ)\s*$")
+_ELICIT_MARKER_RE = re.compile(
+    r"สินค้าประเภท|ประเภทไหน|ประเภทอะไร|สินค้าอะไร|นำเข้าสินค้าอะไร|ขนส่งสินค้าประเภท|"
+    r"สินค้าชนิดไหน|ของประเภทไหน")
+_IMPORT_INTEREST_RE = re.compile(
+    r"อยาก.{0,6}(นำเข้า|สั่งของ|สั่งซื้อ|ชิป|ขนส่ง|ใช้บริการ)|สนใจ.{0,6}(นำเข้า|บริการ|สั่งของ)"
+    r"|ต้องการ.{0,8}นำเข้า|อยากนำเข้า|สนใจนำเข้า|ขอใช้บริการนำเข้า|อยากใช้บริการ")
