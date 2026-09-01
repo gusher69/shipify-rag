@@ -248,13 +248,21 @@ def update_sentiment_from_turn(line_user_id: str, *, question: str = "",
                                display_name: Optional[str] = None, cust_code: Optional[str] = None,
                                lead_stage: Optional[str] = None,
                                action_failed_repeatedly: bool = False,
+                               handoff_active: bool = False,
                                now: Optional[datetime] = None) -> Optional[Dict]:
     """Detect this real LINE turn's sentiment, persist
     sentiment_status / sentiment_reasons / sentiment_updated_at /
     negative_last_detected_at / negative_last_alert_at, and send ONE Admin
     LINE alert on a NORMAL->NEGATIVE transition or a post-cooldown new
     incident. Real LINE users only. Never raises (detached post-reply
-    thread). Returns the persisted dict, or None if skipped."""
+    thread). Returns the persisted dict, or None if skipped.
+
+    `handoff_active` = this turn already escalated to Human Handoff
+    (line_bot/webhook.py routing_type == "HUMAN_HANDOFF"), which sends its
+    own CS notification through the SAME NOTIFY Business Action. When true
+    the P4.1 alert is suppressed and the incident is marked already-
+    alerted (negative_last_alert_at) so exactly ONE notification per
+    incident reaches CS — never two."""
     try:
         if not is_real_line_user_id(line_user_id):
             return None
@@ -287,8 +295,14 @@ def update_sentiment_from_turn(line_user_id: str, *, question: str = "",
         if d["detected_now"]:
             row["negative_last_detected_at"] = now.isoformat()
 
+        # Human Handoff already notified CS for this turn (same NOTIFY
+        # action) — suppress the P4.1 alert, but record the incident as
+        # alerted so a follow-up negative turn within 24h stays quiet too.
         alert_result = {"sent": False, "error": "not_attempted"}
-        if d["should_alert"]:
+        if d["detected_now"] and handoff_active:
+            row["negative_last_alert_at"] = now.isoformat()
+            alert_result = {"sent": False, "error": "covered_by_human_handoff"}
+        elif d["should_alert"]:
             alert_result = send_admin_negative_alert(
                 display_name=display_name, cust_code=cust_code, lead_stage=lead_stage,
                 reasons=d["reasons"], last_message=question, when=now)

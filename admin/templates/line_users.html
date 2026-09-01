@@ -107,11 +107,23 @@
   <div class="lu-toolbar">
     <input class="lu-input" id="lu-search" type="text" placeholder="ค้นหาชื่อ หรือ CustCode"
            oninput="luDebouncedLoad()">
-    <select class="lu-select" id="lu-status" onchange="luLoad()">
-      <option value="all">ทั้งหมด</option>
+    <select class="lu-select" id="lu-status" onchange="luLoad()" aria-label="สถานะบัญชี">
+      <option value="all">สถานะบัญชี: ทั้งหมด</option>
       <option value="verified">ยืนยันแล้ว</option>
       <option value="unverified">ยังไม่ยืนยัน</option>
     </select>
+    <select class="lu-select" id="lu-lead" onchange="luLoad()" aria-label="Lead Stage">
+      <option value="all">Lead Stage: ทั้งหมด</option>
+      <option value="COLD">COLD</option>
+      <option value="WARM">WARM</option>
+      <option value="HOT">HOT</option>
+    </select>
+    <select class="lu-select" id="lu-sentiment" onchange="luLoad()" aria-label="Sentiment">
+      <option value="all">Sentiment: ทั้งหมด</option>
+      <option value="NORMAL">NORMAL</option>
+      <option value="NEGATIVE">NEGATIVE</option>
+    </select>
+    <span class="lu-muted" id="lu-count" style="font-size:11.5px;align-self:center"></span>
   </div>
 
   <table class="lu-table">
@@ -171,22 +183,30 @@ async function luJSON(url){
 async function luLoad(){
   const q = encodeURIComponent(document.getElementById('lu-search').value.trim());
   const st = document.getElementById('lu-status').value;
+  const lead = document.getElementById('lu-lead').value;
+  const sent = document.getElementById('lu-sentiment').value;
   const tb = document.getElementById('lu-tbody');
   tb.innerHTML = '<tr><td colspan="7" class="lu-empty">กำลังโหลด…</td></tr>';
-  const data = await luJSON(`/admin/api/line-users?search=${q}&status=${st}&limit=50`);
+  const data = await luJSON(
+    `/admin/api/line-users?search=${q}&status=${st}&lead=${lead}&sentiment=${sent}&limit=50`);
   if(!data.ok){
     document.getElementById('lu-sum-total').textContent = '0';
     document.getElementById('lu-sum-verified').textContent = '0';
     document.getElementById('lu-sum-unverified').textContent = '0';
-    tb.innerHTML = '<tr><td colspan="7" class="lu-empty">โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</td></tr>'; return;
+    tb.innerHTML = '<tr><td colspan="7" class="lu-empty">โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</td></tr>';
+    document.getElementById('lu-count').textContent = ''; return;
   }
+  // Summary cards always reflect the global REAL-LINE totals, never the filtered view.
   const s = data.summary || {};
   document.getElementById('lu-sum-total').textContent = s.total ?? '–';
   document.getElementById('lu-sum-verified').textContent = s.verified ?? '–';
   document.getElementById('lu-sum-unverified').textContent = s.unverified ?? '–';
   const rows = data.users || [];
+  const anyFilter = !!document.getElementById('lu-search').value.trim()
+                    || st !== 'all' || lead !== 'all' || sent !== 'all';
+  document.getElementById('lu-count').textContent = rows.length ? `พบ ${rows.length} ผู้ใช้งาน` : '';
   if(!rows.length){
-    const msg = document.getElementById('lu-search').value.trim() ? 'ไม่พบผู้ใช้งานที่ค้นหา' : 'ยังไม่มีข้อมูลผู้ใช้งาน LINE';
+    const msg = anyFilter ? 'ไม่พบผู้ใช้งานที่ตรงกับเงื่อนไข' : 'ยังไม่มีข้อมูลผู้ใช้งาน LINE';
     tb.innerHTML = `<tr><td colspan="7" class="lu-empty">${msg}</td></tr>`; return;
   }
   tb.innerHTML = rows.map(u => `

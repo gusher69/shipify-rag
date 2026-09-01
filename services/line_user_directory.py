@@ -107,11 +107,15 @@ def _last_seen(profile: Dict) -> Optional[str]:
 
 
 def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
-                     limit: int = _LIST_DEFAULT_LIMIT, sb=None) -> Dict:
+                     limit: int = _LIST_DEFAULT_LIMIT, sb=None,
+                     lead_stage: Optional[str] = None, sentiment: Optional[str] = None) -> Dict:
     """{"users": [...], "summary": {"total", "verified", "unverified"}}.
     `status` in (None|"all"|"verified"|"unverified"). `search` matches a
     display_name substring (case-insensitive) OR a verified CustCode
-    substring. Read-only."""
+    substring. `lead_stage` in (None|"all"|"COLD"|"WARM"|"HOT") and
+    `sentiment` in (None|"all"|"NORMAL"|"NEGATIVE") filter the TABLE only —
+    `summary` always reflects the global real-LINE totals. All filters
+    combine (AND). Read-only."""
     client = _sb(sb)
 
     # Query 1 — every LINE binding (small table; one shot). Verified ones
@@ -137,6 +141,8 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
 
     s = (search or "").strip().lower()
     st = (status or "all").lower()
+    lead_f = (lead_stage or "all").upper()
+    sent_f = (sentiment or "all").upper()
     rows: List[Dict] = []
     for p in profiles:
         uid = p.get("line_user_id") or ""
@@ -145,6 +151,11 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
         if st == "verified" and not is_verified:
             continue
         if st == "unverified" and is_verified:
+            continue
+        if lead_f in ("COLD", "WARM", "HOT") and (p.get("lead_stage") or "COLD").upper() != lead_f:
+            continue
+        if sent_f in ("NORMAL", "NEGATIVE") \
+                and (p.get("sentiment_status") or "NORMAL").upper() != sent_f:
             continue
         cust_code = binding["cust_code"] if is_verified else None
         if s and s not in (p.get("display_name") or "").lower() \

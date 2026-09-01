@@ -6590,7 +6590,9 @@ async def api_line_users(request: Request):
     except (TypeError, ValueError):
         limit = 50
     data = list_line_users(search=q.get("search") or None,
-                            status=q.get("status") or None, limit=limit)
+                            status=q.get("status") or None, limit=limit,
+                            lead_stage=q.get("lead") or None,
+                            sentiment=q.get("sentiment") or None)
     return JSONResponse({"ok": True, **data})
 
 

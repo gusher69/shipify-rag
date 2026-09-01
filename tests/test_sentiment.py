@@ -213,6 +213,38 @@ class UpdateFromTurn(unittest.TestCase):
         self.assertEqual(row["sentiment_status"], "NEGATIVE")
         self.assertNotIn("negative_last_alert_at", row)
 
+    # Human Handoff dedup — a turn that escalated to HUMAN_HANDOFF already
+    # notified CS through the SAME NOTIFY action; P4.1 must NOT double-alert.
+    def test_handoff_turn_suppresses_p41_alert(self):
+        sb, captured = self._sb()
+        with patch("profiles.manager.get_profile",
+                   return_value={"sentiment_status": "NORMAL", "lead_stage": "WARM"}), \
+             patch("profiles.manager.supabase", sb), \
+             patch("profiles.manager._profile_cache_clear"), \
+             patch("services.sentiment_service.send_admin_negative_alert") as al:
+            out = update_sentiment_from_turn(
+                _UA, question="ระบบตอบผิดอีกแล้วครับ ขอคุยกับเจ้าหน้าที่",
+                display_name="GuDz", cust_code="FT3182",
+                handoff_active=True, now=_NOW)
+        al.assert_not_called()                                  # no 2nd notification
+        row = captured["row"]
+        self.assertEqual(row["sentiment_status"], "NEGATIVE")   # still marked negative
+        self.assertEqual(row["negative_last_alert_at"], _NOW.isoformat())  # incident = alerted
+        self.assertEqual(out["alert_error"], "covered_by_human_handoff")
+
+    def test_handoff_followup_within_cooldown_still_quiet(self):
+        sb, captured = self._sb()
+        prof = {"sentiment_status": "NEGATIVE", "sentiment_reasons": ["human_requested"],
+                "negative_last_detected_at": (_NOW - timedelta(minutes=3)).isoformat(),
+                "negative_last_alert_at": (_NOW - timedelta(minutes=3)).isoformat()}
+        with patch("profiles.manager.get_profile", return_value=prof), \
+             patch("profiles.manager.supabase", sb), \
+             patch("profiles.manager._profile_cache_clear"), \
+             patch("services.sentiment_service.send_admin_negative_alert") as al:
+            update_sentiment_from_turn(_UA, question="ยังผิดอยู่เลยครับ",
+                                       handoff_active=True, now=_NOW)
+        al.assert_not_called()
+
     # J — playground / synthetic user is skipped entirely
     def test_playground_user_skipped(self):
         with patch("profiles.manager.get_profile") as gp:

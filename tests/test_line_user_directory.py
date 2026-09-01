@@ -43,10 +43,13 @@ def _seed(sb):
          "negative_last_alert_at": "2026-09-01T18:30:05Z"},
         {"line_user_id": _UB, "display_name": "Anna Wong",
          "first_seen": "2026-08-10T00:00:00Z", "last_active": "2026-09-02T09:00:00Z",
-         "message_count": 4, "conversation_count": 1, "created_at": "2026-08-10T00:00:00Z"},
+         "message_count": 4, "conversation_count": 1, "created_at": "2026-08-10T00:00:00Z",
+         "lead_stage": "HOT", "lead_score": 80, "sentiment_status": "NORMAL"},
         {"line_user_id": _UC, "display_name": "ร้านค้า B",
          "first_seen": "2026-07-01T00:00:00Z", "last_active": "2026-08-15T09:00:00Z",
-         "message_count": 40, "conversation_count": 9, "created_at": "2026-07-01T00:00:00Z"},
+         "message_count": 40, "conversation_count": 9, "created_at": "2026-07-01T00:00:00Z",
+         "lead_stage": "COLD", "lead_score": 5, "sentiment_status": "NEGATIVE",
+         "sentiment_reasons": ["complaint"]},
         # ── rows that must NOT reach the directory ──
         {"line_user_id": _UNSEEN, "display_name": "No Provenance",
          "first_seen": "2026-09-01T00:00:00Z", "last_active": "2026-09-09T00:00:00Z",
@@ -279,6 +282,9 @@ class Detail(unittest.TestCase):
         self.assertEqual(u["lead_score"], 55)
 
     def test_list_row_defaults_lead_stage_when_absent(self):
+        for row in self.sb.store["user_profiles"]:
+            if row["line_user_id"] == _UB:
+                row.pop("lead_stage", None); row.pop("lead_score", None)
         u = next(x for x in list_line_users(sb=self.sb)["users"] if x["line_user_id"] == _UB)
         self.assertEqual(u["lead_stage"], "COLD")
         self.assertEqual(u["lead_score"], 0)
@@ -298,7 +304,7 @@ class Detail(unittest.TestCase):
         u = next(x for x in list_line_users(sb=self.sb)["users"] if x["line_user_id"] == _UA)
         self.assertEqual(u["sentiment"], "NEGATIVE")
         v = next(x for x in list_line_users(sb=self.sb)["users"] if x["line_user_id"] == _UB)
-        self.assertEqual(v["sentiment"], "NORMAL")   # default when column absent
+        self.assertEqual(v["sentiment"], "NORMAL")
 
     def test_detail_sentiment_block(self):
         s = get_line_user_detail(_UA, sb=self.sb)["sentiment"]
@@ -309,9 +315,63 @@ class Detail(unittest.TestCase):
         self.assertEqual(s["last_alert_at"], "2026-09-01T18:30:05Z")
 
     def test_detail_sentiment_defaults_normal(self):
+        for row in self.sb.store["user_profiles"]:
+            if row["line_user_id"] == _UB:
+                row.pop("sentiment_status", None)
         s = get_line_user_detail(_UB, sb=self.sb)["sentiment"]
         self.assertEqual(s["status"], "NORMAL")
         self.assertEqual(s["reasons"], [])
+
+
+class ListFilters(unittest.TestCase):
+    """P4.1 finalize — Lead Stage + Sentiment filters (server-side, combine
+    with search + account status; summary always global)."""
+
+    def setUp(self):
+        self.sb = _seed(_FakeSupabase())
+
+    def _ids(self, **kw):
+        return {u["line_user_id"] for u in list_line_users(sb=self.sb, **kw)["users"]}
+
+    # seed: _UA WARM/NEGATIVE, _UB HOT/NORMAL, _UC COLD/NEGATIVE
+    def test_lead_stage_filter(self):
+        self.assertEqual(self._ids(lead_stage="WARM"), {_UA})
+        self.assertEqual(self._ids(lead_stage="HOT"), {_UB})
+        self.assertEqual(self._ids(lead_stage="COLD"), {_UC})
+
+    def test_sentiment_filter(self):
+        self.assertEqual(self._ids(sentiment="NORMAL"), {_UB})
+        self.assertEqual(self._ids(sentiment="NEGATIVE"), {_UA, _UC})
+
+    def test_warm_plus_negative(self):
+        self.assertEqual(self._ids(lead_stage="WARM", sentiment="NEGATIVE"), {_UA})
+
+    def test_hot_plus_negative_is_empty(self):
+        self.assertEqual(list_line_users(sb=self.sb, lead_stage="HOT",
+                                         sentiment="NEGATIVE")["users"], [])
+
+    def test_account_status_still_works_with_new_filters(self):
+        self.assertEqual(self._ids(status="verified", sentiment="NEGATIVE"), {_UA})
+        self.assertEqual(self._ids(status="unverified", sentiment="NEGATIVE"), {_UC})
+
+    def test_search_plus_filters_intersect(self):
+        self.assertEqual(self._ids(search="สมชาย", lead_stage="WARM", sentiment="NEGATIVE"), {_UA})
+        self.assertEqual(self._ids(search="สมชาย", lead_stage="COLD"), set())      # wrong combo
+        self.assertEqual(self._ids(search="anna", lead_stage="HOT"), {_UB})
+
+    def test_reset_all_returns_every_real_user(self):
+        self.assertEqual(self._ids(lead_stage="all", sentiment="all"), {_UA, _UB, _UC})
+        self.assertEqual(self._ids(), {_UA, _UB, _UC})
+
+    def test_summary_unchanged_by_filters(self):
+        base = list_line_users(sb=self.sb)["summary"]
+        filt = list_line_users(sb=self.sb, lead_stage="HOT", sentiment="NEGATIVE")["summary"]
+        self.assertEqual(base, {"total": 3, "verified": 1, "unverified": 2})
+        self.assertEqual(filt, base)
+
+    def test_unknown_filter_value_ignored(self):
+        self.assertEqual(self._ids(lead_stage="all"), {_UA, _UB, _UC})
+        self.assertEqual(self._ids(sentiment=""), {_UA, _UB, _UC})
 
 
 # ── P3.2 — Conversation History Viewer ────────────────────────────────
