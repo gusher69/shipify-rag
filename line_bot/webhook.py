@@ -520,10 +520,21 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # anymore" (Task 06B Phase 22 legacy cleanup, code-level).
     verified_binding = get_customer_binding_service().get_verified_binding(
         tenant_id=tenant_id, channel=channel, external_user_id=user_id)
+    _profile_cust_code = (profile or {}).get("cust_code")  # deprecated cache — provenance only
     customer_context = dict(profile or {})
     customer_context.pop("cust_code", None)
     if verified_binding:
         customer_context["cust_code"] = verified_binding["cust_code"]
+        # P8.2 — a cached account-scoped identifier (last_shipment_code /
+        # last_order_code / last_tracking) learned before this binding, or
+        # under a DIFFERENT customer, must never satisfy a private ERP
+        # slot alongside the verified CustCode. Fail closed: drop it so
+        # dynamic collection asks the customer. Same reasoning as the
+        # cust_code pop above, extended to the whole IDENTIFIER_MEMORY set.
+        from services.action_selection_primitives import strip_cross_identity_identifier_memory
+        customer_context = strip_cross_identity_identifier_memory(
+            customer_context, profile_cust_code=_profile_cust_code,
+            verified_cust_code=verified_binding["cust_code"])
 
     decide_context = {
         "channel": channel, "customer_context": customer_context, "developer_mode": True,

@@ -156,6 +156,52 @@ IDENTIFIER_MEMORY_FIELDS = (
     ("last_shipment_code", "ShipmentCode"), ("last_tracking", "Tracking"),
 )
 
+# The identity-SCOPED subset — these values only make sense for one
+# specific customer account, so a cached value learned under a different
+# (or unknown) customer must never prefill a private ERP slot. CustCode
+# itself is excluded here: for a verified LINE user it is replaced
+# upstream with the verified binding value (line_bot/webhook.py), and for
+# authorization it is never trusted from the cache at all
+# (services/authorization_service.py).
+_ACCOUNT_SCOPED_MEMORY_FIELDS = tuple(
+    pf for pf, _ in IDENTIFIER_MEMORY_FIELDS if pf != "cust_code"
+)
+
+
+def strip_cross_identity_identifier_memory(customer_context, *, profile_cust_code,
+                                            verified_cust_code):
+    """Fail-closed Identifier-Memory provenance guard (P8.2).
+
+    `customer_context` is the per-turn dict the LINE adapter copies from
+    `user_profiles`. When the caller holds a VERIFIED customer binding,
+    the cached account-scoped identifiers (last_order_code /
+    last_shipment_code / last_tracking) may prefill a private ERP required
+    parameter ONLY if they can be proven to belong to that same verified
+    customer. The only provenance signal available is the profile's own
+    (deprecated, never-authoritative) `cust_code` — the customer whose
+    identifiers these were learned under. If it does not match the
+    verified CustCode (or is absent), the cached identifiers belong to a
+    different / unknown account and are removed, so dynamic collection
+    treats the slot as missing and asks the customer.
+
+    Returns a NEW dict; never mutates the input. No verified binding ->
+    returned unchanged (an unverified user cannot reach a private action
+    anyway — authorization fails closed there). `user_profiles.cust_code`
+    is used here ONLY as evidence to REJECT stale cache, never as an
+    authorization source.
+    """
+    ctx = dict(customer_context or {})
+    if not verified_cust_code:
+        return ctx
+    same_customer = bool(profile_cust_code) and (
+        str(profile_cust_code).strip().upper() == str(verified_cust_code).strip().upper()
+    )
+    if same_customer:
+        return ctx
+    for pf in _ACCOUNT_SCOPED_MEMORY_FIELDS:
+        ctx.pop(pf, None)
+    return ctx
+
 _NON_ASKABLE_INPUT_SOURCES = ("secret_configuration", "credential_store", "fixed_configuration", "system_generated")
 
 
