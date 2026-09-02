@@ -298,6 +298,58 @@ def _keyword_score(action: Dict, message: str) -> float:
     return score
 
 
+def matched_configured_keywords(action: Dict, message: str) -> set:
+    """The configured `search_keywords` / example strings on THIS action
+    that actually occur in `message` (via the same `_keyword_matches`
+    every scorer uses). Config-only — the caller never needs to know any
+    literal phrase."""
+    message_l = (message or "").lower()
+    out = set()
+    for kw in action.get("search_keywords") or []:
+        if kw and _keyword_matches(kw, message_l):
+            out.add(str(kw))
+    for ex in action.get("_examples_text") or []:
+        if ex and _keyword_matches(ex, message_l):
+            out.add(str(ex))
+    return out
+
+
+def surviving_unique_keyword_matches(candidate_matches: Dict[str, set], message: str) -> Dict[str, set]:
+    """Given {candidate_id: {matched configured-keyword strings}} across a
+    set of tied candidates, drop any matched keyword on a candidate that
+    is a PROPER SUBSTRING of a longer configured keyword matched by a
+    DIFFERENT candidate, where that longer phrase is itself present in the
+    message.
+
+    Such a match is only an incidental fragment of another action's
+    more-specific configured discriminator (a generic one-word keyword
+    that only matched because the customer typed a longer phrase another
+    action configures) — it is NOT evidence uniquely attributable to its
+    owner. A keyword also matched verbatim by another candidate (shared,
+    equal length) is left in place — that is genuine shared evidence,
+    handled by the existing tie logic, not a subsumed fragment.
+
+    Purely config-driven: operates on whatever `search_keywords` the
+    enabled actions define; contains no literal phrase and no action
+    name/id knowledge. Returns {candidate_id: {surviving keyword strings}}.
+    """
+    message_l = (message or "").lower()
+    result: Dict[str, set] = {}
+    for cid, kws in candidate_matches.items():
+        others_lower = set()
+        for ocid, okws in candidate_matches.items():
+            if ocid != cid:
+                others_lower |= {str(k).lower() for k in okws}
+        survivors = set()
+        for k in kws:
+            kl = str(k).lower()
+            subsumed = any(kl != o and kl in o and o in message_l for o in others_lower)
+            if not subsumed:
+                survivors.add(k)
+        result[cid] = survivors
+    return result
+
+
 def _keyword_score_breakdown(action: Dict, message: str) -> Dict[str, float]:
     """Business Action Registry Collision fix (Task 03C, 2026-08-26) —
     confirmed live: "รับประกันไหมว่าจะถึงภายใน 7 วัน" tied searchdataorderlist
