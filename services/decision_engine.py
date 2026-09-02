@@ -1057,6 +1057,13 @@ _REFERENCE_MARKER_RE = re.compile(
     r"ล่าสุด|ของผม|ของฉัน|ของดิฉัน|อันนี้|รายการนี้|ตอนนี้|แล้ว.*ล่ะ|ถึงหรือยัง|สถานะ",
     re.IGNORECASE)
 
+# Self-referencing / on-file-account wording — a message using any of
+# these is talking about ITS OWN account rather than a generic company
+# subject. Extracted so classify_turn_intent (its `_self_registered`
+# gate) and the Public Clarification Continuity coercion in decide()
+# share ONE definition instead of two that could drift apart.
+_SELF_REGISTERED_RE = re.compile(r"ผม|ฉัน|ดิฉัน|ลงทะเบียน|ที่ผูก|บัญชีของ|โปรไฟล์|ในระบบ")
+
 # Declarative Service-Intent Marker (P0 Final Fix, Business Action vs
 # informational boundary, 2026-08-28) — confirmed live on the REAL
 # deployed LINE webhook path: "ผมต้องการสั่งซื้อสินค้าจากจีนครับ" (a general
@@ -1721,7 +1728,7 @@ def classify_turn_intent(message: str) -> str:
     _contact_request = bool(re.search(
         r"เบอร์|ช่องทางติดต่อ|contact|call\s*center|ติดต่อ.{0,12}(shipify|fasttrade|เจ้าหน้าที่|แอดมิน|บริษัท)",
         text, re.IGNORECASE))
-    _self_registered = bool(re.search(r"ผม|ฉัน|ดิฉัน|ลงทะเบียน|ที่ผูก|บัญชีของ|โปรไฟล์|ในระบบ", text)) \
+    _self_registered = bool(_SELF_REGISTERED_RE.search(text)) \
         or bool(_REFERENCE_MARKER_RE.search(text))
 
     # P1.2A informational transport comparison / multi-facet question
@@ -2405,6 +2412,56 @@ class DecisionEngine:
                             and not any(_last_assistant_turn_requests_input(c) for c in _recent_asst)):
                         turn_intent = "SHIPIFY_INFORMATION"
                         developer_trace["turn_intent_coerced"] = "rag_continuity_followup_over_stale_erp"
+
+                # Public Clarification Continuity (Customer UAT Fix 1,
+                # 2026-09-02) — an under-specified reply carrying no
+                # question particle, no declarative-intent verb, no self-
+                # reference, no current-state query and no reference
+                # marker (exactly the shape classify_turn_intent already
+                # returns "AMBIGUOUS" for) that lands straight after an
+                # INFORMATIONAL assistant answer is the customer supplying
+                # task-specific detail for the PUBLIC question just
+                # answered — a measurement, a weight/quantity value, a
+                # code the previous answer asked them to provide. None of
+                # that is account identity. classify_turn_intent only
+                # sees the message in isolation, so it leaves identity-
+                # gated (API/WEBHOOK) actions eligible; the free-text
+                # value then structurally binds some private action's
+                # parameter, that action is selected, and the
+                # Authorization Gate asks the customer for the phone
+                # number on their account — the reported customer-UAT
+                # bug (missing task information mistaken for missing
+                # identity). Coerce to SHIPIFY_INFORMATION so the SAME
+                # exclude_private mechanism keeps the turn on the public
+                # RAG / clarification path, where the genuinely missing
+                # task field is asked for and identity verification is
+                # never triggered. Gated on the preceding assistant turn
+                # NOT being a parameter / confirmation / identity-
+                # verification request (_last_assistant_turn_requests_
+                # input) — a reply continuing one of THOSE is a real
+                # collection / self-verification continuation, owned by
+                # the paths above, never this one. A genuinely pending
+                # Business Action always carries its own
+                # pending_confirmations row and is resolved before this
+                # branch (continuation_action / detail_sibling_action
+                # above), so nothing that truly continues an ERP flow is
+                # touched. Any message carrying its own self-reference /
+                # on-file-account / current-state / reference-marker
+                # evidence still classifies (and routes) exactly as
+                # before.
+                if turn_intent == "AMBIGUOUS" and history:
+                    _recent_asst = [t.get("content") for t in history
+                                    if t.get("role") == "assistant"][-2:]
+                    _msg = message or ""
+                    _carries_private_evidence = bool(
+                        _SELF_REGISTERED_RE.search(_msg)
+                        or _PRIVATE_STATE_QUERY_RE.search(_msg)
+                        or _REFERENCE_MARKER_RE.search(_msg))
+                    if (_recent_asst and not _carries_private_evidence
+                            and not any(_last_assistant_turn_requests_input(c)
+                                        for c in _recent_asst)):
+                        turn_intent = "SHIPIFY_INFORMATION"
+                        developer_trace["turn_intent_coerced"] = "public_clarification_continuity"
 
                 developer_trace["turn_intent"] = turn_intent
                 exclude_private = _IDENTITY_GATED_ACTION_TYPES if turn_intent == "SHIPIFY_INFORMATION" else None
