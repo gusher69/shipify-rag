@@ -179,6 +179,116 @@ class Guard_ParameterAskContinuationStillReachesErp(_Base):
         self.assertIsNone((result.get("developer") or {}).get("turn_intent_coerced"))
 
 
+# ── TEST B — explicit NEW Business Action after a public answer ─────
+#
+# Fix 1.1 regression guard: an explicitly-phrased new ERP request that
+# merely lacks a Thai question particle (classify_turn_intent -> AMBIGUOUS)
+# must NOT be swallowed by public continuity — its own configured
+# Business Action evidence owns the turn.
+
+_PUBLIC_ROAD_ANSWER = "ระยะเวลาขนส่งทางรถจากจีนถึงไทยประมาณ 7–10 วันค่ะ"
+
+
+class TestB_ExplicitNewBusinessActionAfterPublicAnswer(unittest.TestCase):
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        # DETAIL — configures a specific-record discriminator keyword;
+        # LIST — configures the generic substring. P8.3.1's shared
+        # disambiguation resolves the pair to DETAIL.
+        self.detail = _seed_action(
+            self.reg, key="searchdatashipment", action_type="API",
+            category="Customer Shipment Retrieval",
+            keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"])
+        self.reg.replace_parameters(self.detail, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+            {"name": "SecretCode", "display_name": "SecretCode", "required": True,
+             "input_source": "credential_store"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(self.detail, {"endpoint": "https://example.test/s", "http_method": "GET"})
+        lst = _seed_action(self.reg, key="searchdatashipmentlist", action_type="API",
+                            category="Customer Shipment Retrieval",
+                            keywords=["ติดตามพัสดุ", "พัสดุ", "พัสดุล่าสุด", "สถานะรับเข้าไทย", "shipment"])
+        self.reg.replace_parameters(lst, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+            {"name": "SecretCode", "display_name": "SecretCode", "required": True,
+             "input_source": "credential_store"},
+        ])
+        self.reg.upsert_execution(lst, {"endpoint": "https://example.test/l", "http_method": "GET"})
+        self.engine = DecisionEngine(self.reg._sb)
+        self.engine.registry = self.reg
+
+    def _run(self, message):
+        ctx = {"developer_mode": True, "channel": "line",
+               "customer_context": {"cust_code": "FT3182", "identity_confirmed": True,
+                                    "last_business_action": "getdatacustomer"}}
+        history = [
+            {"role": "user", "content": "ทางรถใช้เวลากี่วัน"},
+            {"role": "assistant", "content": _PUBLIC_ROAD_ANSWER},
+        ]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {}})) as mock_req, \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="PUBLIC-RAG-ANSWER", confidence=0.9)):
+            result = self.engine.decide(message, history=history, context=ctx)
+        return result, mock_req
+
+    def test_new_shipment_action_is_not_coerced_and_collects_its_identifier(self):
+        result, mock_req = self._run("ขอเช็กพัสดุเดียวครับ")
+        dev = result.get("developer") or {}
+        # continuity did NOT fire — the message owns its turn
+        self.assertIsNone(dev.get("turn_intent_coerced"))
+        # DETAIL selected, now collecting the missing record identifier
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        self.assertIn("บิลขนส่ง", result["reply"]["text"])
+        mock_req.assert_not_called()   # no ERP call until the slot exists
+
+
+# ── TEST C — synthetic portability (no Shipify names) ──────────────
+
+class TestC_SyntheticPortabilityNewActionAfterPublicAnswer(unittest.TestCase):
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.x = _seed_action(self.reg, key="action_x", action_type="API",
+                               category="Records", keywords=["specific_record"])
+        self.reg.replace_parameters(self.x, [
+            {"name": "CustCode", "display_name": "c", "required": True,
+             "input_source": "customer_message"},
+            {"name": "RecordId", "display_name": "record id", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(self.x, {"endpoint": "https://example.test/x", "http_method": "GET"})
+        y = _seed_action(self.reg, key="action_y", action_type="API",
+                          category="Misc", keywords=["something_unrelated"])
+        self.reg.replace_parameters(y, [
+            {"name": "CustCode", "display_name": "c", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(y, {"endpoint": "https://example.test/y", "http_method": "GET"})
+        self.engine = DecisionEngine(self.reg._sb)
+        self.engine.registry = self.reg
+
+    def test_configured_keyword_owns_the_turn_after_a_public_answer(self):
+        ctx = {"developer_mode": True, "channel": "line",
+               "customer_context": {"cust_code": "FT3182", "identity_confirmed": True}}
+        history = [
+            {"role": "user", "content": "ทางรถใช้เวลากี่วัน"},
+            {"role": "assistant", "content": _PUBLIC_ROAD_ANSWER},
+        ]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {}})) as mock_req, \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="PUBLIC-RAG-ANSWER", confidence=0.9)):
+            result = self.engine.decide("please specific_record", history=history, context=ctx)
+        dev = result.get("developer") or {}
+        self.assertIsNone(dev.get("turn_intent_coerced"))
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")   # action_x owns it, collecting RecordId
+        mock_req.assert_not_called()
+
+
 # ── Guard — the fix carries no hardcoded customer phrase ────────────
 
 class Guard_NoPhraseHardcode(unittest.TestCase):

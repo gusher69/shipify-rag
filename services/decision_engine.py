@@ -2449,6 +2449,25 @@ class DecisionEngine:
                 # on-file-account / current-state / reference-marker
                 # evidence still classifies (and routes) exactly as
                 # before.
+                #
+                # Fix 1.1 (2026-09-02) — "AMBIGUOUS after an informational
+                # answer" is NOT sufficient on its own: classify_turn_
+                # intent also returns AMBIGUOUS for a fresh, explicitly-
+                # phrased Business Action request that merely lacks a Thai
+                # question particle (e.g. "ขอเช็ก<record>ครับ"), and that
+                # message OWNS its turn. So before coercing, ask the SAME
+                # config-driven selector the fresh-routing path below uses
+                # — search_candidate_actions + select_best_action at the
+                # standard decisive threshold, with the P8.3.1 subsumed-
+                # keyword disambiguation it already applies, and an EMPTY
+                # collected_slots set so remembered Identifier Memory can
+                # never manufacture ownership (identical guard to the
+                # diversion / topic-only checks elsewhere in decide()).
+                # If the current message alone decisively resolves to a
+                # Business Action, it is a genuine new intent: leave it
+                # for normal fresh routing, never coerce. Public
+                # continuity only ever applies to a reply that no
+                # configured Business Action claims on its own.
                 if turn_intent == "AMBIGUOUS" and history:
                     _recent_asst = [t.get("content") for t in history
                                     if t.get("role") == "assistant"][-2:]
@@ -2460,8 +2479,14 @@ class DecisionEngine:
                     if (_recent_asst and not _carries_private_evidence
                             and not any(_last_assistant_turn_requests_input(c)
                                         for c in _recent_asst)):
-                        turn_intent = "SHIPIFY_INFORMATION"
-                        developer_trace["turn_intent_coerced"] = "public_clarification_continuity"
+                        _own_candidates = search_candidate_actions(
+                            self.registry, workflow=workflow_hint, message=message,
+                            collected_slots={})
+                        _own_action = select_best_action(
+                            _own_candidates, minimum_score=1.0 if not workflow_hint else 0.5)
+                        if _own_action is None:
+                            turn_intent = "SHIPIFY_INFORMATION"
+                            developer_trace["turn_intent_coerced"] = "public_clarification_continuity"
 
                 developer_trace["turn_intent"] = turn_intent
                 exclude_private = _IDENTITY_GATED_ACTION_TYPES if turn_intent == "SHIPIFY_INFORMATION" else None
