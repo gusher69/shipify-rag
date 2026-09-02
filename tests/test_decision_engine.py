@@ -46,7 +46,8 @@ def _fake_exec_result(status="success", result=None, error=None):
 def _fake_playground_result(answer="", chunks=None, confidence=0.0, confidence_label="Low", model="gpt-4o",
                              policy_escalate=False, policy_escalation_message=None,
                              template_id="t1", template_name="Standard Policy Template", template_version="3",
-                             policy_set_name="Standard Policy", general_chat_used=False):
+                             policy_set_name="Standard Policy", general_chat_used=False,
+                             unsupported_company_fact=False):
     """Production Integration Sprint (2026-08-02) — Decision Engine's RAG
     execution now calls services/playground_orchestrator.py::
     run_playground_turn() directly (services/decision_engine.py::
@@ -75,7 +76,13 @@ def _fake_playground_result(answer="", chunks=None, confidence=0.0, confidence_l
                       confidence_label=confidence_label, model=model,
                       policy=MagicMock(escalate=policy_escalate, escalation_message=policy_escalation_message),
                       prompt=MagicMock(template=template_mock), policy_set_name=policy_set_name,
-                      general_chat_used=general_chat_used)
+                      general_chat_used=general_chat_used,
+                      # Customer UAT Fix 2 — same MagicMock trap as
+                      # general_chat_used above: an unset attribute
+                      # auto-creates a truthy child mock, which would
+                      # reroute every RAG test to HUMAN_HANDOFF. Default
+                      # to the real dataclass field's own default.
+                      unsupported_company_fact=unsupported_company_fact)
 
 
 class TestBusinessActionSearchAndSelection(unittest.TestCase):

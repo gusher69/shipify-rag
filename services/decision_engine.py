@@ -3485,6 +3485,32 @@ class DecisionEngine:
                                        handoff_payload={"reason": "ai_policy_escalation",
                                                          "escalation_message": result_payload.get("policy_escalation_message")})
 
+            # Customer UAT Fix 2 (2026-09-02) — a genuine COMPANY/Shipify
+            # fact the RAG pipeline could not support from trusted
+            # evidence (its deterministic Answerability-Gate / P7.1 no-
+            # info branch fired). Treat it as a structured NEED-HUMAN-
+            # FOLLOW-UP: route through the SAME Human CS handoff the AI-
+            # policy escalation path uses (routing_type="HUMAN_HANDOFF" +
+            # handoff_payload{reason}), so line_bot/webhook.py's existing
+            # send_handoff_notification + handoff_status dedup actually
+            # notify staff. The customer reply carried here is the honest
+            # no-info wording WITHOUT any "staff will check" promise —
+            # the channel adapter appends the follow-up clause ONLY when
+            # the notification really succeeds (never a fake promise).
+            # A missing-customer-input turn never reaches here: it takes
+            # the Answer Plan's clarification branch in the RAG pipeline,
+            # which returns a clarification question (no unsupported_
+            # company_fact flag), and a supported/grounded answer or a
+            # General-Chat-Fallback reply never sets the flag either.
+            if result_payload.get("unsupported_company_fact"):
+                _noinfo_text = (result_payload.get("answer") or "").strip() \
+                    or "ขออภัยค่ะ ตอนนี้ยังไม่พบข้อมูลยืนยันในส่วนนี้ค่ะ"
+                reply = _build_response(text=_noinfo_text)
+                developer_trace["unsupported_company_fact_handoff"] = True
+                return self._finalize(reply=reply, routing_type="HUMAN_HANDOFF", workflow=workflow,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert,
+                                       handoff_payload={"reason": "unsupported_company_information"})
+
             answer = result_payload.get("answer") or ""
             if not answer.strip():
                 # The shared RAG pipeline already ran (above) and produced
@@ -3892,6 +3918,16 @@ class DecisionEngine:
             developer_trace["confidence"] = result_payload["confidence"]
 
         if answer_text and answer_text.strip():
+            # Customer UAT Fix 2 — same structured NEED-HUMAN-FOLLOW-UP
+            # routing as _execute_selected_action's RAG branch, in case a
+            # genuine unsupported company fact reaches the RAG pipeline
+            # via this fallback path instead.
+            if result_payload.get("unsupported_company_fact"):
+                reply = _build_response(text=answer_text.strip())
+                developer_trace["unsupported_company_fact_handoff"] = True
+                return self._finalize(reply=reply, routing_type="HUMAN_HANDOFF", workflow=None,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert,
+                                       handoff_payload={"reason": "unsupported_company_information"})
             reply = _build_response(text=answer_text)
             # Root Change 2 (Final Systemic Routing Fix, 2026-08-28) —
             # same distinction as _execute_selected_action's RAG branch:
@@ -3988,6 +4024,18 @@ class DecisionEngine:
                     # independently-derived escalation check.
                     "policy_escalate": result.policy.escalate,
                     "policy_escalation_message": result.policy.escalation_message,
+                    # Customer UAT Fix 2 (2026-09-02) — the RAG pipeline's
+                    # structured "genuine unsupported company fact, needs
+                    # human follow-up" signal (set only by its
+                    # deterministic Answerability-Gate / P7.1 no-info
+                    # branches). Surfaced, not re-derived, so the caller
+                    # routes it through the existing Human CS handoff.
+                    # `is True` (not a bare truthiness check) so a test
+                    # mock that never sets this attribute — a bare
+                    # MagicMock auto-creates a truthy child, the SAME trap
+                    # documented for policy_escalate / general_chat_used —
+                    # can never accidentally trigger a handoff.
+                    "unsupported_company_fact": getattr(result, "unsupported_company_fact", False) is True,
                     # Prompt Studio / AI Policies identity — already
                     # resolved inside run_playground_turn (services/
                     # prompt_builder.py::get_template /
