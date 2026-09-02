@@ -523,11 +523,14 @@ class Fix13_ActiveSlotFillingFlowRecognisesTaskData(unittest.TestCase):
         return resolve_slot_filling_turn(reply, self._DIM_HISTORY)
 
     def test_dimensions_recognised_and_next_field_requested(self):
-        for variant in ("54x12x43", "54 x 12 x 43", "54*12*43", "กว้าง 54 ยาว 12 สูง 43"):
+        # all multiplication-symbol variants, incl. the U+00D7 "×" glyph
+        for variant in ("54x12x43", "54 x 12 x 43", "54*12*43", "54×12×43",
+                        "กว้าง 54 ยาว 12 สูง 43"):
             r = self._resolve(variant)
             self.assertIsNotNone(r, variant)
             self.assertFalse(r["flow_complete"], variant)
             self.assertIn("weight", r["missing_slots"], variant)
+            self.assertEqual(sorted(r["captured_slots"]["dimension_values"]), [12.0, 43.0, 54.0], variant)
             self.assertIn("ได้รับขนาด", r["message"], variant)      # understood as dimensions
             self.assertIn("น้ำหนัก", r["message"], variant)         # asks for the still-missing field
 
@@ -536,6 +539,84 @@ class Fix13_ActiveSlotFillingFlowRecognisesTaskData(unittest.TestCase):
             r = self._resolve(variant)
             self.assertIsNotNone(r, variant)
             self.assertIn("ได้รับน้ำหนัก", r["message"], variant)
+
+    def test_dimensions_then_weight_multi_turn_retains_task_state(self):
+        # turn 1: dimensions
+        r1 = self._resolve("54x12x43")
+        history = self._DIM_HISTORY + [
+            {"role": "user", "content": "54x12x43"},
+            {"role": "assistant", "content": r1["message"]},   # this module's own continuation prompt
+        ]
+        from rag.slot_filling_flow import resolve_slot_filling_turn
+        r2 = resolve_slot_filling_turn("12 กก.", history)       # turn 2: weight
+        self.assertIsNotNone(r2)
+        self.assertEqual(sorted(r2["captured_slots"]["dimension_values"]), [12.0, 43.0, 54.0])  # dims retained
+        self.assertEqual(r2["captured_slots"]["weight"], 12.0)                                   # weight bound
+        self.assertNotIn("weight", r2["missing_slots"])
+
+
+class Fix13_NonSlotPublicTaskDataStaysPublicViaRag(unittest.TestCase):
+    """Quantity / product type / URL replies to a public clarification —
+    rag/slot_filling_flow has no slot for these, so they are NOT
+    deterministic bindings. The Decision Engine still keeps them PUBLIC:
+    routed to the shared RAG pipeline with full history, never the
+    identity/entity-code ambiguity prompt, never ERP."""
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        g = _seed_action(self.reg, key="getdatacustomer", action_type="API",
+                          category="Customer Data Retrieval", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(g, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(g, {"endpoint": "https://example.test/c", "http_method": "GET"})
+        d = _seed_action(self.reg, key="searchdatashipment", action_type="API",
+                          category="Customer Shipment Retrieval", keywords=["พัสดุเดียว", "รายละเอียดพัสดุ"])
+        self.reg.replace_parameters(d, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
+            {"name": "SecretCode", "display_name": "S", "required": True, "input_source": "credential_store"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True, "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(d, {"endpoint": "https://example.test/s", "http_method": "POST"})
+        self.engine = DecisionEngine(self.reg._sb)
+        self.engine.registry = self.reg
+
+    def _decide(self, message, assistant_prompt):
+        ctx = {"developer_mode": True, "channel": "line",
+               "customer_context": {"cust_code": "FT3182", "identity_confirmed": True,
+                                    "last_business_action": "getdatacustomer"}}
+        history = [
+            {"role": "user", "content": "สอบถามหน่อยครับ"},
+            {"role": "assistant", "content": assistant_prompt},
+        ]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {}})) as mock_req, \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="RAG-PIPELINE-REACHED", confidence=0.9)):
+            result = self.engine.decide(message, history=history, context=ctx)
+        return result, mock_req
+
+    def _assert_public_rag_continuation(self, result, mock_req):
+        dev = result.get("developer") or {}
+        self.assertEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
+        self.assertEqual(result["reply"]["text"], "RAG-PIPELINE-REACHED")
+        self.assertNotIn(_GENERIC_AMBIGUITY_MARKER, result["reply"]["text"])
+        self.assertNotEqual(result["routing"]["type"], "API")
+        self.assertIsNone(dev.get("selected_business_action"))
+        mock_req.assert_not_called()
+
+    def test_quantity_reply_stays_public(self):
+        r, mr = self._decide("500 ชิ้น", "ได้ค่ะ ไม่ทราบว่าสินค้าประเภทไหน และประมาณกี่ชิ้นคะ")
+        self._assert_public_rag_continuation(r, mr)
+
+    def test_product_type_reply_stays_public(self):
+        r, mr = self._decide("เสื้อผ้า", "ได้ค่ะ ไม่ทราบว่าสินค้าประเภทไหนคะ")
+        self._assert_public_rag_continuation(r, mr)
+
+    def test_url_reply_stays_public(self):
+        r, mr = self._decide("https://example-shop.test/p/abc123",
+                              "รบกวนส่งลิงก์สินค้ามาให้ดูหน่อยค่ะ")
+        self._assert_public_rag_continuation(r, mr)
 
 
 # ── Guard — the fix carries no hardcoded customer phrase ────────────
