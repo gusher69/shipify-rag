@@ -60,6 +60,7 @@ from services.action_selection_primitives import (
     _keyword_score,
     IDENTIFIER_MEMORY_FIELDS,
     select_requested_mapped_fields,
+    resolve_subsumed_keyword_tie,
 )
 # Hybrid Question Classifier (2026-08-02 Production Integration Sprint,
 # Phase 1 Step C) — the SAME classifier the AI Playground's Auto mode
@@ -1912,6 +1913,30 @@ def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
                         "_semantic_score": sem, "_embedding_score": emb})
 
     scored.sort(key=lambda a: a["_score"], reverse=True)
+
+    # Subsumed-Keyword Discriminator (P8.3.1, config-driven) — the SAME
+    # shared rule the Hybrid Question Classifier applies to its own
+    # `close` set (services/action_selection_primitives.
+    # resolve_subsumed_keyword_tie). Without this, a top-`_score` tie that
+    # exists ONLY because one action's generic one-word keyword is a
+    # substring of another action's longer configured phrase (which the
+    # customer actually typed) was silently resolved by returning
+    # candidates[0] — so `classify_question` could correctly pick the
+    # specific-record action while this independent path re-selected the
+    # summary action from the same false substring tie. Now both layers
+    # break that tie identically. Only touches a genuine top-`_score`
+    # tie; a candidate with real independent evidence (category /
+    # identifier pattern / collected-slot params) already outscores the
+    # tie and is never reordered. No literal phrase, action key, or
+    # action type here — purely each action's own configured keywords.
+    if len(scored) > 1:
+        _top_score = scored[0]["_score"]
+        _tied = [a for a in scored if a["_score"] == _top_score]
+        if len(_tied) > 1:
+            _win_id = resolve_subsumed_keyword_tie(_tied, message)
+            if _win_id is not None and scored[0]["id"] != _win_id:
+                scored = ([a for a in scored if a["id"] == _win_id]
+                          + [a for a in scored if a["id"] != _win_id])
     return scored
 
 

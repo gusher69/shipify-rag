@@ -289,26 +289,26 @@ def classify_question(message: str, registry, *, forced_action_id: Optional[str]
                     close = []
                     scored = []
             if len(close) > 1:
-                # Subsumed-Keyword Discriminator (P8.3, config-driven) — a
-                # tied candidate whose ONLY matched configured keyword is a
-                # substring of a DIFFERENT tied candidate's longer, more-
-                # specific configured keyword (present in the message) has
-                # no evidence uniquely its own — it matched an incidental
-                # fragment of the other action's discriminator. If exactly
-                # one candidate keeps a genuine (non-subsumed) configured
-                # keyword/example match, the customer's specific wording
-                # points at it; select it now and let the existing slot
-                # collection handle any missing required parameter. Knows
-                # no literal phrase or action name — operates purely on
-                # each enabled action's own search_keywords.
-                from services.action_selection_primitives import (
-                    matched_configured_keywords, surviving_unique_keyword_matches)
-                _cand_kw = {a["id"]: matched_configured_keywords(a, message) for a in close}
-                if any(_cand_kw.values()):
-                    _surv = surviving_unique_keyword_matches(_cand_kw, message)
-                    _unique = [a for a in close if _surv.get(a["id"])]
-                    if len(_unique) == 1:
-                        close = _unique
+                # Subsumed-Keyword Discriminator (P8.3 / P8.3.1, config-
+                # driven) — a tied candidate whose ONLY matched configured
+                # keyword is a substring of a DIFFERENT tied candidate's
+                # longer, more-specific configured keyword (present in the
+                # message) has no evidence uniquely its own — it matched
+                # an incidental fragment of the other action's
+                # discriminator. If exactly one candidate keeps a genuine
+                # (non-subsumed) configured keyword/example match, the
+                # customer's specific wording points at it; select it now
+                # and let the existing slot collection handle any missing
+                # required parameter. This calls the SAME shared rule the
+                # Decision Engine's own search_candidate_actions applies
+                # (services/action_selection_primitives.
+                # resolve_subsumed_keyword_tie) — one implementation, two
+                # consumers, so the two routing layers can never diverge
+                # here. Knows no literal phrase or action name.
+                from services.action_selection_primitives import resolve_subsumed_keyword_tie
+                _win_id = resolve_subsumed_keyword_tie(close, message)
+                if _win_id is not None:
+                    close = [a for a in close if a["id"] == _win_id]
             if len(close) > 1:
                 # Final Conversational Correctness (2026-08-15) — a tied
                 # KEYWORD score alone (e.g. SearchDataTracking and

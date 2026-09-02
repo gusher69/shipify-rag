@@ -350,6 +350,36 @@ def surviving_unique_keyword_matches(candidate_matches: Dict[str, set], message:
     return result
 
 
+def resolve_subsumed_keyword_tie(tied_candidates: List[Dict], message: str) -> Optional[str]:
+    """The ONE shared, config-driven subsumed-keyword tiebreak, consumed
+    by every routing layer (the hybrid question classifier's `close` set
+    AND the Decision Engine's own `search_candidate_actions` top-score
+    tie) so the two can never diverge on this case.
+
+    `tied_candidates` is the currently-tied candidate action dicts (each
+    carrying at least `id` plus its configured `search_keywords` /
+    `_examples_text`). If exactly ONE of them keeps a matched configured
+    keyword that is NOT merely an incidental substring of a DIFFERENT
+    tied candidate's longer configured phrase (that longer phrase itself
+    being present in the message), that candidate's `id` is returned —
+    the customer's specific wording points at it and the caller should
+    narrow the tie to it. Otherwise (no configured-keyword evidence on
+    any candidate, genuine verbatim-shared evidence, or 2+ survivors)
+    returns None and the caller's existing tie handling stands unchanged.
+
+    Pure and config-only: reuses `matched_configured_keywords` +
+    `surviving_unique_keyword_matches`, knows no literal phrase, action
+    key, or action type. Never re-implement this rule in a caller."""
+    if not tied_candidates or len(tied_candidates) < 2:
+        return None
+    cand_kw = {c.get("id"): matched_configured_keywords(c, message) for c in tied_candidates}
+    if not any(cand_kw.values()):
+        return None
+    surviving = surviving_unique_keyword_matches(cand_kw, message)
+    unique = [cid for cid, kws in surviving.items() if kws]
+    return unique[0] if len(unique) == 1 else None
+
+
 def _keyword_score_breakdown(action: Dict, message: str) -> Dict[str, float]:
     """Business Action Registry Collision fix (Task 03C, 2026-08-26) —
     confirmed live: "รับประกันไหมว่าจะถึงภายใน 7 วัน" tied searchdataorderlist
