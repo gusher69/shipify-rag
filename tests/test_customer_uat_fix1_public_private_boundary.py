@@ -289,6 +289,144 @@ class TestC_SyntheticPortabilityNewActionAfterPublicAnswer(unittest.TestCase):
         mock_req.assert_not_called()
 
 
+# ── Fix 1.2 — a PUBLIC RAG answer's polite wording must not veto continuity
+
+# The REAL production regression (HEAD 74e1bf3): the public RAG answer to
+# "ค่าขนส่งคิดยังไง" ended with "...กรุณาแจ้งน้ำหนักและขนาด...". The Fix 1
+# coercion was gated on `not _last_assistant_turn_requests_input(prev)`,
+# a pure text-shape check ("แจ้ง" + "กรุณา/รบกวน"), so that polite public
+# wording blocked continuity — the turn stayed AMBIGUOUS,
+# _resolve_conversation_reference resurrected the remembered private
+# `last_business_action=searchdatashipment`, same-customer Identifier
+# Memory supplied ShipmentCode, and ERP executed.
+
+_PUBLIC_CALC_ASKS_WEIGHT_KRUNA = (
+    "ค่าขนส่งจะคำนวณจากทั้งน้ำหนักและปริมาตร (CBM) แล้วใช้ค่าที่สูงกว่าค่ะ "
+    "หากต้องการประเมินค่าส่ง กรุณาแจ้งน้ำหนักและขนาดพัสดุมาได้เลยค่ะ")
+_PUBLIC_CALC_ASKS_WEIGHT_RBKUAN = (
+    "ค่าขนส่งคำนวณจากน้ำหนักจริงเทียบกับปริมาตรค่ะ "
+    "รบกวนแจ้งน้ำหนักและขนาดกล่องมาด้วยนะคะ จะได้ประเมินค่าส่งให้")
+
+# webhook-shaped context AFTER P8.2: verified FT3182, the stale cross-
+# identity last_* identifiers already stripped, but last_business_action
+# (not an account-scoped identifier) survives, and a same-customer
+# ShipmentCode captured earlier this session is available.
+_REAL_FAILURE_CONTEXT = {
+    "cust_code": "FT3182",
+    "identity_confirmed": True,
+    "last_business_action": "searchdatashipment",
+    "last_shipment_code": "FT318220260726001",   # this customer's own, from an earlier turn
+    "segment": "hot",
+    "conversation_tier": "hot",
+}
+
+
+class Fix12_PublicAnswerPoliteWordingDoesNotVetoContinuity(unittest.TestCase):
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        self.detail = _seed_action(
+            self.reg, key="searchdatashipment", action_type="API",
+            category="Customer Shipment Retrieval",
+            keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"])
+        self.reg.replace_parameters(self.detail, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+            {"name": "SecretCode", "display_name": "SecretCode", "required": True,
+             "input_source": "credential_store"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(self.detail, {"endpoint": "https://example.test/SearchDataShipment",
+                                                 "http_method": "POST"})
+        lst = _seed_action(self.reg, key="searchdatashipmentlist", action_type="API",
+                            category="Customer Shipment Retrieval",
+                            keywords=["ติดตามพัสดุ", "พัสดุ", "พัสดุล่าสุด", "shipment"])
+        self.reg.replace_parameters(lst, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+            {"name": "SecretCode", "display_name": "SecretCode", "required": True,
+             "input_source": "credential_store"},
+        ])
+        self.reg.upsert_execution(lst, {"endpoint": "https://example.test/List", "http_method": "POST"})
+        self.engine = DecisionEngine(self.reg._sb)
+        self.engine.registry = self.reg
+
+    def _decide(self, message, rag_answer):
+        ctx = {"developer_mode": True, "channel": "line",
+               "customer_context": dict(_REAL_FAILURE_CONTEXT)}
+        history = [
+            {"role": "user", "content": "ค่าขนส่งคิดยังไง"},
+            {"role": "assistant", "content": rag_answer},
+        ]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {
+                       "data": {"Shipment": {"Code": "FT318220260726001", "Status": "รับเข้าที่จีน"}}})) as mock_req, \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="PUBLIC-RAG-ANSWER", confidence=0.9)):
+            result = self.engine.decide(message, history=history, context=ctx)
+        return result, mock_req
+
+    def test_1_exact_real_failure_kruna_jaeng_stays_public(self):
+        result, mock_req = self._decide("54x12x43", _PUBLIC_CALC_ASKS_WEIGHT_KRUNA)
+        dev = result.get("developer") or {}
+        self.assertEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
+        self.assertNotEqual(result["routing"]["type"], "API")
+        self.assertIsNone(dev.get("selected_business_action"))
+        self.assertNotEqual(dev.get("selection_source"), "conversation_reference")
+        mock_req.assert_not_called()                                   # no ERP
+        self.assertNotIn(_SELF_VERIFY_ASK_PHONE_TEXT, result["reply"]["text"])
+        self.assertNotIn("FT318220260726001", result["reply"]["text"])  # no shipment resurrection
+
+    def test_2_same_bug_class_with_rbkuan_jaeng_wording(self):
+        result, mock_req = self._decide("54x12x43", _PUBLIC_CALC_ASKS_WEIGHT_RBKUAN)
+        dev = result.get("developer") or {}
+        self.assertEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
+        self.assertNotEqual(result["routing"]["type"], "API")
+        mock_req.assert_not_called()
+        self.assertNotIn("FT318220260726001", result["reply"]["text"])
+
+    def test_3_explicit_new_business_action_still_wins_after_polite_public_answer(self):
+        # Fix 1.1 preserved: an explicitly-phrased new request is NOT coerced
+        result, mock_req = self._decide("ขอเช็กพัสดุเดียวครับ", _PUBLIC_CALC_ASKS_WEIGHT_KRUNA)
+        dev = result.get("developer") or {}
+        self.assertIsNone(dev.get("turn_intent_coerced"))
+        # DETAIL owns the turn (P8.3.1); no plain public-clarification swallow
+        self.assertIn(dev.get("selected_business_action"), ("searchdatashipment", None))
+        self.assertNotEqual(result["routing"]["type"], "RAG")
+
+
+class Fix12_SelfVerificationContinuationNotCoerced(unittest.TestCase):
+    """A reply to the self-service identity-verification prompt is a real
+    continuation (recognised structurally, verbatim match), so the
+    Fix 1.2 structural veto still holds it back from public coercion."""
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        aid = _seed_action(self.reg, key="getdatacustomer", action_type="API",
+                            category="Customer Data Retrieval", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(aid, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(aid, {"endpoint": "https://example.test/customer", "http_method": "GET"})
+        self.engine = DecisionEngine(self.reg._sb)
+        self.engine.registry = self.reg
+
+    def test_phone_reply_to_self_verify_prompt_is_not_coerced_to_public(self):
+        ctx = {"developer_mode": True, "channel": "line",
+               "customer_context": {"cust_code": "FT3182", "identity_confirmed": True,
+                                    "last_business_action": "getdatacustomer"}}
+        history = [
+            {"role": "user", "content": "ขอดูข้อมูลลูกค้าของผม"},
+            {"role": "assistant", "content": _SELF_VERIFY_ASK_PHONE_TEXT},
+        ]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {}})), \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="RAG", confidence=0.9)):
+            result = self.engine.decide("0812345678", history=history, context=ctx)
+        self.assertIsNone((result.get("developer") or {}).get("turn_intent_coerced"))
+
+
 # ── Guard — the fix carries no hardcoded customer phrase ────────────
 
 class Guard_NoPhraseHardcode(unittest.TestCase):

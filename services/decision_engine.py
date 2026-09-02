@@ -647,6 +647,49 @@ def _reply_matches_question(actual_text: str, expected_question: str) -> bool:
             or actual_text.startswith(expected_question + "\n\n"))
 
 
+def _assistant_text_is_generated_action_prompt(text: str, registry) -> bool:
+    """True only when `text` is VERBATIM one of the prompts this engine
+    emits while a Business Action is collecting its input: a generated
+    parameter question (`_generate_parameter_question`) for any parameter
+    of any enabled API/WEBHOOK action, that action's confirmation-gate
+    question, or a self-service identity-verification prompt.
+
+    This is the STRUCTURAL "the previous turn was an ERP collection
+    prompt" signal — matched via `_reply_matches_question` (the generated
+    text verbatim, optionally with a known preamble/suffix). Unlike the
+    text-shape heuristic `_last_assistant_turn_requests_input` (which
+    fires on any polite "กรุณา…แจ้ง" phrasing), a free-form RAG answer
+    that merely asks the customer for more task detail in natural
+    language never matches this — so Public Clarification Continuity can
+    use it to tell "the customer is answering a real parameter question"
+    apart from "the customer is adding detail to a public answer that
+    happened to end with a polite request"."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t in (_SELF_VERIFY_ASK_PHONE_TEXT, _SELF_VERIFY_ASK_EMAIL_TEXT):
+        return True
+    try:
+        actions = [a for a in registry.enabled_actions()
+                   if a.get("action_type") in _IDENTITY_GATED_ACTION_TYPES]
+    except Exception:
+        return False
+    for a in actions:
+        try:
+            full = registry.get_full(a["id"], mask_secrets=True)
+        except Exception:
+            continue
+        if not full:
+            continue
+        for p in (full.get("parameters") or []):
+            if _reply_matches_question(t, _generate_parameter_question(p)):
+                return True
+        if _requires_confirmation(full) and _reply_matches_question(
+                t, _generate_confirmation_question(full, {})):
+            return True
+    return False
+
+
 def _replay_business_action_collection(action: Dict, registry, history: List[Dict],
                                         customer_context: Optional[Dict] = None) -> Dict[str, str]:
     """Reconstructs 'Collected Parameters' purely from `history` — no
@@ -2413,61 +2456,78 @@ class DecisionEngine:
                         turn_intent = "SHIPIFY_INFORMATION"
                         developer_trace["turn_intent_coerced"] = "rag_continuity_followup_over_stale_erp"
 
-                # Public Clarification Continuity (Customer UAT Fix 1,
-                # 2026-09-02) — an under-specified reply carrying no
-                # question particle, no declarative-intent verb, no self-
-                # reference, no current-state query and no reference
-                # marker (exactly the shape classify_turn_intent already
-                # returns "AMBIGUOUS" for) that lands straight after an
-                # INFORMATIONAL assistant answer is the customer supplying
-                # task-specific detail for the PUBLIC question just
-                # answered — a measurement, a weight/quantity value, a
-                # code the previous answer asked them to provide. None of
-                # that is account identity. classify_turn_intent only
-                # sees the message in isolation, so it leaves identity-
-                # gated (API/WEBHOOK) actions eligible; the free-text
-                # value then structurally binds some private action's
-                # parameter, that action is selected, and the
-                # Authorization Gate asks the customer for the phone
-                # number on their account — the reported customer-UAT
-                # bug (missing task information mistaken for missing
-                # identity). Coerce to SHIPIFY_INFORMATION so the SAME
-                # exclude_private mechanism keeps the turn on the public
-                # RAG / clarification path, where the genuinely missing
-                # task field is asked for and identity verification is
-                # never triggered. Gated on the preceding assistant turn
-                # NOT being a parameter / confirmation / identity-
-                # verification request (_last_assistant_turn_requests_
-                # input) — a reply continuing one of THOSE is a real
-                # collection / self-verification continuation, owned by
-                # the paths above, never this one. A genuinely pending
-                # Business Action always carries its own
-                # pending_confirmations row and is resolved before this
-                # branch (continuation_action / detail_sibling_action
-                # above), so nothing that truly continues an ERP flow is
-                # touched. Any message carrying its own self-reference /
-                # on-file-account / current-state / reference-marker
-                # evidence still classifies (and routes) exactly as
-                # before.
+                # Public Clarification Continuity (Customer UAT Fix 1 /
+                # 1.1 / 1.2, 2026-09-02) — an under-specified reply
+                # carrying no question particle, no declarative-intent
+                # verb, no self-reference, no current-state query and no
+                # reference marker (the shape classify_turn_intent
+                # returns "AMBIGUOUS" for) that lands after an assistant
+                # turn is, when nothing else owns it, the customer
+                # supplying task-specific detail for the PUBLIC question
+                # just answered — a measurement, a weight/quantity value,
+                # a code the previous answer asked them to provide. None
+                # of that is account identity. classify_turn_intent sees
+                # the message in isolation and leaves identity-gated
+                # (API/WEBHOOK) actions eligible, so without this the
+                # bare value lets _resolve_conversation_reference
+                # resurrect a remembered private last_business_action and
+                # same-customer Identifier Memory then makes it
+                # executable — the reported customer-UAT bug (public
+                # clarification data mistaken for a private request).
+                # Coerce to SHIPIFY_INFORMATION so the SAME exclude_
+                # private mechanism keeps the turn on the public RAG /
+                # clarification path.
                 #
-                # Fix 1.1 (2026-09-02) — "AMBIGUOUS after an informational
-                # answer" is NOT sufficient on its own: classify_turn_
-                # intent also returns AMBIGUOUS for a fresh, explicitly-
-                # phrased Business Action request that merely lacks a Thai
-                # question particle (e.g. "ขอเช็ก<record>ครับ"), and that
-                # message OWNS its turn. So before coercing, ask the SAME
-                # config-driven selector the fresh-routing path below uses
-                # — search_candidate_actions + select_best_action at the
+                # Precedence this relies on (all resolved ABOVE, so this
+                # `else` runs only when none of them owns the turn):
+                #   • a genuine parameter-collection continuation ->
+                #     continuation_action (via _resolve_continuation_
+                #     action's history replay OR the explicit
+                #     context["pending_action_id"] pending_confirmations
+                #     row) -> the `if continuation_action` branch;
+                #   • a self-service identity-verification continuation
+                #     (customer answering _SELF_VERIFY_ASK_PHONE/EMAIL_
+                #     TEXT) -> also continuation_action, same branch
+                #     (_resolve_continuation_action handles it explicitly);
+                #   • a LIST->DETAIL sibling follow-up -> detail_sibling_
+                #     action -> the `elif` branch.
+                # Fix 1.2 — the only remaining reason to hold back is that
+                # the previous turn really was a Business Action's own
+                # collection prompt and this reply is answering it in a
+                # degraded (no pending_confirmations row) path. That is
+                # tested STRUCTURALLY — _assistant_text_is_generated_
+                # action_prompt: the previous turn is VERBATIM a
+                # generated parameter / confirmation / self-verification
+                # question of some enabled action — NOT with the text-
+                # shape heuristic _last_assistant_turn_requests_input
+                # (any polite "กรุณา…แจ้ง" phrasing), which a PUBLIC RAG
+                # answer that asks for more task data in natural language
+                # also trips. That false positive is exactly what blocked
+                # continuity in production and let the private action
+                # resurrect. _last_assistant_turn_requests_input stays
+                # unchanged for its other callers (_resolve_continuation_
+                # action's replay short-circuit, the self-verify
+                # recognizer).
+                #
+                # Fix 1.1 — "AMBIGUOUS after an assistant turn" alone is
+                # still not enough: classify_turn_intent also returns
+                # AMBIGUOUS for a fresh, explicitly-phrased Business
+                # Action request that merely lacks a Thai question
+                # particle (e.g. "ขอเช็ก<record>ครับ"), and that message
+                # OWNS its turn. So before coercing, ask the SAME config-
+                # driven selector the fresh-routing path below uses —
+                # search_candidate_actions + select_best_action at the
                 # standard decisive threshold, with the P8.3.1 subsumed-
                 # keyword disambiguation it already applies, and an EMPTY
                 # collected_slots set so remembered Identifier Memory can
                 # never manufacture ownership (identical guard to the
                 # diversion / topic-only checks elsewhere in decide()).
                 # If the current message alone decisively resolves to a
-                # Business Action, it is a genuine new intent: leave it
-                # for normal fresh routing, never coerce. Public
-                # continuity only ever applies to a reply that no
-                # configured Business Action claims on its own.
+                # Business Action, leave it for normal fresh routing.
+                # Any message carrying its own self-reference / on-file-
+                # account / current-state / reference-marker evidence is
+                # excluded here and still classifies (and routes) exactly
+                # as before.
                 if turn_intent == "AMBIGUOUS" and history:
                     _recent_asst = [t.get("content") for t in history
                                     if t.get("role") == "assistant"][-2:]
@@ -2476,9 +2536,11 @@ class DecisionEngine:
                         _SELF_REGISTERED_RE.search(_msg)
                         or _PRIVATE_STATE_QUERY_RE.search(_msg)
                         or _REFERENCE_MARKER_RE.search(_msg))
+                    _prev_is_action_prompt = any(
+                        _assistant_text_is_generated_action_prompt(c, self.registry)
+                        for c in _recent_asst)
                     if (_recent_asst and not _carries_private_evidence
-                            and not any(_last_assistant_turn_requests_input(c)
-                                        for c in _recent_asst)):
+                            and not _prev_is_action_prompt):
                         _own_candidates = search_candidate_actions(
                             self.registry, workflow=workflow_hint, message=message,
                             collected_slots={})
