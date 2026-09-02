@@ -427,6 +427,117 @@ class Fix12_SelfVerificationContinuationNotCoerced(unittest.TestCase):
         self.assertIsNone((result.get("developer") or {}).get("turn_intent_coerced"))
 
 
+# ── Fix 1.3 — a coerced public turn keeps its TASK semantics ────────
+#
+# After Fix 1.2 stopped the private-action resurrection, "54x12x43" was
+# still trapped by the Decision Engine's bare-identifier guard (it passes
+# _validate_generic_identifier) and answered "ต้องการตรวจสอบข้อมูลอะไรของ
+# 54x12x43 คะ เช่น ข้อมูลลูกค้า คำสั่งซื้อ หรือพัสดุ". Fix 1.3: a turn
+# already coerced by public_clarification_continuity skips both bare-
+# identifier guards and reaches the shared RAG pipeline, where the
+# EXISTING Active Slot-Filling Flow (rag/slot_filling_flow.py, already
+# wired into playground_orchestrator) recognises the structural value.
+
+_DIMENSION_REQUEST_ANSWER = (
+    "ค่าขนส่งคำนวณจากน้ำหนักจริงเทียบกับปริมาตรค่ะ "
+    "กรุณาแจ้งน้ำหนักและขนาด กว้าง × ยาว × สูง")
+
+_GENERIC_AMBIGUITY_MARKER = "ต้องการตรวจสอบข้อมูลอะไรของ"
+
+
+class Fix13_DecisionEngineRoutesCoercedPublicTurnToRag(unittest.TestCase):
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        d = _seed_action(self.reg, key="searchdatashipment", action_type="API",
+                          category="Customer Shipment Retrieval",
+                          keywords=["เลขบิลขนส่ง", "พัสดุเดียว", "รายละเอียดพัสดุ"])
+        self.reg.replace_parameters(d, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+            {"name": "SecretCode", "display_name": "SecretCode", "required": True,
+             "input_source": "credential_store"},
+            {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(d, {"endpoint": "https://example.test/s", "http_method": "POST"})
+        g = _seed_action(self.reg, key="getdatacustomer", action_type="API",
+                          category="Customer Data Retrieval", keywords=["ข้อมูลลูกค้า"])
+        self.reg.replace_parameters(g, [
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+             "input_source": "customer_message"},
+        ])
+        self.reg.upsert_execution(g, {"endpoint": "https://example.test/c", "http_method": "GET"})
+        self.engine = DecisionEngine(self.reg._sb)
+        self.engine.registry = self.reg
+
+    def _decide(self, message):
+        ctx = {"developer_mode": True, "channel": "line",
+               "customer_context": {"cust_code": "FT3182", "identity_confirmed": True,
+                                    "last_business_action": "searchdatashipment",
+                                    "last_shipment_code": "FT318220260726001"}}
+        history = [
+            {"role": "user", "content": "ค่าขนส่งคิดยังไง"},
+            {"role": "assistant", "content": _DIMENSION_REQUEST_ANSWER},
+        ]
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {}})) as mock_req, \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="RAG-PIPELINE-REACHED", confidence=0.9)):
+            result = self.engine.decide(message, history=history, context=ctx)
+        return result, mock_req
+
+    def test_1_real_failure_reaches_rag_pipeline_not_identifier_ambiguity(self):
+        result, mock_req = self._decide("54x12x43")
+        dev = result.get("developer") or {}
+        self.assertEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
+        self.assertEqual(result["reply"]["text"], "RAG-PIPELINE-REACHED")   # shared RAG pipeline ran
+        self.assertNotIn(_GENERIC_AMBIGUITY_MARKER, result["reply"]["text"])
+        self.assertNotEqual(result["routing"]["type"], "API")
+        self.assertIsNone(dev.get("selected_business_action"))
+        mock_req.assert_not_called()
+
+    def test_2_explicit_new_business_action_still_wins(self):
+        result, _ = self._decide("ขอเช็กพัสดุเดียวครับ")
+        dev = result.get("developer") or {}
+        self.assertIsNone(dev.get("turn_intent_coerced"))
+        self.assertNotEqual(result["reply"]["text"], "RAG-PIPELINE-REACHED")
+
+    def test_3_new_private_intent_still_wins(self):
+        result, _ = self._decide("ยอด Wallet ของผมเท่าไหร่")
+        self.assertEqual(result["routing"]["type"], "API")
+        self.assertIsNone((result.get("developer") or {}).get("turn_intent_coerced"))
+
+
+class Fix13_ActiveSlotFillingFlowRecognisesTaskData(unittest.TestCase):
+    """The existing rag/slot_filling_flow resolver (reached once Fix 1.3
+    routes the coerced turn to the RAG pipeline) understands the customer's
+    reply as dimensions / weight against the previous public request and
+    asks only for what is still missing — deterministic, no LLM."""
+    _DIM_HISTORY = [
+        {"role": "user", "content": "ค่าขนส่งคิดยังไง"},
+        {"role": "assistant", "content": _DIMENSION_REQUEST_ANSWER},
+    ]
+
+    def _resolve(self, reply):
+        from rag.slot_filling_flow import resolve_slot_filling_turn
+        return resolve_slot_filling_turn(reply, self._DIM_HISTORY)
+
+    def test_dimensions_recognised_and_next_field_requested(self):
+        for variant in ("54x12x43", "54 x 12 x 43", "54*12*43", "กว้าง 54 ยาว 12 สูง 43"):
+            r = self._resolve(variant)
+            self.assertIsNotNone(r, variant)
+            self.assertFalse(r["flow_complete"], variant)
+            self.assertIn("weight", r["missing_slots"], variant)
+            self.assertIn("ได้รับขนาด", r["message"], variant)      # understood as dimensions
+            self.assertIn("น้ำหนัก", r["message"], variant)         # asks for the still-missing field
+
+    def test_weight_recognised(self):
+        for variant in ("12 kg", "12 กก.", "12 กิโล"):
+            r = self._resolve(variant)
+            self.assertIsNotNone(r, variant)
+            self.assertIn("ได้รับน้ำหนัก", r["message"], variant)
+
+
 # ── Guard — the fix carries no hardcoded customer phrase ────────────
 
 class Guard_NoPhraseHardcode(unittest.TestCase):

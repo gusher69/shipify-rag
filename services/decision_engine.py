@@ -2860,6 +2860,27 @@ class DecisionEngine:
                     return self._handle_legacy_workflow(
                         workflow_hint, message, history, context, developer_trace, start,
                         reason="no_business_action_for_workflow")
+                # Public Task Clarification Continuity (Customer UAT
+                # Fix 1.3, 2026-09-02) — this turn was already coerced to
+                # SHIPIFY_INFORMATION by Public Clarification Continuity
+                # above: it is a bare reply to a PUBLIC informational
+                # answer, NOT a customer-service "check this code"
+                # message. A dimensions / weight / quantity / product /
+                # destination / URL value the customer typed in answer to
+                # a public request must not be intercepted here and asked
+                # "what entity is this?". Skip BOTH bare-identifier guards
+                # below and let it reach the shared RAG pipeline
+                # (_route_safe_fallback -> _run_rag_pipeline), where the
+                # existing, deterministic Active Slot-Filling Flow
+                # (rag/slot_filling_flow.py, already wired into
+                # playground_orchestrator) recognises the structural
+                # value against the previous dimensions/weight request
+                # and asks only for the genuinely still-missing task
+                # field — no LLM call, no new slot system, no per-field
+                # branch here.
+                _public_clarification_turn = (
+                    developer_trace.get("turn_intent_coerced") == "public_clarification_continuity")
+
                 # RAG Guard (Final Conversational Correctness, 2026-08-15)
                 # — a message that IS, in its entirety, a bare
                 # identifier-shaped token (never a substring match — the
@@ -2872,7 +2893,8 @@ class DecisionEngine:
                 # is not — the customer never asked a knowledge question
                 # in the first place.
                 bare_value = (message or "").strip()
-                if bare_value and _validate_generic_identifier(bare_value):
+                if bare_value and _validate_generic_identifier(bare_value) \
+                        and not _public_clarification_turn:
                     # Identifier Continuity (2026-08-16) — this bare code
                     # must still be REMEMBERED for the next turn, exactly
                     # like the "identifier + other words" guard below
@@ -2903,7 +2925,8 @@ class DecisionEngine:
                 # ever returns a STRUCTURAL match against one of the
                 # platform's own configured identifier patterns, never a
                 # free-text guess, so this stays config-driven.
-                captured = _opportunistic_identifier_capture(self.registry, message)
+                captured = _opportunistic_identifier_capture(self.registry, message) \
+                    if not _public_clarification_turn else None
                 if captured:
                     developer_trace.setdefault("information_collection_status", {})["collected_parameters"] = captured
                     identifier_value = next(iter(captured.values()))
