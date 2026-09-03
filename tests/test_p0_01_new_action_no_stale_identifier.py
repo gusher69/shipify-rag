@@ -118,6 +118,41 @@ class P001_A_FreshRequestDoesNotReuseStaleRecordId(P001_Base):
         self.assertEqual((ics.get("collected_parameters") or {}).get("CustCode"), "FT3182")
 
 
+# ── A2 — the exact REAL production history state (multi-cycle window) ──
+
+# Faithful reduction of the real 20-exchange window at the failing turn
+# (session 6c9b9026, 2026-09-03 00:28 UTC): an EARLIER "ขอเช็กพัสดุเดียว
+# ครับ" cycle asked for the bill, was RAG-interrupted, then answered
+# with FT318220260726001 and executed — several turns and further
+# cycles before the CURRENT fresh "ขอเช็กพัสดุเดียวครับ".
+_REAL_MULTI_CYCLE_HISTORY = [
+    {"role": "user", "content": "ขอเช็กพัสดุเดียวครับ"},
+    {"role": "assistant", "content": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ"},
+    {"role": "user", "content": "ทางรถใช้เวลากี่วัน"},
+    {"role": "assistant", "content": "ระยะเวลาขนส่งทางรถจากจีนถึงไทยประมาณ 7–10 วันค่ะ"},
+    {"role": "user", "content": "FT318220260726001"},
+    {"role": "assistant", "content": "เลขที่บิลขนส่ง: FT318220260726001\nสถานะบิลขนส่ง: รับเข้าที่จีน\nยอดรวมบิลขนส่ง 2,786.75 บาทค่ะ"},
+    {"role": "user", "content": "ขอเช็กพัสดุเดียวครับ"},
+    {"role": "assistant", "content": "เลขที่บิลขนส่ง: FT318220260726001\nสถานะบิลขนส่ง: รับเข้าที่จีน\nยอดรวมบิลขนส่ง 2,786.75 บาทค่ะ"},
+    {"role": "user", "content": "ค่าขนส่งคิดยังไง"},
+    {"role": "assistant", "content": "ค่าขนส่งจะคำนวณจากทั้งน้ำหนักและปริมาตร (CBM) แล้วใช้ค่าที่สูงกว่าค่ะ"},
+]
+
+
+class P001_A2_RealMultiCycleWindowState(P001_Base):
+    def test_stale_identifier_from_a_finished_cycle_does_not_execute_the_fresh_one(self):
+        result, mock_req = self._decide("ขอเช็กพัสดุเดียวครับ", history=list(_REAL_MULTI_CYCLE_HISTORY))
+        dev = result.get("developer") or {}
+        ics = dev.get("information_collection_status") or {}
+        self.assertEqual(result["routing"]["type"], "WORKFLOW")
+        self.assertEqual(ics.get("selected_business_action"), "searchdatashipment")
+        self.assertIn("ShipmentCode", ics.get("missing_parameters") or [])
+        self.assertNotEqual((ics.get("collected_parameters") or {}).get("ShipmentCode"),
+                            "FT318220260726001")
+        self.assertIn("บิลขนส่ง", result["reply"]["text"])
+        mock_req.assert_not_called()
+
+
 # ── B — genuine continuation still uses the identifier ──────────────
 
 class P001_B_ContinuationStillUsesIdentifier(P001_Base):
