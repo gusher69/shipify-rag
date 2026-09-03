@@ -25,9 +25,18 @@ class RealLineReplayFixtures(unittest.TestCase):
 
 
 def _make(fixture_path: Path):
+    fx0 = json.loads(fixture_path.read_text(encoding="utf-8"))
+
     def _test(self):
         fx = json.loads(fixture_path.read_text(encoding="utf-8"))
         self.assertTrue(replay(fx, verbose=False), f"{fixture_path.name} did not match its expected block")
+
+    # A fixture that documents a still-open bug (its `expected` block is
+    # the TARGET behavior, not today's) is registered as an expected
+    # failure so the branch suite stays green while the regression is
+    # captured. Drop the `exposes_open_bug` key once the fix lands.
+    if fx0.get("exposes_open_bug"):
+        return unittest.expectedFailure(_test)
     return _test
 
 

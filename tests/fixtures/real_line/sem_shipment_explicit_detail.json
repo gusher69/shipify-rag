@@ -1,0 +1,110 @@
+{
+  "case_id": "sem_shipment_explicit_detail",
+  "captured_at": "2026-09-03T01:25:00Z",
+  "source": "REAL LINE semantic family — sanitized",
+  "channel": "line",
+  "verified_cust_code": "FT3182",
+  "customer_context": {
+    "cust_code": "FT3182",
+    "identity_confirmed": true,
+    "last_business_action": "searchdatashipment"
+  },
+  "pending_action_id_key": null,
+  "message": "เช็กพัสดุ FT318220260726001",
+  "history": [
+    {
+      "role": "user",
+      "content": "สวัสดีครับ"
+    },
+    {
+      "role": "assistant",
+      "content": "สวัสดีค่ะ"
+    }
+  ],
+  "actions": [
+    {
+      "action_key": "searchdatashipment",
+      "action_type": "API",
+      "category": "Customer Shipment Retrieval",
+      "keywords": [
+        "เลขบิลขนส่ง",
+        "พัสดุเดียว",
+        "shipment detail",
+        "รายละเอียดพัสดุ"
+      ],
+      "parameters": [
+        {
+          "name": "CustCode",
+          "display_name": "รหัสลูกค้า",
+          "required": true,
+          "input_source": "customer_message",
+          "validation_pattern": "^[A-Za-z]{2}[0-9]{3,6}$"
+        },
+        {
+          "name": "SecretCode",
+          "display_name": "SecretCode",
+          "required": true,
+          "input_source": "credential_store"
+        },
+        {
+          "name": "ShipmentCode",
+          "display_name": "เลขที่บิลขนส่ง",
+          "required": true,
+          "input_source": "customer_message",
+          "validation_pattern": "^[A-Za-z]{2}[0-9]{6,}$"
+        }
+      ],
+      "endpoint": "https://erp.invalid/SearchDataShipment",
+      "http_method": "POST"
+    },
+    {
+      "action_key": "searchdatashipmentlist",
+      "action_type": "API",
+      "category": "Customer Shipment Retrieval",
+      "keywords": [
+        "ติดตามพัสดุ",
+        "พัสดุ",
+        "พัสดุล่าสุด",
+        "รายการพัสดุ",
+        "shipment"
+      ],
+      "parameters": [
+        {
+          "name": "CustCode",
+          "display_name": "รหัสลูกค้า",
+          "required": true,
+          "input_source": "customer_message",
+          "validation_pattern": "^[A-Za-z]{2}[0-9]{3,6}$"
+        },
+        {
+          "name": "SecretCode",
+          "display_name": "SecretCode",
+          "required": true,
+          "input_source": "credential_store"
+        },
+        {
+          "name": "Latest",
+          "display_name": "จำนวนล่าสุด",
+          "required": false,
+          "input_source": "fixed_configuration"
+        }
+      ],
+      "endpoint": "https://erp.invalid/SearchDataShipmentList",
+      "http_method": "POST"
+    }
+  ],
+  "erp_mock_response": {
+    "data": {
+      "Shipment": {
+        "Code": "FT318220260726001",
+        "Status": "รับเข้าที่จีน"
+      }
+    }
+  },
+  "expected": {
+    "selected_action": "searchdatashipment",
+    "routing_type": "API",
+    "shipment_code_present": true,
+    "is_complete": true
+  }
+}
