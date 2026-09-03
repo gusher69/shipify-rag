@@ -37,6 +37,12 @@ from services.session_service import _now_iso, HANDOFF_EPISODE_TTL_SECONDS
 
 _NOINFO_TEXT = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
 _STAFF_PROMISE_FRAGMENT = "เจ้าหน้าที่"
+# the REAL P7.1 no-info text carried into the handoff reply — ends with a
+# SELF-SERVICE line that Fix-2.2 strips once a handoff is on the books.
+_P71_NOINFO_TEXT = ("ตอนนี้ยังไม่มีข้อมูลยืนยันนโยบายเรื่องนี้ในระบบค่ะ "
+                    "รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ")
+_SELF_SERVICE_ASK = "รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ"
+_SERVICE_MIND_FRAGMENT = "ทางเราประสานเจ้าหน้าที่"
 
 
 # ── Part A — Decision Engine routing contract ───────────────────────
@@ -133,7 +139,7 @@ class Fix2_WebhookPromiseMatchesRealHandoff(unittest.TestCase):
                 "alert": None, "error": None}
 
     def _run(self, *, handoff_status, send_result, handoff_state=None, reason="unsupported_company_information",
-             message="Shipify การันตีของหายไหม"):
+             message="Shipify การันตีของหายไหม", base_reply=None):
         # decide() still only consults the status string
         self.mock_session_service.get_handoff_status.return_value = handoff_status
         # Fix-2.1 — the webhook's episode-aware dedupe consults the full state
@@ -150,8 +156,8 @@ class Fix2_WebhookPromiseMatchesRealHandoff(unittest.TestCase):
              patch("services.human_handoff_service.send_handoff_notification",
                    return_value=send_result) as mock_notify:
             mock_engine_cls.return_value.decide.return_value = self._decide_result(
-                text=_NOINFO_TEXT, routing_type="HUMAN_HANDOFF",
-                handoff_payload={"reason": reason})
+                text=base_reply if base_reply is not None else _NOINFO_TEXT,
+                routing_type="HUMAN_HANDOFF", handoff_payload={"reason": reason})
             webhook_module._handle_message_via_decision_engine(_fake_event(message))
         sent_text = " ".join(
             m.text for m in self.mock_line_bot_api.reply_message.call_args.args[0].messages
@@ -256,6 +262,56 @@ class Fix21_HandoffDedupeIsEpisodeAware(Fix2_WebhookPromiseMatchesRealHandoff):
         self.assertIn("ยังไม่", sent_text)
         self.mock_session_service.set_handoff_status.assert_any_call(
             "fake-session-id", "NONE", reason="unsupported_company_information")  # retryable
+
+
+# ── Part B.2 — Fix-2.2: Service-Mind handoff wording ───────────────
+
+class Fix22_ServiceMindWording(Fix2_WebhookPromiseMatchesRealHandoff):
+    """Once a Human CS handoff is on the books, the reply must read
+    'we will coordinate a staff follow-up for you', never 'go ask staff
+    yourself'. On notification failure the customer keeps the neutral
+    no-info wording with no coordination promise."""
+
+    def test_A_fresh_success_uses_service_mind_not_self_service(self):
+        mock_notify, sent_text = self._run(
+            handoff_status="NONE", send_result={"sent": True, "action_key": "sendlinenotics", "error": None},
+            base_reply=_P71_NOINFO_TEXT)
+        mock_notify.assert_called_once()
+        self.assertNotIn(_SELF_SERVICE_ASK, sent_text)          # "go ask staff yourself" removed
+        self.assertIn(_SERVICE_MIND_FRAGMENT, sent_text)         # "we coordinate staff for you" present
+        self.assertIn("ยังไม่มีข้อมูลยืนยัน", sent_text)         # honest no-info kept
+
+    def test_B_same_episode_dedupe_still_service_mind_no_second_notify(self):
+        mock_notify, sent_text = self._run(
+            handoff_status="NOTIFIED", send_result={"sent": True},
+            handoff_state={"status": "NOTIFIED", "reason": "unsupported_company_information",
+                           "notified_at": _now_iso()},
+            base_reply=_P71_NOINFO_TEXT)
+        mock_notify.assert_not_called()                          # no notification storm
+        self.assertNotIn(_SELF_SERVICE_ASK, sent_text)
+        self.assertIn(_SERVICE_MIND_FRAGMENT, sent_text)
+
+    def test_C_notification_failure_neutral_no_info_no_coordination_promise(self):
+        mock_notify, sent_text = self._run(
+            handoff_status="NONE",
+            send_result={"sent": False, "action_key": None, "error": "execution_failed"},
+            base_reply=_P71_NOINFO_TEXT)
+        mock_notify.assert_called_once()
+        self.assertNotIn(_SERVICE_MIND_FRAGMENT, sent_text)      # no false coordination promise
+        self.assertNotIn(_SELF_SERVICE_ASK, sent_text)          # self-service line also dropped
+        self.assertIn("ยังไม่มีข้อมูลยืนยัน", sent_text)         # neutral no-info remains
+
+    def test_D_normal_rag_reply_untouched(self):
+        # a non-handoff reply is never rewritten by this path
+        with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
+             patch.object(webhook_module, "send_line_notify"):
+            mock_engine_cls.return_value.decide.return_value = {
+                "reply": {"text": "Shipify ฝ่ายบริการลูกค้า : 02-026-6426", "images": [], "files": []},
+                "routing": {"type": "RAG"}, "handoff_payload": None, "alert": None, "error": None}
+            webhook_module._handle_message_via_decision_engine(_fake_event("ขอเบอร์ติดต่อ"))
+        sent = " ".join(m.text for m in self.mock_line_bot_api.reply_message.call_args.args[0].messages
+                        if hasattr(m, "text"))
+        self.assertEqual(sent, "Shipify ฝ่ายบริการลูกค้า : 02-026-6426")
 
 
 # ── Part C — the RAG pipeline exposes the structured signal ─────────

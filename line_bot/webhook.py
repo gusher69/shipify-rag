@@ -780,7 +780,20 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         # If the send fails, the customer keeps the plain no-info wording
         # — never a fabricated promise.
         _unsupported_fact_handoff = reason == "unsupported_company_information"
-        _STAFF_FOLLOWUP_CLAUSE = " เดี๋ยวเจ้าหน้าที่จะช่วยตรวจสอบเพิ่มเติมให้นะคะ"
+        # Fix-2.2 (2026-09-03) — Service-Mind wording. The RAG pipeline's
+        # P7.1 no-info text ends with a SELF-SERVICE line ("go ask staff
+        # yourself"), which is wrong once the system has already taken
+        # ownership via a Human CS handoff. For an unsupported-company
+        # handoff, drop that line, and — ONLY when the handoff truth rule
+        # is satisfied (a notification for THIS episode succeeded this
+        # turn, or this same episode is already legitimately NOTIFIED/
+        # PENDING) — add a "we will coordinate staff for you" line
+        # instead. On notification failure the customer is left with the
+        # plain neutral no-info wording — never a coordination promise.
+        _SELF_SERVICE_ASK = "รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ"
+        _STAFF_COORDINATION_CLAUSE = " เดี๋ยวทางเราประสานเจ้าหน้าที่ช่วยตรวจสอบเพิ่มเติมให้นะคะ"
+        if _unsupported_fact_handoff:
+            reply_text = reply_text.replace(" " + _SELF_SERVICE_ASK, "").replace(_SELF_SERVICE_ASK, "").strip()
         # Fix-2.1 (2026-09-03) — dedupe on the ISSUE / EPISODE, not on any
         # historical NOTIFIED. A stale or unrelated prior handoff (e.g. a
         # 3-day-old self_verification_failed) must NOT suppress a genuine
@@ -795,8 +808,11 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         if _same_episode:
             print(f"[webhook] Human Handoff already {handoff_status} for THIS issue/episode "
                   f"(reason class {reason!r}) — skipping duplicate notification")
-            if _unsupported_fact_handoff and _STAFF_FOLLOWUP_CLAUSE.strip() not in reply_text:
-                reply_text = reply_text + _STAFF_FOLLOWUP_CLAUSE
+            # Same episode is already legitimately NOTIFIED/PENDING — the
+            # service-mind coordination line is truthful (CS is engaged
+            # for THIS issue).
+            if _unsupported_fact_handoff and _STAFF_COORDINATION_CLAUSE.strip() not in reply_text:
+                reply_text = reply_text + _STAFF_COORDINATION_CLAUSE
         else:
             if conversation:
                 session_service.set_handoff_status(conversation["id"], "PENDING", reason=reason)
@@ -831,10 +847,10 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                 last_tracking=collected.get("Tracking") or (profile or {}).get("last_tracking"),
             )
             if send_result.get("sent") and _unsupported_fact_handoff \
-                    and _STAFF_FOLLOWUP_CLAUSE.strip() not in reply_text:
+                    and _STAFF_COORDINATION_CLAUSE.strip() not in reply_text:
                 # Real notification went out — now it is true to tell the
-                # customer a staff member will follow up.
-                reply_text = reply_text + _STAFF_FOLLOWUP_CLAUSE
+                # customer that WE will coordinate a staff follow-up.
+                reply_text = reply_text + _STAFF_COORDINATION_CLAUSE
             if conversation:
                 if send_result.get("sent"):
                     session_service.set_handoff_status(conversation["id"], "NOTIFIED", reason=reason)
