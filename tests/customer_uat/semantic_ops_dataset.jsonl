@@ -1,0 +1,82 @@
+{"id": "OP-seed-greet-1", "split": "seed", "text": "สวัสดีครับ", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": true, "note": "greeting during pending"}
+{"id": "OP-seed-greet-2", "split": "seed", "text": "สวัสดีค่ะ", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-greet-3", "split": "seed", "text": "หวัดดีครับ", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-greet-4", "split": "seed", "text": "hello", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-greet-5", "split": "seed", "text": "ดีครับผม", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-cont-1", "split": "seed", "text": "FT318220260726001", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "ShipmentCode"}
+{"id": "OP-seed-cont-2", "split": "seed", "text": "PO12345678", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "OrderCode"}
+{"id": "OP-seed-cont-3", "split": "seed", "text": "12 กก.", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "Weight"}
+{"id": "OP-seed-cont-4", "split": "seed", "text": "FT3182", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "CustCode"}
+{"id": "OP-seed-cont-5", "split": "seed", "text": "54x12x43 ซม", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "Dimensions"}
+{"id": "OP-seed-cancel-1", "split": "seed", "text": "ไม่เอาแล้ว", "op": "CANCEL", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-cancel-2", "split": "seed", "text": "ยกเลิก", "op": "CANCEL", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-cancel-3", "split": "seed", "text": "ไม่เช็กแล้วครับ", "op": "CANCEL", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-cancel-4", "split": "seed", "text": "พอแล้ว ไม่ต้องเช็ค", "op": "CANCEL", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-changetarget-1", "split": "seed", "text": "ไม่เอาเลขนี้ ขออีกเลข", "op": "CHANGE_TARGET", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-changetarget-2", "split": "seed", "text": "ขอเช็คเลขอื่น ๆ ได้ไหม ไม่ใช้เลขนี้", "op": "CHANGE_TARGET", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-changetarget-3", "split": "seed", "text": "เปลี่ยนเป็นอีกบิลได้ไหม", "op": "CHANGE_TARGET", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-correct-1", "split": "seed", "text": "พิมพ์ผิด ที่ถูกคือ FT318220260726002", "op": "CORRECT_VALUE", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-correct-2", "split": "seed", "text": "แก้เป็น PO99999999 นะครับ", "op": "CORRECT_VALUE", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-changetopic-1", "split": "seed", "text": "ขอเบอร์ติดต่อ", "op": "CHANGE_TOPIC", "publicity": "PUBLIC", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-changetopic-2", "split": "seed", "text": "คูปองใช้ยังไง", "op": "CHANGE_TOPIC", "publicity": "PUBLIC", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-changetopic-3", "split": "seed", "text": "ค่าขนส่งคิดยังไง", "op": "CHANGE_TOPIC", "publicity": "PUBLIC", "record_scope": "NA", "pending": true}
+{"id": "OP-seed-priv-unspec-1", "split": "seed", "text": "ของผมเข้าไทยหรือยัง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-seed-priv-unspec-2", "split": "seed", "text": "สินค้าถึงโกดังหรือยัง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-seed-priv-unspec-3", "split": "seed", "text": "เช็กพัสดุของผมให้หน่อย", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-seed-priv-unspec-4", "split": "seed", "text": "ร้านส่งของให้ผมหรือยัง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "order", "pending": false}
+{"id": "OP-seed-priv-latest-1", "split": "seed", "text": "พัสดุล่าสุดของผมถึงไหนแล้ว", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "LATEST", "domain": "shipment", "pending": false}
+{"id": "OP-seed-priv-latest-2", "split": "seed", "text": "บิลล่าสุดของผมสถานะอะไร", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "LATEST", "domain": "shipment", "pending": false}
+{"id": "OP-seed-priv-explicit-1", "split": "seed", "text": "เช็ก FT318220260726001 ให้หน่อย", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "EXPLICIT", "domain": "shipment", "pending": false}
+{"id": "OP-seed-priv-explicit-2", "split": "seed", "text": "บิล PO12345678 ถึงไหนแล้ว", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "EXPLICIT", "domain": "order", "pending": false}
+{"id": "OP-seed-priv-wallet-1", "split": "seed", "text": "ยอดเงินของผมเหลือเท่าไหร่", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "customer_data", "pending": false}
+{"id": "OP-seed-priv-coupon-1", "split": "seed", "text": "ผมมีคูปองอะไรบ้าง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "LIST_ALL", "domain": "customer_data", "pending": false}
+{"id": "OP-seed-pub-1", "split": "seed", "text": "คูปองใช้ยังไง", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-pub-2", "split": "seed", "text": "ค่าขนส่งคิดยังไง", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-pub-3", "split": "seed", "text": "ขอที่อยู่โกดังจีน", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-pub-4", "split": "seed", "text": "สินค้าที่ห้ามนำเข้ามีอะไรบ้าง", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-pub-5", "split": "seed", "text": "ทางรถกับทางเรือใช้เวลากี่วัน", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-pub-6", "split": "seed", "text": "ขอเบอร์ติดต่อ", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-seed-newaction-1", "split": "seed", "text": "ขอเช็กพัสดุเดียวครับ", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-crit-1", "split": "heldout", "text": "สวัสดีครับ", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": true, "note": "CRITICAL 1 greeting during pending"}
+{"id": "OP-crit-2", "split": "heldout", "text": "FT318220260726001", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "ShipmentCode", "note": "CRITICAL 2 valid continuation"}
+{"id": "OP-crit-3", "split": "heldout", "text": "ขอเบอร์ติดต่อ", "op": "CHANGE_TOPIC", "publicity": "PUBLIC", "record_scope": "NA", "pending": true, "note": "CRITICAL 3 new public topic during pending"}
+{"id": "OP-crit-4", "split": "heldout", "text": "ไม่เอาเลขนี้ ขออีกเลข", "op": "CHANGE_TARGET", "publicity": "NA", "record_scope": "NA", "pending": true, "note": "CRITICAL 4 change target"}
+{"id": "OP-crit-5", "split": "heldout", "text": "ไม่เอาแล้ว", "op": "CANCEL", "publicity": "NA", "record_scope": "NA", "pending": true, "note": "CRITICAL 5 cancel"}
+{"id": "OP-crit-6", "split": "heldout", "text": "ของผมเข้าไทยหรือยัง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false, "note": "CRITICAL 6 private unspecified, NOT latest"}
+{"id": "OP-crit-7", "split": "heldout", "text": "พัสดุล่าสุดของผมถึงไหนแล้ว", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "LATEST", "domain": "shipment", "pending": false, "note": "CRITICAL 7 explicit latest"}
+{"id": "OP-crit-8", "split": "heldout", "text": "คูปองใช้ยังไง", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false, "note": "CRITICAL 8 public coupon"}
+{"id": "OP-crit-9", "split": "heldout", "text": "ผมมีคูปองอะไรบ้าง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "LIST_ALL", "domain": "customer_data", "pending": false, "note": "CRITICAL 9 private coupon"}
+{"id": "OP-crit-10", "split": "heldout", "text": "ของเข้าไทยหรือยัง ของผมอ่ะ", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false, "note": "CRITICAL 10 human paraphrase of #6"}
+{"id": "OP-hold-greet-1", "split": "heldout", "text": "สวัสดีตอนเช้าครับ ทักมาถามหน่อย", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-greet-2", "split": "heldout", "text": "ดีจ้า", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-greet-3", "split": "heldout", "text": "hi ครับ", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": false}
+{"id": "OP-hold-greet-4", "split": "heldout", "text": "ขอบคุณมากครับ", "op": "GREETING", "publicity": "NA", "record_scope": "NA", "pending": true, "note": "social acknowledgement"}
+{"id": "OP-hold-cont-1", "split": "heldout", "text": "เลขบิล FT318220260726099 ครับ", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "ShipmentCode"}
+{"id": "OP-hold-cont-2", "split": "heldout", "text": "น้ำหนัก 8 กิโลครับ", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "Weight"}
+{"id": "OP-hold-cont-3", "split": "heldout", "text": "รหัสลูกค้า SP1008", "op": "CONTINUE", "publicity": "NA", "record_scope": "NA", "pending": true, "expected_param": "CustCode"}
+{"id": "OP-hold-cancel-1", "split": "heldout", "text": "เลิกเช็กแล้วกันครับ เดี๋ยวมาใหม่", "op": "CANCEL", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-cancel-2", "split": "heldout", "text": "ไม่ต้องแล้วครับ ขอบคุณ", "op": "CANCEL", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-changetarget-1", "split": "heldout", "text": "เลขเมื่อกี้ผิด ขอเช็กอีกอันแทน", "op": "CHANGE_TARGET", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-changetarget-2", "split": "heldout", "text": "อันนี้ไม่ใช่ ขอดูบิลอื่น", "op": "CHANGE_TARGET", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-correct-1", "split": "heldout", "text": "ขอโทษพิมพ์ตกไปตัวนึง ที่ถูกคือ FT318220260726010", "op": "CORRECT_VALUE", "publicity": "NA", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-changetopic-1", "split": "heldout", "text": "แล้วเบอร์โทรบริษัทล่ะครับ", "op": "CHANGE_TOPIC", "publicity": "PUBLIC", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-changetopic-2", "split": "heldout", "text": "ขอถามเรื่องเรทเรือหน่อย กี่บาทต่อคิว", "op": "CHANGE_TOPIC", "publicity": "PUBLIC", "record_scope": "NA", "pending": true}
+{"id": "OP-hold-priv-unspec-1", "split": "heldout", "text": "ของที่ส่งมาถึงไหนแล้วอ่ะ", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-hold-priv-unspec-2", "split": "heldout", "text": "พัสดุผมเป็นไงบ้าง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-hold-priv-unspec-3", "split": "heldout", "text": "ออเดอร์ที่ผมสั่งไปถึงไหนแล้ว", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "order", "pending": false}
+{"id": "OP-hold-priv-unspec-4", "split": "heldout", "text": "เช็กของผมทีดิ", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-hold-priv-latest-1", "split": "heldout", "text": "ล่าสุดที่ผมส่งมาถึงไหนแล้ว", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "LATEST", "domain": "shipment", "pending": false}
+{"id": "OP-hold-priv-latest-2", "split": "heldout", "text": "อันล่าสุดของผมสถานะไงบ้าง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "LATEST", "domain": "shipment", "pending": false}
+{"id": "OP-hold-priv-explicit-1", "split": "heldout", "text": "ช่วยดู FT318220260726001 หน่อยครับ", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "EXPLICIT", "domain": "shipment", "pending": false}
+{"id": "OP-hold-priv-wallet-1", "split": "heldout", "text": "เงินในระบบผมมีเท่าไหร่", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "customer_data", "pending": false}
+{"id": "OP-hold-priv-wallet-2", "split": "heldout", "text": "ที่เติมเงินไปเข้าหรือยัง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "customer_data", "pending": false}
+{"id": "OP-hold-pub-1", "split": "heldout", "text": "ใช้คูปองยังไงเหรอ", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-hold-pub-2", "split": "heldout", "text": "คิดค่าส่งยังไงคะ", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-hold-pub-3", "split": "heldout", "text": "มีบริการตีลังไม้ไหม", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-hold-pub-4", "split": "heldout", "text": "ที่อยู่โกดังไทยอยู่ตรงไหน", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-hold-pub-5", "split": "heldout", "text": "คูปองใช้ไม่หมดคืนได้ไหม", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false}
+{"id": "OP-hold-typo-1", "split": "heldout", "text": "เช็คพัสดุหนอ่ย", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false, "note": "typo หน่อย"}
+{"id": "OP-hold-typo-2", "split": "heldout", "text": "ของ เข้า ไทย หรือ ยัง", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false, "note": "spaced tokens"}
+{"id": "OP-hold-typo-3", "split": "heldout", "text": "ช่วยเช็กของผมที", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "shipment", "pending": false}
+{"id": "OP-hold-typo-4", "split": "heldout", "text": "ขนสง ทางรถ กี่ วัน", "op": "NEW_ACTION", "publicity": "PUBLIC", "record_scope": "NA", "pending": false, "note": "typo ขนส่ง"}
+{"id": "OP-hold-typo-5", "split": "heldout", "text": "แทรค จีน ของ ผม ถึง ไหน", "op": "NEW_ACTION", "publicity": "PRIVATE", "record_scope": "UNSPECIFIED", "domain": "tracking", "pending": false}
