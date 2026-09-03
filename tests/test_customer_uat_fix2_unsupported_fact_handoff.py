@@ -27,10 +27,13 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import datetime, timedelta, timezone
+
 from tests.test_business_action_registry import _FakeSupabase
 from tests.test_decision_engine import _seed_action, _fake_playground_result, _engine_with_registry
 from services.business_action_registry import BusinessActionRegistry
 from services.decision_engine import DecisionEngine
+from services.session_service import _now_iso, HANDOFF_EPISODE_TTL_SECONDS
 
 _NOINFO_TEXT = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
 _STAFF_PROMISE_FRAGMENT = "เจ้าหน้าที่"
@@ -129,16 +132,27 @@ class Fix2_WebhookPromiseMatchesRealHandoff(unittest.TestCase):
                 "routing": {"type": routing_type}, "handoff_payload": handoff_payload,
                 "alert": None, "error": None}
 
-    def _run(self, *, handoff_status, send_result):
+    def _run(self, *, handoff_status, send_result, handoff_state=None, reason="unsupported_company_information",
+             message="Shipify การันตีของหายไหม"):
+        # decide() still only consults the status string
         self.mock_session_service.get_handoff_status.return_value = handoff_status
+        # Fix-2.1 — the webhook's episode-aware dedupe consults the full state
+        state = handoff_state if handoff_state is not None else {
+            "status": handoff_status, "reason": reason if handoff_status in ("NOTIFIED", "PENDING") else None,
+            "notified_at": _now_iso() if handoff_status == "NOTIFIED" else None}
+        self.mock_session_service.get_handoff_state.return_value = state
+        # keep the real episode helper (a MagicMock session_service would
+        # otherwise stub it away)
+        from services import session_service as _ss
+        self.mock_session_service.is_same_handoff_episode.side_effect = _ss.is_same_handoff_episode
         with patch("services.decision_engine.DecisionEngine") as mock_engine_cls, \
              patch.object(webhook_module, "send_line_notify"), \
              patch("services.human_handoff_service.send_handoff_notification",
                    return_value=send_result) as mock_notify:
             mock_engine_cls.return_value.decide.return_value = self._decide_result(
                 text=_NOINFO_TEXT, routing_type="HUMAN_HANDOFF",
-                handoff_payload={"reason": "unsupported_company_information"})
-            webhook_module._handle_message_via_decision_engine(_fake_event("Shipify การันตีของหายไหม"))
+                handoff_payload={"reason": reason})
+            webhook_module._handle_message_via_decision_engine(_fake_event(message))
         sent_text = " ".join(
             m.text for m in self.mock_line_bot_api.reply_message.call_args.args[0].messages
             if hasattr(m, "text"))
@@ -165,10 +179,14 @@ class Fix2_WebhookPromiseMatchesRealHandoff(unittest.TestCase):
             "fake-session-id", "NONE", reason="unsupported_company_information")
 
     def test_dedupe_does_not_storm_but_still_reassures(self):
+        # SAME issue (unsupported_company_information) already NOTIFIED
+        # within the active window -> real duplicate, no storm.
         mock_notify, sent_text = self._run(
-            handoff_status="NOTIFIED", send_result={"sent": True})
+            handoff_status="NOTIFIED", send_result={"sent": True},
+            handoff_state={"status": "NOTIFIED", "reason": "unsupported_company_information",
+                           "notified_at": _now_iso()})
         mock_notify.assert_not_called()                     # no notification storm
-        self.assertIn("เจ้าหน้าที่", sent_text)             # CS already engaged — reassurance is true
+        self.assertIn("เจ้าหน้าที่", sent_text)             # CS already engaged for THIS issue — reassurance is true
 
     def test_fresh_conversation_status_none_does_not_block_new_handoff(self):
         # a new/rolled conversation reports NONE regardless of any older
@@ -176,6 +194,68 @@ class Fix2_WebhookPromiseMatchesRealHandoff(unittest.TestCase):
         mock_notify, _ = self._run(
             handoff_status="NONE", send_result={"sent": True})
         mock_notify.assert_called_once()
+
+
+# ── Part B.1 — Fix-2.1: dedupe is ISSUE / EPISODE aware ─────────────
+
+class Fix21_HandoffDedupeIsEpisodeAware(Fix2_WebhookPromiseMatchesRealHandoff):
+    """The REAL LINE defect: a 3-day-old, unrelated `self_verification_failed`
+    NOTIFIED state suppressed a genuine new `unsupported_company_information`
+    handoff. Dedupe must key on (reason class + active episode window),
+    not on any historical NOTIFIED."""
+
+    _OLD_SELF_VERIF = {
+        "status": "NOTIFIED",
+        "reason": "self_verification_failed: CustCode FT3182: phone did not match record on file",
+        "notified_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(),
+    }
+
+    def test_A_old_unrelated_notified_does_not_suppress_new_issue(self):
+        mock_notify, sent_text = self._run(
+            handoff_status="NOTIFIED", send_result={"sent": True, "action_key": "sendlinenotics", "error": None},
+            handoff_state=self._OLD_SELF_VERIF)
+        mock_notify.assert_called_once()                                  # NEW notification really sent
+        self.assertEqual(mock_notify.call_args.kwargs["reason"], "unsupported_company_information")
+        self.mock_session_service.set_handoff_status.assert_any_call(
+            "fake-session-id", "NOTIFIED", reason="unsupported_company_information")  # evidence updated
+        self.assertIn("เจ้าหน้าที่", sent_text)
+
+    def test_B_same_issue_immediate_repeat_is_deduped(self):
+        mock_notify, sent_text = self._run(
+            handoff_status="NOTIFIED", send_result={"sent": True},
+            handoff_state={"status": "NOTIFIED", "reason": "unsupported_company_information",
+                           "notified_at": _now_iso()})
+        mock_notify.assert_not_called()
+        self.assertIn("เจ้าหน้าที่", sent_text)
+
+    def test_C_same_episode_paraphrase_is_deduped_no_exact_string(self):
+        # a different sentence, same reason class, still inside the window
+        mock_notify, _ = self._run(
+            handoff_status="NOTIFIED", send_result={"sent": True},
+            handoff_state={"status": "NOTIFIED", "reason": "unsupported_company_information",
+                           "notified_at": (datetime.now(timezone.utc) - timedelta(seconds=90)).isoformat()},
+            message="แล้ว Shipify รับผิดชอบไหมถ้าของติดศุลกากร")
+        mock_notify.assert_not_called()
+
+    def test_D_same_class_after_episode_window_notifies_again(self):
+        lapsed = (datetime.now(timezone.utc)
+                  - timedelta(seconds=HANDOFF_EPISODE_TTL_SECONDS + 120)).isoformat()
+        mock_notify, _ = self._run(
+            handoff_status="NOTIFIED", send_result={"sent": True},
+            handoff_state={"status": "NOTIFIED", "reason": "unsupported_company_information",
+                           "notified_at": lapsed})
+        mock_notify.assert_called_once()                                  # new episode -> notify again
+
+    def test_E_new_issue_notification_failure_no_false_promise(self):
+        mock_notify, sent_text = self._run(
+            handoff_status="NOTIFIED",
+            send_result={"sent": False, "action_key": None, "error": "execution_failed"},
+            handoff_state=self._OLD_SELF_VERIF)
+        mock_notify.assert_called_once()
+        self.assertNotIn("เจ้าหน้าที่", sent_text)                        # no fabricated promise
+        self.assertIn("ยังไม่", sent_text)
+        self.mock_session_service.set_handoff_status.assert_any_call(
+            "fake-session-id", "NONE", reason="unsupported_company_information")  # retryable
 
 
 # ── Part C — the RAG pipeline exposes the structured signal ─────────

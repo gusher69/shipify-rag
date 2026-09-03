@@ -163,6 +163,10 @@ class TestDecisionEngineAdapter(unittest.TestCase):
         self.mock_session_service = MagicMock()
         self.mock_session_service.get_or_create_active_conversation.return_value = {"id": "fake-session-id", "message_count": 0}
         self.mock_session_service.get_recent_history.return_value = []
+        # Fix-2.1 — the webhook reads the full handoff state for its
+        # episode-aware dedupe; default to a clean NONE state.
+        self.mock_session_service.get_handoff_state.return_value = {
+            "status": "NONE", "reason": None, "notified_at": None}
         mock_get_session_service.return_value = self.mock_session_service
 
     def tearDown(self):
@@ -673,23 +677,44 @@ class TestHumanHandoffNotification(unittest.TestCase):
         # only that webhook.py correctly consults/updates handoff state
         # THROUGH it (real dedup semantics, not a rubber-stamp mock).
         self._conversations: dict = {}
+        # Fix-2.1 — the in-memory ai_sessions stand-in now tracks the FULL
+        # handoff state (status + reason + notified_at) so webhook.py's
+        # episode-aware dedupe is exercised for real, not rubber-stamped.
+        # `_handoff_status` is kept as a status-only mirror for the
+        # existing assertions further down.
+        self._handoff_state: dict = {}
         self._handoff_status: dict = {}
+        from datetime import datetime as _dt, timezone as _tz
 
         def _get_or_create(user_id, **kwargs):
             if user_id not in self._conversations:
-                self._conversations[user_id] = {"id": f"conv-{user_id}", "message_count": 0}
-                self._handoff_status[f"conv-{user_id}"] = "NONE"
+                cid = f"conv-{user_id}"
+                self._conversations[user_id] = {"id": cid, "message_count": 0}
+                self._handoff_state[cid] = {"status": "NONE", "reason": None, "notified_at": None}
+                self._handoff_status[cid] = "NONE"
             return self._conversations[user_id]
 
         def _get_status(conversation_id):
-            return self._handoff_status.get(conversation_id, "NONE")
+            return self._handoff_state.get(conversation_id, {}).get("status", "NONE")
+
+        def _get_state(conversation_id):
+            return self._handoff_state.get(
+                conversation_id, {"status": "NONE", "reason": None, "notified_at": None})
 
         def _set_status(conversation_id, status, reason=None):
+            st = self._handoff_state.setdefault(
+                conversation_id, {"status": "NONE", "reason": None, "notified_at": None})
+            st["status"] = status
+            if reason is not None:
+                st["reason"] = reason
+            if status == "NOTIFIED":
+                st["notified_at"] = _dt.now(_tz.utc).isoformat()
             self._handoff_status[conversation_id] = status
 
         self.mock_session_service = MagicMock()
         self.mock_session_service.get_or_create_active_conversation.side_effect = _get_or_create
         self.mock_session_service.get_handoff_status.side_effect = _get_status
+        self.mock_session_service.get_handoff_state.side_effect = _get_state
         self.mock_session_service.set_handoff_status.side_effect = _set_status
         self.mock_session_service.get_recent_history.return_value = []
         self.session_service_patcher = patch.object(webhook_module, "get_session_service",

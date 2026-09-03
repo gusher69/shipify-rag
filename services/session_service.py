@@ -39,6 +39,60 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Fix-2.1 (2026-09-03) — the storm-prevention window for Human CS
+# handoff notifications. Within this window a repeat / paraphrase of the
+# SAME handoff issue (same reason class) is deduped; once it lapses, the
+# same reason class in a fresh visit is a NEW episode and notifies again.
+# A DIFFERENT reason class is always a new episode regardless of timing.
+# Tunable single constant — no schema, no per-phrase table.
+HANDOFF_EPISODE_TTL_SECONDS = 600
+
+
+def _handoff_reason_class(reason: Optional[str]) -> str:
+    """The episode-identity component of a handoff reason: everything
+    before the first ':' (self_verification_failed / unsupported_company_
+    information / user_requested_human / ai_policy_escalation / max_retry_
+    exceeded / ...), lowercased. A per-CustCode / per-message suffix
+    (e.g. 'self_verification_failed: CustCode FT3182 ...') never changes
+    the class."""
+    return (reason or "").split(":", 1)[0].strip().lower()
+
+
+def is_same_handoff_episode(current_reason: Optional[str], prev_status: Optional[str],
+                            prev_reason: Optional[str], prev_notified_at: Optional[str],
+                            *, now: Optional[datetime] = None,
+                            ttl_seconds: int = HANDOFF_EPISODE_TTL_SECONDS) -> bool:
+    """True only when the persisted handoff state represents the SAME
+    active issue/episode as `current_reason` — i.e. a real
+    duplicate that should NOT trigger another Human CS notification.
+
+    Same episode  ⇔  a NOTIFIED/PENDING state exists  AND  its reason
+    class matches the current one  AND  ( it is still PENDING — a send
+    is in flight — OR it was notified within `ttl_seconds` ).
+
+    An unrelated historical handoff (different reason class, or same
+    class but stale) is NOT the same episode → the caller sends a fresh
+    notification and overwrites handoff_reason / handoff_notified_at."""
+    if prev_status not in ("NOTIFIED", "PENDING"):
+        return False
+    if _handoff_reason_class(current_reason) != _handoff_reason_class(prev_reason):
+        return False
+    if prev_status == "PENDING":
+        return True
+    if not prev_notified_at:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(prev_notified_at).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return False
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    return (ref - ts).total_seconds() <= ttl_seconds
+
+
 def _search_text(question: str, answer: str, chunks: List[Dict], prompt, policy) -> str:
     parts = [question or "", answer or ""]
     for c in chunks or []:
@@ -590,6 +644,26 @@ class SessionService:
         except Exception as e:
             print(f"[SessionService] get_handoff_status failed (treating as NONE): {e}")
             return "NONE"
+
+    def get_handoff_state(self, conversation_id: str) -> Dict:
+        """Fix-2.1 (2026-09-03) — the FULL persisted handoff state
+        (status + reason + notified_at) in ONE read, so the channel
+        adapter's duplicate-notification check can be ISSUE / EPISODE
+        aware instead of "any historical NOTIFIED suppresses everything".
+        No schema change: handoff_reason / handoff_notified_at already
+        exist (migrations/037_handoff_state.sql). Degrades to an all-None
+        NONE state on any failure, exactly like get_handoff_status."""
+        try:
+            res = _get_sb().table("ai_sessions") \
+                .select("handoff_status, handoff_reason, handoff_notified_at") \
+                .eq("id", conversation_id).single().execute()
+            d = res.data or {}
+            return {"status": d.get("handoff_status") or "NONE",
+                    "reason": d.get("handoff_reason"),
+                    "notified_at": d.get("handoff_notified_at")}
+        except Exception as e:
+            print(f"[SessionService] get_handoff_state failed (treating as NONE): {e}")
+            return {"status": "NONE", "reason": None, "notified_at": None}
 
     def set_handoff_status(self, conversation_id: str, status: str, *, reason: Optional[str] = None) -> None:
         if status not in ("NONE", "PENDING", "NOTIFIED", "RESOLVED"):

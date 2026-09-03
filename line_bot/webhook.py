@@ -17,7 +17,9 @@ from line_bot.tone import generate_reply
 from rag.searcher import search, format_context
 from profiles.manager import get_profile, upsert_profile, update_profile_from_turn
 from line_bot.message_adapter import build_line_text_messages
-from services.session_service import get_session_service, extract_conversation_fields
+from services.session_service import (
+    get_session_service, extract_conversation_fields, is_same_handoff_episode,
+)
 from services.customer_tier_service import update_tier_for_profile
 
 app = FastAPI()
@@ -567,7 +569,13 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # Follow-up routing (services/decision_engine.py::decide()) and
     # duplicate-notification suppression read the exact same value,
     # never two separately-timed reads of the same row.
-    handoff_status_before = session_service.get_handoff_status(conversation["id"]) if conversation else "NONE"
+    # Fix-2.1 (2026-09-03) — read the FULL handoff state (status + reason
+    # + notified_at) once here so the duplicate-notification check below
+    # is ISSUE / EPISODE aware. decide()'s Active Handoff Follow-up
+    # routing only needs the status string, so that is what it still gets.
+    handoff_state_before = session_service.get_handoff_state(conversation["id"]) \
+        if conversation else {"status": "NONE", "reason": None, "notified_at": None}
+    handoff_status_before = handoff_state_before["status"]
     decide_context["handoff_status"] = handoff_status_before
 
     # LINE Confirmation Flow (2026-08-10) — a customer-typed reply like
@@ -773,8 +781,20 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         # — never a fabricated promise.
         _unsupported_fact_handoff = reason == "unsupported_company_information"
         _STAFF_FOLLOWUP_CLAUSE = " เดี๋ยวเจ้าหน้าที่จะช่วยตรวจสอบเพิ่มเติมให้นะคะ"
-        if handoff_status in ("NOTIFIED", "PENDING"):
-            print(f"[webhook] Human Handoff already {handoff_status} for this conversation — skipping duplicate notification")
+        # Fix-2.1 (2026-09-03) — dedupe on the ISSUE / EPISODE, not on any
+        # historical NOTIFIED. A stale or unrelated prior handoff (e.g. a
+        # 3-day-old self_verification_failed) must NOT suppress a genuine
+        # new episode (unsupported_company_information). Same reason class
+        # within the active window (or an in-flight PENDING) is a real
+        # duplicate and is skipped; anything else sends a fresh
+        # notification and rewrites handoff_reason / handoff_notified_at
+        # to the current episode.
+        _same_episode = is_same_handoff_episode(
+            reason, handoff_state_before.get("status"),
+            handoff_state_before.get("reason"), handoff_state_before.get("notified_at"))
+        if _same_episode:
+            print(f"[webhook] Human Handoff already {handoff_status} for THIS issue/episode "
+                  f"(reason class {reason!r}) — skipping duplicate notification")
             if _unsupported_fact_handoff and _STAFF_FOLLOWUP_CLAUSE.strip() not in reply_text:
                 reply_text = reply_text + _STAFF_FOLLOWUP_CLAUSE
         else:

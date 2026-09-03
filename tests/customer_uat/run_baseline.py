@@ -491,7 +491,10 @@ def _write_report(results):
     P(f"- **Logical cases:** {results['n_logical_cases']}   |   **Strings evaluated "
       f"(messages + wording variants):** {results['n_strings_evaluated']}")
     P("")
-    P("> **SEM-1 + SEM-1.1 + SEM-1.2 + IDENTITY-0 + Fix-2 applied (2026-09-03).** IDENTITY-0 fixed a "
+    P("> **SEM-1 + SEM-1.1 + SEM-1.2 + IDENTITY-0 + Fix-2 + Fix-2.1 applied (2026-09-03).** Fix-2.1 makes "
+      "the Human CS handoff dedupe issue/episode-aware — an unrelated or stale prior handoff no longer "
+      "suppresses a genuine new one (keyed on reason class + a 10-minute active-episode window; webhook + "
+      "session_service only, no routing change). IDENTITY-0 fixed a "
       "failed-self-verification escalation drop (now a real Human CS handoff). Fix-2 (ported from `7f1e6cd`) "
       "routes a genuine *unsupported company fact* — the RAG pipeline's deterministic Answerability-Gate / "
       "P7.1 no-info branches — through the existing Human CS handoff, and the webhook only promises staff "
