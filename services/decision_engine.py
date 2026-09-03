@@ -3780,7 +3780,28 @@ class DecisionEngine:
               original unchanged denial behavior."""
         cust_code = collected_slots.get("CustCode")
         if not cust_code:
-            return {"resolved": False}
+            # IDENTITY-0 (2026-09-03) — the deterministic phone→email
+            # verification sequence spans several turns; by the time the
+            # customer answers the EMAIL question, the collection replay
+            # for this turn has bound `CustEmail` and no longer carries
+            # the `CustCode` from the turn that started the sequence.
+            # Without recovering it here, this method returns
+            # {"resolved": False} and the failed-verification ESCALATION
+            # (a real Human CS handoff) is silently dropped — the customer
+            # is still denied (the Authorization Gate is untouched), but
+            # no staff notification ever fires. Recover the CustCode the
+            # sequence was started for from the conversation, using the
+            # SAME config-driven structural capture used elsewhere — never
+            # a new identifier shape, never a free-text guess.
+            for _t in reversed(history or []):
+                if _t.get("role") != "user":
+                    continue
+                _cap = _opportunistic_identifier_capture(self.registry, _t.get("content") or "")
+                if _cap.get("CustCode"):
+                    cust_code = _cap["CustCode"]
+                    break
+            if not cust_code:
+                return {"resolved": False}
 
         last_assistant = next(
             (t.get("content") or "" for t in reversed(history or []) if t.get("role") == "assistant"), "")
