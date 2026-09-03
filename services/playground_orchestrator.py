@@ -1471,6 +1471,27 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
+    elif intent_result["actionable_intent"] == "self_pickup_permission":
+        # CUSTOMER-RAG-1.1 — a SELF-PICKUP permission / how-to question
+        # ("รับสินค้าเองได้ไหม", "ไปรับของเองได้ไหม"). NOT a warehouse-
+        # LOCATION question — must not ask ไทย/จีน. The trusted evidence
+        # is one sentence in the "ขอที่อยู่โกดังหน่อย" FAQ (chunk
+        # 5fdffb90-b922-4aef-847c-74e73fa941ec): "สำหรับลูกค้าต้องการ
+        # เข้ารับสาขานี้ สามารถเลือกเปลี่ยนมารับสินค้าได้ที่หน้าที่อยู่
+        # จัดส่งในระบบนะคะ". Answered deterministically from that trusted
+        # wording — no LLM, no ไทย/จีน clarification, no invented
+        # conditions. (The FAQ-exact matcher short-circuits retrieval to
+        # the country-specific "ขอที่อยู่โกดังจีน" row for any pickup-ish
+        # query, so a retrieval-based path cannot reach this sentence.)
+        answer_text = ("ได้ค่ะ สามารถเลือกเปลี่ยนมารับสินค้าเองได้ที่หน้าที่อยู่จัดส่งในระบบค่ะ "
+                       "หากต้องการทราบที่อยู่จุดรับสินค้า แจ้งได้เลยนะคะ")
+        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                             "self-pickup permission — deterministic answer from the trusted "
+                             "warehouse FAQ's self-pickup sentence, no LLM call"))
+        services_used.append({"name": "LLMService", "status": "skipped"})
+        input_tokens = output_tokens = 0
+        llm_latency = 0.0
+        llm_failed = False
     elif answer_plan["clarification_required"]:
         answer_text = answer_plan["clarification_question"]
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,

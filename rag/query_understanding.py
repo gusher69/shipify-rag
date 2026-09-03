@@ -248,7 +248,8 @@ def understand_query(question: str) -> Dict:
 # vocabulary doesn't cover yet (payment/coupon/invoice/prohibited goods/
 # tracking/attachment requests/human handoff/summary).
 ACTIONABLE_INTENTS = (
-    "warehouse_location", "warehouse_map", "warehouse_contact", "service_information",
+    "warehouse_location", "warehouse_map", "warehouse_contact", "self_pickup_permission",
+    "service_information",
     "shipping_rate", "shipping_duration", "shipping_calculation",
     "payment_instruction", "payment_policy", "coupon_policy", "invoice_policy",
     "prohibited_goods", "tracking_status", "attachment_request", "human_agent_request",
@@ -305,10 +306,39 @@ _COMPANY_OVERVIEW_RE = re.compile(
 
 # actionable_intent -> the fact LABELS (never actual values — those only
 # ever come from Retrieved Context) an Answer Planner should focus on.
+# CUSTOMER-RAG-1.1 — SELF-PICKUP PERMISSION / how-to ("รับสินค้าเองได้ไหม",
+# "ไปรับของเองได้ไหม", "สามารถมารับสินค้าเองได้หรือเปล่า"). Structurally
+# distinct from a warehouse-LOCATION question: a self/personally marker
+# ("เอง"/"ด้วยตัวเอง") + a yes/no permission marker, and NO where-
+# interrogative. A self-referencing "ของผม…" pickup question is PRIVATE
+# shipment state and is excluded here.
+_SELF_PICKUP_SELF_RE = re.compile(r"เอง|ด้วยตัวเอง|ตัวเอง")
+_SELF_PICKUP_CONTEXT_RE = re.compile(
+    r"รับ|มารับ|ไปรับ|เข้ารับ|มาเอา|มาเอง|เข้ามาเอา|สินค้า|ของ|พัสดุ|โกดัง|คลัง|จุดรับ")
+_SELF_PICKUP_PERMISSION_MARK_RE = re.compile(
+    r"ได้ไหม|ได้มั้ย|ได้มัย|ได้ป่าว|ได้บ่|ได้หรือเปล่า|ได้รึเปล่า|ได้หรือไม่|หรือเปล่า|หรือไม่|มั้ยคะ|ไหมคะ|ไหมครับ")
+_SELF_PICKUP_WHERE_RE = re.compile(r"ที่ไหน|ตรงไหน|จุดไหน|สาขาไหน|ที่ใด|อยู่ไหน|ที่นี่|แผนที่|พิกัด")
+_SELF_PICKUP_PRIVATE_RE = re.compile(
+    r"ของผม|ของฉัน|ของดิฉัน|ของหนู|ของเรา|บิลผม|ออเดอร์ผม|พัสดุผม|เลขบิล|เลขที่บิล|พร้อมรับ")
+
+
+def is_self_pickup_permission(text: str) -> bool:
+    t = text or ""
+    return bool(
+        _SELF_PICKUP_SELF_RE.search(t)
+        and _SELF_PICKUP_CONTEXT_RE.search(t)
+        and _SELF_PICKUP_PERMISSION_MARK_RE.search(t)
+        and not _SELF_PICKUP_WHERE_RE.search(t)
+        and not _SELF_PICKUP_PRIVATE_RE.search(t))
+
+
+# actionable_intent -> the fact LABELS (never actual values — those only
+# ever come from Retrieved Context) an Answer Planner should focus on.
 REQUESTED_ATTRIBUTES_BY_INTENT: Dict[str, List[str]] = {
     "warehouse_location": ["address"],
     "warehouse_map": ["map_url", "address"],
     "warehouse_contact": ["phone"],
+    "self_pickup_permission": [],
     "service_information": ["general_info"],
     "shipping_rate": ["rate_per_kg", "rate_per_cbm"],
     "shipping_duration": ["duration_days"],
@@ -338,6 +368,10 @@ def _classify_actionable(text: str, entities: Dict[str, Optional[str]]) -> "tupl
         return "attachment_request", 0.9
     if _HUMAN_AGENT_RE.search(text):
         return "human_agent_request", 0.9
+    # CUSTOMER-RAG-1.1 — a SELF-PICKUP permission/how-to question must not
+    # be read as a warehouse-LOCATION question (which would ask ไทย/จีน).
+    if is_self_pickup_permission(text):
+        return "self_pickup_permission", 0.85
 
     topic = entities.get("topic")
     attribute = entities.get("attribute")

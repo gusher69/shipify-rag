@@ -43,7 +43,7 @@ _PICKUP_LOCATION_INTENT_RE = re.compile(
     r"(?:(?:รับ|มารับ|ไปรับ|เข้ารับ|มาเอา)\s*(?:สินค้า|ของ|พัสดุ)"
     r"|จุดรับ(?:สินค้า|ของ)?|จุดส่งของ|คลังสินค้า|คลังไทย|โกดังรับสินค้า)"
     r"[^\n]{0,24}"
-    r"(?:ที่ไหน|ตรงไหน|ที่ใด|จุดไหน|สาขาไหน|อยู่ไหน|ที่นี่|แผนที่|พิกัด|address|location|เอง)"
+    r"(?:ที่ไหน|ตรงไหน|ที่ใด|จุดไหน|สาขาไหน|อยู่ไหน|ที่นี่|แผนที่|พิกัด|address|location)"
     r"|(?:ที่ไหน|ตรงไหน)[^\n]{0,12}(?:รับ|มารับ|ไปรับ)\s*(?:สินค้า|ของ)")
 _PICKUP_PRIVATE_RE = re.compile(
     r"ของผม|ของฉัน|ของดิฉัน|ของหนู|ของเรา|บิลผม|ออเดอร์ผม|พัสดุผม|เลขบิล|เลขที่บิล")
@@ -103,8 +103,13 @@ def rewrite_canonical_query(question: str, entities: Optional[Dict[str, Optional
     # CUSTOMER-RAG-1 — pickup/receiving-point location intent (see the
     # module-level pattern). Standardize to the warehouse-address query
     # the entity template below already emits, so every semantically-
-    # equivalent wording retrieves the same trusted FAQ.
+    # equivalent wording retrieves the same trusted FAQ. CUSTOMER-RAG-1.1
+    # — a SELF-PICKUP permission question ("รับสินค้าเองได้ไหม") is NOT a
+    # location question: it keeps its own intent (answered
+    # deterministically downstream), so it is NOT rewritten here.
+    from rag.query_understanding import is_self_pickup_permission
     if (_PICKUP_LOCATION_INTENT_RE.search(question)
+            and not is_self_pickup_permission(question)
             and not _PICKUP_PRIVATE_RE.search(question)
             and question.strip() != _PICKUP_CANONICAL_QUERY):
         from rag.semantic_guard import validate_transformation
