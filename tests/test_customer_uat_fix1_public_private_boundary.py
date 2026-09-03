@@ -504,7 +504,13 @@ class Fix13_DecisionEngineRoutesCoercedPublicTurnToRag(unittest.TestCase):
 
     def test_3_new_private_intent_still_wins(self):
         result, _ = self._decide("ยอด Wallet ของผมเท่าไหร่")
-        self.assertEqual(result["routing"]["type"], "API")
+        # stays on the private/ERP path (never coerced to the public RAG
+        # pipeline). It may execute (API) or ask for a still-missing
+        # required identifier (WORKFLOW) — the P0-01 fix stops a stale
+        # session record id from silently auto-executing it, which is
+        # correct — but it must NOT become a public RAG turn.
+        self.assertIn(result["routing"]["type"], ("API", "WORKFLOW"))
+        self.assertNotEqual(result["reply"]["text"], "RAG-PIPELINE-REACHED")
         self.assertIsNone((result.get("developer") or {}).get("turn_intent_coerced"))
 
 

@@ -59,6 +59,7 @@ from services.action_selection_primitives import (
     _askable_parameters_by_name,
     _keyword_score,
     IDENTIFIER_MEMORY_FIELDS,
+    _ACCOUNT_SCOPED_MEMORY_FIELDS,
     select_requested_mapped_fields,
     resolve_subsumed_keyword_tie,
 )
@@ -567,20 +568,38 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
     return {"collected": working, "ambiguous_candidates": ambiguous_candidates}
 
 
-def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Optional[Dict]) -> Dict[str, str]:
+def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Optional[Dict],
+                             *, is_continuation: bool = True) -> Dict[str, str]:
     """Fills any still-missing ASKABLE parameter from Identifier Memory
     (a value the customer already established earlier — this
     conversation or a prior one — persisted onto their profile by
     profiles/manager.py::update_profile_from_turn, keyed by
     IDENTIFIER_MEMORY_FIELDS). Never overrides a value already present in
     `collected` — an explicit/fresher value always wins. Returns a NEW
-    dict; never mutates the one passed in."""
+    dict; never mutates the one passed in.
+
+    New-Action vs Continuation (P0-01 real-LINE fix, 2026-09-03) — a
+    remembered ACCOUNT-SCOPED RECORD identifier (last_order_code /
+    last_shipment_code / last_tracking — never CustCode, which is the
+    customer's own identity and is reused across the whole conversation)
+    only auto-fills when THIS turn is genuinely CONTINUING an already-
+    active collection (the bot asked for it and the customer is
+    answering, or a live pending workflow is being resumed —
+    `is_continuation`). On a FRESH explicit request that starts the
+    action anew ("ขอเช็กพัสดุเดียวครับ" with no bill number), a stale
+    record id left in session memory from an earlier lookup must NOT
+    silently make the action executable and skip the required question —
+    the customer meant "check A shipment", not "re-run the last one".
+    Identifier Memory is NOT globally disabled: CustCode still fills, and
+    every genuine continuation still reuses the record id it collected."""
     if not customer_context:
         return collected
     working = dict(collected)
     askable = _askable_parameters_by_name(action)
     for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
         if param_name in working or param_name not in askable:
+            continue
+        if not is_continuation and profile_field in _ACCOUNT_SCOPED_MEMORY_FIELDS:
             continue
         remembered = customer_context.get(profile_field)
         if remembered:
@@ -691,7 +710,8 @@ def _assistant_text_is_generated_action_prompt(text: str, registry) -> bool:
 
 
 def _replay_business_action_collection(action: Dict, registry, history: List[Dict],
-                                        customer_context: Optional[Dict] = None) -> Dict[str, str]:
+                                        customer_context: Optional[Dict] = None,
+                                        *, is_continuation: bool = True) -> Dict[str, str]:
     """Reconstructs 'Collected Parameters' purely from `history` — no
     separate persistence table, same convention every other
     conversation-intelligence module in this codebase already follows.
@@ -719,7 +739,8 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     (accepted, correctly bound) -> a later turn needing to replay through
     that point reconstructed collected={} instead of {ShipmentCode:...},
     re-asking for a field the customer had already supplied."""
-    collected: Dict[str, str] = _apply_identifier_memory(action, {}, customer_context)
+    collected: Dict[str, str] = _apply_identifier_memory(
+        action, {}, customer_context, is_continuation=is_continuation)
     for i, turn in enumerate(history):
         if turn.get("role") != "user":
             continue
@@ -2987,7 +3008,28 @@ class DecisionEngine:
         full_action = action if action.get("parameters") is not None else self.registry.get_full(action_id, mask_secrets=False)
 
         customer_context = context.get("customer_context") or {}
-        collected = _replay_business_action_collection(full_action, self.registry, history, customer_context)
+        # New-Action vs Continuation (P0-01 real-LINE fix, 2026-09-03) —
+        # this turn genuinely CONTINUES an active flow only when the
+        # engine selected the action as one of:
+        #   • "conversation_continuation" — `_resolve_continuation_action`'s
+        #     history replay matched the bot's own last generated
+        #     question, or a live pending workflow row is being resumed;
+        #   • "conversation_reference_detail" — a LIST→DETAIL sibling
+        #     drill-down ("ขอรายละเอียดอันล่าสุด" right after a list), where
+        #     the record id the customer is drilling into legitimately
+        #     comes from the list they just saw.
+        # A fresh explicit request that merely re-selects a remembered
+        # action ("ขอเช็กพัสดุเดียวครับ" with no bill number, via
+        # fresh_search or a bare last_business_action resurrection) is NOT
+        # a continuation — a stale account-scoped RECORD identifier
+        # (last_shipment_code / last_order_code / last_tracking) left in
+        # session memory must not auto-fill and silently skip the
+        # required question. CustCode (the customer's own identity) still
+        # fills either way; see _apply_identifier_memory.
+        _is_continuation = developer_trace.get("selection_source") in (
+            "conversation_continuation", "conversation_reference_detail")
+        collected = _replay_business_action_collection(
+            full_action, self.registry, history, customer_context, is_continuation=_is_continuation)
         # Multi-Intent Preservation fix (Task 03, 2026-08-25; corrected
         # 2026-08-26 — Production UAT finding) — a proxy for "is this
         # message the actual trigger" (a genuine continuation reply is
@@ -3071,7 +3113,8 @@ class DecisionEngine:
         # here too covers a value THIS turn's live binding still left
         # missing, and is a no-op for anything replay already carried
         # through.)
-        collected = _apply_identifier_memory(full_action, collected, customer_context)
+        collected = _apply_identifier_memory(full_action, collected, customer_context,
+                                              is_continuation=_is_continuation)
 
         validation = self.registry.validate_can_execute(action_id, collected)
         next_after = None if validation["ok"] else _next_expected_parameter(full_action, self.registry, collected)

@@ -620,9 +620,12 @@ class TestFieldKeywordFollowUpsAndDetailTransition(unittest.TestCase):
         with patch("services.action_executor.requests.request",
                    return_value=MagicMock(status_code=200, json=lambda: {
                        "data": {"Shipment": [{"Code": "FT999", "Status": "รับเข้าที่จีน"}]}})):
-            result = self.engine.decide("ช่วยเช็ก tracking หน่อย", history=[],
-                                         context={"customer_context": {"cust_code": "SP1014",
-                                                                        "last_tracking": "ABC123"},
+            # Tracking supplied in THIS message (CustCode fills from the
+            # customer's own identity memory); a stale last_tracking is no
+            # longer auto-filled on a fresh request (P0-01), so the value
+            # this composer test needs is given explicitly.
+            result = self.engine.decide("ช่วยเช็ก tracking 9822950447648 หน่อย", history=[],
+                                         context={"customer_context": {"cust_code": "SP1014"},
                                                    "channel": "admin"})
         text = result["reply"]["text"]
         self.assertNotIn("{", text)
