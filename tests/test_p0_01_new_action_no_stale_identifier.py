@@ -174,6 +174,39 @@ class P001_B_ContinuationStillUsesIdentifier(P001_Base):
                           "FT318220260726001")                          # continuation keeps the id
 
 
+# ── E — repeated fresh cycles A → B → C, no record-id leakage ──────
+
+class P001_E_RepeatedCyclesNoLeakage(P001_Base):
+    _Q = "กรุณาแจ้งเลขที่บิลขนส่งค่ะ"
+    _RESULT_A = "เลขที่บิลขนส่ง: FT318220260726001\nสถานะบิลขนส่ง: รับเข้าที่จีน"
+    _RESULT_B = "เลขที่บิลขนส่ง: FT318220260726002\nสถานะบิลขนส่ง: รับเข้าที่จีน"
+
+    def _fresh_ask(self, history):
+        result, mock_req = self._decide("ขอเช็กพัสดุเดียวครับ", history=history)
+        ics = (result.get("developer") or {}).get("information_collection_status") or {}
+        self.assertEqual(result["routing"]["type"], "WORKFLOW", "fresh request must ask, not execute")
+        self.assertIn("ShipmentCode", ics.get("missing_parameters") or [])
+        self.assertNotIn("ShipmentCode", ics.get("collected_parameters") or {})
+        mock_req.assert_not_called()
+
+    def test_A_then_fresh_B_then_fresh_C_never_inherit_the_record_id(self):
+        h = list(_PRIOR_HISTORY)
+        # cycle A: fresh ask
+        self._fresh_ask(h)
+        h += [{"role": "user", "content": "ขอเช็กพัสดุเดียวครับ"},
+              {"role": "assistant", "content": self._Q},
+              {"role": "user", "content": "FT318220260726001"},
+              {"role": "assistant", "content": self._RESULT_A}]     # cycle A completed + executed
+        # cycle B: MUST ask again (no FT...001 inheritance)
+        self._fresh_ask(h)
+        h += [{"role": "user", "content": "ขอเช็กพัสดุเดียวครับ"},
+              {"role": "assistant", "content": self._Q},
+              {"role": "user", "content": "FT318220260726002"},
+              {"role": "assistant", "content": self._RESULT_B}]     # cycle B completed + executed
+        # cycle C: MUST ask again (no FT...001 or FT...002 inheritance)
+        self._fresh_ask(h)
+
+
 # ── C — an explicit identifier in the fresh message still executes ──
 
 class P001_C_ExplicitCurrentTurnIdentifier(P001_Base):

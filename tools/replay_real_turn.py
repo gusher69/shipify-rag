@@ -82,7 +82,15 @@ def _fmt(v):
     return json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
 
 
-def replay(fixture: dict) -> bool:
+def replay(fixture: dict, *, verbose: bool = True) -> bool:
+    def _p(*a):
+        if not verbose:
+            return
+        try:
+            print(*a)
+        except UnicodeEncodeError:                       # non-utf-8 stdout (e.g. unittest on Windows)
+            print(*(str(x).encode("ascii", "replace").decode() for x in a))
+
     fx = _mask_secrets(fixture)
     message = fx["message"]
     history = fx.get("history") or []
@@ -160,39 +168,39 @@ def replay(fixture: dict) -> bool:
 
     passed = all(actual == want for _, actual, want in checks)
 
-    print("CASE:              ", fx.get("case_id", "?"))
-    print("CAPTURED_AT:        ", fx.get("captured_at", "?"))
-    print("MESSAGE:           ", message)
-    print()
-    print("SELECTED ACTION:   ", ics.get("selected_business_action") or dev.get("selected_business_action"))
-    print("SELECTION SOURCE:  ", dev.get("selection_source"))
-    print("ROUTING TYPE:      ", routing)
-    print("TURN INTENT:       ", dev.get("turn_intent"), "| coerced:", dev.get("turn_intent_coerced"))
-    print()
-    print("PENDING ACTION:    ", context.get("pending_action_id") or None)
-    print("LAST BUSINESS ACT: ", (fx.get("customer_context") or {}).get("last_business_action"))
-    print()
-    print("COLLECTED BEFORE:       ", _fmt(stages.get("before", {})))
-    print("COLLECTED AFTER REPLAY: ", _fmt(stages.get("after_replay", {})))
-    print("COLLECTED AFTER MEMORY: ", _fmt(stages.get("after_memory", collected_final)))
-    print("MISSING PARAMETERS:     ", _fmt(ics.get("missing_parameters") or []))
-    print()
-    print("ERP CALLED:        ", "YES" if erp_called else "NO")
-    print("ERP ACTION:        ", exec_res.get("selected_business_action") or dev.get("selected_business_action")
+    _p("CASE:              ", fx.get("case_id", "?"))
+    _p("CAPTURED_AT:        ", fx.get("captured_at", "?"))
+    _p("MESSAGE:           ", message)
+    _p()
+    _p("SELECTED ACTION:   ", ics.get("selected_business_action") or dev.get("selected_business_action"))
+    _p("SELECTION SOURCE:  ", dev.get("selection_source"))
+    _p("ROUTING TYPE:      ", routing)
+    _p("TURN INTENT:       ", dev.get("turn_intent"), "| coerced:", dev.get("turn_intent_coerced"))
+    _p()
+    _p("PENDING ACTION:    ", context.get("pending_action_id") or None)
+    _p("LAST BUSINESS ACT: ", (fx.get("customer_context") or {}).get("last_business_action"))
+    _p()
+    _p("COLLECTED BEFORE:       ", _fmt(stages.get("before", {})))
+    _p("COLLECTED AFTER REPLAY: ", _fmt(stages.get("after_replay", {})))
+    _p("COLLECTED AFTER MEMORY: ", _fmt(stages.get("after_memory", collected_final)))
+    _p("MISSING PARAMETERS:     ", _fmt(ics.get("missing_parameters") or []))
+    _p()
+    _p("ERP CALLED:        ", "YES" if erp_called else "NO")
+    _p("ERP ACTION:        ", exec_res.get("selected_business_action") or dev.get("selected_business_action")
           if erp_called else "-")
-    print()
-    print("REPLY:             ", reply.replace("\n", " / "))
-    print()
+    _p()
+    _p("REPLY:             ", reply.replace("\n", " / "))
+    _p()
     for name, actual, want in checks:
         flag = "ok  " if actual == want else "FAIL"
-        print(f"  [{flag}] {name}: actual={_fmt(actual)} expected={_fmt(want)}")
-    print()
-    print("EXPECTED:          ", _fmt(exp))
-    print("ACTUAL:            ", _fmt({"selected_action": ics.get("selected_business_action"),
+        _p(f"  [{flag}] {name}: actual={_fmt(actual)} expected={_fmt(want)}")
+    _p()
+    _p("EXPECTED:          ", _fmt(exp))
+    _p("ACTUAL:            ", _fmt({"selected_action": ics.get("selected_business_action"),
                                        "routing_type": routing, "erp_called": erp_called,
                                        "shipment_code_present": "ShipmentCode" in collected_final,
                                        "is_complete": bool(ics.get("is_complete"))}))
-    print("RESULT:            ", "PASS" if passed else "FAIL")
+    _p("RESULT:            ", "PASS" if passed else "FAIL")
     return passed
 
 

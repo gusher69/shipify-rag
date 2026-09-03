@@ -842,6 +842,28 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
             continue
         result = _bind_all_from_message(action, registry, collected, turn.get("content") or "")
         collected = result["collected"]
+
+    # Completed-Cycle Boundary at the WINDOW TAIL (P0-01 round 3,
+    # 2026-09-03) — the mid-walk reset above only fires when another user
+    # turn follows the finished cycle. When the most recent thing in the
+    # window IS a completed (executed) cycle of this action — e.g.
+    # "ขอเช็กพัสดุเดียวครับ → กรุณาแจ้งเลขที่บิลขนส่งค่ะ → FT... → <DETAIL
+    # result>" as the last four turns — the walk ends with that cycle's
+    # `collected` fully satisfied and nothing resets it, so the record
+    # identifier leaks into the CURRENT fresh request (real LINE turn
+    # 614). If this turn is not continuing that collection
+    # (`is_continuation` is False — no live pending row, not a
+    # conversation-continuation / detail-sibling selection) and the
+    # action is not confirmation-gated, the reconstructed collection
+    # belongs to the finished cycle: return the identity-only seed so the
+    # fresh cycle starts with the record identifier missing. CustCode
+    # (customer identity) is preserved by the seed; a genuine
+    # continuation and a confirmation-await turn are `is_continuation` /
+    # `_requires_confirmation` and untouched.
+    if (not is_continuation and not _requires_confirmation(action)
+            and collected != identity_seed
+            and not _next_expected_parameter(action, registry, collected)):
+        return dict(identity_seed)
     return collected
 
 
