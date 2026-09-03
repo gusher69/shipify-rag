@@ -780,6 +780,15 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         # If the send fails, the customer keeps the plain no-info wording
         # — never a fabricated promise.
         _unsupported_fact_handoff = reason == "unsupported_company_information"
+        # CUSTOMER-RAG-2.1 — a completed charter-truck (เหมารถ / TC19)
+        # request uses the SAME truth rule: the "staff will coordinate"
+        # line is added ONLY when a real notification is on the books for
+        # THIS episode. Its own coordination clause names เหมารถ so the
+        # collector (services/charter_truck_flow.py::_CHARTER_DONE_RE)
+        # sees the flow is complete and does not re-collect.
+        _charter_handoff = reason == "charter_truck_request"
+        _CHARTER_COORDINATION_CLAUSE = " เดี๋ยวเจ้าหน้าที่จะติดต่อประสานงานเรื่องเหมารถให้นะคะ"
+        _promises_followup = _unsupported_fact_handoff or _charter_handoff
         # Fix-2.2 (2026-09-03) — Service-Mind wording. The RAG pipeline's
         # P7.1 no-info text ends with a SELF-SERVICE line ("go ask staff
         # yourself"), which is wrong once the system has already taken
@@ -813,6 +822,8 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             # for THIS issue).
             if _unsupported_fact_handoff and _STAFF_COORDINATION_CLAUSE.strip() not in reply_text:
                 reply_text = reply_text + _STAFF_COORDINATION_CLAUSE
+            elif _charter_handoff and _CHARTER_COORDINATION_CLAUSE.strip() not in reply_text:
+                reply_text = reply_text + _CHARTER_COORDINATION_CLAUSE
         else:
             if conversation:
                 session_service.set_handoff_status(conversation["id"], "PENDING", reason=reason)
@@ -832,13 +843,21 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             recent_summary = " | ".join(
                 f"{h['role']}: {h['content']}" for h in (recent_history or []) if h.get("content")
             ) or None
+            # CUSTOMER-RAG-2.1 — a charter-truck handoff carries the 4
+            # collected TC19 fields to CS in one readable line (decide()
+            # already put them in handoff_payload.summary). No price, no
+            # credential.
+            _charter_summary = (handoff_payload.get("summary")
+                                if _charter_handoff else None)
             send_result = send_handoff_notification(
                 reason=reason,
                 customer_name=(profile or {}).get("display_name") or None,
                 cust_code=collected.get("CustCode") or (profile or {}).get("cust_code"),
                 line_user_id=user_id,
-                customer_message=question,
-                conversation_summary=recent_summary,
+                customer_message=_charter_summary or question,
+                conversation_summary=(_charter_summary + " || " + recent_summary
+                                      if _charter_summary and recent_summary
+                                      else _charter_summary or recent_summary),
                 customer_stage=stage_now or (profile or {}).get("conversation_tier"),
                 primary_intent=(dev.get("intent") or {}).get("actionable_intent") or (profile or {}).get("primary_intent"),
                 current_topic=(dev.get("intent") or {}).get("actionable_intent"),

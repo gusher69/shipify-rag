@@ -81,6 +81,14 @@ from services.conversation_semantics import (
     resolve_followup as _resolve_frame_followup,
     frame_ack_reply as _frame_ack_reply,
 )
+# CUSTOMER-RAG-2.1 — charter-truck (เหมารถ / TC19) multi-turn slot
+# collection (deterministic, history-derived — no LLM, no pending table).
+from services.charter_truck_flow import (
+    derive_charter_state as _derive_charter_state,
+    extract_charter_fields as _extract_charter_fields,
+    charter_missing_prompt as _charter_missing_prompt,
+    charter_handoff_summary as _charter_handoff_summary,
+)
 # Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
 # 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
 # mode already uses (services/hybrid_runtime_service.py); this module
@@ -2904,6 +2912,44 @@ class DecisionEngine:
                 candidates = [selected]
                 developer_trace["selection_source"] = "conversation_reference_detail"
             else:
+                # CUSTOMER-RAG-2.1 — an active charter-truck (เหมารถ /
+                # TC19) collection. TC19's FAQ answer opened it; collect
+                # bill / destination / recipient name / phone over one or
+                # more turns (any order), ask ONLY the missing fields,
+                # then route to the EXISTING Human CS handoff. Runs BEFORE
+                # the identifier-driven Business-Action search so a bill
+                # id supplied here does NOT resurrect `searchdatashipment`.
+                # Deterministic, history-derived — no LLM.
+                _charter = _derive_charter_state(history)
+                if _charter is not None:
+                    _extract_charter_fields(message, _charter)
+                    developer_trace["selection_source"] = "charter_truck_collection"
+                    developer_trace["charter_truck_state"] = _charter.as_dict()
+                    if not _charter.complete():
+                        return self._finalize(
+                            reply=_build_response(text=_charter_missing_prompt(_charter)),
+                            routing_type="WORKFLOW", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    # all 4 collected -> hand to Human CS. The neutral
+                    # reply carries NO "staff will continue" promise; the
+                    # webhook adds it only if the notification actually
+                    # goes out (or this episode is already NOTIFIED).
+                    developer_trace.setdefault("information_collection_status", {})["collected_parameters"] = {
+                        "ShipmentCode": _charter.bill,
+                        "CharterDestination": _charter.destination,
+                        "CharterRecipientName": _charter.recipient_name,
+                        "CharterRecipientPhone": _charter.recipient_phone,
+                    }
+                    return self._finalize(
+                        reply=_build_response(text="รับข้อมูลการขอใช้บริการเหมารถครบแล้วค่ะ"),
+                        routing_type="HUMAN_HANDOFF", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context),
+                        handoff_payload={"reason": "charter_truck_request",
+                                         "details": _charter.as_dict(),
+                                         "summary": _charter_handoff_summary(_charter)})
+
                 # SEM-GEN-1 — a SHORT follow-up inside an active
                 # IMPORT_INTEREST frame ("ถ้าเป็นกางเกงล่ะ", "200 ตัว",
                 # "ไม่ใช่ 200 เอา 300", "ถ้าทางเรือล่ะ", "งั้นถามเรื่องคูปอง
