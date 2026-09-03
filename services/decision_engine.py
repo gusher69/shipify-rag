@@ -70,7 +70,7 @@ from services.action_selection_primitives import (
 # depends only on services/action_selection_primitives.py, not on this
 # module.
 from services.hybrid_question_classifier import (
-    classify_question, _QUESTION_MARKER_RE, _REQUEST_MARKER_RE, _split_clauses,
+    classify_question, _QUESTION_MARKER_RE, _REQUEST_MARKER_RE, _split_clauses, _GREETING_RE,
 )
 # Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
 # 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
@@ -1393,6 +1393,30 @@ _PSI_DOMAIN_ACTION_HINTS = {
 }
 
 
+# SEM-1.2 — a message that is ONLY a social greeting / acknowledgement,
+# carrying no task content. Such a turn must never be consumed as a
+# pending-workflow parameter value or treated as a continuation. Broader
+# than hybrid_question_classifier._GREETING_RE (kept as an OR fallback):
+# also covers "ดีครับ", a trailing "ผม/นะ/จ้า", and a bare "ขอบคุณ".
+_SOCIAL_ONLY_RE = re.compile(
+    r"^\s*(สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ดีจ้า|ดีคับ|hello+|hi+|hey+|halo|โย่|ทัก)"
+    r"[\s\.!,~ครับคับค่ะคะจ้าาๆนะฮะฮ่ะผมโว้ยว้อย]*$", re.IGNORECASE)
+
+
+def _is_social_only(message: str) -> bool:
+    t = (message or "").strip()
+    if not t:
+        return False
+    return bool(_SOCIAL_ONLY_RE.match(t) or _GREETING_RE.match(t))
+
+
+# SEM-1.2 — an explicit cancellation of the in-progress collection. Same
+# vocabulary rag/slot_filling_flow._CANCELLATION_RE uses for the public
+# calculator flow, plus the "ไม่เช็ก/ไม่ต้อง...แล้ว" shapes seen on LINE.
+_CONVERSATION_CANCEL_RE = re.compile(
+    r"ไม่คำนวณแล้ว|ไม่เช็ก?แล้ว|ไม่เช็คแล้ว|ไม่ต้องแล้ว|ไม่เอาแล้ว|ยกเลิก|พอแล้ว|เลิกเช็ก|หยุดก่อน|เปลี่ยนเรื่อง")
+
+
 def _psi_is_list_shaped(action: Dict) -> bool:
     """A customer-scoped 'list/latest' Business Action (as opposed to a
     per-record 'detail' action). Same test _resolve_private_state_action
@@ -2426,13 +2450,46 @@ class DecisionEngine:
                         message, history, context, developer_trace, start,
                         reason="customer_intelligence_recommended", workflow=workflow_hint)
 
+            # SEM-1.2 (2026-09-03) — a pending workflow is CONTEXT, not
+            # ownership of every later message. Compute the private-state
+            # frame and the social-greeting flag up front so the
+            # continuation / pending-resume / conversation-reference
+            # resolution below can refuse to consume this turn as stale-
+            # workflow input when the message is self-contained:
+            #   • a social/greeting-only message ("สวัสดีครับ") is never a
+            #     pending-parameter value — REAL LINE: it was consumed by
+            #     an active ShipmentCode collection and re-asked.
+            #   • a self-contained private-record status inquiry with
+            #     UNSPECIFIED record scope ("ของผมเข้าไทยหรือยัง" — no
+            #     identifier, no "ล่าสุด"/list scope) is a fresh request,
+            #     not a continuation and not a reference to a remembered
+            #     list action — REAL LINE: conversation_reference
+            #     resurrected searchdatashipmentlist and returned latest.
+            # A bare identifier / weight / value reply never fires
+            # _classify_private_state_inquiry, so a genuine continuation
+            # ("FT318…", "12 กก.") is unaffected.
+            private_state_inquiry = _classify_private_state_inquiry(message)
+            # Only the per-record domains have a list-vs-detail record-scope
+            # hazard; customer_data (wallet/coupon) is account-scoped by the
+            # customer id itself, so a remembered customer lookup may still
+            # be resumed for it.
+            _psi_self_contained = (
+                bool(private_state_inquiry)
+                and private_state_inquiry.get("record_scope") == "UNSPECIFIED"
+                and private_state_inquiry.get("domain") in ("shipment", "order", "tracking"))
+            _social_only = _is_social_only(message)
+            _suppress_stale_workflow = _psi_self_contained or _social_only
+            if _suppress_stale_workflow:
+                developer_trace["stale_workflow_suppressed"] = (
+                    "private_state_self_contained" if _psi_self_contained else "social_greeting")
+
             # New execution order: Search Candidate Business Actions ->
             # Select Best Business Action -> Read Business Action
             # Parameters -> Information Collection -> Execute. Selection
             # happens BEFORE information collection, so the Registry's
             # own parameter definitions — not a separate intent-keyed
             # schema — drive what gets asked.
-            continuation_action = _resolve_continuation_action(
+            continuation_action = None if _suppress_stale_workflow else _resolve_continuation_action(
                 self.registry, history, workflow_hint, context.get("customer_context"))
 
             # Reliable Pending-Confirmation Continuation (Address Change
@@ -2455,7 +2512,7 @@ class DecisionEngine:
             # Continuation Intent Guard immediately below still applies
             # in full, so a genuine topical diversion overrides this
             # exactly as it would any other continuation.
-            if not continuation_action:
+            if not continuation_action and not _suppress_stale_workflow:
                 pending_action_id = context.get("pending_action_id")
                 if pending_action_id:
                     pending_full_action = self.registry.get_full(pending_action_id, mask_secrets=False)
@@ -2629,6 +2686,47 @@ class DecisionEngine:
                                 _escape_company_re.search(message or "") or _escape_china_re.search(message or ""))
                             if not matches_slot_shape and not has_erp_evidence and not has_company_topic_evidence:
                                 continuation_action = None
+
+            # SEM-1.2 semantic conversation-operation guard — a pending
+            # workflow is only resumed when the CURRENT message behaves
+            # like a CONTINUE. Two more operations that must break it
+            # (the greeting/social + self-contained-private-state cases
+            # were already handled up front):
+            #   • CANCEL  — "ไม่เอาแล้ว" / "ยกเลิก" / "ไม่เช็กแล้ว"
+            #   • CHANGE_TOPIC to a self-contained request — a concrete
+            #     polite ask ("ขอเบอร์ติดต่อ") that classifies RAG_ONLY and
+            #     does NOT match the pending STRUCTURED (pattern-validated)
+            #     slot's shape. Free-text slots (ReceiverName/Address) keep
+            #     accepting a "ขอใส่ชื่อ…"-style answer — this only fires
+            #     for pattern-validated identifier slots.
+            if continuation_action and _CONVERSATION_CANCEL_RE.search(message or "") \
+                    and not _requires_confirmation(continuation_action):
+                # Plain (non-confirmation) collection has no cancel path of
+                # its own — without this it silently re-asks the pending
+                # question. A confirmation-gated action keeps its existing
+                # cancel handling (this guard does not touch it).
+                developer_trace["conversation_operation"] = "CANCEL"
+                reply = _build_response(text="รับทราบค่ะ ยกเลิกรายการนี้ให้แล้วนะคะ หากต้องการเริ่มใหม่แจ้งได้เลยค่ะ")
+                return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
+                                       developer_trace=developer_trace, context=context, start=start)
+            if continuation_action and _REQUEST_MARKER_RE.search(message or "") \
+                    and not _QUESTION_MARKER_RE.search(message or "") \
+                    and not _REFERENCE_MARKER_RE.search(message or "") \
+                    and not _COLLECTION_STATUS_QUERY_RE.search(message or ""):
+                _c_replay = _replay_business_action_collection(
+                    continuation_action, self.registry, history, customer_context)
+                _c_next = _next_expected_parameter(continuation_action, self.registry, _c_replay)
+                _c_pat = (_c_next or {}).get("validation_pattern")
+                if _c_next and _c_pat:
+                    _c_toks = [t for t in _TOKEN_SPLIT_RE.split(message or "") if t]
+                    try:
+                        _c_shape = any(re.compile(_c_pat).match(t) for t in _c_toks)
+                    except re.error:
+                        _c_shape = any(_validate_generic_identifier(t) for t in _c_toks)
+                    if not _c_shape and classify_question(
+                            message, self.registry)["classification"] == "RAG_ONLY":
+                        developer_trace["conversation_operation"] = "CHANGE_TOPIC"
+                        continuation_action = None
 
             detail_sibling_action = None
             if not continuation_action and customer_context.get("last_business_action") \
@@ -2850,7 +2948,7 @@ class DecisionEngine:
                 # Status-Inquiry action's own collection flow instead of
                 # RAG. Never fires for a company-subject question, a how-to
                 # question, or an operational WRITE request.
-                private_state_inquiry = _classify_private_state_inquiry(message)
+                # private_state_inquiry was already computed up front (SEM-1.2)
                 if private_state_inquiry:
                     developer_trace["private_state_inquiry"] = private_state_inquiry
                     if turn_intent != "PRIVATE_ACTION" and developer_trace.get("turn_intent_coerced") not in (
@@ -2897,7 +2995,11 @@ class DecisionEngine:
                 # decisive topical evidence for a genuinely different
                 # action (checked memory-FREE, so remembered identifiers
                 # can never manufacture that evidence on their own).
-                referenced = _resolve_conversation_reference(self.registry, message, customer_context)
+                # SEM-1.2 — a self-contained UNSPECIFIED private-state
+                # inquiry must not resurrect a remembered list/latest
+                # action via a bare reference marker ("ของผม" alone).
+                referenced = None if _psi_self_contained else _resolve_conversation_reference(
+                    self.registry, message, customer_context)
 
                 # Stale-identity-gated-action guard (P1 hotfix, 2026-09-01)
                 # — _resolve_conversation_reference resurrects the

@@ -491,8 +491,11 @@ def _write_report(results):
     P(f"- **Logical cases:** {results['n_logical_cases']}   |   **Strings evaluated "
       f"(messages + wording variants):** {results['n_strings_evaluated']}")
     P("")
-    P("> **SEM-1 + SEM-1.1 applied (2026-09-03).** This report reflects the tree *after* SEM-1 "
-      "(private-record status-inquiry semantic routing) and its SEM-1.1 record-scope fix. "
+    P("> **SEM-1 + SEM-1.1 + SEM-1.2 applied (2026-09-03).** This report reflects the tree *after* SEM-1 "
+      "(private-record status-inquiry semantic routing), the SEM-1.1 record-scope fix, and the SEM-1.2 "
+      "pending-workflow boundary (a greeting / cancel / self-contained UNSPECIFIED private-state inquiry "
+      "is no longer consumed as a pending-parameter value; the record-scope invariant now applies across "
+      "fresh-search, continuation, pending-resume and conversation-reference). "
       "Baseline `3e83ed9` measured 65.2% logical-case pass / 69.7% semantic / 37.9% ERP-action / "
       "14 SEMANTIC_INTENT primaries. SEM-1 moved 6 cases (CUS-G12, G16, S08, S15, S17, S18) from a "
       "RAG dead-end into the matching Business Action's identifier-collection flow. SEM-1.1 then "

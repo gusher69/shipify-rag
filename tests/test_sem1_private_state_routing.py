@@ -228,5 +228,87 @@ class TestSem11RecordScope(unittest.TestCase):
         self.assertEqual(r2["sel"], "searchdatashipmentlist")
 
 
+class TestSem12PendingWorkflowBoundary(unittest.TestCase):
+    """SEM-1.2 — a pending workflow is context, not ownership of every
+    later message. A greeting / cancel / self-contained new request /
+    self-contained UNSPECIFIED private-state inquiry must NOT be consumed
+    as a pending-parameter value; a genuine value/continuation still is.
+    """
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        _seed_status_registry(self.reg)
+        self.reg.get_by_key("searchdatashipmentlist")
+        self.reg.update(self.reg.get_by_key("searchdatashipmentlist")["id"],
+                        {"search_keywords": ["พัสดุล่าสุด", "ของผม", "เข้าไทย", "ถึงโกดัง"]})
+        _seed_action(self.reg, key="contact_faq", action_type="RAG", category="faq",
+                     keywords=["เบอร์ติดต่อ", "เบอร์โทร", "ติดต่อ"])
+        self.engine = _engine_with_registry(self.reg)
+        self.pending = self.reg.get_by_key("searchdatashipment")["id"]
+        self.hist = [{"role": "user", "content": "ขอเช็กพัสดุเดียวครับ"},
+                     {"role": "assistant", "content": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ"}]
+
+    def _run(self, msg, hist=None, pending=True):
+        ctx = {"channel": "line", "developer_mode": True,
+               "customer_context": {"cust_code": "FT3182", "identity_confirmed": True}}
+        if pending:
+            ctx["pending_action_id"] = self.pending
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200, json=lambda: {"data": {}})) as erp, \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="[RAGANS]", confidence=0.9)):
+            res = self.engine.decide(msg, history=self.hist if hist is None else hist, context=ctx)
+        dev = res.get("developer") or {}
+        ics = dev.get("information_collection_status") or {}
+        return {"routing": res["routing"]["type"],
+                "sel": dev.get("selected_business_action") or ics.get("selected_business_action"),
+                "src": dev.get("selection_source"), "op": dev.get("conversation_operation"),
+                "sup": dev.get("stale_workflow_suppressed"), "erp": erp.called,
+                "reply": (res.get("reply") or {}).get("text") or ""}
+
+    def test_greeting_during_pending_is_not_consumed(self):
+        r = self._run("สวัสดีครับ")
+        self.assertEqual(r["sup"], "social_greeting")
+        self.assertNotIn("เลขที่บิลขนส่ง", r["reply"])
+        self.assertFalse(r["erp"])
+        self.assertNotEqual(r["src"], "conversation_continuation")
+
+    def test_pending_resumes_with_a_real_identifier(self):
+        r = self._run("FT318220260726001")
+        self.assertEqual(r["sel"], "searchdatashipment")
+        self.assertEqual(r["src"], "conversation_continuation")
+
+    def test_self_contained_new_public_request_during_pending(self):
+        r = self._run("ขอเบอร์ติดต่อ")
+        self.assertNotEqual(r["src"], "conversation_continuation")
+        self.assertNotIn("เลขที่บิลขนส่ง", r["reply"])
+
+    def test_cancel_during_pending(self):
+        for m in ("ไม่เอาแล้ว", "ไม่เช็กแล้ว", "ยกเลิก"):
+            r = self._run(m)
+            self.assertEqual(r["op"], "CANCEL", m)
+            self.assertNotIn("เลขที่บิลขนส่ง", r["reply"], m)
+
+    def test_unspecified_private_status_during_pending_asks_identifier_not_latest(self):
+        r = self._run("ของผมเข้าไทยหรือยัง")
+        self.assertEqual(r["sup"], "private_state_self_contained")
+        self.assertEqual(r["sel"], "searchdatashipment")
+        self.assertEqual(r["routing"], "WORKFLOW")
+        self.assertFalse(r["erp"])
+        self.assertIn("บิลขนส่ง", r["reply"])
+        self.assertNotIn("ล่าสุด", r["reply"])
+
+    def test_explicit_latest_during_pending_still_allowed(self):
+        self.assertEqual(self._run("พัสดุล่าสุดของผมถึงไหนแล้ว")["sel"], "searchdatashipmentlist")
+
+    def test_explicit_identifier_during_pending_is_detail(self):
+        self.assertEqual(self._run("เช็ก FT318220260726001")["sel"], "searchdatashipment")
+
+    def test_greeting_with_no_pending_still_greets(self):
+        r = self._run("สวัสดีครับ", hist=[], pending=False)
+        self.assertFalse(r["erp"])
+        self.assertNotIn("เลขที่บิลขนส่ง", r["reply"])
+
+
 if __name__ == "__main__":
     unittest.main()
