@@ -209,6 +209,24 @@ class TestSem11RecordScope(unittest.TestCase):
         r = self._run("ทางรถใช้เวลากี่วัน")
         self.assertEqual(r["routing"], "RAG")
 
+    def test_redirect_when_keyword_search_picks_the_list_action(self):
+        """SEM-1.1b — on a production-shaped registry the LIST action
+        matches these phrasings by keyword and (for a verified user) would
+        auto-execute and return the latest record. An UNSPECIFIED-scope
+        inquiry must be REDIRECTED to the per-record detail action."""
+        lst = self.reg.get_by_key("searchdatashipmentlist")
+        self.reg.update(lst["id"], {"search_keywords": [
+            "พัสดุล่าสุด", "รายการพัสดุ", "ของผม", "เข้าไทย", "ถึงโกดัง", "ของที่ส่ง"]})
+        r = self._run("ของผมเข้าไทยหรือยัง")
+        self.assertEqual(r["sel"], "searchdatashipment")
+        self.assertEqual(r["routing"], "WORKFLOW")
+        self.assertFalse(r["complete"])
+        self.assertFalse(r["erp"])
+        self.assertIn("บิลขนส่ง", r["reply"])
+        # explicit latest scope keeps the list action even with the same keywords
+        r2 = self._run("พัสดุล่าสุดของผมถึงไหนแล้ว")
+        self.assertEqual(r2["sel"], "searchdatashipmentlist")
+
 
 if __name__ == "__main__":
     unittest.main()

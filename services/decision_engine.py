@@ -1393,6 +1393,14 @@ _PSI_DOMAIN_ACTION_HINTS = {
 }
 
 
+def _psi_is_list_shaped(action: Dict) -> bool:
+    """A customer-scoped 'list/latest' Business Action (as opposed to a
+    per-record 'detail' action). Same test _resolve_private_state_action
+    uses internally, exposed for the SEM-1.1 selection-time redirect."""
+    return "list" in (action.get("action_key") or "").lower() \
+        or "list" in (action.get("category") or "").lower()
+
+
 def _resolve_private_state_action(registry, domain: str, record_scope: str = "UNSPECIFIED"):
     """Pick the EXISTING enabled Business Action that serves a private
     status inquiry for `domain` at the given semantic `record_scope`
@@ -2944,6 +2952,11 @@ class DecisionEngine:
                             and topic_only_candidates[0]["_score"] >= (1.0 if not workflow_hint else 0.5):
                         fresh_topic_beats_reference = True
 
+                # Bound on every path (the fresh-search branch may re-set
+                # it) so the SEM-1 block below can read it unconditionally
+                # even when a conversation_reference won without entering
+                # the fresh-search branch.
+                general_policy_question_vetoed = False
                 if referenced and not fresh_topic_beats_reference:
                     selected = referenced
                     candidates = [selected]
@@ -3156,27 +3169,51 @@ class DecisionEngine:
                         candidates = [selected]
                         developer_trace["selection_source"] = "conversation_reference"
 
-                # SEM-1 (2026-09-03) — a confirmed private-record status
-                # inquiry whose natural wording matched no Business Action
-                # keyword: force the EXISTING Status-Inquiry action for the
-                # detected domain (resolved by generic category/key hints,
-                # never a hardcoded id) so its own collection flow asks for
-                # the missing record/customer identifier — instead of
-                # falling through to RAG and answering "ไม่มีข้อมูลยืนยัน".
-                # Gated by the same conditions the general-policy veto uses
-                # so a genuine how-to / company question is never revived.
-                if not selected and private_state_inquiry and not general_policy_question_vetoed:
-                    # SEM-1.1 — honour the semantic record scope. An
-                    # UNSPECIFIED single-record inquiry ("ของผมเข้าไทยหรือยัง"
-                    # — no identifier, no "ล่าสุด"/list scope) must route to
-                    # the per-record DETAIL action so its collection flow
-                    # asks for the bill/tracking id, NOT a customer-scoped
-                    # list action that silently returns the latest record.
-                    _psi_action = _resolve_private_state_action(
-                        self.registry, private_state_inquiry["domain"],
-                        record_scope=private_state_inquiry.get("record_scope", "UNSPECIFIED"))
-                    if _psi_action is not None:
-                        selected = _psi_action
+                # SEM-1 / SEM-1.1 (2026-09-03) — a confirmed private-record
+                # status inquiry. Resolve the EXISTING Status-Inquiry
+                # action for the detected domain at the detected semantic
+                # record scope (generic category/key hints, never a
+                # hardcoded id). Gated by the same condition the
+                # general-policy veto uses so a genuine how-to / company
+                # question is never revived.
+                if private_state_inquiry and not general_policy_question_vetoed:
+                    _psi_scope = private_state_inquiry.get("record_scope", "UNSPECIFIED")
+                    _psi_target = _resolve_private_state_action(
+                        self.registry, private_state_inquiry["domain"], record_scope=_psi_scope)
+                    _psi_msg_has_id = any(
+                        _validate_generic_identifier(tok) and not tok.isdigit()
+                        for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
+                    if _psi_target is not None and not selected:
+                        # (a) natural wording matched no Business Action
+                        # keyword — force the resolved target so its
+                        # collection flow asks for the identifier instead
+                        # of falling through to RAG ("ไม่มีข้อมูลยืนยัน").
+                        selected = _psi_target
+                        candidates = [selected]
+                        developer_trace["selection_source"] = "private_state_inquiry"
+                    elif (_psi_target is not None and selected is not None
+                          and developer_trace.get("selection_source") == "fresh_search"
+                          and _psi_scope == "UNSPECIFIED" and not _psi_msg_has_id
+                          and selected.get("id") != _psi_target.get("id")
+                          and selected.get("action_type") in ("API", "WEBHOOK")
+                          and _psi_is_list_shaped(selected)
+                          and not _psi_is_list_shaped(_psi_target)):
+                        # (b) SEM-1.1 — keyword search picked a
+                        # customer-scoped LIST/latest action for an
+                        # UNSPECIFIED single-record inquiry with no
+                        # identifier. For a verified customer that action
+                        # needs nothing more and would silently return the
+                        # latest record (REAL LINE regression:
+                        # "ของผมเข้าไทยหรือยัง" -> latest FT318…). Redirect
+                        # to the per-record detail action so it asks for
+                        # the bill/tracking id. Explicit "ล่าสุด" / whole-
+                        # list scope keeps the list action (scope !=
+                        # UNSPECIFIED); a genuine continuation was already
+                        # resolved above as conversation_reference.
+                        developer_trace["private_state_inquiry_redirect"] = {
+                            "from": selected.get("action_key"), "to": _psi_target.get("action_key"),
+                            "reason": "unspecified_record_scope_would_auto_return_latest"}
+                        selected = _psi_target
                         candidates = [selected]
                         developer_trace["selection_source"] = "private_state_inquiry"
 

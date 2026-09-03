@@ -770,7 +770,7 @@
         "verdict": "NO_INFO_FALLBACK"
       }
     ],
-    "note": "live pass carried from the SEM-1 run; SEM-1.1 routing is byte-identical to SEM-1 on the master (0 case diff), so the live-RAG picture is unchanged"
+    "note": "live pass carried from the SEM-1 run; SEM-1.1 routing on the anonymous master is byte-identical to SEM-1 (0 case diff)"
   },
   "per_case": [
     {
