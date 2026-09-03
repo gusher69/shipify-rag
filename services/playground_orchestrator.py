@@ -501,7 +501,20 @@ _COMPANY_OPERATIONAL_TOPIC_RE = re.compile(
     # none of this list's existing terms, letting the LLM answer entirely
     # from its own real-world knowledge of ASEAN-China trade documents
     # instead of the one genuinely relevant, retrieved trusted chunk.
-    r"form e",
+    r"form e|"
+    # CUSTOMER-RAG-1 (2026-09-03) — pickup / receiving-point vocabulary.
+    # Confirmed live: "สามารถรับสินค้าได้ที่ไหนหรอคะ" retrieved the trusted
+    # "ขอที่อยู่โกดังหน่อย" FAQ (2 Thai warehouses + maps + phone) at
+    # rerank 0.84 / raw_vector_rank 1, yet this text-only gate matched
+    # none of its terms (only "โกดัง" was present, which the customer's
+    # phrasing omits), so it was diverted to General Chat Fallback and
+    # answered "no info about branch pickup location". Same closed, low-
+    # collision domain-term convention as every prior addition; "ของผม…
+    # ไปรับ" still routes PRIVATE upstream via the existing self-reference
+    # check, and "รับสินค้าเองได้ไหม" stays on the RAG path where the
+    # trusted chunk itself states the self-pickup option.
+    r"รับสินค้า|จุดรับ|จุดส่ง|จุดรับของ|มารับสินค้า|เข้ารับสินค้า|ไปรับสินค้า|"
+    r"คลังสินค้า|คลังไทย|สาขา",
     re.IGNORECASE,
 )
 
