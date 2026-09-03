@@ -21,9 +21,33 @@ template's required slots are satisfied, the corrected/resolved question
 is returned completely unchanged ("if uncertain, keep the corrected
 original query unchanged").
 """
+import re
 from typing import Dict, Optional
 
 from rag.query_resolution import extract_entities, requested_transport_modes
+
+# CUSTOMER-RAG-1 (2026-09-03) — pickup / receiving-point LOCATION intent.
+# Customer/UAT wordings like "สามารถรับสินค้าได้ที่ไหนหรอคะ" / "มีจุดรับ
+# สินค้าที่ไหนบ้าง" name no "โกดัง"/"ที่อยู่" term, so the entity path
+# below leaves them un-normalized and retrieval becomes phrasing-
+# dependent (the SAME trusted "ขอที่อยู่โกดังหน่อย" FAQ flips
+# has_literal_evidence on/off by wording, so some variants hit the
+# Answerability Gate and Human CS). Canonicalize to the exact warehouse-
+# address query the entity template already emits — the semantic guard
+# already approves that transformation. Deliberately NOT exact-sentence
+# matching: a pickup verb+noun (or a "จุดรับ…" noun) together with a
+# where/self-pickup marker. A self-referencing "ของผม…" pickup question
+# is PRIVATE shipment state, not a public warehouse FAQ — excluded here
+# (it is routed PRIVATE upstream anyway).
+_PICKUP_LOCATION_INTENT_RE = re.compile(
+    r"(?:(?:รับ|มารับ|ไปรับ|เข้ารับ|มาเอา)\s*(?:สินค้า|ของ|พัสดุ)"
+    r"|จุดรับ(?:สินค้า|ของ)?|จุดส่งของ|คลังสินค้า|คลังไทย|โกดังรับสินค้า)"
+    r"[^\n]{0,24}"
+    r"(?:ที่ไหน|ตรงไหน|ที่ใด|จุดไหน|สาขาไหน|อยู่ไหน|ที่นี่|แผนที่|พิกัด|address|location|เอง)"
+    r"|(?:ที่ไหน|ตรงไหน)[^\n]{0,12}(?:รับ|มารับ|ไปรับ)\s*(?:สินค้า|ของ)")
+_PICKUP_PRIVATE_RE = re.compile(
+    r"ของผม|ของฉัน|ของดิฉัน|ของหนู|ของเรา|บิลผม|ออเดอร์ผม|พัสดุผม|เลขบิล|เลขที่บิล")
+_PICKUP_CANONICAL_QUERY = "ขอที่อยู่โกดัง"
 
 # Confidence floor below which a rewrite is discarded and the original
 # (already spell-corrected/resolved) question is used as-is instead —
@@ -75,6 +99,19 @@ def rewrite_canonical_query(question: str, entities: Optional[Dict[str, Optional
     if not question:
         return {"canonical_query": question, "rewrite_applied": False,
                 "reason": "empty question", "confidence": 1.0}
+
+    # CUSTOMER-RAG-1 — pickup/receiving-point location intent (see the
+    # module-level pattern). Standardize to the warehouse-address query
+    # the entity template below already emits, so every semantically-
+    # equivalent wording retrieves the same trusted FAQ.
+    if (_PICKUP_LOCATION_INTENT_RE.search(question)
+            and not _PICKUP_PRIVATE_RE.search(question)
+            and question.strip() != _PICKUP_CANONICAL_QUERY):
+        from rag.semantic_guard import validate_transformation
+        if validate_transformation(question, _PICKUP_CANONICAL_QUERY,
+                                    carried_entities=entities)["accepted"]:
+            return {"canonical_query": _PICKUP_CANONICAL_QUERY, "rewrite_applied": True,
+                    "reason": "pickup/receiving-point location intent", "confidence": 0.85}
 
     current_entities = extract_entities(question)
     merged = dict(entities or {})

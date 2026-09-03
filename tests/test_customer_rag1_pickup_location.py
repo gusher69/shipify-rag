@@ -16,6 +16,7 @@ The equivalent wording that already answers correctly ("โกดังรับ
 import unittest
 
 from services.playground_orchestrator import _COMPANY_OPERATIONAL_TOPIC_RE
+from rag.canonical_query import rewrite_canonical_query
 
 
 class TestPickupLocationTopicGuard(unittest.TestCase):
@@ -50,6 +51,36 @@ class TestPickupLocationTopicGuard(unittest.TestCase):
     def test_new_terms_are_present(self):
         for term in ("รับสินค้า", "จุดรับ", "มารับสินค้า", "คลังไทย", "สาขา"):
             self.assertIn(term, _COMPANY_OPERATIONAL_TOPIC_RE.pattern)
+
+
+class TestPickupLocationCanonicalRewrite(unittest.TestCase):
+    """Every semantically-equivalent pickup-location wording is
+    standardized to the SAME warehouse-address retrieval query, so the
+    trusted FAQ is retrieved consistently (not phrasing-dependent)."""
+
+    def test_customer_variants_canonicalize_to_warehouse_address(self):
+        for q in ["สามารถรับสินค้าได้ที่ไหนหรอคะ",       # exact REAL failure
+                  "มีจุดรับสินค้าที่ไหนบ้าง",
+                  "โกดังรับสินค้ามีที่ไหนบ้าง",
+                  "สามารถรับสินค้าได้ที่ไหนบ้างคะ",
+                  "รับสินค้าเองได้ไหมคะ",
+                  "ไปรับของเองได้ที่ไหน"]:
+            r = rewrite_canonical_query(q)
+            self.assertTrue(r["rewrite_applied"], q)
+            self.assertEqual(r["canonical_query"], "ขอที่อยู่โกดัง", q)
+
+    def test_private_pickup_wording_is_not_canonicalized(self):
+        # F — "ของผม…" pickup wording is PRIVATE shipment state, must not
+        # be rewritten into a public warehouse-address query.
+        for q in ["ของผมไปรับได้หรือยัง", "ของผมไปรับได้ที่ไหน",
+                  "พัสดุผมมารับได้ที่ไหน"]:
+            r = rewrite_canonical_query(q)
+            self.assertNotEqual(r["canonical_query"], "ขอที่อยู่โกดัง", q)
+
+    def test_unrelated_where_questions_are_not_canonicalized(self):
+        for q in ["ซื้อคูปองที่ไหน", "จ่ายเงินยังไง", "ขอเบอร์ติดต่อ"]:
+            r = rewrite_canonical_query(q)
+            self.assertNotEqual(r["canonical_query"], "ขอที่อยู่โกดัง", q)
 
 
 if __name__ == "__main__":
