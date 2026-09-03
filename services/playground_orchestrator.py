@@ -663,6 +663,16 @@ class PlaygroundResult:
     # as "RAG". Defaults False so this field is a pure addition for every
     # other branch (slot-filling/no-information/normal-grounded-answer).
     general_chat_used: bool = False
+    # Customer UAT Fix 2 (2026-09-02) — True ONLY when this turn is a
+    # genuine COMPANY/Shipify fact question that the deterministic
+    # Answerability Gate / P7.1 branch answered with the grounded
+    # "no trusted information" wording (zero reliable evidence, no LLM
+    # call, no invented yes/no). services/decision_engine.py reads this
+    # as a structured "NEED HUMAN FOLLOW-UP" signal and routes the turn
+    # through the SAME existing Human CS handoff mechanism. Never set for
+    # a normal grounded answer, a clarification-needed turn, a product-
+    # answer continuation, or a General-Chat-Fallback reply.
+    unsupported_company_fact: bool = False
 
 
 def run_playground_turn(
@@ -1345,6 +1355,7 @@ def run_playground_turn(
     slot_filling_escalation = slot_state is not None and slot_state["escalation_required"]
     slot_filling_complete = slot_state is not None and slot_state["is_complete"]
     general_chat_used = False
+    unsupported_company_fact = False
 
     if bare_math_result:
         value = bare_math_result["value"]
@@ -1562,6 +1573,12 @@ def run_playground_turn(
                 answer_text = "รับทราบเรื่องที่แจ้งมาค่ะ " + answer_text + " หากมีเลขที่คำสั่งซื้อหรือรายละเอียดเพิ่มเติม รบกวนแจ้งเพิ่มเติมได้เลยค่ะ จะช่วยตรวจสอบให้ค่ะ"
             elif _URGENCY_SIGNAL_RE.search(question or ""):
                 answer_text = "เข้าใจว่าเรื่องนี้เร่งด่วนสำหรับคุณค่ะ " + answer_text + " จะติดตามและแจ้งความคืบหน้าให้เร็วที่สุดค่ะ"
+            # Customer UAT Fix 2 — a genuine company-fact question with zero
+            # reliable evidence is a structured "need human follow-up"
+            # case; the Decision Engine routes it through the existing
+            # Human CS handoff mechanism (no wording match, no new
+            # infra).
+            unsupported_company_fact = True
             stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                                  "no chunk carries reliable evidence for this question (Answerability Gate) — "
                                  "deterministic safe-fallback used, no LLM call, no chunks used as evidence"))
@@ -1612,6 +1629,9 @@ def run_playground_turn(
         # is a curated FAQ row and answers normally.)
         answer_text = ("ตอนนี้ยังไม่มีข้อมูลยืนยันนโยบายเรื่องนี้ในระบบค่ะ "
                        "รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ")
+        # Customer UAT Fix 2 — same structured "need human follow-up"
+        # signal as the Answerability-Gate branch above.
+        unsupported_company_fact = True
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                              "P7.1 — company guarantee/responsibility question, no exact-FAQ policy "
                              "evidence — grounded no-information, no LLM call"))
@@ -1873,4 +1893,5 @@ def run_playground_turn(
         reply_text=answer_text,
         company_profile_warning=company_profile_warning,
         general_chat_used=general_chat_used,
+        unsupported_company_fact=unsupported_company_fact,
     )

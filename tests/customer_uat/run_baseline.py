@@ -491,7 +491,13 @@ def _write_report(results):
     P(f"- **Logical cases:** {results['n_logical_cases']}   |   **Strings evaluated "
       f"(messages + wording variants):** {results['n_strings_evaluated']}")
     P("")
-    P("> **SEM-1 + SEM-1.1 + SEM-1.2 applied (2026-09-03).** This report reflects the tree *after* SEM-1 "
+    P("> **SEM-1 + SEM-1.1 + SEM-1.2 + IDENTITY-0 + Fix-2 applied (2026-09-03).** IDENTITY-0 fixed a "
+      "failed-self-verification escalation drop (now a real Human CS handoff). Fix-2 (ported from `7f1e6cd`) "
+      "routes a genuine *unsupported company fact* — the RAG pipeline's deterministic Answerability-Gate / "
+      "P7.1 no-info branches — through the existing Human CS handoff, and the webhook only promises staff "
+      "follow-up after the notification actually succeeded (or a per-conversation dedupe is already on the "
+      "books). Neither changes the routing-only Customer UAT numbers below (the routing pass stubs RAG so "
+      "`unsupported_company_fact` is never set). This report reflects the tree *after* SEM-1 "
       "(private-record status-inquiry semantic routing), the SEM-1.1 record-scope fix, and the SEM-1.2 "
       "pending-workflow boundary (a greeting / cancel / self-contained UNSPECIFIED private-state inquiry "
       "is no longer consumed as a pending-parameter value; the record-scope invariant now applies across "

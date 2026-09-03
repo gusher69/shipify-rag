@@ -763,8 +763,20 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         # branch just below) -- reusing the same value avoids a second,
         # redundant read of the same row.
         handoff_status = handoff_status_before
+        # Customer UAT Fix 2 (2026-09-02) — for the "unsupported company
+        # fact" handoff, the reply decide() carried is the honest no-info
+        # text with NO "staff will check" promise. Append the follow-up
+        # clause ONLY when a real notification is on the books for this
+        # conversation: either it succeeds on this turn, or it already
+        # went out earlier (dedup path below) so CS is genuinely engaged.
+        # If the send fails, the customer keeps the plain no-info wording
+        # — never a fabricated promise.
+        _unsupported_fact_handoff = reason == "unsupported_company_information"
+        _STAFF_FOLLOWUP_CLAUSE = " เดี๋ยวเจ้าหน้าที่จะช่วยตรวจสอบเพิ่มเติมให้นะคะ"
         if handoff_status in ("NOTIFIED", "PENDING"):
             print(f"[webhook] Human Handoff already {handoff_status} for this conversation — skipping duplicate notification")
+            if _unsupported_fact_handoff and _STAFF_FOLLOWUP_CLAUSE.strip() not in reply_text:
+                reply_text = reply_text + _STAFF_FOLLOWUP_CLAUSE
         else:
             if conversation:
                 session_service.set_handoff_status(conversation["id"], "PENDING", reason=reason)
@@ -798,6 +810,11 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                 last_shipment_code=collected.get("ShipmentCode") or (profile or {}).get("last_shipment_code"),
                 last_tracking=collected.get("Tracking") or (profile or {}).get("last_tracking"),
             )
+            if send_result.get("sent") and _unsupported_fact_handoff \
+                    and _STAFF_FOLLOWUP_CLAUSE.strip() not in reply_text:
+                # Real notification went out — now it is true to tell the
+                # customer a staff member will follow up.
+                reply_text = reply_text + _STAFF_FOLLOWUP_CLAUSE
             if conversation:
                 if send_result.get("sent"):
                     session_service.set_handoff_status(conversation["id"], "NOTIFIED", reason=reason)
@@ -823,6 +840,12 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         for f in (reply.get("files") or []):
             icon = icon_by_type.get((f.get("attachment_type") or "").lower(), "📎")
             file_links.append(f"{icon} {f.get('filename') or 'file'}: {f.get('url')}")
+
+    # Customer UAT Fix 2 — keep the persisted turn (record_conversation_
+    # turn reads `result`) consistent with what the customer actually
+    # received when the handoff block appended the follow-up clause.
+    if is_handoff and isinstance(reply, dict) and reply.get("text") != reply_text:
+        reply["text"] = reply_text
 
     full_reply_text = reply_text
     if file_links:
