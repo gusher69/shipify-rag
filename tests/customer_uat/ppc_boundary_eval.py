@@ -354,6 +354,14 @@ def _write_md(out):
     P("")
     P(f"- **Base:** `{a['base']}`  ·  REAL `DecisionEngine.decide()` + REAL DB registry; RAG + ERP HTTP faked.")
     P("- **Code change made** — a minimal `_classify_private_state_inquiry` boundary fix (see BEFORE -> AFTER).")
+    P("- **PPC-1 (2026-09-03):** a referent-less underspecified question "
+      "(`สั่งเยอะได้ไหม`, `ราคาเท่าไหร่`, `มีไหม`, `อันนี้ได้ไหม`) with no concrete "
+      "referent in the immediate conversation now routes to CLARIFY "
+      "(`selection_source = clarification_referentless_underspecified`) instead of a "
+      "fresh RAG search whose closest lexical neighbour could be a stale/adjacent FAQ "
+      "chunk (REAL LINE: a battery-prohibition FAQ was woven into the answer). An "
+      "immediate product referent (`สนใจนำเข้ารองเท้า` the turn before) still lets RAG "
+      "use that referent — current explicit intent > stale history.")
     P("")
     b = out.get("before")
     if b:

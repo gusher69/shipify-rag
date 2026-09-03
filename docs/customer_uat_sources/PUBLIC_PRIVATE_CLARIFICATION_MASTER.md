@@ -2,6 +2,7 @@
 
 - **Base:** `0745846`  ·  REAL `DecisionEngine.decide()` + REAL DB registry; RAG + ERP HTTP faked.
 - **Code change made** — a minimal `_classify_private_state_inquiry` boundary fix (see BEFORE -> AFTER).
+- **PPC-1 (2026-09-03):** a referent-less underspecified question (`สั่งเยอะได้ไหม`, `ราคาเท่าไหร่`, `มีไหม`, `อันนี้ได้ไหม`) with no concrete referent in the immediate conversation now routes to CLARIFY (`selection_source = clarification_referentless_underspecified`) instead of a fresh RAG search whose closest lexical neighbour could be a stale/adjacent FAQ chunk (REAL LINE: a battery-prohibition FAQ was woven into the answer). An immediate product referent (`สนใจนำเข้ารองเท้า` the turn before) still lets RAG use that referent — current explicit intent > stale history.
 
 ## BEFORE -> AFTER (PPC boundary fix in `services/decision_engine.py`)
 
@@ -87,13 +88,13 @@ BEFORE failing cases (both now PASS):
 | PRV-07 | PRIVATE | False | ข้อมูลลูกค้าของผม | WORKFLOW | fresh_search | getdatacustomer | Y | · | · | **PASS** |
 | PRV-08 | PRIVATE | True | ยอดค้างของผมมีไหม | WORKFLOW | fresh_search | None | Y | · | · | **PASS** |
 | PRV-08 | PRIVATE | False | ยอดค้างของผมมีไหม | WORKFLOW | fresh_search | None | Y | · | · | **PASS** |
-| CLR-01 | CLARIFY | False | สั่งเยอะได้ไหม | RAG | fresh_search | None | · | · | · | **PASS** |
-| CLR-02 | CLARIFY | False | อันนี้ได้ไหม | RAG | fresh_search | None | · | · | · | **PASS** |
-| CLR-03 | CLARIFY | False | ได้หรือเปล่าคะ | RAG | fresh_search | None | · | · | · | **PASS** |
-| CLR-04 | CLARIFY | False | ราคาเท่าไหร่ | RAG | fresh_search | None | · | · | · | **PASS** |
+| CLR-01 | CLARIFY | False | สั่งเยอะได้ไหม | WORKFLOW | clarification_referentless_underspecified | None | · | · | · | **PASS** |
+| CLR-02 | CLARIFY | False | อันนี้ได้ไหม | WORKFLOW | clarification_referentless_underspecified | None | · | · | · | **PASS** |
+| CLR-03 | CLARIFY | False | ได้หรือเปล่าคะ | WORKFLOW | clarification_referentless_underspecified | None | · | · | · | **PASS** |
+| CLR-04 | CLARIFY | False | ราคาเท่าไหร่ | WORKFLOW | clarification_referentless_underspecified | None | · | · | · | **PASS** |
 | CLR-05 | CLARIFY | False | เช็กให้หน่อย | RAG | fresh_search | None | · | · | · | **PASS** |
 | CLR-06 | CLARIFY | False | ขอรายละเอียด | RAG | fresh_search | None | · | · | · | **PASS** |
-| CLR-07 | CLARIFY | False | มีไหม | RAG | fresh_search | None | · | · | · | **PASS** |
+| CLR-07 | CLARIFY | False | มีไหม | WORKFLOW | clarification_referentless_underspecified | None | · | · | · | **PASS** |
 | CLR-08 | CLARIFY | False | เอาแบบเดิม | RAG | fresh_search | None | · | · | · | **PASS** |
 | CLR-09 | CLARIFY | False | ไม่ใช่อันนี้ | RAG | fresh_search | None | · | · | · | **PASS** |
 | CTX-01 | CTX->PUBLIC | True | คูปองใช้ยังไง | RAG | fresh_search | None | · | · | · | **PASS** |

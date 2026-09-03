@@ -1023,10 +1023,10 @@
       "verified": false,
       "verdict": "PASS",
       "signal": {
-        "routing": "RAG",
-        "reply": "[RAG-STUB]",
+        "routing": "WORKFLOW",
+        "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ",
         "selected_action": null,
-        "selection_source": "fresh_search",
+        "selection_source": "clarification_referentless_underspecified",
         "handoff_reason": null,
         "turn_intent": "SHIPIFY_INFORMATION",
         "turn_intent_coerced": null,
@@ -1035,7 +1035,7 @@
         "erp_called": false,
         "identity_ask": false,
         "noinfo": false,
-        "asks_question": false,
+        "asks_question": true,
         "sentinel_in_reply": false,
         "unsupported_company_information": false
       }
@@ -1047,10 +1047,10 @@
       "verified": false,
       "verdict": "PASS",
       "signal": {
-        "routing": "RAG",
-        "reply": "[RAG-STUB]",
+        "routing": "WORKFLOW",
+        "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ",
         "selected_action": null,
-        "selection_source": "fresh_search",
+        "selection_source": "clarification_referentless_underspecified",
         "handoff_reason": null,
         "turn_intent": "PRIVATE_ACTION",
         "turn_intent_coerced": null,
@@ -1059,7 +1059,7 @@
         "erp_called": false,
         "identity_ask": false,
         "noinfo": false,
-        "asks_question": false,
+        "asks_question": true,
         "sentinel_in_reply": false,
         "unsupported_company_information": false
       }
@@ -1071,10 +1071,10 @@
       "verified": false,
       "verdict": "PASS",
       "signal": {
-        "routing": "RAG",
-        "reply": "[RAG-STUB]",
+        "routing": "WORKFLOW",
+        "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ",
         "selected_action": null,
-        "selection_source": "fresh_search",
+        "selection_source": "clarification_referentless_underspecified",
         "handoff_reason": null,
         "turn_intent": "SHIPIFY_INFORMATION",
         "turn_intent_coerced": null,
@@ -1083,7 +1083,7 @@
         "erp_called": false,
         "identity_ask": false,
         "noinfo": false,
-        "asks_question": false,
+        "asks_question": true,
         "sentinel_in_reply": false,
         "unsupported_company_information": false
       }
@@ -1095,10 +1095,10 @@
       "verified": false,
       "verdict": "PASS",
       "signal": {
-        "routing": "RAG",
-        "reply": "[RAG-STUB]",
+        "routing": "WORKFLOW",
+        "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ",
         "selected_action": null,
-        "selection_source": "fresh_search",
+        "selection_source": "clarification_referentless_underspecified",
         "handoff_reason": null,
         "turn_intent": "SHIPIFY_INFORMATION",
         "turn_intent_coerced": null,
@@ -1107,7 +1107,7 @@
         "erp_called": false,
         "identity_ask": false,
         "noinfo": false,
-        "asks_question": false,
+        "asks_question": true,
         "sentinel_in_reply": false,
         "unsupported_company_information": false
       }
@@ -1167,10 +1167,10 @@
       "verified": false,
       "verdict": "PASS",
       "signal": {
-        "routing": "RAG",
-        "reply": "[RAG-STUB]",
+        "routing": "WORKFLOW",
+        "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ",
         "selected_action": null,
-        "selection_source": "fresh_search",
+        "selection_source": "clarification_referentless_underspecified",
         "handoff_reason": null,
         "turn_intent": "SHIPIFY_INFORMATION",
         "turn_intent_coerced": null,
@@ -1179,7 +1179,7 @@
         "erp_called": false,
         "identity_ask": false,
         "noinfo": false,
-        "asks_question": false,
+        "asks_question": true,
         "sentinel_in_reply": false,
         "unsupported_company_information": false
       }

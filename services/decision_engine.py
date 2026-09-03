@@ -2060,6 +2060,95 @@ def _identifier_pattern_score(registry, action: Dict, message: str, *,
     return score
 
 
+# ── PPC-1: referent-less underspecified question -> CLARIFY ─────────────
+# An INTERROGATIVE message that, once every GENERIC light verb / pronoun
+# / degree word / politeness particle / bare demonstrative / bare
+# attribute head is removed, names NO concrete product, service,
+# quantity, attribute, topic or identifier of its own:
+# "สั่งเยอะได้ไหม", "ราคาเท่าไหร่", "มีไหม", "อันนี้ได้ไหม".
+# A fresh RAG search on such a bare string just retrieves
+# whatever FAQ chunk is its closest lexical neighbour (confirmed live:
+# "สั่งเยอะได้ไหม" pulled a battery-prohibition FAQ chunk and the answer
+# wove it in). When the immediate conversation supplies no concrete
+# referent either, the honest move is one natural clarifying question —
+# not a guess. NOT a phrase list: the test is structural (nothing
+# topical survives the generic-token strip), so "สั่งรองเท้าเยอะได้ไหม",
+# "ค่าส่งเท่าไหร่", "คูปองใช้ยังไง" all keep a real remnant and are
+# untouched.
+_PPC_GENERIC_TOKEN_RE = re.compile(
+    r"(ผม|ฉัน|ดิฉัน|หนู|เรา|คุณ|"
+    r"ครับ|คับ|ค่ะ|คะ|นะ|น่ะ|จ๊ะ|จ้า|ฮะ|ๆ|"
+    r"ที|หน่อย|ด้วย|ได้|สัก|นิด|บ้าง|อีก|เลย|แล้ว|ยัง|"
+    r"สั่ง|มี|เอา|ทำ|เช็ก|เช็ค|เชค|ดู|ขอ|ให้|อยาก|ต้องการ|สนใจ|"
+    r"เยอะ|มาก|น้อย|หมด|เท่าไหร่|เท่าไร|กี่|"
+    r"ไหม|มั้ย|มัั้ย|ยังไง|ยังงัย|อย่างไร|หรือเปล่า|รึเปล่า|หรอ|เหรอ|"
+    r"อันนี้|อันนั้น|อันไหน|แบบนี้|แบบนั้น|แบบไหน|ตรงนี้|ตรงนั้น|นี้|นั้น|นี่|"
+    r"ราคา|รายละเอียด|ข้อมูล|"
+    r"\s|\?|!|\.|,|~|ๆ)+",
+    re.IGNORECASE)
+# Deliberately INTERROGATIVE-only — a bare request verb ("ขอข้อมูล",
+# "เช็กให้หน่อย") is not enough on its own to force a clarification here;
+# the message must actually be phrased as a question.
+_PPC_INTERROGATIVE_RE = re.compile(
+    r"ไหม|มั้ย|เท่าไหร่|เท่าไร|กี่|ยังไง|ยังงัย|อย่างไร|หรือเปล่า|รึเปล่า|เหรอ|หรอ|อันไหน",
+    re.IGNORECASE)
+# Transport-mode / logistics / time / greeting vocabulary that, on its
+# own in the PRECEDING turn, is NOT a product/service referent for an
+# ordering question ("ทางเรือกี่วัน" before "สั่งเยอะได้ไหม" does not tell
+# us WHAT the customer wants to order).
+_PPC_NON_REFERENT_TOPIC_RE = re.compile(
+    r"ทางเรือ|ทางรถ|ทางอากาศ|ทางบก|เรือ|รถ|อากาศ|ขนส่ง|โลจิสติกส์|"
+    r"โกดัง|คลัง|สาขา|วัน|กี่วัน|ระยะเวลา|นาน|เวลา|คิว|รอบ|"
+    r"สวัสดี|หวัดดี|ขอบคุณ|เบอร์|ติดต่อ|แอดมิน|เจ้าหน้าที่", re.IGNORECASE)
+
+
+def _ppc_topical_remnant(text: str) -> str:
+    """What survives stripping every generic (non-topical) token — a
+    non-empty result means the message names something concrete."""
+    return _PPC_GENERIC_TOKEN_RE.sub("", text or "").strip()
+
+
+def _is_referentless_underspecified(message: str) -> bool:
+    t = (message or "").strip()
+    if not t or len(t) > 24:
+        return False
+    if not _PPC_INTERROGATIVE_RE.search(t):
+        return False
+    remnant = _ppc_topical_remnant(t)
+    # nothing topical left, and no digit / identifier hiding in it
+    if remnant:
+        return False
+    return True
+
+
+# An explicit "I want / I'm interested in / import / order" marker in the
+# PRECEDING turn is what turns a topical noun there into a referent an
+# underspecified follow-up may inherit. A prior bare status question
+# ("ของผมเข้าไทยหรือยัง") or a logistics fact ("ทางเรือกี่วัน") carries no
+# such marker and does NOT establish a product referent.
+_PPC_REFERENT_INTENT_RE = re.compile(
+    r"สนใจ|อยาก|ต้องการ|อยากได้|นำเข้า|สั่งซื้อ|สั่งของ|ฝากสั่ง|ฝากนำเข้า|จะสั่ง|จะนำเข้า|ขนของ|ชิปปิ้ง")
+
+
+def _recent_product_referent(history: Optional[List[Dict]]) -> bool:
+    """True when the immediately preceding user turn established a
+    concrete product/service referent an underspecified follow-up can
+    legitimately inherit ("สนใจนำเข้ารองเท้า" -> "สั่งเยอะได้ไหม"). Needs
+    BOTH an interest/import/order marker AND a residual topical noun, so
+    a prior status question or logistics fact never counts."""
+    if not history:
+        return False
+    prev_users = [t.get("content") or "" for t in history if t.get("role") == "user"][-2:]
+    for msg in reversed(prev_users):
+        if not _PPC_REFERENT_INTENT_RE.search(msg):
+            continue
+        remnant = _PPC_NON_REFERENT_TOPIC_RE.sub("", _ppc_topical_remnant(msg)).strip()
+        remnant = _PPC_REFERENT_INTENT_RE.sub("", remnant).strip()
+        if len(remnant) >= 3:
+            return True
+    return False
+
+
 # ── Shared Turn-Intent Primitive (Root Change 1, Final Systemic Routing
 # Fix, 2026-08-28) — the forensic routing audit's Root Cause #1: the
 # "informational vs. private/action" distinction used to be decided
@@ -3004,6 +3093,23 @@ class DecisionEngine:
                 if classification["classification"] == "CLARIFICATION_REQUIRED":
                     return self._route_clarification(classification, message, context,
                                                         developer_trace, start, workflow=workflow_hint)
+
+                # PPC-1 (2026-09-03) — a referent-less underspecified
+                # question ("สั่งเยอะได้ไหม", "ราคาเท่าไหร่", "มีไหม") with
+                # NO concrete referent in the immediate conversation goes
+                # to CLARIFY, not a fresh RAG search whose closest lexical
+                # neighbour can be a stale/adjacent FAQ chunk (confirmed
+                # live: it wove in an unrelated battery-prohibition FAQ).
+                # Current explicit intent > stale history: an immediate
+                # product referent ("สนใจนำเข้ารองเท้า" the turn before)
+                # suppresses this and lets RAG use that referent.
+                if classification["classification"] in ("RAG_ONLY", "UNKNOWN") \
+                        and _is_referentless_underspecified(message) \
+                        and not _recent_product_referent(history):
+                    developer_trace["selection_source"] = "clarification_referentless_underspecified"
+                    return self._route_clarification(
+                        {"classification": "CLARIFICATION_REQUIRED", "candidate_action_ids": []},
+                        message, context, developer_trace, start, workflow=workflow_hint)
 
                 # Entity Continuation (Final Conversation State Engine,
                 # 2026-08-15) — checked BEFORE identifier-memory-boosted
