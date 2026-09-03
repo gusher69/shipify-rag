@@ -89,6 +89,14 @@ from services.charter_truck_flow import (
     charter_missing_prompt as _charter_missing_prompt,
     charter_handoff_summary as _charter_handoff_summary,
 )
+# CUSTOMER-CALC-1 — shipping-cost estimate multi-turn slot collection
+# (deterministic, history-derived; reuses the dimension/weight parser).
+from services.shipping_estimate_flow import (
+    derive_estimate_state as _derive_estimate_state,
+    extract_estimate_fields as _extract_estimate_fields,
+    estimate_missing_prompt as _estimate_missing_prompt,
+    estimate_reply as _estimate_reply,
+)
 # Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
 # 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
 # mode already uses (services/hybrid_runtime_service.py); this module
@@ -2949,6 +2957,33 @@ class DecisionEngine:
                         handoff_payload={"reason": "charter_truck_request",
                                          "details": _charter.as_dict(),
                                          "summary": _charter_handoff_summary(_charter)})
+
+                # CUSTOMER-CALC-1 — a shipping-cost ESTIMATE request. A
+                # recognized calculator intent with a missing input is
+                # WORKFLOW / ASK MISSING, never Fix-2 no-info / Human CS.
+                # Deterministic multi-turn slot collection (weight, 3
+                # dims, ROAD/SEA), remembers supplied values, calculates
+                # the moment there is enough data. Runs BEFORE the RAG
+                # pipeline so a missing slot can never reach the
+                # Answerability Gate. A bare "เรทเท่าไหร่" / "ค่านำเข้า
+                # เท่าไหร่" (no value, no calc verb) is NOT opened -> the
+                # rate FAQ answers it, unchanged.
+                _est = _derive_estimate_state(history, message)
+                if _est is not None:
+                    _extract_estimate_fields(message, _est)
+                    developer_trace["selection_source"] = "shipping_estimate_flow"
+                    developer_trace["shipping_estimate_state"] = _est.as_dict()
+                    if _est.complete():
+                        return self._finalize(
+                            reply=_build_response(text=_estimate_reply(_est)),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    return self._finalize(
+                        reply=_build_response(text=_estimate_missing_prompt(_est)),
+                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
 
                 # SEM-GEN-1 — a SHORT follow-up inside an active
                 # IMPORT_INTEREST frame ("ถ้าเป็นกางเกงล่ะ", "200 ตัว",
