@@ -417,6 +417,30 @@ def _strip_unsolicited_prohibited_caveat(answer_text: str, allowed_terms: str) -
     out = "".join(kept).strip()
     return out if len(out) >= 15 else answer_text
 
+
+# CUSTOMER-INVOICE-1 (2026-09-03) — a "can you issue a goods invoice?"
+# yes/no policy question. Distinct from the download how-to
+# ("โหลดใบกำกับยังไง"), which keeps its own FAQ answer.
+_INVOICE_ISSUANCE_Q_RE = re.compile(
+    r"(?:ออก|ขอ|มี|รับ|ได้)[^\n]{0,14}ใบกำกับ"
+    r"|ใบกำกับ[^\n]{0,14}(?:ออก|ขอ|ได้)"
+    r"|ไม่สามารถ[^\n]{0,10}ใบกำกับ")
+_INVOICE_DOWNLOAD_RE = re.compile(
+    r"โหลด|ดาวน์โหลด|download|ยังไง|อย่างไร|วิธี|ขั้นตอน|กดตรงไหน|เมนูไหน|หาได้ที่ไหน")
+# Composed ONLY from clauses present verbatim in the trusted invoice FAQ
+# rows ff288877 / 99390831 / a2618c6d (see the branch comment). No
+# invented condition.
+_INVOICE_ISSUANCE_ANSWER = (
+    "ทางเราสามารถออกใบกำกับค่าสินค้าและใบเสร็จค่าขนส่งให้ได้ค่ะ ตามเงื่อนไขของบิลและวิธีชำระเงิน "
+    "หากต้องการใบกำกับภาษี รบกวนแจ้งข้อมูลผู้เสียภาษีและเลขบิลให้เจ้าหน้าที่ตรวจสอบเงื่อนไขก่อนชำระเงินนะคะ "
+    "ทั้งนี้ การชำระค่าสินค้าด้วยบัตรเครดิตจะไม่สามารถออกใบกำกับได้ตามข้อมูลปัจจุบันค่ะ")
+
+
+def _is_invoice_issuance_question(question: str) -> bool:
+    q = question or ""
+    return bool(_INVOICE_ISSUANCE_Q_RE.search(q) and not _INVOICE_DOWNLOAD_RE.search(q))
+
+
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
 # 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization;
 # broadened again 2026-08-27 same day — Semantic RAG Retrieval fix) — a
@@ -1488,6 +1512,31 @@ def run_playground_turn(
         stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                              "self-pickup permission — deterministic answer from the trusted "
                              "warehouse FAQ's self-pickup sentence, no LLM call"))
+        services_used.append({"name": "LLMService", "status": "skipped"})
+        input_tokens = output_tokens = 0
+        llm_latency = 0.0
+        llm_failed = False
+    elif (intent_result["actionable_intent"] == "invoice_policy"
+          and _is_invoice_issuance_question(question)):
+        # CUSTOMER-INVOICE-1 — "can you issue a goods invoice?"
+        # (ใบกำกับค่าสินค้าออกได้ไหม / …ไม่ได้หรอ / ขอ…ไม่ได้หรอ). The
+        # FAQ-exact matcher returns the Quick_FAQ_Patch row 546c1bd5
+        # verbatim, whose Answer ends with an unrelated product question
+        # ("…ไม่ทราบว่าสินค้าของลูกค้าเป็นอะไรคะ") and omits the actual
+        # conditions. Answer deterministically from the COMPLETE trusted
+        # invoice facts that already exist in the KB:
+        #   ff288877 ("ออกใบกำกับได้ไหม") — issuance + bill/payment
+        #            condition + taxpayer-info requirement + credit-card
+        #            limitation.
+        #   99390831 ("Shipify ออก e-Tax Invoice ได้ไหม") — send taxpayer
+        #            info + bill number to staff.
+        #   a2618c6d ("ชำระบัตรเครดิตได้ไหม") — credit card => no invoice.
+        # No invented conditions; the download flow (โหลดใบกำกับยังไง) is
+        # excluded and keeps its own FAQ answer.
+        answer_text = _INVOICE_ISSUANCE_ANSWER
+        stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                             "invoice issuance policy — deterministic answer composed from the "
+                             "complete trusted invoice FAQ conditions, no LLM call"))
         services_used.append({"name": "LLMService", "status": "skipped"})
         input_tokens = output_tokens = 0
         llm_latency = 0.0
