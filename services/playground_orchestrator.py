@@ -301,6 +301,51 @@ def _product_answer_continuation_noun(followup_type: Optional[str], history, sin
     return None
 
 
+# ── FIX-2.3 — product / import interest is NOT a company-fact no-info ───
+# "สนใจนำเข้ารองเท้า", "อยากนำเข้าเสื้อผ้า", "จะนำเข้าอะไหล่", "กำลังสนใจ
+# สั่งของจากจีน" are EARLY SALES INTEREST, not an understood company-
+# policy fact question. When retrieval finds no direct evidence, the
+# Answerability Gate must NOT promote such a turn to
+# `unsupported_company_fact` / Human CS merely because every retrieved
+# chunk is RELATED_CONTEXT. Reuses the SAME P5.1 product-answer service
+# continuation the elicit_product_type reply path already uses. A company
+# GUARANTEE/POLICY question (_COMPANY_GUARANTEE_Q_RE) is explicitly
+# excluded — that remains TRUE no-info -> Fix-2. A prohibited product
+# retrieves its own firm policy evidence and never reaches this branch.
+_FIX23_IMPORT_VERB_RE = re.compile(
+    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|ชิปปิ้ง|ขนของ|นำสินค้าเข้า")
+_FIX23_INTEREST_RE = re.compile(
+    r"สนใจ|อยาก|ต้องการ|วางแผน|เล็ง|กำลังมองหา|กำลังสนใจ|มองหา")
+_FIX23_ABOUT_TO_RE = re.compile(
+    r"(จะ|กำลังจะ)\s*(นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า)")
+# stripped to expose the bare product noun; generic markers only, never a
+# product dictionary.
+_FIX23_STRIP_RE = re.compile(
+    r"(สนใจ|อยากจะ|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|"
+    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|สั่ง|ชิปปิ้ง|ขนของ|นำสินค้าเข้า|"
+    r"สินค้า|ของ|จาก|เว็บ|จีน|taobao|1688|tmall|เถาเป่า|"
+    r"ครับ|ค่ะ|คะ|นะ|หน่อย|ผม|ฉัน|เรา|\s)+", re.IGNORECASE)
+
+
+def _is_product_import_interest(question: str) -> bool:
+    q = question or ""
+    if _COMPANY_GUARANTEE_Q_RE.search(q):
+        return False
+    if _FIX23_ABOUT_TO_RE.search(q):
+        return True
+    return bool(_FIX23_INTEREST_RE.search(q) and _FIX23_IMPORT_VERB_RE.search(q))
+
+
+def _product_interest_noun(question: str) -> Optional[str]:
+    """The bare product noun in a product/import-interest declarative,
+    or None (-> a generic acknowledgement). Deterministic generic-token
+    strip, never a product-name lookup."""
+    remnant = _FIX23_STRIP_RE.sub("", question or "").strip()
+    if remnant and _PRODUCT_ANSWER_NOUN_OK_RE.match(remnant):
+        return remnant
+    return None
+
+
 def _product_answer_service_continuation(noun: str, *, lead_stage: Optional[str],
                                           sentiment_status: Optional[str], history,
                                           transport_known: bool) -> "tuple[str, str]":
@@ -1567,6 +1612,45 @@ def run_playground_turn(
                 history=history, transport_known=_pac_transport_known)
             stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                                  f"P5.1 product-answer continuation ({_pac_note}) — no LLM call"))
+        elif _is_product_import_interest(question):
+            # FIX-2.3 — a product / import interest declarative that
+            # retrieved no direct evidence is EARLY SALES INTEREST, not a
+            # company-fact no-info. NEVER set `unsupported_company_fact`,
+            # never Human CS, never claim an eligibility guarantee. Full
+            # product recognition -> policy cross-check -> quantity/weight/
+            # route collection is CONV-SELL.
+            #
+            # If a retrieved chunk firmly classifies a product into a
+            # trusted prohibited CATEGORY ("<x>จัดเป็นสินค้าประเภทของเหลว…
+            # ไม่สามารถนำเข้า"), surface that FAQ's answer verbatim — a
+            # trusted prohibition, deterministic, no LLM. The generic
+            # "สินค้าที่ห้ามนำเข้ามีอะไรบ้าง" list chunk does NOT match
+            # `_ITEM_IS_CATEGORY_RE` (its category words follow "รวมถึง",
+            # never "จัดเป็น/เป็น"), so a non-prohibited interest like
+            # "สนใจนำเข้ารองเท้า" still gets the safe service ack.
+            _prohib_chunk = next(
+                (c for c in (chunks or [])
+                 if _ITEM_IS_CATEGORY_RE.search(c.get("text") or "")
+                 and _P51_FIRM_PROHIBITED_RE.search(c.get("text") or "")), None)
+            if _prohib_chunk:
+                _t = _prohib_chunk.get("text") or ""
+                answer_text = _t.split("\nAnswer: ", 1)[1].strip() if "\nAnswer: " in _t else _t.strip()
+                _pi_note = "prohibited-category-policy-from-retrieved-evidence"
+            else:
+                _pi_noun = _product_interest_noun(question)
+                if _pi_noun:
+                    answer_text, _pi_note = _product_answer_service_continuation(
+                        _pi_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
+                        history=history, transport_known=_pac_transport_known)
+                else:
+                    answer_text = ("รับทราบค่ะ สนใจนำเข้าสินค้ากับ Shipify นะคะ 😊 "
+                                   "มีบริการขนส่งทั้งทางรถและทางเรือค่ะ "
+                                   "รบกวนขอรายละเอียดสินค้าเพิ่มเติมสักนิด เช่น ประเภทสินค้า จำนวน "
+                                   "หรือน้ำหนักโดยประมาณ จะได้แนะนำบริการที่เหมาะสมให้ค่ะ")
+                    _pi_note = "generic-import-interest-ack"
+            stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                                 f"FIX-2.3 product/import-interest continuation ({_pi_note}) — "
+                                 "not a company-fact no-info, no LLM call, no Human CS"))
         else:
             answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
             if _COMPLAINT_SIGNAL_RE.search(question or ""):

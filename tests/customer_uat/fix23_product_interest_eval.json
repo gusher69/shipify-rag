@@ -1,0 +1,110 @@
+{
+  "cases": [
+    {
+      "id": "A",
+      "message": "สนใจนำเข้ารองเท้า",
+      "expectation": "no_handoff",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "RAG",
+        "handoff_reason": null,
+        "unsupported_company_fact": false,
+        "selection_source": "fresh_search",
+        "reply": "รับทราบค่ะ เป็นรองเท้านะคะ 😊 หากต้องการนำเข้ากับ Shipify มีบริการขนส่งทั้งทางรถและทางเรือค่ะ\n\nสนใจส่งทางรถหรือทางเรือคะ"
+      }
+    },
+    {
+      "id": "A2",
+      "message": "สนใจนำเข้ารองเท้า",
+      "expectation": "no_handoff",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "RAG",
+        "handoff_reason": null,
+        "unsupported_company_fact": false,
+        "selection_source": "fresh_search",
+        "reply": "รับทราบค่ะ เป็นรองเท้านะคะ 😊 หากต้องการนำเข้ากับ Shipify มีบริการขนส่งทั้งทางรถและทางเรือค่ะ\n\nสนใจส่งทางรถหรือทางเรือคะ"
+      }
+    },
+    {
+      "id": "B",
+      "message": "อยากนำเข้าเสื้อผ้า",
+      "expectation": "no_handoff",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "RAG",
+        "handoff_reason": null,
+        "unsupported_company_fact": false,
+        "selection_source": "fresh_search",
+        "reply": "การฝากนำเข้าเสื้อผ้า หมายถึงลูกค้าจะต้องดำเนินการสั่งสินค้ากับร้านจีนด้วยตัวเอง โดยมีขั้นตอนหลักดังนี้:\n\n1. คัดลอกที่อยู่โกดังจีนจากหน้าเว็บ Shipify และส่งให้ร้านจีน\n2. ร้านจีนจะจัดส่งสินค้าไปยังโกดังจีน ซึ่งปกติใช้เวลาประมาณ 2–4 วัน ขึ้นอยู่กับร้าน\n3. เมื่อสินค้าถึงโกดังจีน จะใช้เวลาประมาณ 1 วันในการนำสินค้าเข้าระบบและเตรียมส่งออก\n4. การขนส่งจากจีนมาไทยใช้เวลาทางรถประมาณ 7–10 วัน หรือทางเรือประมาณ 14–20 วัน\n\nหากต้องการรายละเอียดเพิ่มเติมเกี่ยวกับการฝากนำเข้า สามารถสอบถามเพิ่มเติมได้ค่ะ"
+      }
+    },
+    {
+      "id": "C",
+      "message": "สนใจนำเข้าแบตเตอรี่",
+      "expectation": "prohibited_no_handoff",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "RAG",
+        "handoff_reason": null,
+        "unsupported_company_fact": false,
+        "selection_source": "fresh_search",
+        "reply": "แบตเตอรี่จัดเป็นสินค้าต้องห้ามค่ะ ทางเราไม่รับนำเข้าแบตเตอรี่ไม่ว่าจำนวนเท่าไหร่ก็ตาม เนื่องจากเป็นวัตถุอันตรายและวัตถุไวไฟค่ะ"
+      }
+    },
+    {
+      "id": "D",
+      "message": "สนใจนำเข้าน้ำยาปรับผ้านุ่ม",
+      "expectation": "prohibited_no_handoff",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "RAG",
+        "handoff_reason": null,
+        "unsupported_company_fact": false,
+        "selection_source": "fresh_search",
+        "reply": "ครีมอาบน้ำจัดเป็นสินค้าประเภทของเหลวค่ะ ซึ่งตอนนี้ทางเราไม่สามารถนำเข้าสินค้าประเภทของเหลวได้ ไม่ว่าจะเป็นครีมอาบน้ำ โลชั่น หรือผลิตภัณฑ์ของเหลวอื่นๆ ก็ตาม คุณลูกค้ามีสินค้าประเภทอื่นที่ต้องการนำเข้าเพิ่มไหมคะ\nAlternative phrasings: ครีมอาบน้ำสั่งได้ไหม / โลชั่นนำเข้าได้ไหม / ผลิตภัณฑ์ของเหลวนำเข้าได้ไหม / ครีมอาบน้ำฝากสั่งได้ไหม\nTags: ของเหลว, สินค้าต้องห้าม, นำเข้า"
+      }
+    },
+    {
+      "id": "E",
+      "message": "Shipify รับประกันว่าสินค้าทุกชิ้นจะผ่านศุลกากรไหม",
+      "expectation": "true_no_info_handoff",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "HUMAN_HANDOFF",
+        "handoff_reason": "unsupported_company_information",
+        "unsupported_company_fact": true,
+        "selection_source": "fresh_search",
+        "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันนโยบายเรื่องนี้ในระบบค่ะ รบกวนสอบถามเจ้าหน้าที่เพื่อความชัดเจนอีกครั้งนะคะ"
+      }
+    },
+    {
+      "id": "F",
+      "message": "ขอเบอร์ติดต่อ",
+      "expectation": "normal_rag",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "RAG",
+        "handoff_reason": null,
+        "unsupported_company_fact": false,
+        "selection_source": "fresh_search",
+        "reply": "Shipify  ฝ่ายบริการลูกค้า : 02-026-6426\nFasttrade  Call: 02-026-6425"
+      }
+    },
+    {
+      "id": "G",
+      "message": "สั่งเยอะได้ไหม",
+      "expectation": "clarification",
+      "verdict": "PASS",
+      "signal": {
+        "routing": "WORKFLOW",
+        "handoff_reason": null,
+        "unsupported_company_fact": null,
+        "selection_source": "clarification_referentless_underspecified",
+        "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ"
+      }
+    }
+  ],
+  "pass": 8,
+  "total": 8
+}
