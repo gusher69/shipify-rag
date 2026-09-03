@@ -6,37 +6,39 @@
 - **Production code changed:** NO   |   **Dependencies installed:** NO   |   **Deployed:** NO
 - **Logical cases:** 69   |   **Strings evaluated (messages + wording variants):** 109
 
+> **SEM-1 applied (2026-09-03).** This report reflects the tree *after* SEM-1 (private-record status-inquiry semantic routing). Baseline `3e83ed9` measured 65.2% logical-case pass / 69.7% semantic / 37.9% ERP-action / 14 SEMANTIC_INTENT primaries. SEM-1 moved 6 cases (CUS-G12, G16, S08, S15, S17, S18) from a RAG dead-end into the matching Business Action's identifier-collection flow. The 8 residual SEMANTIC_INTENT failures are out of SEM-1 scope by design: 5 operational WRITE requests with no Business Action configured (CUS-G21, S02, S03, S04, S13 → Human Handoff phase) and 3 genuine how-to questions (CUS-S05, S07, S12 → RAG is the correct primary route).
+
 > **Scope of this baseline.** The Decision Engine's *routing / classification / public-vs-private / action-selection* behaviour is measured directly and deterministically. The dimensions that depend on the live RAG pipeline output — **RAG RETRIEVAL (7)**, **NO-INFO CORRECTNESS (6)** beyond the routing-level signal, **CLARIFICATION QUALITY (5)** on RAG answers, and *DOES-NOT-INVENT* under RESPONSE QUALITY (9) — cannot be observed while the RAG pipeline is stubbed and are reported as `LIVE_RAG_REQUIRED`. Every case remains `REAL LINE REQUIRED`; nothing here closes a customer case.
 
 ## Overall
 
 | | Passed | Failed | Pass % |
 |---|---|---|---|
-| Logical cases (primary wording) | 45 | 24 | **65.2%** |
-| All strings (incl. wording variants) | 60 | 49 | **55.0%** |
+| Logical cases (primary wording) | 51 | 18 | **73.9%** |
+| All strings (incl. wording variants) | 68 | 41 | **62.4%** |
 
 ## Dimension scores — 8 scored dimensions (logical cases, primary wording)
 
 | # | Dimension | Pass | Scored | Pass % | LIVE_RAG_REQUIRED |
 |---|---|---|---|---|---|
-| 1 | SEMANTIC UNDERSTANDING | 46 | 66 | 69.7% | 0 |
-| 3 | PUBLIC / PRIVATE | 44 | 45 | 97.8% | 15 |
-| 4 | ROUTE | 47 | 66 | 71.2% | 0 |
-| 5 | CLARIFICATION QUALITY | 15 | 15 | 100.0% | 0 |
+| 1 | SEMANTIC UNDERSTANDING | 52 | 66 | 78.8% | 0 |
+| 3 | PUBLIC / PRIVATE | 50 | 51 | 98.0% | 9 |
+| 4 | ROUTE | 53 | 66 | 80.3% | 0 |
+| 5 | CLARIFICATION QUALITY | 21 | 21 | 100.0% | 0 |
 | 6 | NO-INFO CORRECTNESS | 35 | 35 | 100.0% | 34 |
 | 7 | RAG RETRIEVAL | 0 | 0 | n/a (live RAG) | 35 |
-| 8 | ERP / BUSINESS ACTION | 11 | 29 | 37.9% | 0 |
-| 9 | RESPONSE QUALITY | 53 | 69 | 76.8% | 0 |
+| 8 | ERP / BUSINESS ACTION | 17 | 29 | 58.6% | 0 |
+| 9 | RESPONSE QUALITY | 59 | 69 | 85.5% | 0 |
 
 **Dimension 2 — CONVERSATION OPERATION** is report-only (inferred, architecture untouched). Inferred distribution across logical cases: `{'NEW_ACTION': 68, 'CONTINUE': 1}` — single-turn UAT prompts infer NEW_ACTION; `genuine_continuation` infers CONTINUE, while the two P0-01 replay fixtures correctly infer NEW_ACTION (a fresh request after a completed cycle).
 
-> **Dimensions 6 & 7 are answered by the Live RAG pass below, not by the routing table above** (where they read `LIVE_RAG_REQUIRED` because RAG is stubbed). The live pass produced a bare *ไม่มีข้อมูลยืนยัน*-style reply for **12 of 53** probed cases — this is the customer's single largest observed failure and it reproduces on `3e83ed9`.
+> **Dimensions 6 & 7 are answered by the Live RAG pass below, not by the routing table above** (where they read `LIVE_RAG_REQUIRED` because RAG is stubbed). The live pass produced a bare *ไม่มีข้อมูลยืนยัน*-style reply for **11 of 47** probed cases — this is the customer's single largest observed failure and it reproduces on `3e83ed9`.
 
 ## Primary root-cause family counts (failing logical cases)
 
 | Root class | Cases |
 |---|---|
-| SEMANTIC_INTENT | 14 |
+| SEMANTIC_INTENT | 8 |
 | HUMAN_HANDOFF | 5 |
 | ERP_FLOW | 3 |
 | CONTEXT_OPERATION | 1 |
@@ -46,7 +48,7 @@
 
 | Category | Failed | Total |
 |---|---|---|
-| Private ERP | 17 | 21 |
+| Private ERP | 11 | 21 |
 | Operational/Human CS | 4 | 6 |
 | No-information/handoff | 1 | 2 |
 | Correction/change target | 1 | 1 |
@@ -64,8 +66,6 @@
 | Case | Exp route | Exp P/P | Actual routing | Root class | Key signal |
 |---|---|---|---|---|---|
 | CUS-G11 | ERP | PRIVATE | WORKFLOW | ERP_FLOW | action=None |
-| CUS-G12 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
-| CUS-G16 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
 | CUS-G17 | ERP | PRIVATE | WORKFLOW | ERP_FLOW | action=None |
 | CUS-G19 | HUMAN_CS | NA | RAG | HUMAN_HANDOFF | routed RAG |
 | CUS-G21 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
@@ -75,15 +75,11 @@
 | CUS-S05 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
 | CUS-S06 | HUMAN_CS | NA | RAG | HUMAN_HANDOFF | routed RAG |
 | CUS-S07 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
-| CUS-S08 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
 | CUS-S10 | HUMAN_CS | NA | RAG | HUMAN_HANDOFF | routed RAG |
 | CUS-S11 | ERP | PRIVATE | WORKFLOW | ERP_FLOW | action=None |
 | CUS-S12 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
 | CUS-S13 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
-| CUS-S15 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
 | CUS-S16 | HUMAN_CS | PRIVATE | RAG | HUMAN_HANDOFF | routed RAG |
-| CUS-S17 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
-| CUS-S18 | ERP | PRIVATE | RAG | SEMANTIC_INTENT | routed RAG; action=None |
 | CUS-SC3 | CLARIFY | PUBLIC | WORKFLOW | CONTEXT_OPERATION | routed WORKFLOW |
 | CUS-P06 | HUMAN_CS | PUBLIC | RAG | HUMAN_HANDOFF | routed RAG |
 | CUS-P20 | WORKFLOW | PUBLIC | WORKFLOW | LINK_CONVERSION | asked identity on PUBLIC; action=geturlproductdetail |
@@ -94,8 +90,8 @@ CUS-G01, CUS-G02, CUS-G04, CUS-G05, CUS-G06, CUS-G07, CUS-G08, CUS-G09, CUS-G10,
 
 ## Live RAG pass (REAL retrieval + generation; ERP HTTP faked)
 
-- probed **53** cases: every RAG/CLARIFY case with a customer-provided expected answer, plus every case that routed to RAG/GENERAL in the routing pass
-- verdict counts: `{'THIN_REPLY': 10, 'ANSWERED': 31, 'NO_INFO_FALLBACK': 12}`
+- probed **47** cases: every RAG/CLARIFY case with a customer-provided expected answer, plus every case that routed to RAG/GENERAL in the routing pass
+- verdict counts: `{'THIN_REPLY': 1, 'ANSWERED': 35, 'NO_INFO_FALLBACK': 11}`
 - `NO_INFO_FALLBACK` = the live pipeline produced a bare *ไม่มีข้อมูลยืนยัน*-style reply. `ANSWERED` = a substantive reply was generated (wording-correctness vs the CS-approved answer still needs a human / Ragas judge). `strong overlap` is a positive hint only, and is noisy for Thai because the token split has no word boundaries.
 
 | Case | exp route | routing | no-info sentence | strong overlap | verdict |
@@ -107,40 +103,34 @@ CUS-G01, CUS-G02, CUS-G04, CUS-G05, CUS-G06, CUS-G07, CUS-G08, CUS-G09, CUS-G10,
 | CUS-G06 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G07 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G08 | RAG | RAG | no | yes | ANSWERED |
-| CUS-G09 | RAG | RAG | no | · | ANSWERED |
+| CUS-G09 | RAG | RAG | YES | · | NO_INFO_FALLBACK |
 | CUS-G10 | RAG | RAG | no | yes | ANSWERED |
-| CUS-G12 | ERP | RAG | YES | · | NO_INFO_FALLBACK |
 | CUS-G13 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G14 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G15 | RAG | RAG | no | yes | ANSWERED |
-| CUS-G16 | ERP | GENERAL | no | · | THIN_REPLY |
-| CUS-G19 | HUMAN_CS | GENERAL | no | · | THIN_REPLY |
+| CUS-G19 | HUMAN_CS | GENERAL | YES | · | NO_INFO_FALLBACK |
 | CUS-G20 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G21 | ERP | RAG | no | · | ANSWERED |
-| CUS-G22 | RAG | RAG | no | · | THIN_REPLY |
+| CUS-G22 | RAG | RAG | no | · | ANSWERED |
 | CUS-G23 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G24 | RAG | RAG | no | · | ANSWERED |
 | CUS-G25 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G26 | RAG | RAG | no | · | ANSWERED |
 | CUS-G27 | RAG | RAG | no | yes | ANSWERED |
 | CUS-G28 | RAG | RAG | no | · | ANSWERED |
-| CUS-S02 | ERP | GENERAL | no | · | THIN_REPLY |
-| CUS-S03 | ERP | RAG | no | · | THIN_REPLY |
+| CUS-S02 | ERP | GENERAL | YES | · | NO_INFO_FALLBACK |
+| CUS-S03 | ERP | RAG | no | · | ANSWERED |
 | CUS-S04 | ERP | GENERAL | YES | · | NO_INFO_FALLBACK |
 | CUS-S05 | ERP | RAG | YES | · | NO_INFO_FALLBACK |
 | CUS-S06 | HUMAN_CS | RAG | no | · | ANSWERED |
 | CUS-S07 | ERP | RAG | YES | yes | NO_INFO_FALLBACK |
-| CUS-S08 | ERP | RAG | YES | · | NO_INFO_FALLBACK |
 | CUS-S10 | HUMAN_CS | GENERAL | YES | · | NO_INFO_FALLBACK |
 | CUS-S12 | ERP | RAG | YES | · | NO_INFO_FALLBACK |
-| CUS-S13 | ERP | GENERAL | no | · | THIN_REPLY |
+| CUS-S13 | ERP | GENERAL | no | · | ANSWERED |
 | CUS-S14 | RAG | RAG | no | · | ANSWERED |
-| CUS-S15 | ERP | RAG | no | · | THIN_REPLY |
 | CUS-S16 | HUMAN_CS | GENERAL | YES | · | NO_INFO_FALLBACK |
-| CUS-S17 | ERP | GENERAL | YES | · | NO_INFO_FALLBACK |
-| CUS-S18 | ERP | GENERAL | YES | · | NO_INFO_FALLBACK |
-| CUS-F01 | RAG | RAG | no | · | THIN_REPLY |
-| CUS-F02 | RAG | RAG | no | · | THIN_REPLY |
+| CUS-F01 | RAG | RAG | no | · | ANSWERED |
+| CUS-F02 | RAG | RAG | no | · | ANSWERED |
 | CUS-F03 | RAG | RAG | no | · | ANSWERED |
 | CUS-F04 | RAG | RAG | no | · | ANSWERED |
 | CUS-F05 | RAG | RAG | no | · | ANSWERED |

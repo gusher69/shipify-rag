@@ -19,21 +19,21 @@
   "n_logical_cases": 69,
   "n_strings_evaluated": 109,
   "aggregates": {
-    "cases_failed": 24,
-    "cases_passed": 45,
-    "variants_failed": 49,
-    "variants_passed": 60,
-    "overall_case_pass_pct": 65.2,
-    "overall_variant_pass_pct": 55.0,
+    "cases_failed": 18,
+    "cases_passed": 51,
+    "variants_failed": 41,
+    "variants_passed": 68,
+    "overall_case_pass_pct": 73.9,
+    "overall_variant_pass_pct": 62.4,
     "primary_root_class_counts_case": {
-      "SEMANTIC_INTENT": 14,
+      "SEMANTIC_INTENT": 8,
       "HUMAN_HANDOFF": 5,
       "ERP_FLOW": 3,
       "CONTEXT_OPERATION": 1,
       "LINK_CONVERSION": 1
     },
     "primary_root_class_counts_variant": {
-      "SEMANTIC_INTENT": 27,
+      "SEMANTIC_INTENT": 19,
       "HUMAN_HANDOFF": 9,
       "ERP_FLOW": 5,
       "CONTEXT_OPERATION": 5,
@@ -42,7 +42,7 @@
     "by_category": {
       "Private ERP": {
         "total": 21,
-        "failed": 17
+        "failed": 11
       },
       "Operational/Human CS": {
         "total": 6,
@@ -92,26 +92,26 @@
     "by_dimension": {
       "by_dimension_case": {
         "semantic": {
-          "pass": 46,
+          "pass": 52,
           "scored": 66,
-          "pct": 69.7,
+          "pct": 78.8,
           "live_rag_required": 0
         },
         "public_private": {
-          "pass": 44,
-          "scored": 45,
-          "pct": 97.8,
-          "live_rag_required": 15
+          "pass": 50,
+          "scored": 51,
+          "pct": 98.0,
+          "live_rag_required": 9
         },
         "route": {
-          "pass": 47,
+          "pass": 53,
           "scored": 66,
-          "pct": 71.2,
+          "pct": 80.3,
           "live_rag_required": 0
         },
         "clarification_quality": {
-          "pass": 15,
-          "scored": 15,
+          "pass": 21,
+          "scored": 21,
           "pct": 100.0,
           "live_rag_required": 0
         },
@@ -128,40 +128,40 @@
           "live_rag_required": 35
         },
         "erp_action": {
-          "pass": 11,
+          "pass": 17,
           "scored": 29,
-          "pct": 37.9,
+          "pct": 58.6,
           "live_rag_required": 0
         },
         "response_quality": {
-          "pass": 53,
+          "pass": 59,
           "scored": 69,
-          "pct": 76.8,
+          "pct": 85.5,
           "live_rag_required": 0
         }
       },
       "by_dimension_variant": {
         "semantic": {
-          "pass": 65,
+          "pass": 73,
           "scored": 106,
-          "pct": 61.3,
+          "pct": 68.9,
           "live_rag_required": 0
         },
         "public_private": {
-          "pass": 65,
-          "scored": 68,
-          "pct": 95.6,
-          "live_rag_required": 28
+          "pass": 73,
+          "scored": 76,
+          "pct": 96.1,
+          "live_rag_required": 20
         },
         "route": {
-          "pass": 70,
+          "pass": 78,
           "scored": 106,
-          "pct": 66.0,
+          "pct": 73.6,
           "live_rag_required": 0
         },
         "clarification_quality": {
-          "pass": 20,
-          "scored": 20,
+          "pass": 28,
+          "scored": 28,
           "pct": 100.0,
           "live_rag_required": 0
         },
@@ -178,15 +178,15 @@
           "live_rag_required": 53
         },
         "erp_action": {
-          "pass": 12,
+          "pass": 20,
           "scored": 47,
-          "pct": 25.5,
+          "pct": 42.6,
           "live_rag_required": 0
         },
         "response_quality": {
-          "pass": 78,
+          "pass": 86,
           "scored": 109,
-          "pct": 71.6,
+          "pct": 78.9,
           "live_rag_required": 0
         }
       },
@@ -198,11 +198,11 @@
   },
   "rag_probe": {
     "ran": true,
-    "n_probed": 53,
+    "n_probed": 47,
     "verdict_counts": {
-      "THIN_REPLY": 10,
-      "ANSWERED": 31,
-      "NO_INFO_FALLBACK": 12
+      "THIN_REPLY": 1,
+      "ANSWERED": 35,
+      "NO_INFO_FALLBACK": 11
     },
     "rows": [
       {
@@ -221,7 +221,7 @@
         "case_id": "CUS-G02",
         "query": "ขอที่อยู่โกดังจีน,ต้องการส่งของผ่านชิปปิ้ง ส่งไปที่อยู่ไหน",
         "routing_type": "RAG",
-        "reply_head": "คุณสามารถเข้าไปที่หน้าเว็บของเรา แล้วเลือกเมนู \"ที่อยู่โกดังจีน\" เพื่อคัดลอกที่อยู่ตามขั้นตอนที่แสดงในรูปได้เลยค่ะ",
+        "reply_head": "คุณสามารถดูที่อยู่และแผนที่ของโกดังจีนได้โดยเข้าไปที่หน้าเว็บของเรา แล้วเลือกเมนู \"ที่อยู่โกดังจีน\" จากนั้นคัดลอกที่อยู่ตามขั้นตอนที่แสดงในรูปเพื่อส่งให้ร้านจีน",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 5,
@@ -293,13 +293,13 @@
         "case_id": "CUS-G09",
         "query": "วิธีการชำระบิลสั่งซื้อ,ชำระค่าสินค้ายังไง,จ่ายบิลสั่งซื้อยังไง",
         "routing_type": "RAG",
-        "reply_head": "สำหรับการชำระบิลสั่งซื้อ คุณสามารถทำได้โดย:\n\n1. คลิกเข้าไปที่เลขบิลที่ต้องการชำระ\n2. จะมี QR Code ปรากฏขึ้นมาให้คุณสแกนเพื่อชำระเงิน\n3. หลังจากสแกนจ่ายเรียบร้อย",
-        "noinfo_sentence": false,
+        "reply_head": "ในการชำระบิลสั่งซื้อ คุณสามารถคลิกเข้าไปที่เลขบิล จากนั้นจะมีให้กดชำระยอด จะมี QR Code ให้สแกนจ่ายได้เลยค่ะ เมื่อสแกนจ่ายเรียบร้อยแล้ว กดยืนยันการชำระยอดใต้ QR ",
+        "noinfo_sentence": true,
         "expected_token_overlap": 1,
         "expected_tokens": 7,
         "overlap_ratio": 0.14,
         "strong_overlap": false,
-        "verdict": "ANSWERED"
+        "verdict": "NO_INFO_FALLBACK"
       },
       {
         "case_id": "CUS-G10",
@@ -312,18 +312,6 @@
         "overlap_ratio": 1.0,
         "strong_overlap": true,
         "verdict": "ANSWERED"
-      },
-      {
-        "case_id": "CUS-G12",
-        "query": "สินค้าถึงโกดังหรือยัง , ได้รับสินค้าหรือยัง",
-        "routing_type": "RAG",
-        "reply_head": "ตอนนี้ยังไม่มีข้อมูลยืนยันว่าสินค้าถึงโกดังหรือจุดรับสินค้าหรือยังค่ะ",
-        "noinfo_sentence": true,
-        "expected_token_overlap": 0,
-        "expected_tokens": 4,
-        "overlap_ratio": 0.0,
-        "strong_overlap": false,
-        "verdict": "NO_INFO_FALLBACK"
       },
       {
         "case_id": "CUS-G13",
@@ -362,28 +350,16 @@
         "verdict": "ANSWERED"
       },
       {
-        "case_id": "CUS-G16",
-        "query": "ร้านส่งหรือยังคะ",
-        "routing_type": "GENERAL",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
-        "noinfo_sentence": false,
-        "expected_token_overlap": 0,
-        "expected_tokens": 2,
-        "overlap_ratio": 0.0,
-        "strong_overlap": false,
-        "verdict": "THIN_REPLY"
-      },
-      {
         "case_id": "CUS-G19",
         "query": "เรียกรถให้ได้ไหม ,เหมารถให้ได้ไหม",
         "routing_type": "GENERAL",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
-        "noinfo_sentence": false,
+        "reply_head": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องบริการเรียกรถหรือเหมารถค่ะ",
+        "noinfo_sentence": true,
         "expected_token_overlap": 0,
         "expected_tokens": 6,
         "overlap_ratio": 0.0,
         "strong_overlap": false,
-        "verdict": "THIN_REPLY"
+        "verdict": "NO_INFO_FALLBACK"
       },
       {
         "case_id": "CUS-G20",
@@ -413,13 +389,13 @@
         "case_id": "CUS-G22",
         "query": "เรทเท่าไหร่คะ ,เรทนำเข้าเท่าไหร่ ,เรทฝากสั่งเท่าไหร่",
         "routing_type": "RAG",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
+        "reply_head": "เรทฝากสั่งคือ 5.11 บาทต่อหยวน\n\nสำหรับการขนส่ง:\n- ทางรถ: 35 บาท/กิโลกรัม หรือ 6,900 บาท/CBM\n- ทางเรือ: 19 บาท/กิโลกรัม หรือ 4,500 บาท/CBM\n\nค่าขนส่งจะเปรียบเทียบร",
         "noinfo_sentence": false,
-        "expected_token_overlap": 0,
+        "expected_token_overlap": 2,
         "expected_tokens": 21,
-        "overlap_ratio": 0.0,
+        "overlap_ratio": 0.1,
         "strong_overlap": false,
-        "verdict": "THIN_REPLY"
+        "verdict": "ANSWERED"
       },
       {
         "case_id": "CUS-G23",
@@ -461,7 +437,7 @@
         "case_id": "CUS-G26",
         "query": "ชำระบิลขนส่งยังไง,ชำระค่านำเข้ายังไง",
         "routing_type": "RAG",
-        "reply_head": "คุณสามารถชำระบิลขนส่งได้โดยการเติมเงินและกดชำระตามขั้นตอนในรูปที่แอดมินส่งให้ค่ะ",
+        "reply_head": "คุณสามารถเติมเงินและกดชำระในบิลตามขั้นตอนที่แอดมินส่งรูปให้ได้เลยค่ะ",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 3,
@@ -485,7 +461,7 @@
         "case_id": "CUS-G28",
         "query": "มีบริการตีลังไม้ไหม,ตีลังได้ไหม",
         "routing_type": "RAG",
-        "reply_head": "ทางเรามีบริการตีลังไม้ให้ค่ะ คุณลูกค้าสามารถเปิดบิลและกดเลือกตีลังไม้ได้เลย เงื่อนไขการตีลังเป็นไปตามที่บริษัทกำหนดค่ะ",
+        "reply_head": "ทางเรามีบริการตีลังไม้ให้ค่ะ คุณลูกค้าสามารถเปิดบิลและกดเลือกตีลังไม้มาได้เลย เงื่อนไขการตีลังเป็นไปตามที่บริษัทกำหนดค่ะ",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 4,
@@ -497,31 +473,31 @@
         "case_id": "CUS-S02",
         "query": "ต้องการแก้จำนวนสินค้าในบิล",
         "routing_type": "GENERAL",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
-        "noinfo_sentence": false,
+        "reply_head": "ตอนนี้ยังไม่มีข้อมูลเกี่ยวกับการแก้จำนวนสินค้าในบิลค่ะ หากต้องการความช่วยเหลือเพิ่มเติม อาจต้องติดต่อเจ้าหน้าที่เพื่อดำเนินการให้ค่ะ",
+        "noinfo_sentence": true,
         "expected_token_overlap": 0,
         "expected_tokens": 6,
         "overlap_ratio": 0.0,
         "strong_overlap": false,
-        "verdict": "THIN_REPLY"
+        "verdict": "NO_INFO_FALLBACK"
       },
       {
         "case_id": "CUS-S03",
         "query": "สามารถเปลี่ยนเป็นจัดส่งทางรถ,ทางเรือได้ไหมคะ",
         "routing_type": "RAG",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
+        "reply_head": "สามารถจัดส่งได้ทั้งทางรถและทางเรือค่ะ\n\n- **ทางรถ**: ค่าขนส่งอยู่ที่ 35 บาท/กิโลกรัม หรือ 6,900 บาท/CBM\n- **ทางเรือ**: ค่าขนส่งอยู่ที่ 19 บาท/กิโลกรัม หรือ 4,500",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 6,
         "overlap_ratio": 0.0,
         "strong_overlap": false,
-        "verdict": "THIN_REPLY"
+        "verdict": "ANSWERED"
       },
       {
         "case_id": "CUS-S04",
         "query": "ลืมเลือก VAT ไปค่ะ ,ต้องการVATด้วยค่ะ",
         "routing_type": "GENERAL",
-        "reply_head": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องการเพิ่ม VAT หลังการสั่งซื้อค่ะ หากต้องการใบกำกับภาษีที่มี VAT แนะนำให้ติดต่อเจ้าหน้าที่เพื่อขอความช่วยเหลือเพิ่มเติมค่ะ",
+        "reply_head": "ตอนนี้ยังไม่มีข้อมูลยืนยันเกี่ยวกับการเพิ่ม VAT หลังจากที่ทำการสั่งซื้อไปแล้วค่ะ แนะนำให้ติดต่อเจ้าหน้าที่เพื่อขอความช่วยเหลือเพิ่มเติมในเรื่องนี้ค่ะ",
         "noinfo_sentence": true,
         "expected_token_overlap": 1,
         "expected_tokens": 22,
@@ -545,7 +521,7 @@
         "case_id": "CUS-S06",
         "query": "ต้องการสั่งผลิตตามสเปค ,สั่งสกรีนโลโก้ได้ไหมคะ",
         "routing_type": "RAG",
-        "reply_head": "หากต้องการรายละเอียดเพิ่มเติมเกี่ยวกับบริการนี้ แนะนำให้ติดต่อเจ้าหน้าที่เพื่อตรวจสอบเพิ่มเติมค่ะ",
+        "reply_head": "หากต้องการข้อมูลเพิ่มเติมเกี่ยวกับการสั่งซื้อหรือบริการพิเศษ แนะนำให้ติดต่อเจ้าหน้าที่เพื่อสอบถามรายละเอียดเพิ่มเติมค่ะ",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 11,
@@ -566,22 +542,10 @@
         "verdict": "NO_INFO_FALLBACK"
       },
       {
-        "case_id": "CUS-S08",
-        "query": "บิลขนส่งนี้ หรือแทรคนี้เป็นของบิลสั่งซื้อไหน",
-        "routing_type": "RAG",
-        "reply_head": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ",
-        "noinfo_sentence": true,
-        "expected_token_overlap": 0,
-        "expected_tokens": 9,
-        "overlap_ratio": 0.0,
-        "strong_overlap": false,
-        "verdict": "NO_INFO_FALLBACK"
-      },
-      {
         "case_id": "CUS-S10",
         "query": "รีเเพ็คค่ะ",
         "routing_type": "GENERAL",
-        "reply_head": "ตอนนี้ยังไม่มีข้อมูลเกี่ยวกับการรีแพ็คในระบบค่ะ หากต้องการรายละเอียดเพิ่มเติมเกี่ยวกับบริการนี้ อาจต้องติดต่อเจ้าหน้าที่เพื่อสอบถามข้อมูลเพิ่มเติมค่ะ",
+        "reply_head": "ตอนนี้ยังไม่มีข้อมูลเกี่ยวกับบริการรีแพ็คในระบบค่ะ",
         "noinfo_sentence": true,
         "expected_token_overlap": 0,
         "expected_tokens": 8,
@@ -605,13 +569,13 @@
         "case_id": "CUS-S13",
         "query": "บิลซ้ำค่ะ",
         "routing_type": "GENERAL",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
+        "reply_head": "หากคุณพบว่ามีบิลซ้ำกัน แนะนำให้ตรวจสอบรายละเอียดบิลทั้งสองใบก่อนว่ามีรายการและยอดเงินที่เหมือนกันหรือไม่ ถ้าพบว่าเป็นบิลซ้ำจริง คุณสามารถติดต่อฝ่ายบริการลูกค้าเ",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 4,
         "overlap_ratio": 0.0,
         "strong_overlap": false,
-        "verdict": "THIN_REPLY"
+        "verdict": "ANSWERED"
       },
       {
         "case_id": "CUS-S14",
@@ -626,18 +590,6 @@
         "verdict": "ANSWERED"
       },
       {
-        "case_id": "CUS-S15",
-        "query": "ใส่ที่อยู่โกดังจีนถูกไหมคะ",
-        "routing_type": "RAG",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
-        "noinfo_sentence": false,
-        "expected_token_overlap": 0,
-        "expected_tokens": 2,
-        "overlap_ratio": 0.0,
-        "strong_overlap": false,
-        "verdict": "THIN_REPLY"
-      },
-      {
         "case_id": "CUS-S16",
         "query": "รวมบิลเหมารถค่ะ",
         "routing_type": "GENERAL",
@@ -650,52 +602,28 @@
         "verdict": "NO_INFO_FALLBACK"
       },
       {
-        "case_id": "CUS-S17",
-        "query": "ขอแทรคไทยค่ะ (กรณีลูกค้าไม่เข้ามาเช็คในระบบเอง)",
-        "routing_type": "GENERAL",
-        "reply_head": "ตอนนี้ยังไม่มีข้อมูลแทรคพัสดุในระบบค่ะ หากต้องการทราบสถานะพัสดุเพิ่มเติม แนะนำให้ติดต่อเจ้าหน้าที่เพื่อช่วยตรวจสอบให้ค่ะ",
-        "noinfo_sentence": true,
-        "expected_token_overlap": 0,
-        "expected_tokens": 6,
-        "overlap_ratio": 0.0,
-        "strong_overlap": false,
-        "verdict": "NO_INFO_FALLBACK"
-      },
-      {
-        "case_id": "CUS-S18",
-        "query": "วันนี้มีของเข้าไทยไหมคะ",
-        "routing_type": "GENERAL",
-        "reply_head": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องการนำเข้าไทยในวันนี้ค่ะ",
-        "noinfo_sentence": true,
-        "expected_token_overlap": 0,
-        "expected_tokens": 10,
-        "overlap_ratio": 0.0,
-        "strong_overlap": false,
-        "verdict": "NO_INFO_FALLBACK"
-      },
-      {
         "case_id": "CUS-F01",
         "query": "ครีมอาบน้ำนำเข้าได้ไหม",
         "routing_type": "RAG",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
+        "reply_head": "ฟรีมอาบน้ำจัดเป็นสินค้าประเภทของเหลว ซึ่งตอนนี้ทางเราไม่สามารถนำเข้าสินค้าประเภทของเหลวได้ค่ะ\n\nมีสินค้าอย่างอื่นที่ต้องการให้ช่วยเช็กไหมคะ",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 4,
         "overlap_ratio": 0.0,
         "strong_overlap": false,
-        "verdict": "THIN_REPLY"
+        "verdict": "ANSWERED"
       },
       {
         "case_id": "CUS-F02",
         "query": "ทางรถกับทางเรือระยะเวลากี่วัน",
         "routing_type": "RAG",
-        "reply_head": "ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งนะคะ",
+        "reply_head": "ทางรถใช้เวลาประมาณ 7–10 วัน ส่วนทางเรือใช้เวลาประมาณ 14–20 วันค่ะ ระยะเวลานับจากวันที่สินค้าเข้าถึงโกดังจีน และอาจมีการคลาดเคลื่อนจากด่าน ศุลกากร หรือเหตุสุดวิส",
         "noinfo_sentence": false,
         "expected_token_overlap": 0,
         "expected_tokens": 3,
         "overlap_ratio": 0.0,
         "strong_overlap": false,
-        "verdict": "THIN_REPLY"
+        "verdict": "ANSWERED"
       },
       {
         "case_id": "CUS-F03",
@@ -1467,13 +1395,16 @@
       "primary_string": "สินค้าถึงโกดังหรือยัง , ได้รับสินค้าหรือยัง",
       "n_strings_evaluated": 3,
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatashipmentlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -1491,28 +1422,25 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
       "response_quality_detail": {
         "answers_or_asks": true,
         "no_over_verify": true,
         "not_bare_no_info": true,
-        "asks_next_required": false
+        "asks_next_required": true
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true,
-      "variant_only_failures": [
-        "สินค้าถึงโกดังหรือยัง",
-        "ได้รับสินค้าหรือยัง"
-      ],
+      "primary_root_class": null,
+      "failed": false,
+      "variant_only_failures": [],
       "has_customer_expected_answer": true,
       "requires_real_line": true
     },
@@ -1690,13 +1618,16 @@
       "primary_string": "ร้านส่งหรือยังคะ",
       "n_strings_evaluated": 1,
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdataorderlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -1714,24 +1645,24 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
       "response_quality_detail": {
         "answers_or_asks": true,
         "no_over_verify": true,
         "not_bare_no_info": true,
-        "asks_next_required": false
+        "asks_next_required": true
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true,
+      "primary_root_class": null,
+      "failed": false,
       "variant_only_failures": [],
       "has_customer_expected_answer": true,
       "requires_real_line": true
@@ -1747,8 +1678,8 @@
       "signal": {
         "routing_type": "WORKFLOW",
         "reply": "พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการค่ะ รบกวนระบุให้ชัดเจนขึ้นอีกนิดนะคะ",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": null,
         "selected_action": null,
         "missing_parameters": [],
@@ -2886,13 +2817,17 @@
       "primary_string": "บิลขนส่งนี้ หรือแทรคนี้เป็นของบิลสั่งซื้อไหน",
       "n_strings_evaluated": 1,
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatatracking",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode",
+          "Tracking"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -2910,24 +2845,24 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
       "response_quality_detail": {
         "answers_or_asks": true,
         "no_over_verify": true,
         "not_bare_no_info": true,
-        "asks_next_required": false
+        "asks_next_required": true
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true,
+      "primary_root_class": null,
+      "failed": false,
       "variant_only_failures": [],
       "has_customer_expected_answer": true,
       "requires_real_line": true
@@ -3292,13 +3227,16 @@
       "primary_string": "ใส่ที่อยู่โกดังจีนถูกไหมคะ",
       "n_strings_evaluated": 1,
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "SHIPIFY_INFORMATION",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "getdatacustomer",
+        "missing_parameters": [
+          "SecretCode",
+          "customer_identifier"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -3316,24 +3254,24 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
       "response_quality_detail": {
         "answers_or_asks": true,
         "no_over_verify": true,
         "not_bare_no_info": true,
-        "asks_next_required": false
+        "asks_next_required": true
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true,
+      "primary_root_class": null,
+      "failed": false,
       "variant_only_failures": [],
       "has_customer_expected_answer": true,
       "requires_real_line": true
@@ -3402,13 +3340,17 @@
       "primary_string": "ขอแทรคไทยค่ะ (กรณีลูกค้าไม่เข้ามาเช็คในระบบเอง)",
       "n_strings_evaluated": 1,
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatatracking",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode",
+          "Tracking"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -3426,24 +3368,24 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
       "response_quality_detail": {
         "answers_or_asks": true,
         "no_over_verify": true,
         "not_bare_no_info": true,
-        "asks_next_required": false
+        "asks_next_required": true
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true,
+      "primary_root_class": null,
+      "failed": false,
       "variant_only_failures": [],
       "has_customer_expected_answer": true,
       "requires_real_line": true
@@ -3457,48 +3399,54 @@
       "primary_string": "วันนี้มีของเข้าไทยไหมคะ",
       "n_strings_evaluated": 1,
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "SHIPIFY_INFORMATION",
-        "turn_intent_coerced": null,
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "selected_action": "searchdatashipmentlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
-          "classification": "RAG_ONLY",
-          "confidence": 0.6,
+          "classification": "ERP_ONLY",
+          "confidence": 0.5,
           "evidence": [
-            "no Business Action keyword/example/description overlap found"
+            "Business Action matched: searchdatashipmentlist",
+            "Business Action matched by keyword, but no parameter value found yet (the Action's own clarification flow will ask for it — no ERP execution without one)"
           ],
-          "selected_action_id": null,
-          "candidate_action_ids": [],
-          "erp_sub_question": null,
-          "rag_sub_question": "วันนี้มีของเข้าไทยไหมคะ"
+          "selected_action_id": "867f996c-4e37-4d46-bf9f-ed7ebb41b816",
+          "candidate_action_ids": [
+            "867f996c-4e37-4d46-bf9f-ed7ebb41b816"
+          ],
+          "erp_sub_question": "วันนี้มีของเข้าไทยไหมคะ",
+          "rag_sub_question": null
         },
         "self_verification": false,
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
       "response_quality_detail": {
         "answers_or_asks": true,
         "no_over_verify": true,
         "not_bare_no_info": true,
-        "asks_next_required": false
+        "asks_next_required": true
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true,
+      "primary_root_class": null,
+      "failed": false,
       "variant_only_failures": [],
       "has_customer_expected_answer": true,
       "requires_real_line": true
@@ -4641,8 +4589,8 @@
       "signal": {
         "routing_type": "WORKFLOW",
         "reply": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "fresh_search",
         "selected_action": "searchdatashipment",
         "missing_parameters": [
@@ -4704,8 +4652,8 @@
       "signal": {
         "routing_type": "WORKFLOW",
         "reply": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "fresh_search",
         "selected_action": "searchdatashipment",
         "missing_parameters": [
@@ -5563,13 +5511,16 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatashipmentlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -5587,18 +5538,18 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-G12",
@@ -5607,13 +5558,16 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatashipmentlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -5631,18 +5585,18 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-G12",
@@ -5651,13 +5605,16 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatashipmentlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -5675,18 +5632,18 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-G13",
@@ -5827,13 +5784,16 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdataorderlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -5851,18 +5811,18 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-G17",
@@ -5873,8 +5833,8 @@
       "signal": {
         "routing_type": "WORKFLOW",
         "reply": "พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการค่ะ รบกวนระบุให้ชัดเจนขึ้นอีกนิดนะคะ",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": null,
         "selected_action": null,
         "missing_parameters": [],
@@ -7702,13 +7662,17 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatatracking",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode",
+          "Tracking"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -7726,18 +7690,18 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-S09",
@@ -8120,13 +8084,16 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "SHIPIFY_INFORMATION",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "getdatacustomer",
+        "missing_parameters": [
+          "SecretCode",
+          "customer_identifier"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -8144,18 +8111,18 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-S16",
@@ -8208,13 +8175,17 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
-        "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
+        "selection_source": "private_state_inquiry",
+        "selected_action": "searchdatatracking",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode",
+          "Tracking"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
@@ -8232,18 +8203,18 @@
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-S18",
@@ -8252,42 +8223,48 @@
       "expected_route": "ERP",
       "expected_public_private": "PRIVATE",
       "signal": {
-        "routing_type": "RAG",
-        "reply": "[STUB-RAG-ANSWER]",
-        "turn_intent": "SHIPIFY_INFORMATION",
-        "turn_intent_coerced": null,
+        "routing_type": "WORKFLOW",
+        "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "fresh_search",
-        "selected_action": null,
-        "missing_parameters": [],
+        "selected_action": "searchdatashipmentlist",
+        "missing_parameters": [
+          "SecretCode",
+          "CustCode"
+        ],
         "collected_parameters": [],
         "is_complete": false,
         "classification": {
-          "classification": "RAG_ONLY",
-          "confidence": 0.6,
+          "classification": "ERP_ONLY",
+          "confidence": 0.5,
           "evidence": [
-            "no Business Action keyword/example/description overlap found"
+            "Business Action matched: searchdatashipmentlist",
+            "Business Action matched by keyword, but no parameter value found yet (the Action's own clarification flow will ask for it — no ERP execution without one)"
           ],
-          "selected_action_id": null,
-          "candidate_action_ids": [],
-          "erp_sub_question": null,
-          "rag_sub_question": "วันนี้มีของเข้าไทยไหมคะ"
+          "selected_action_id": "867f996c-4e37-4d46-bf9f-ed7ebb41b816",
+          "candidate_action_ids": [
+            "867f996c-4e37-4d46-bf9f-ed7ebb41b816"
+          ],
+          "erp_sub_question": "วันนี้มีของเข้าไทยไหมคะ",
+          "rag_sub_question": null
         },
         "self_verification": false,
         "erp_called": false
       },
       "dimensions": {
-        "route": "FAIL",
-        "semantic": "FAIL",
+        "route": "PASS",
+        "semantic": "PASS",
         "conversation_operation": "NEW_ACTION",
-        "public_private": "LIVE_RAG_REQUIRED",
-        "clarification_quality": "NA",
+        "public_private": "PASS",
+        "clarification_quality": "WEAK",
         "no_info": "PASS",
         "rag_retrieval": "NA",
-        "erp_action": "FAIL",
-        "response_quality": "FAIL"
+        "erp_action": "PASS",
+        "response_quality": "PASS"
       },
-      "primary_root_class": "SEMANTIC_INTENT",
-      "failed": true
+      "primary_root_class": null,
+      "failed": false
     },
     {
       "case_id": "CUS-S20",
@@ -9561,8 +9538,8 @@
       "signal": {
         "routing_type": "WORKFLOW",
         "reply": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "fresh_search",
         "selected_action": "searchdatashipment",
         "missing_parameters": [
@@ -9613,8 +9590,8 @@
       "signal": {
         "routing_type": "WORKFLOW",
         "reply": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
-        "turn_intent": "AMBIGUOUS",
-        "turn_intent_coerced": null,
+        "turn_intent": "PRIVATE_ACTION",
+        "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "fresh_search",
         "selected_action": "searchdatashipment",
         "missing_parameters": [

@@ -1234,6 +1234,177 @@ _PRIVATE_STATE_QUERY_RE = re.compile(r"เหลือ|ยอดคงเหล�
 _DETAIL_INTENT_RE = re.compile(r"รายละเอียด", re.IGNORECASE)
 
 
+# ── SEM-1: Private-record status-inquiry concept (2026-09-03) ──────────
+# ONE generic, compositional, non-LLM recognizer for the semantic frame
+# "the customer is asking about the STATE of their OWN business record /
+# account" — the Customer UAT baseline's single largest failure family
+# (14 SEMANTIC_INTENT primaries + 12 downstream live-RAG "ไม่มีข้อมูลยืนยัน"
+# dead-ends). The routing path has NO LLM classifier; matching is purely
+# lexical keyword overlap against each Business Action's configured
+# search_keywords, and natural Thai phrasings ("สินค้าถึงโกดังหรือยัง",
+# "ร้านส่งของให้ผมหรือยัง", "ของผมเข้าไทยยัง") share zero tokens with any
+# action, so the turn falls through to RAG and dead-ends.
+#
+# This is NOT a phrase dictionary — it is a small set of GENERIC building
+# blocks combined by rule:
+#   state-probe   : a "what is the state of X" marker that has no
+#                   "how does X work in general" reading in natural Thai
+#   record-domain : a generic logistics/order/payment record noun
+#   ownership     : first-person / on-file-account wording (optional when
+#                   a record-domain noun is present, since in a 1:1 CS DM
+#                   an unqualified record question is about the sender)
+# and gated OFF for company-subject questions, how-to questions, and
+# operational WRITE requests (those belong to RAG / the Human Handoff
+# phase, never here — see the SEM-1 spec point 6).
+# The completive "ยัง" ("…yet?") — NOT "ยังไง" ("how"), "ยังไม่" ("not
+# yet, [statement]"). Only the sentence-final / "หรือยัง" reading is an
+# arrival state probe.
+_YET = r"(?:(?:หรือ|รึ)ยัง|ยัง(?=คะ|ครับ|คับ|ค่ะ|มั้ย|ไหม|เปล่า|\s|$|\?|,))"
+_PSI_STATE_PROBE_RE = re.compile(
+    r"ถึงไหน|ถึงไหนแล้ว|ถึง.{0,6}(โกดัง|ไทย|จีน).{0,4}" + _YET
+    + r"|เข้า.{0,4}ไทย.{0,4}(?:" + _YET + r"|ไหม|มั้ย)"
+    + r"|ส่ง.{0,8}(?:" + _YET + r")|ส่งของ.{0,8}(?:" + _YET + r")"
+    + r"|มา.{0,4}(?:" + _YET + r")|เข้า.{0,6}(?:" + _YET + r")"
+    + r"|ได้รับ.{0,8}(?:" + _YET + r")"
+    + r"|มี.{0,12}(ของ|สินค้า|พัสดุ|บิล).{0,8}(เข้า|ถึง|มา)ไทย"
+    + r"|สถานะ|คืบหน้า|ค้างอยู่|(?<!ที่)อยู่(ที่)?ไหน|ถึงไทยรึยัง"
+    + r"|เป็นไง|เป็นยังไงบ้าง|เป็นอย่างไรบ้าง|เป็นไงบ้าง|เป็นยังไงบ้าง"
+    + r"|เหลือ.{0,12}(ไหม|มั้ย|บ้าง|กี่|เท่า)|เหลือเท่า(ไหร่|ไร)|เหลือกี่|มีเท่า(ไหร่|ไร)|กี่บาท"
+    + r"|เป็นของ.{0,10}(บิล|ออเดอร์|คำสั่งซื้อ).{0,4}ไหน|ของบิลสั่งซื้อ.{0,3}ไหน"
+    + r"|(ที่อยู่|address).{0,10}ถูก(ต้อง)?.{0,4}(ไหม|มั้ย|รึเปล่า)|ใส่.{0,12}ถูก(ต้อง)?.{0,4}ไหม")
+# "มี…อะไร/บ้าง" is a CATALOG probe ("what services are there",
+# "which goods are prohibited") — public FAQ, NOT a private state probe.
+# It only signals a private inquiry when the customer is asking what is
+# in THEIR OWN account (owner wording + a customer-data domain).
+_PSI_CATALOG_PROBE_RE = re.compile(r"มี.{0,15}(อะไร|บ้าง)")
+# "ขอ<data-noun>" — a bare request for the customer's own record data
+# (ขอแทรคไทย / ขอสถานะ / ขอรายละเอียดออเดอร์) is a status inquiry, not a
+# how-to. "ขอที่อยู่โกดัง" / "ขอเบอร์ติดต่อ" carry no record-domain noun
+# and are filtered out by the domain gate.
+_PSI_DATA_REQUEST_RE = re.compile(
+    r"ขอ.{0,3}(เลข)?(แทรค|แทร็ก|แทรก|สถานะ|ราย(การ|ละเอียด)|ข้อมูล|ยอด)")
+# generic record-domain nouns -> coarse capability domain
+_PSI_DOMAIN_RES = (
+    ("tracking", re.compile(r"แทรค|แทร็ก|แทรก|tracking|เลขพัสดุจีน|เลขจีน", re.IGNORECASE)),
+    ("order", re.compile(r"ออเดอร์|คำสั่งซื้อ|บิลสั่งซื้อ|ร้าน.{0,6}ส่ง|ที่สั่งไป|ที่สั่งไว้|order", re.IGNORECASE)),
+    ("customer_data", re.compile(r"วอลเล็ท|wallet|ยอดเงิน|เงินในระบบ|เงินที่เติม|เติมเงิน|เครดิต|คูปอง|coupon|ยอดของ|ที่อยู่โกดังจีน|ที่อยู่จีน", re.IGNORECASE)),
+    ("shipment", re.compile(r"พัสดุ|สินค้า|กล่อง|ของที่ส่ง|ของผม|ของฉัน|ของหนู|บิลขนส่ง|ของเข้าไทย|ของ(เรา|ผม|ฉัน)", re.IGNORECASE)),
+)
+_PSI_OWNERSHIP_RE = re.compile(r"ผม|ฉัน|ดิฉัน|หนู|เรา|ของผม|ของฉัน|บัญชีของ|บัญชีผม|ในระบบ|ที่ผูก|ที่ลงทะเบียน|ที่สั่งไป")
+_PSI_THIRD_PARTY_RE = re.compile(r"บริษัท(?!.{0,4}ผม)|เพื่อน|ลูกค้าท่านอื่น|คนอื่น")
+_PSI_HOWTO_RE = re.compile(r"ยังไง|ยังงัย|อย่างไร|วิธี(การ)?|ขั้นตอน|how\s*to", re.IGNORECASE)
+_PSI_WRITE_VERB_RE = re.compile(r"เปลี่ยน|แก้ไข|แก้จำนวน|ยกเลิก|ถอนเงิน|ถอน|เพิ่ม.{0,4}(vat|VAT|จำนวน)|ลบ|รวมบิล|รีแพ็ค|รีเเพ็ค|ตีลัง|สั่งผลิต|สกรีน")
+_PSI_CHECK_VERB_RE = re.compile(r"เช็ก|เช็ค|เชค|ตรวจสอบ|ดูให้|ขอดู|ขอเช็ก")
+
+
+def _classify_private_state_inquiry(message: str):
+    """Pure, non-LLM. Returns a dict describing the private-record
+    status-inquiry concept when the message expresses it, else None:
+
+        {"domain": "shipment"|"order"|"tracking"|"customer_data",
+         "intent": "status_inquiry", "ownership_scope": "USER_PRIVATE",
+         "confidence": float}
+
+    Message-only (no history, no candidate scores) so it can run in the
+    same place classify_turn_intent() does. Never fires for a company-
+    subject question, a how-to question, or an operational WRITE request.
+    """
+    text = message or ""
+    if not text.strip():
+        return None
+    # Hard negative gates first — keep the already-good 97.8% public/
+    # private behaviour intact and stay out of the Human Handoff phase's
+    # operational-WRITE territory (SEM-1 spec point 6).
+    if _PSI_THIRD_PARTY_RE.search(text):
+        return None
+    if _PSI_WRITE_VERB_RE.search(text):
+        return None
+    has_probe = bool(_PSI_STATE_PROBE_RE.search(text))
+    has_howto = bool(_PSI_HOWTO_RE.search(text))
+    has_check_verb = bool(_PSI_CHECK_VERB_RE.search(text) or _PSI_DATA_REQUEST_RE.search(text))
+    has_owner = bool(_PSI_OWNERSHIP_RE.search(text))
+    has_catalog_probe = bool(_PSI_CATALOG_PROBE_RE.search(text))
+    # A how-to question ("ถอนเงินยังไง", "ใช้คูปองยังไง") is RAG's job even
+    # when it names a record noun — unless it ALSO carries a concrete
+    # state probe ("ยอดผมเหลือเท่าไหร่ ดูยังไง" is still a balance query).
+    if has_howto and not has_probe:
+        return None
+    domain = None
+    for name, rx in _PSI_DOMAIN_RES:
+        if rx.search(text):
+            domain = name
+            break
+    if domain is None:
+        return None
+    # A "มี…อะไร/บ้าง" catalog probe only counts when the customer is
+    # asking about their OWN customer-data holdings ("ในบัญชีผมมีคูปองอะไร").
+    private_catalog = has_catalog_probe and has_owner and domain == "customer_data"
+    # Evidence rule: (an explicit state probe) OR (a private catalog probe)
+    # OR (a check/lookup/data-request verb aimed at the customer's own
+    # record). Any one, with a record-domain noun and no negative gate, is
+    # a private status inquiry.
+    if not (has_probe or private_catalog
+            or (has_check_verb and (has_owner or domain in ("shipment", "order", "tracking")))):
+        return None
+    confidence = 0.9 if ((has_probe or private_catalog) and (has_owner or domain != "shipment")) else 0.75
+    return {"domain": domain, "intent": "status_inquiry",
+            "ownership_scope": "USER_PRIVATE", "confidence": confidence}
+
+
+# Domain -> the generic Business Action category / key hints used to
+# resolve which EXISTING enabled action serves a private status inquiry.
+# Config-driven: matched against each action's own `category` and
+# `action_key`, never a hardcoded id. A "list"-style action (needs only
+# the customer identifier) is preferred for a bare status inquiry; a
+# "detail" action is preferred when the customer named a specific record.
+_PSI_DOMAIN_ACTION_HINTS = {
+    "shipment": (("shipment", "parcel", "ขนส่ง", "พัสดุ"), ("list",)),
+    "order": (("order", "คำสั่งซื้อ", "สั่งซื้อ", "ออเดอร์"), ("list",)),
+    "tracking": (("tracking", "แทรค", "แทร็ก"), ("track",)),
+    "customer_data": (("customer data", "customer_data", "wallet", "ลูกค้า", "บัญชี", "finance"), ()),
+}
+
+
+def _resolve_private_state_action(registry, domain: str, prefer_detail: bool = False):
+    """Pick the EXISTING enabled Business Action that serves a private
+    status inquiry for `domain`, by matching the generic category/key
+    hints above — never an invented action, never a hardcoded key. Returns
+    a bare `business_actions` row or None when the platform has nothing
+    configured for that domain (the caller then keeps current behaviour)."""
+    hints = _PSI_DOMAIN_ACTION_HINTS.get(domain)
+    if not hints:
+        return None
+    cat_key_hints, list_hints = hints
+    try:
+        rows = [a for a in registry.list()
+                if a.get("enabled") and not a.get("deleted_at")
+                and (a.get("action_type") in ("API", "WEBHOOK", "TOOL"))]
+    except Exception:
+        return None
+    matched = []
+    for a in rows:
+        hay = f"{a.get('category') or ''} {a.get('action_key') or ''} {a.get('name') or ''}".lower()
+        if any(h.lower() in hay for h in cat_key_hints):
+            matched.append(a)
+    if not matched:
+        return None
+    if domain == "tracking":
+        track = [a for a in matched if any(h in (a.get("action_key") or "").lower() for h in list_hints)]
+        if track:
+            return track[0]
+    def _is_list(a):
+        return "list" in (a.get("action_key") or "").lower() or "list" in (a.get("category") or "").lower()
+    if prefer_detail:
+        detail = [a for a in matched if not _is_list(a)]
+        if detail:
+            return detail[0]
+    if list_hints:
+        lst = [a for a in matched if _is_list(a)]
+        if lst:
+            return lst[0]
+    return matched[0]
+
+
 def _resolve_conversation_reference(registry, message: str, customer_context: Dict) -> Optional[Dict]:
     """Last-resort resolution for a follow-up message that carries NO
     Business-Action-selecting signal of its own (no keyword/pattern
@@ -2607,6 +2778,29 @@ class DecisionEngine:
                             turn_intent = "SHIPIFY_INFORMATION"
                             developer_trace["turn_intent_coerced"] = "public_clarification_continuity"
 
+                # SEM-1 Private-record status inquiry (2026-09-03) — the
+                # customer is asking about the STATE of their OWN record /
+                # account ("สินค้าถึงโกดังหรือยัง", "ร้านส่งของให้ผมหรือยัง",
+                # "ยอดของผมเหลือเท่าไหร่"). The lexical keyword classifier
+                # shares zero tokens with any Business Action for these
+                # phrasings, so without this the turn falls through to RAG
+                # and dead-ends on "ไม่มีข้อมูลยืนยัน". Treat a confirmed
+                # private-state inquiry as PRIVATE_ACTION so identity-gated
+                # actions stay eligible (fixes the classify_turn_intent
+                # mislabel that also excluded a keyword-matched action),
+                # and remember the domain so the "no action selected"
+                # dead-end path below can force the matching EXISTING
+                # Status-Inquiry action's own collection flow instead of
+                # RAG. Never fires for a company-subject question, a how-to
+                # question, or an operational WRITE request.
+                private_state_inquiry = _classify_private_state_inquiry(message)
+                if private_state_inquiry:
+                    developer_trace["private_state_inquiry"] = private_state_inquiry
+                    if turn_intent != "PRIVATE_ACTION" and developer_trace.get("turn_intent_coerced") not in (
+                            "public_clarification_continuity", "rag_continuity_followup_over_stale_erp"):
+                        turn_intent = "PRIVATE_ACTION"
+                        developer_trace["turn_intent_coerced"] = "private_state_inquiry"
+
                 developer_trace["turn_intent"] = turn_intent
                 exclude_private = _IDENTITY_GATED_ACTION_TYPES if turn_intent == "SHIPIFY_INFORMATION" else None
 
@@ -2887,6 +3081,10 @@ class DecisionEngine:
                             and not _declarative_private_action
                             and not _identifier_evidence
                             and not _PRIVATE_STATE_QUERY_RE.search(message or "")
+                            # SEM-1: a confirmed private-record status
+                            # inquiry ("วันนี้มีของเข้าไทยไหมคะ") already
+                            # excludes how-to wording — never veto it here.
+                            and not private_state_inquiry
                         )
                         if is_company_policy_question or is_unrequested_howto_question:
                             selected = None
@@ -2908,6 +3106,28 @@ class DecisionEngine:
                         selected = referenced
                         candidates = [selected]
                         developer_trace["selection_source"] = "conversation_reference"
+
+                # SEM-1 (2026-09-03) — a confirmed private-record status
+                # inquiry whose natural wording matched no Business Action
+                # keyword: force the EXISTING Status-Inquiry action for the
+                # detected domain (resolved by generic category/key hints,
+                # never a hardcoded id) so its own collection flow asks for
+                # the missing record/customer identifier — instead of
+                # falling through to RAG and answering "ไม่มีข้อมูลยืนยัน".
+                # Gated by the same conditions the general-policy veto uses
+                # so a genuine how-to / company question is never revived.
+                if not selected and private_state_inquiry and not general_policy_question_vetoed:
+                    # "detail" only when the customer points at ONE specific
+                    # record ("รายละเอียด…", "บิลนี้", "อันนี้") — bare
+                    # ownership ("ของผม") is a list-scope status inquiry.
+                    _psi_prefer_detail = bool(_DETAIL_INTENT_RE.search(message or "")
+                                              or re.search(r"อันนี้|รายการนี้|บิลนี้|ตัวนี้", message or ""))
+                    _psi_action = _resolve_private_state_action(
+                        self.registry, private_state_inquiry["domain"], prefer_detail=_psi_prefer_detail)
+                    if _psi_action is not None:
+                        selected = _psi_action
+                        candidates = [selected]
+                        developer_trace["selection_source"] = "private_state_inquiry"
 
             if not selected:
                 if workflow_hint:
