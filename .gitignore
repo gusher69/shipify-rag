@@ -83,3 +83,9 @@ uat_runs/*.json
 
 # ── Node (only present if a JS tool is added later) ───────────────────────
 node_modules/
+
+# Customer UAT raw source set — contains a live SecretCode in Ai.xlsx; keep local-only.
+# Derived, secret-masked artifacts live in tests/customer_uat/ and the manifest MD (both committed).
+docs/customer_uat_sources/*.xlsx
+docs/customer_uat_sources/*.pdf
+docs/customer_uat_sources/screenshot/
