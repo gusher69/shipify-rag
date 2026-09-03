@@ -1287,10 +1287,30 @@ _PSI_DATA_REQUEST_RE = re.compile(
 _PSI_DOMAIN_RES = (
     ("tracking", re.compile(r"แทรค|แทร็ก|แทรก|tracking|เลขพัสดุจีน|เลขจีน", re.IGNORECASE)),
     ("order", re.compile(r"ออเดอร์|คำสั่งซื้อ|บิลสั่งซื้อ|ร้าน.{0,6}ส่ง|ที่สั่งไป|ที่สั่งไว้|order", re.IGNORECASE)),
-    ("customer_data", re.compile(r"วอลเล็ท|wallet|ยอดเงิน|เงินในระบบ|เงินที่เติม|เติมเงิน|เครดิต|คูปอง|coupon|ยอดของ|ที่อยู่โกดังจีน|ที่อยู่จีน", re.IGNORECASE)),
+    ("customer_data", re.compile(
+        r"วอลเล็ท|wallet|ยอดเงิน|เงินในระบบ|เงินที่เติม|เติมเงิน|เครดิต|คูปอง|coupon|ยอดของ"
+        r"|ที่อยู่โกดังจีน|ที่อยู่จีน"
+        r"|เบอร์.{0,10}(ที่ผม|ที่ลงทะเบียน|ในระบบ|ที่ผูก|ของผม|ของฉัน)|เบอร์ที่ลงทะเบียน"
+        r"|อีเมล.{0,10}(ที่ผม|ที่ลงทะเบียน|ในระบบ|ที่ผูก|ของผม|ของฉัน)"
+        r"|ข้อมูลลูกค้าของ(ผม|ฉัน|เรา|หนู)|ข้อมูลของผมในระบบ|โปรไฟล์ของผม", re.IGNORECASE)),
     ("shipment", re.compile(r"พัสดุ|สินค้า|กล่อง|ของที่ส่ง|ของผม|ของฉัน|ของหนู|บิลขนส่ง|ของเข้าไทย|ของ(เรา|ผม|ฉัน)", re.IGNORECASE)),
 )
 _PSI_OWNERSHIP_RE = re.compile(r"ผม|ฉัน|ดิฉัน|หนู|เรา|ของผม|ของฉัน|บัญชีของ|บัญชีผม|ในระบบ|ที่ผูก|ที่ลงทะเบียน|ที่สั่งไป")
+# PPC (2026-09-03) — a facility LOCATION / hours question ("โกดังรับสินค้า
+# อยู่ที่ไหน", "สาขานนทบุรีเปิดกี่โมง") is always PUBLIC FAQ, never a
+# private shipment-status inquiry — even though it contains "สินค้า" +
+# "อยู่ที่ไหน". Deliberately narrow: only a location/hours question about a
+# named facility, NOT "ใส่ที่อยู่โกดังจีนถูกไหม" (a private address
+# validation — no location/hours interrogative).
+_PSI_FACILITY_LOC_RE = re.compile(
+    r"(โกดัง|คลังสินค้า|คลังไทย|สาขา|จุดรับสินค้า|จุดส่ง|จุดรับของ|ออฟฟิศ|สำนักงาน|บริษัท)"
+    r"[^\n]{0,16}(อยู่(ที่)?ไหน|อยู่ตรงไหน|ที่ไหน|พิกัด|แผนที่|เปิดกี่โมง|เปิดทำการ|เวลาทำการ|เปิดวันไหน|ปิดวันไหน|เปิดทุกวัน)")
+# PPC — a direct "คืออะไร / เป็นอะไร" value question about the customer's
+# OWN on-file datum ("เบอร์ที่ผมลงทะเบียนไว้คืออะไร"). Counts as a probe
+# only together with owner wording (guarded in the evidence rule), so a
+# public "CBM คืออะไร" (no owner, and no record-domain noun anyway) never
+# reaches it.
+_PSI_VALUE_Q_RE = re.compile(r"คืออะไร|เป็นอะไร|อะไรค่ะ$|อะไรคะ$|อะไรครับ$")
 # SEM-1.1 record-scope markers — an inquiry that explicitly asks for the
 # LATEST record ("พัสดุล่าสุด") or the WHOLE LIST ("มีกี่รายการ", "วันนี้
 # มีอะไรเข้าบ้าง") may safely use a customer-scoped list/latest action.
@@ -1329,6 +1349,9 @@ def _classify_private_state_inquiry(message: str):
         return None
     if _PSI_WRITE_VERB_RE.search(text):
         return None
+    if _PSI_FACILITY_LOC_RE.search(text):
+        # a warehouse/branch LOCATION or hours question — public FAQ
+        return None
     has_probe = bool(_PSI_STATE_PROBE_RE.search(text))
     has_howto = bool(_PSI_HOWTO_RE.search(text))
     has_check_verb = bool(_PSI_CHECK_VERB_RE.search(text) or _PSI_DATA_REQUEST_RE.search(text))
@@ -1352,14 +1375,19 @@ def _classify_private_state_inquiry(message: str):
     # a public catalog question ("สินค้าที่ห้ามนำเข้ามีอะไรบ้าง"). It is a
     # LIST_ALL-scope inquiry (handled in the record_scope block below).
     private_catalog = has_catalog_probe and has_owner
+    # PPC — a direct "…คืออะไร" value question about the customer's OWN
+    # on-file datum ("เบอร์ที่ผมลงทะเบียนไว้คืออะไร"). Only counts with
+    # owner wording, so a public "CBM คืออะไร" (no owner, no record-domain
+    # noun) never reaches this branch.
+    private_value_q = has_owner and bool(_PSI_VALUE_Q_RE.search(text))
     # Evidence rule: (an explicit state probe) OR (a private catalog probe)
-    # OR (a check/lookup/data-request verb aimed at the customer's own
-    # record). Any one, with a record-domain noun and no negative gate, is
-    # a private status inquiry.
-    if not (has_probe or private_catalog
+    # OR (a private value question) OR (a check/lookup/data-request verb
+    # aimed at the customer's own record). Any one, with a record-domain
+    # noun and no negative gate, is a private status inquiry.
+    if not (has_probe or private_catalog or private_value_q
             or (has_check_verb and (has_owner or domain in ("shipment", "order", "tracking")))):
         return None
-    confidence = 0.9 if ((has_probe or private_catalog) and (has_owner or domain != "shipment")) else 0.75
+    confidence = 0.9 if ((has_probe or private_catalog or private_value_q) and (has_owner or domain != "shipment")) else 0.75
     # SEM-1.1 — semantic record scope. An identifier token in the message
     # is EXPLICIT_RECORD; "ล่าสุด" is LATEST; a whole-list / date-range
     # ask is LIST_ALL; a "…อะไรบ้าง" catalog probe outside customer_data

@@ -90,6 +90,40 @@ class TestPrivateStateConcept(unittest.TestCase):
             self.assertIsNone(_classify_private_state_inquiry(m), m)
 
 
+class TestPpcBoundary(unittest.TestCase):
+    """PUBLIC / PRIVATE / CLARIFICATION MASTER (2026-09-03) — two
+    boundary cases the recognizer previously got wrong."""
+
+    def _dom(self, msg):
+        r = _classify_private_state_inquiry(msg)
+        return r["domain"] if r else None
+
+    def test_facility_location_or_hours_is_public_never_private(self):
+        # a warehouse / branch LOCATION or opening-hours question is
+        # public FAQ even though it names "สินค้า" and asks "อยู่ที่ไหน" —
+        # it must NOT be coerced into a private shipment-status inquiry
+        # that asks the customer for a CustCode.
+        for m in ["โกดังรับสินค้าอยู่ที่ไหน", "โกดังไทยอยู่ตรงไหน",
+                  "จุดรับสินค้าอยู่ที่ไหนคะ", "สาขานนทบุรีเปิดกี่โมง",
+                  "คลังสินค้าเปิดทำการวันไหนบ้าง", "ออฟฟิศบริษัทอยู่ที่ไหน"]:
+            self.assertIsNone(_classify_private_state_inquiry(m), m)
+
+    def test_own_on_file_contact_value_question_is_private(self):
+        # "what is the phone/email I registered?" is a question about the
+        # customer's OWN account datum — private, account-scoped, must not
+        # fall through to public RAG.
+        for m in ["เบอร์ที่ผมลงทะเบียนไว้คืออะไร", "อีเมลที่ผมผูกไว้ในระบบคืออะไร",
+                  "เบอร์ที่ลงทะเบียนของผมเป็นอะไร", "ข้อมูลลูกค้าของผมในระบบคืออะไร"]:
+            self.assertEqual(self._dom(m), "customer_data", m)
+
+    def test_public_value_question_without_owner_still_never_fires(self):
+        # the value-question branch is owner-gated, so a public glossary
+        # question ("CBM คืออะไร") is untouched.
+        for m in ["CBM คืออะไร", "ค่า CO คืออะไร", "พรีออเดอร์คืออะไร",
+                  "ค่าธรรมเนียมศุลกากรคืออะไร"]:
+            self.assertIsNone(_classify_private_state_inquiry(m), m)
+
+
 class TestPrivateStateRouting(unittest.TestCase):
     def setUp(self):
         self.reg = BusinessActionRegistry(_FakeSupabase())
