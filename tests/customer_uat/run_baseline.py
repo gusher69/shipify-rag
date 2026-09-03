@@ -491,14 +491,20 @@ def _write_report(results):
     P(f"- **Logical cases:** {results['n_logical_cases']}   |   **Strings evaluated "
       f"(messages + wording variants):** {results['n_strings_evaluated']}")
     P("")
-    P("> **SEM-1 applied (2026-09-03).** This report reflects the tree *after* SEM-1 "
-      "(private-record status-inquiry semantic routing). Baseline `3e83ed9` measured 65.2% "
-      "logical-case pass / 69.7% semantic / 37.9% ERP-action / 14 SEMANTIC_INTENT primaries. "
-      "SEM-1 moved 6 cases (CUS-G12, G16, S08, S15, S17, S18) from a RAG dead-end into the "
-      "matching Business Action's identifier-collection flow. The 8 residual SEMANTIC_INTENT "
-      "failures are out of SEM-1 scope by design: 5 operational WRITE requests with no Business "
-      "Action configured (CUS-G21, S02, S03, S04, S13 → Human Handoff phase) and 3 genuine "
-      "how-to questions (CUS-S05, S07, S12 → RAG is the correct primary route).")
+    P("> **SEM-1 + SEM-1.1 applied (2026-09-03).** This report reflects the tree *after* SEM-1 "
+      "(private-record status-inquiry semantic routing) and its SEM-1.1 record-scope fix. "
+      "Baseline `3e83ed9` measured 65.2% logical-case pass / 69.7% semantic / 37.9% ERP-action / "
+      "14 SEMANTIC_INTENT primaries. SEM-1 moved 6 cases (CUS-G12, G16, S08, S15, S17, S18) from a "
+      "RAG dead-end into the matching Business Action's identifier-collection flow. SEM-1.1 then "
+      "corrected an over-reach where an UNSPECIFIED single-record inquiry (no identifier, no "
+      "explicit latest/list scope) was routed to a customer-scoped *list* action that silently "
+      "returned the latest record for a verified user — it now routes to the per-record *detail* "
+      "action and asks for the bill/tracking id; explicit `ล่าสุด` / whole-list scope still uses "
+      "the list action. Routing across the 69-case master is byte-identical between SEM-1 and "
+      "SEM-1.1 (the master runs anonymous, so both ask for an identifier). The 8 residual "
+      "SEMANTIC_INTENT failures are out of scope by design: 5 operational WRITE requests with no "
+      "Business Action configured (CUS-G21, S02, S03, S04, S13 → Human Handoff phase) and 3 "
+      "genuine how-to questions (CUS-S05, S07, S12 → RAG is the correct primary route).")
     P("")
     P("> **Scope of this baseline.** The Decision Engine's *routing / classification / "
       "public-vs-private / action-selection* behaviour is measured directly and deterministically. "

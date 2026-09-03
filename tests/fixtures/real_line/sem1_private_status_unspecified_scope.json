@@ -1,0 +1,54 @@
+{
+  "case_id": "sem1_private_status_unspecified_scope",
+  "captured_at": "2026-09-03T11:04:00Z",
+  "source": "REAL LINE session 6c9b9026 — SEM-1.1 failure, sanitized. Verified LINE user (CustCode FT3182). User asked an UNSPECIFIED single-record shipment status inquiry with NO identifier and NO explicit latest/list scope; production auto-returned the latest shipment FT318220260726001 instead of asking for the bill number.",
+  "channel": "line",
+  "verified_cust_code": "FT3182",
+  "customer_context": {
+    "cust_code": "FT3182",
+    "identity_confirmed": true
+  },
+  "pending_action_id_key": null,
+  "message": "ของผมเข้าไทยหรือยัง",
+  "history": [],
+  "actions": [
+    {
+      "action_key": "searchdatashipment",
+      "action_type": "API",
+      "category": "Customer Shipment Retrieval",
+      "keywords": ["เลขบิลขนส่ง", "พัสดุเดียว", "shipment detail", "รายละเอียดพัสดุ"],
+      "parameters": [
+        {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": true, "input_source": "customer_message", "validation_pattern": "^[A-Za-z]{2}[0-9]{3,6}$"},
+        {"name": "SecretCode", "display_name": "SecretCode", "required": true, "input_source": "credential_store"},
+        {"name": "ShipmentCode", "display_name": "เลขที่บิลขนส่ง", "required": true, "input_source": "customer_message", "validation_pattern": "^[A-Za-z]{2}[0-9]{6,}$"}
+      ],
+      "endpoint": "https://erp.invalid/SearchDataShipment",
+      "http_method": "POST"
+    },
+    {
+      "action_key": "searchdatashipmentlist",
+      "action_type": "API",
+      "category": "Customer Shipment Retrieval",
+      "keywords": ["ติดตามพัสดุ", "พัสดุ", "พัสดุล่าสุด", "รายการพัสดุ", "shipment"],
+      "parameters": [
+        {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": true, "input_source": "customer_message", "validation_pattern": "^[A-Za-z]{2}[0-9]{3,6}$"},
+        {"name": "SecretCode", "display_name": "SecretCode", "required": true, "input_source": "credential_store"}
+      ],
+      "endpoint": "https://erp.invalid/SearchDataShipmentList",
+      "http_method": "POST"
+    }
+  ],
+  "erp_mock_response": {
+    "data": {
+      "Shipment": {"Code": "FT318220260726001", "Status": "รับเข้าที่จีน", "TotalAmount": "2786.75"}
+    }
+  },
+  "expected": {
+    "selected_action": "searchdatashipment",
+    "routing_type": "WORKFLOW",
+    "shipment_code_present": false,
+    "is_complete": false,
+    "erp_called": false,
+    "reply_contains": ["บิลขนส่ง"]
+  }
+}

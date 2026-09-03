@@ -769,7 +769,8 @@
         "strong_overlap": false,
         "verdict": "NO_INFO_FALLBACK"
       }
-    ]
+    ],
+    "note": "live pass carried from the SEM-1 run; SEM-1.1 routing is byte-identical to SEM-1 on the master (0 case diff), so the live-RAG picture is unchanged"
   },
   "per_case": [
     {
@@ -1400,10 +1401,11 @@
         "turn_intent": "PRIVATE_ACTION",
         "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "private_state_inquiry",
-        "selected_action": "searchdatashipmentlist",
+        "selected_action": "searchdatashipment",
         "missing_parameters": [
           "SecretCode",
-          "CustCode"
+          "CustCode",
+          "ShipmentCode"
         ],
         "collected_parameters": [],
         "is_complete": false,
@@ -1623,10 +1625,11 @@
         "turn_intent": "PRIVATE_ACTION",
         "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "private_state_inquiry",
-        "selected_action": "searchdataorderlist",
+        "selected_action": "searchdataorder",
         "missing_parameters": [
           "SecretCode",
-          "CustCode"
+          "CustCode",
+          "OrderCode"
         ],
         "collected_parameters": [],
         "is_complete": false,
@@ -5516,10 +5519,11 @@
         "turn_intent": "PRIVATE_ACTION",
         "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "private_state_inquiry",
-        "selected_action": "searchdatashipmentlist",
+        "selected_action": "searchdatashipment",
         "missing_parameters": [
           "SecretCode",
-          "CustCode"
+          "CustCode",
+          "ShipmentCode"
         ],
         "collected_parameters": [],
         "is_complete": false,
@@ -5563,10 +5567,11 @@
         "turn_intent": "PRIVATE_ACTION",
         "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "private_state_inquiry",
-        "selected_action": "searchdatashipmentlist",
+        "selected_action": "searchdatashipment",
         "missing_parameters": [
           "SecretCode",
-          "CustCode"
+          "CustCode",
+          "ShipmentCode"
         ],
         "collected_parameters": [],
         "is_complete": false,
@@ -5610,10 +5615,11 @@
         "turn_intent": "PRIVATE_ACTION",
         "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "private_state_inquiry",
-        "selected_action": "searchdatashipmentlist",
+        "selected_action": "searchdatashipment",
         "missing_parameters": [
           "SecretCode",
-          "CustCode"
+          "CustCode",
+          "ShipmentCode"
         ],
         "collected_parameters": [],
         "is_complete": false,
@@ -5789,10 +5795,11 @@
         "turn_intent": "PRIVATE_ACTION",
         "turn_intent_coerced": "private_state_inquiry",
         "selection_source": "private_state_inquiry",
-        "selected_action": "searchdataorderlist",
+        "selected_action": "searchdataorder",
         "missing_parameters": [
           "SecretCode",
-          "CustCode"
+          "CustCode",
+          "OrderCode"
         ],
         "collected_parameters": [],
         "is_complete": false,

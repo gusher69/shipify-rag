@@ -21,17 +21,28 @@ from services.decision_engine import _classify_private_state_inquiry
 
 
 def _seed_status_registry(reg):
-    for key, cat, kws in [
-        ("searchdatashipmentlist", "Customer Shipment Retrieval", ["พัสดุล่าสุด", "รายการพัสดุ"]),
-        ("searchdatashipment", "Customer Shipment Retrieval", ["เลขบิลขนส่ง", "พัสดุเดียว"]),
-        ("searchdataorderlist", "Customer Order Retrieval", ["รายการสั่งซื้อ", "ออเดอร์ล่าสุด"]),
-        ("searchdatatracking", "Customer Shipment Retrieval", ["แทร็กจีน", "tracking"]),
-        ("getdatacustomer", "Customer Data Retrieval", ["ข้อมูลลูกค้า", "ยอดเงิน"]),
-    ]:
+    # list actions need only the customer identifier; detail actions need
+    # a per-record identifier — SEM-1.1 record-scope routing depends on
+    # both variants existing.
+    specs = [
+        ("searchdatashipmentlist", "Customer Shipment Retrieval", ["พัสดุล่าสุด", "รายการพัสดุ"], None),
+        ("searchdatashipment", "Customer Shipment Retrieval", ["เลขบิลขนส่ง", "พัสดุเดียว"], "ShipmentCode"),
+        ("searchdataorderlist", "Customer Order Retrieval", ["รายการสั่งซื้อ", "ออเดอร์ล่าสุด"], None),
+        ("searchdataorder", "Customer Order Retrieval", ["เลขคำสั่งซื้อ", "ออเดอร์เดียว"], "OrderCode"),
+        ("searchdatatracking", "Customer Shipment Retrieval", ["แทร็กจีน", "tracking"], "Tracking"),
+        ("getdatacustomer", "Customer Data Retrieval", ["ข้อมูลลูกค้า", "ยอดเงิน"], None),
+    ]
+    for key, cat, kws, rec_param in specs:
         aid = _seed_action(reg, key=key, action_type="API", category=cat, keywords=kws)
-        reg.replace_parameters(aid, [
-            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True, "input_source": "customer_message"},
-        ])
+        params = [{"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
+                   "input_source": "customer_message"}]
+        if rec_param:
+            p = {"name": rec_param, "display_name": "เลขที่บิลขนส่ง" if rec_param == "ShipmentCode" else rec_param,
+                 "required": True, "input_source": "customer_message"}
+            if rec_param == "ShipmentCode":
+                p["validation_pattern"] = r"^[A-Za-z]{2}[0-9]{6,}$"
+            params.append(p)
+        reg.replace_parameters(aid, params)
         reg.upsert_execution(aid, {"endpoint": f"https://erp.invalid/{key}", "http_method": "POST"})
 
 
@@ -114,14 +125,89 @@ class TestPrivateStateRouting(unittest.TestCase):
             for bad in ("ยืนยันตัวตน", "เบอร์โทรที่ผูก", "รหัสลูกค้า"):
                 self.assertNotIn(bad, reply, m)
 
+    def _sel(self, res):
+        dev = res["developer"] or {}
+        ics = dev.get("information_collection_status") or {}
+        return dev.get("selected_business_action") or ics.get("selected_business_action")
+
     def test_domain_routes_to_matching_capability(self):
-        def _sel(res):
-            dev = res["developer"] or {}
-            ics = dev.get("information_collection_status") or {}
-            return dev.get("selected_business_action") or ics.get("selected_business_action")
-        self.assertEqual(_sel(self._route("ยอดของผมเหลือเท่าไหร่")[0]), "getdatacustomer")
-        self.assertEqual(_sel(self._route("ออเดอร์ที่ผมสั่งไปถึงไหน")[0]), "searchdataorderlist")
-        self.assertEqual(_sel(self._route("ของผมเข้าไทยยัง")[0]), "searchdatashipmentlist")
+        self.assertEqual(self._sel(self._route("ยอดของผมเหลือเท่าไหร่")[0]), "getdatacustomer")
+        # UNSPECIFIED single-record scope -> per-record detail action
+        self.assertEqual(self._sel(self._route("ออเดอร์ที่ผมสั่งไปถึงไหน")[0]), "searchdataorder")
+        self.assertEqual(self._sel(self._route("ของผมเข้าไทยยัง")[0]), "searchdatashipment")
+
+
+class TestSem11RecordScope(unittest.TestCase):
+    """SEM-1.1 — an UNSPECIFIED single-record status inquiry (no
+    identifier, no explicit latest/list scope) must route to the DETAIL
+    action and ask for the record identifier, never silently return a
+    latest / historical record via a customer-scoped list action."""
+
+    def setUp(self):
+        self.reg = BusinessActionRegistry(_FakeSupabase())
+        _seed_status_registry(self.reg)
+        self.engine = _engine_with_registry(self.reg)
+
+    def _run(self, msg, cc=None):
+        with patch("services.action_executor.requests.request",
+                   return_value=MagicMock(status_code=200,
+                                          json=lambda: {"data": {"Shipment": {"Code": "FT318220260726001"}}})) as erp, \
+             patch("services.playground_orchestrator.run_playground_turn",
+                   return_value=_fake_playground_result(answer="[RAG]", confidence=0.9)):
+            res = self.engine.decide(msg, history=[], context={
+                "channel": "line", "developer_mode": True,
+                "customer_context": dict(cc or {"cust_code": "FT3182", "identity_confirmed": True})})
+        dev = res.get("developer") or {}
+        ics = dev.get("information_collection_status") or {}
+        return {
+            "routing": res["routing"]["type"],
+            "sel": dev.get("selected_business_action") or ics.get("selected_business_action"),
+            "scope": (dev.get("private_state_inquiry") or {}).get("record_scope"),
+            "complete": bool(ics.get("is_complete")),
+            "erp": erp.called,
+            "reply": (res.get("reply") or {}).get("text") or "",
+        }
+
+    def test_A_unspecified_asks_for_identifier_no_latest(self):
+        r = self._run("ของผมเข้าไทยหรือยัง")
+        self.assertEqual(r["scope"], "UNSPECIFIED")
+        self.assertEqual(r["sel"], "searchdatashipment")
+        self.assertEqual(r["routing"], "WORKFLOW")
+        self.assertFalse(r["complete"])
+        self.assertFalse(r["erp"])
+        self.assertIn("บิลขนส่ง", r["reply"])
+        self.assertNotIn("FT318220260726001", r["reply"])
+
+    def test_B_check_my_parcel_no_silent_latest(self):
+        r = self._run("เช็กพัสดุของผมให้หน่อย")
+        self.assertEqual(r["sel"], "searchdatashipment")
+        self.assertFalse(r["complete"])
+
+    def test_C_explicit_latest_allowed(self):
+        r = self._run("พัสดุล่าสุดของผมถึงไหนแล้ว")
+        self.assertEqual(r["scope"], "LATEST")
+        self.assertEqual(r["sel"], "searchdatashipmentlist")
+
+    def test_D_explicit_identifier_uses_detail_with_id(self):
+        r = self._run("เช็ก FT318220260726001 ให้หน่อย")
+        self.assertEqual(r["sel"], "searchdatashipment")
+
+    def test_list_all_scope_uses_list_action(self):
+        self.assertEqual(self._run("พัสดุของผมมีอะไรบ้าง")["sel"], "searchdatashipmentlist")
+        self.assertEqual(self._run("วันนี้มีของเข้าไทยไหมคะ")["sel"], "searchdatashipmentlist")
+
+    def test_order_unspecified_asks_for_order_code(self):
+        r = self._run("ร้านส่งหรือยังคะ")
+        self.assertEqual(r["sel"], "searchdataorder")
+        self.assertFalse(r["complete"])
+
+    def test_wallet_is_account_scoped_not_per_record(self):
+        r = self._run("ยอดของผมเหลือเท่าไหร่")
+        self.assertEqual(r["sel"], "getdatacustomer")
+
+    def test_public_transport_question_untouched(self):
+        r = self._run("ทางรถใช้เวลากี่วัน")
+        self.assertEqual(r["routing"], "RAG")
 
 
 if __name__ == "__main__":

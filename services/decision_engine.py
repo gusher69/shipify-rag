@@ -1291,6 +1291,16 @@ _PSI_DOMAIN_RES = (
     ("shipment", re.compile(r"พัสดุ|สินค้า|กล่อง|ของที่ส่ง|ของผม|ของฉัน|ของหนู|บิลขนส่ง|ของเข้าไทย|ของ(เรา|ผม|ฉัน)", re.IGNORECASE)),
 )
 _PSI_OWNERSHIP_RE = re.compile(r"ผม|ฉัน|ดิฉัน|หนู|เรา|ของผม|ของฉัน|บัญชีของ|บัญชีผม|ในระบบ|ที่ผูก|ที่ลงทะเบียน|ที่สั่งไป")
+# SEM-1.1 record-scope markers — an inquiry that explicitly asks for the
+# LATEST record ("พัสดุล่าสุด") or the WHOLE LIST ("มีกี่รายการ", "วันนี้
+# มีอะไรเข้าบ้าง") may safely use a customer-scoped list/latest action.
+# Without either, a single-record status inquiry has UNSPECIFIED scope and
+# MUST ask for the record identifier rather than silently return a latest
+# or historical record.
+_PSI_LATEST_RE = re.compile(r"ล่าสุด|อันล่าสุด|ตัวล่าสุด|ครั้งล่าสุด|เที่ยวล่าสุด|recent|latest", re.IGNORECASE)
+_PSI_LIST_ALL_RE = re.compile(
+    r"ทั้งหมด|ทุกรายการ|ทุกอัน|ทุกบิล|มีกี่|กี่รายการ|กี่บิล|รายการไหนบ้าง|บิลไหนบ้าง"
+    r"|วันนี้|พรุ่งนี้|วันไหน|สัปดาห์นี้|เดือนนี้|list\b", re.IGNORECASE)
 _PSI_THIRD_PARTY_RE = re.compile(r"บริษัท(?!.{0,4}ผม)|เพื่อน|ลูกค้าท่านอื่น|คนอื่น")
 _PSI_HOWTO_RE = re.compile(r"ยังไง|ยังงัย|อย่างไร|วิธี(การ)?|ขั้นตอน|how\s*to", re.IGNORECASE)
 _PSI_WRITE_VERB_RE = re.compile(r"เปลี่ยน|แก้ไข|แก้จำนวน|ยกเลิก|ถอนเงิน|ถอน|เพิ่ม.{0,4}(vat|VAT|จำนวน)|ลบ|รวมบิล|รีแพ็ค|รีเเพ็ค|ตีลัง|สั่งผลิต|สกรีน")
@@ -1336,9 +1346,12 @@ def _classify_private_state_inquiry(message: str):
             break
     if domain is None:
         return None
-    # A "มี…อะไร/บ้าง" catalog probe only counts when the customer is
-    # asking about their OWN customer-data holdings ("ในบัญชีผมมีคูปองอะไร").
-    private_catalog = has_catalog_probe and has_owner and domain == "customer_data"
+    # A "มี…อะไร/บ้าง" catalog probe is a PRIVATE inquiry only when the
+    # customer explicitly scopes it to themselves ("พัสดุของผมมีอะไรบ้าง",
+    # "ในบัญชีผมมีคูปองอะไร") — the owner wording is what separates it from
+    # a public catalog question ("สินค้าที่ห้ามนำเข้ามีอะไรบ้าง"). It is a
+    # LIST_ALL-scope inquiry (handled in the record_scope block below).
+    private_catalog = has_catalog_probe and has_owner
     # Evidence rule: (an explicit state probe) OR (a private catalog probe)
     # OR (a check/lookup/data-request verb aimed at the customer's own
     # record). Any one, with a record-domain noun and no negative gate, is
@@ -1347,62 +1360,98 @@ def _classify_private_state_inquiry(message: str):
             or (has_check_verb and (has_owner or domain in ("shipment", "order", "tracking")))):
         return None
     confidence = 0.9 if ((has_probe or private_catalog) and (has_owner or domain != "shipment")) else 0.75
+    # SEM-1.1 — semantic record scope. An identifier token in the message
+    # is EXPLICIT_RECORD; "ล่าสุด" is LATEST; a whole-list / date-range
+    # ask is LIST_ALL; a "…อะไรบ้าง" catalog probe outside customer_data
+    # is LIST_ALL; otherwise a single-record inquiry with no identifier is
+    # UNSPECIFIED and the caller must collect the record identifier.
+    if any(_validate_generic_identifier(tok) and not tok.isdigit()
+           for tok in _TOKEN_SPLIT_RE.split(text) if tok):
+        record_scope = "EXPLICIT_RECORD"
+    elif _PSI_LATEST_RE.search(text):
+        record_scope = "LATEST"
+    elif _PSI_LIST_ALL_RE.search(text) or (has_catalog_probe and domain != "customer_data"):
+        record_scope = "LIST_ALL"
+    else:
+        record_scope = "UNSPECIFIED"
     return {"domain": domain, "intent": "status_inquiry",
-            "ownership_scope": "USER_PRIVATE", "confidence": confidence}
+            "ownership_scope": "USER_PRIVATE", "record_scope": record_scope,
+            "confidence": confidence}
 
 
-# Domain -> the generic Business Action category / key hints used to
-# resolve which EXISTING enabled action serves a private status inquiry.
-# Config-driven: matched against each action's own `category` and
-# `action_key`, never a hardcoded id. A "list"-style action (needs only
-# the customer identifier) is preferred for a bare status inquiry; a
-# "detail" action is preferred when the customer named a specific record.
+# Domain -> generic Business Action category / key hints used to resolve
+# which EXISTING enabled action serves a private status inquiry.
+# Config-driven: matched against each action's own `category`/`action_key`
+# /`name`, never a hardcoded id. `track_hint` names the per-record
+# tracking action for the tracking domain.
 _PSI_DOMAIN_ACTION_HINTS = {
-    "shipment": (("shipment", "parcel", "ขนส่ง", "พัสดุ"), ("list",)),
-    "order": (("order", "คำสั่งซื้อ", "สั่งซื้อ", "ออเดอร์"), ("list",)),
-    "tracking": (("tracking", "แทรค", "แทร็ก"), ("track",)),
-    "customer_data": (("customer data", "customer_data", "wallet", "ลูกค้า", "บัญชี", "finance"), ()),
+    "shipment": {"cat_key": ("shipment", "parcel", "ขนส่ง", "พัสดุ"), "track_hint": ()},
+    "order": {"cat_key": ("order", "คำสั่งซื้อ", "สั่งซื้อ", "ออเดอร์"), "track_hint": ()},
+    "tracking": {"cat_key": ("tracking", "แทรค", "แทร็ก", "shipment"), "track_hint": ("track",)},
+    "customer_data": {"cat_key": ("customer data", "customer_data", "wallet", "ลูกค้า", "บัญชี", "finance"),
+                      "track_hint": ()},
 }
 
 
-def _resolve_private_state_action(registry, domain: str, prefer_detail: bool = False):
+def _resolve_private_state_action(registry, domain: str, record_scope: str = "UNSPECIFIED"):
     """Pick the EXISTING enabled Business Action that serves a private
-    status inquiry for `domain`, by matching the generic category/key
-    hints above — never an invented action, never a hardcoded key. Returns
-    a bare `business_actions` row or None when the platform has nothing
-    configured for that domain (the caller then keeps current behaviour)."""
+    status inquiry for `domain` at the given semantic `record_scope`
+    (SEM-1.1) — never an invented action, never a hardcoded key.
+
+    - LATEST / LIST_ALL           -> a customer-scoped "list" action is
+                                     fine (returns the latest / the set).
+    - UNSPECIFIED / EXPLICIT_RECORD -> prefer the per-record "detail"
+                                     action so its collection flow asks
+                                     for the record identifier instead of
+                                     silently returning a latest record.
+    - customer_data                -> the account action regardless of
+                                     scope (it is scoped by the customer
+                                     identifier itself, not a per-record id).
+
+    Returns a bare `business_actions` row or None when nothing matches
+    (caller then keeps current behaviour)."""
     hints = _PSI_DOMAIN_ACTION_HINTS.get(domain)
     if not hints:
         return None
-    cat_key_hints, list_hints = hints
     try:
         rows = [a for a in registry.list()
                 if a.get("enabled") and not a.get("deleted_at")
                 and (a.get("action_type") in ("API", "WEBHOOK", "TOOL"))]
     except Exception:
         return None
-    matched = []
-    for a in rows:
-        hay = f"{a.get('category') or ''} {a.get('action_key') or ''} {a.get('name') or ''}".lower()
-        if any(h.lower() in hay for h in cat_key_hints):
-            matched.append(a)
+    matched = [a for a in rows
+               if any(h.lower() in f"{a.get('category') or ''} {a.get('action_key') or ''} "
+                                   f"{a.get('name') or ''}".lower()
+                      for h in hints["cat_key"])]
     if not matched:
         return None
-    if domain == "tracking":
-        track = [a for a in matched if any(h in (a.get("action_key") or "").lower() for h in list_hints)]
-        if track:
-            return track[0]
+
     def _is_list(a):
         return "list" in (a.get("action_key") or "").lower() or "list" in (a.get("category") or "").lower()
-    if prefer_detail:
-        detail = [a for a in matched if not _is_list(a)]
-        if detail:
-            return detail[0]
-    if list_hints:
+
+    if domain == "tracking":
+        track = [a for a in matched if any(h in (a.get("action_key") or "").lower() for h in hints["track_hint"])]
+        if track:
+            return track[0]
+
+    if domain == "customer_data":
+        non_list = [a for a in matched if not _is_list(a)]
+        return (non_list or matched)[0]
+
+    if record_scope in ("LATEST", "LIST_ALL"):
         lst = [a for a in matched if _is_list(a)]
         if lst:
             return lst[0]
-    return matched[0]
+        return matched[0]
+
+    # UNSPECIFIED / EXPLICIT_RECORD -> detail action (asks for the id)
+    detail = [a for a in matched if not _is_list(a)]
+    if detail:
+        return detail[0]
+    # No detail action configured for this domain -> nothing safe to
+    # force; let the caller fall through (RAG / clarification) rather
+    # than auto-return a latest record the customer never asked for.
+    return None
 
 
 def _resolve_conversation_reference(registry, message: str, customer_context: Dict) -> Optional[Dict]:
@@ -3117,13 +3166,15 @@ class DecisionEngine:
                 # Gated by the same conditions the general-policy veto uses
                 # so a genuine how-to / company question is never revived.
                 if not selected and private_state_inquiry and not general_policy_question_vetoed:
-                    # "detail" only when the customer points at ONE specific
-                    # record ("รายละเอียด…", "บิลนี้", "อันนี้") — bare
-                    # ownership ("ของผม") is a list-scope status inquiry.
-                    _psi_prefer_detail = bool(_DETAIL_INTENT_RE.search(message or "")
-                                              or re.search(r"อันนี้|รายการนี้|บิลนี้|ตัวนี้", message or ""))
+                    # SEM-1.1 — honour the semantic record scope. An
+                    # UNSPECIFIED single-record inquiry ("ของผมเข้าไทยหรือยัง"
+                    # — no identifier, no "ล่าสุด"/list scope) must route to
+                    # the per-record DETAIL action so its collection flow
+                    # asks for the bill/tracking id, NOT a customer-scoped
+                    # list action that silently returns the latest record.
                     _psi_action = _resolve_private_state_action(
-                        self.registry, private_state_inquiry["domain"], prefer_detail=_psi_prefer_detail)
+                        self.registry, private_state_inquiry["domain"],
+                        record_scope=private_state_inquiry.get("record_scope", "UNSPECIFIED"))
                     if _psi_action is not None:
                         selected = _psi_action
                         candidates = [selected]
