@@ -385,6 +385,38 @@ def _strip_contradictory_noinfo_hedge(answer_text: str, answerability: str) -> s
     rest = answer_text[m.end():].strip()
     return rest if len(rest) >= 15 else answer_text
 
+
+# SEM-GEN-1 — retrieved-entity contamination guard. A retrieved chunk may
+# supply FACTS; it must NOT introduce the customer's UNSTATED target. For
+# "สั่งเยอะได้ไหม" the retrieved FAQ "สั่งแบตเตอรี่จำนวนเยอะได้ไหม" led
+# synthesis to volunteer "…แต่ถ้าเป็นแบตเตอรี่ ทางเราไม่รับ…" — a caveat
+# about a product the customer never mentioned. Deterministic, generic
+# (the caveat SHAPE + the existing prohibited-category word list, never a
+# battery-specific rule): drop a hedge-introduced prohibited-product
+# caveat clause when its product/category word appears in NEITHER the
+# current message NOR the recent user turns NOR the active frame.
+_UNSOLICITED_CAVEAT_SPLIT_RE = re.compile(
+    r"(?=(?:แต่ถ้า|อย่างไรก็ตาม\s*หากเป็น|อย่างไรก็ดี\s*หากเป็น|ทั้งนี้\s*หากเป็น|ยกเว้น|เว้นแต่)\S)")
+_CAVEAT_PROHIBITION_RE = re.compile(r"ไม่รับ|ไม่สามารถ|ห้าม|ต้องห้าม|งดรับ")
+
+
+def _strip_unsolicited_prohibited_caveat(answer_text: str, allowed_terms: str) -> str:
+    if not answer_text or "แบตเตอรี่" not in answer_text and not any(
+            w in answer_text for w in _PROHIBITED_CATEGORY_WORDS):
+        return answer_text
+    allowed = allowed_terms or ""
+    parts = _UNSOLICITED_CAVEAT_SPLIT_RE.split(answer_text)
+    if len(parts) < 2:
+        return answer_text
+    kept = [parts[0]]
+    for seg in parts[1:]:
+        cat = next((w for w in _PROHIBITED_CATEGORY_WORDS if w in seg), None)
+        if cat and _CAVEAT_PROHIBITION_RE.search(seg) and cat not in allowed:
+            continue  # drop this volunteered, off-target caveat
+        kept.append(seg)
+    out = "".join(kept).strip()
+    return out if len(out) >= 15 else answer_text
+
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
 # 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization;
 # broadened again 2026-08-27 same day — Semantic RAG Retrieval fix) — a
@@ -1538,7 +1570,18 @@ def run_playground_turn(
             multi_component_request and any(
                 c.get("has_literal_evidence") or c.get("is_faq_exact")
                 or c.get("classification") in ("direct_evidence", "structured_deterministic")
-                for c in chunks)):
+                for c in chunks)) and not (
+            # FIX-2.3 / SEM-GEN-1 — a product/import-interest turn that
+            # retrieved a chunk firmly classifying SOME product into a
+            # prohibited category goes to grounded synthesis instead, so
+            # the LLM classifies the CUSTOMER's actual product against
+            # that policy ("กล่องพลาสติก" is not a liquid; "น้ำยาปรับผ้านุ่ม"
+            # is). Surfacing the retrieved FAQ verbatim mis-answered the
+            # unfamiliar product.
+            _is_product_import_interest(question) and any(
+                _ITEM_IS_CATEGORY_RE.search(c.get("text") or "")
+                and _P51_FIRM_PROHIBITED_RE.search(c.get("text") or "")
+                for c in (chunks or []))):
         # Partial answerability (P1.2A) — a MULTI-COMPONENT request with at
         # least one component that has literal evidence goes to synthesis
         # (the Answer Plan tells the LLM to answer the supported components
@@ -1620,34 +1663,21 @@ def run_playground_turn(
             # product recognition -> policy cross-check -> quantity/weight/
             # route collection is CONV-SELL.
             #
-            # If a retrieved chunk firmly classifies a product into a
-            # trusted prohibited CATEGORY ("<x>จัดเป็นสินค้าประเภทของเหลว…
-            # ไม่สามารถนำเข้า"), surface that FAQ's answer verbatim — a
-            # trusted prohibition, deterministic, no LLM. The generic
-            # "สินค้าที่ห้ามนำเข้ามีอะไรบ้าง" list chunk does NOT match
-            # `_ITEM_IS_CATEGORY_RE` (its category words follow "รวมถึง",
-            # never "จัดเป็น/เป็น"), so a non-prohibited interest like
-            # "สนใจนำเข้ารองเท้า" still gets the safe service ack.
-            _prohib_chunk = next(
-                (c for c in (chunks or [])
-                 if _ITEM_IS_CATEGORY_RE.search(c.get("text") or "")
-                 and _P51_FIRM_PROHIBITED_RE.search(c.get("text") or "")), None)
-            if _prohib_chunk:
-                _t = _prohib_chunk.get("text") or ""
-                answer_text = _t.split("\nAnswer: ", 1)[1].strip() if "\nAnswer: " in _t else _t.strip()
-                _pi_note = "prohibited-category-policy-from-retrieved-evidence"
+            # (A product-interest turn whose retrieval carried a firm
+            # prohibited-CATEGORY chunk was already diverted to grounded
+            # synthesis by the outer guard above, so here there is no
+            # trusted prohibition to state — only the safe service ack.)
+            _pi_noun = _product_interest_noun(question)
+            if _pi_noun:
+                answer_text, _pi_note = _product_answer_service_continuation(
+                    _pi_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
+                    history=history, transport_known=_pac_transport_known)
             else:
-                _pi_noun = _product_interest_noun(question)
-                if _pi_noun:
-                    answer_text, _pi_note = _product_answer_service_continuation(
-                        _pi_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
-                        history=history, transport_known=_pac_transport_known)
-                else:
-                    answer_text = ("รับทราบค่ะ สนใจนำเข้าสินค้ากับ Shipify นะคะ 😊 "
-                                   "มีบริการขนส่งทั้งทางรถและทางเรือค่ะ "
-                                   "รบกวนขอรายละเอียดสินค้าเพิ่มเติมสักนิด เช่น ประเภทสินค้า จำนวน "
-                                   "หรือน้ำหนักโดยประมาณ จะได้แนะนำบริการที่เหมาะสมให้ค่ะ")
-                    _pi_note = "generic-import-interest-ack"
+                answer_text = ("รับทราบค่ะ สนใจนำเข้าสินค้ากับ Shipify นะคะ 😊 "
+                               "มีบริการขนส่งทั้งทางรถและทางเรือค่ะ "
+                               "รบกวนขอรายละเอียดสินค้าเพิ่มเติมสักนิด เช่น ประเภทสินค้า จำนวน "
+                               "หรือน้ำหนักโดยประมาณ จะได้แนะนำบริการที่เหมาะสมให้ค่ะ")
+                _pi_note = "generic-import-interest-ack"
             stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                                  f"FIX-2.3 product/import-interest continuation ({_pi_note}) — "
                                  "not a company-fact no-info, no LLM call, no Human CS"))
@@ -1751,6 +1781,29 @@ def run_playground_turn(
                 # branches above never mutate a value or hedge).
                 answer_text = _restore_verbatim_scalar_values(answer_text, context)
                 answer_text = _strip_contradictory_noinfo_hedge(answer_text, conf_result.answerability)
+                # SEM-GEN-1 — a retrieved chunk must not inject an unstated
+                # prohibited-product caveat (see helper). allowed = the
+                # current message + the recent user turns.
+                _sg1_allowed = (question or "") + " " + " ".join(
+                    (t.get("content") or "") for t in (history or [])[-4:]
+                    if t.get("role") == "user")
+                answer_text = _strip_unsolicited_prohibited_caveat(answer_text, _sg1_allowed)
+                # SEM-GEN-1 — for a product/import-interest turn, synthesis
+                # must not answer ABOUT a different product it only saw in a
+                # RELATED_CONTEXT chunk ("สนใจนำเข้ากล่องพลาสติก" ->
+                # "ครีมอาบน้ำจัดเป็นของเหลว…"). If the answer firmly
+                # classifies an item whose name is neither the customer's
+                # product nor in the message, it is mis-grounded — fall
+                # back to the safe P5.1 service ack for the real product.
+                if _is_product_import_interest(question):
+                    _tgt = _product_interest_noun(question)
+                    _wrong = re.search(r"(?P<x>[ก-๙A-Za-z ]{2,20}?)\s*(?:จัดเป็น|เป็น)\s*สินค้าประเภท", answer_text)
+                    if (_tgt and _wrong and _wrong.group("x").strip()
+                            and _wrong.group("x").strip() not in (question or "")
+                            and _wrong.group("x").strip() != _tgt):
+                        answer_text, _ = _product_answer_service_continuation(
+                            _tgt, lead_stage=lead_stage, sentiment_status=sentiment_status,
+                            history=history, transport_known=_pac_transport_known)
                 # Final category-verdict hotfix — for a multi-product
                 # eligibility answer, firm a hedge on an item the answer
                 # itself classified into a Context-prohibited category

@@ -1,0 +1,108 @@
+{
+  "pass": 11,
+  "total": 11,
+  "change_target_accuracy": "4/4",
+  "false_human_handoff": 0,
+  "stale_contamination": "PASS",
+  "results": [
+    {
+      "scenario": "A clarification",
+      "message": "สั่งเยอะได้ไหม",
+      "op": null,
+      "routing": "WORKFLOW",
+      "verdict": "PASS",
+      "note": "",
+      "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ"
+    },
+    {
+      "scenario": "C open target",
+      "message": "สนใจนำเข้าตุ๊กตา",
+      "op": null,
+      "routing": "RAG",
+      "verdict": "PASS",
+      "note": "",
+      "reply": "ตุ๊กตาไม่จัดเป็นสินค้าต้องห้าม ดังนั้นสามารถนำเข้าได้ค่ะ หากสนใจสามารถเลือกใช้บริการฝากสั่งหรือฝากนำเข้าได้ตามความสะดวก\n"
+    },
+    {
+      "scenario": "C CHANGE_TARGET",
+      "message": "จานชามล่ะ",
+      "op": "CHANGE_TARGET",
+      "routing": "RAG",
+      "verdict": "PASS",
+      "note": "op=CHANGE_TARGET",
+      "reply": "หากสนใจนำเข้าจานชามจากจีน สามารถใช้บริการฝากสั่งของเราได้ โดยเราจะช่วยดำเนินการต่างๆ เช่น หาร้าน ต่อรอง/สอบถามรายละเอียด"
+    },
+    {
+      "scenario": "C CHANGE_TARGET",
+      "message": "ผ้าห่มล่ะ",
+      "op": "CHANGE_TARGET",
+      "routing": "RAG",
+      "verdict": "PASS",
+      "note": "op=CHANGE_TARGET",
+      "reply": "ผ้าห่มสามารถนำเข้าได้ค่ะ ไม่ได้อยู่ในรายการสินค้าต้องห้ามของเรา"
+    },
+    {
+      "scenario": "C CHANGE_TARGET",
+      "message": "ปากกาล่ะ",
+      "op": "CHANGE_TARGET",
+      "routing": "RAG",
+      "verdict": "PASS",
+      "note": "op=CHANGE_TARGET",
+      "reply": "การนำเข้าปากกาสามารถทำได้ค่ะ แต่ต้องตรวจสอบให้แน่ใจว่าปากกานั้นไม่เข้าข่ายเป็นสินค้าต้องห้าม เช่น มีส่วนประกอบของของเหลว"
+    },
+    {
+      "scenario": "D SET_QUANTITY",
+      "message": "200 ตัว",
+      "op": "SET_QUANTITY",
+      "routing": "GENERAL",
+      "verdict": "PASS",
+      "note": "",
+      "reply": "รับทราบค่ะ ปรับเป็นจำนวนประมาณ 200 ชิ้นนะคะ (สินค้า โคมไฟ • จำนวนประมาณ 200 ชิ้น) สนใจส่งทางรถหรือทางเรือคะ"
+    },
+    {
+      "scenario": "D CORRECT_QUANTITY",
+      "message": "ไม่ใช่ 200 เอา 300",
+      "op": "CORRECT_QUANTITY",
+      "routing": "GENERAL",
+      "verdict": "PASS",
+      "note": "op=CORRECT_QUANTITY",
+      "reply": "รับทราบค่ะ ปรับเป็นจำนวนประมาณ 300 ชิ้นนะคะ (สินค้า โคมไฟ • จำนวนประมาณ 300 ชิ้น) สนใจส่งทางรถหรือทางเรือคะ"
+    },
+    {
+      "scenario": "E CHANGE_METHOD",
+      "message": "ถ้าทางเรือล่ะ",
+      "op": "CHANGE_METHOD",
+      "routing": "GENERAL",
+      "verdict": "PASS",
+      "note": "product/qty kept=True",
+      "reply": "รับทราบค่ะ เปลี่ยนเป็นขนส่งทางเรือนะคะ (สินค้า โคมไฟ • จำนวนประมาณ 300 ชิ้น • ขนส่งทางเรือ) รบกวนแจ้งน้ำหนักโดยประมาณเพิ"
+    },
+    {
+      "scenario": "F CHANGE_TOPIC",
+      "message": "งั้นถามเรื่องคูปองดีกว่า",
+      "op": "CHANGE_TOPIC",
+      "routing": "RAG",
+      "verdict": "PASS",
+      "note": "op=CHANGE_TOPIC",
+      "reply": "คูปองสามารถใช้ลดค่านำเข้าและค่าส่งในไทยได้ค่ะ\n\nขั้นตอนการใช้คูปอง:\n1. เข้าทีเมนูสมาชิก\n2. เข้าเมนูคูปองของฉัน กดจิ้มที่ค"
+    },
+    {
+      "scenario": "G prohibited target",
+      "message": "ถ้าเป็นไฟแช็กล่ะ",
+      "op": "CHANGE_TARGET",
+      "routing": "RAG",
+      "verdict": "PASS",
+      "note": "op=CHANGE_TARGET",
+      "reply": "ไฟแช็กจัดเป็นวัตถุอันตรายและวัตถุไวไฟ ทางเราไม่รับนำเข้าไฟแช็กค่ะ"
+    },
+    {
+      "scenario": "H stale contamination",
+      "message": "สั่งเยอะได้ไหม",
+      "op": null,
+      "routing": "WORKFLOW",
+      "verdict": "PASS",
+      "note": "",
+      "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ"
+    }
+  ]
+}

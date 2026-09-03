@@ -72,6 +72,15 @@ from services.action_selection_primitives import (
 from services.hybrid_question_classifier import (
     classify_question, _QUESTION_MARKER_RE, _REQUEST_MARKER_RE, _split_clauses, _GREETING_RE,
 )
+# SEM-GEN-1 — conversational semantic backbone (frame derivation is
+# deterministic; a single gated LLM call resolves open-vocabulary
+# follow-up meaning only — see services/conversation_semantics.py).
+from services.conversation_semantics import (
+    derive_active_frame as _derive_active_frame,
+    is_frame_followup as _is_frame_followup,
+    resolve_followup as _resolve_frame_followup,
+    frame_ack_reply as _frame_ack_reply,
+)
 # Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
 # 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
 # mode already uses (services/hybrid_runtime_service.py); this module
@@ -2895,6 +2904,57 @@ class DecisionEngine:
                 candidates = [selected]
                 developer_trace["selection_source"] = "conversation_reference_detail"
             else:
+                # SEM-GEN-1 — a SHORT follow-up inside an active
+                # IMPORT_INTEREST frame ("ถ้าเป็นกางเกงล่ะ", "200 ตัว",
+                # "ไม่ใช่ 200 เอา 300", "ถ้าทางเรือล่ะ", "งั้นถามเรื่องคูปอง
+                # ดีกว่า"). Deterministic gate first (an active frame with
+                # a product + a follow-up shape + NOT a private-state
+                # inquiry + NOT a PPC-1 no-referent turn); a single gated
+                # LLM call then resolves the open-vocabulary meaning.
+                # CHANGE_TARGET / CHANGE_TOPIC are rewritten to a self-
+                # contained message and handed back to the normal pipeline
+                # (so FIX-2.3 / prohibited-goods eligibility still decide
+                # the business answer — policy is NOT baked in here);
+                # quantity / method / continue produce a deterministic
+                # frame acknowledgement. Any resolver error -> UNKNOWN ->
+                # ordinary routing, unchanged.
+                _sem_frame = _derive_active_frame(history)
+                if (_sem_frame and _sem_frame.product
+                        and _is_frame_followup(message)
+                        and _classify_private_state_inquiry(message) is None
+                        and not _is_referentless_underspecified(message)):
+                    _sem = _resolve_frame_followup(message, _sem_frame)
+                    developer_trace["semantic_frame"] = _sem_frame.as_dict()
+                    developer_trace["semantic_op"] = _sem["op"]
+                    _op = _sem["op"]
+                    if _op == "CHANGE_TARGET" and _sem["product"]:
+                        message = f"สนใจนำเข้า{_sem['product']}"
+                        developer_trace["semantic_rewrite"] = message
+                    elif _op == "CHANGE_TOPIC":
+                        message = _sem.get("topic") or message
+                        developer_trace["semantic_rewrite"] = message
+                    elif _op in ("SET_QUANTITY", "CORRECT_QUANTITY") and _sem["quantity"]:
+                        _sem_frame.quantity = _sem["quantity"]
+                        return self._finalize(
+                            reply=_build_response(text=_frame_ack_reply(_sem_frame, changed="quantity")),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    elif _op == "CHANGE_METHOD" and _sem["method"]:
+                        _sem_frame.method = _sem["method"]
+                        return self._finalize(
+                            reply=_build_response(text=_frame_ack_reply(_sem_frame, changed="method")),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    elif _op == "CONTINUE":
+                        return self._finalize(
+                            reply=_build_response(text=_frame_ack_reply(_sem_frame, changed="none")),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    # UNKNOWN -> fall through to ordinary routing, unchanged.
+
                 # Root Change 1 (Final Systemic Routing Fix, 2026-08-28) —
                 # classify the message's informational-vs-private-action
                 # intent ONCE, here, BEFORE classify_question()'s own
