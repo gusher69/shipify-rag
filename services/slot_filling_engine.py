@@ -181,6 +181,32 @@ def _is_genuine_invoice_lookup_request(text: str) -> bool:
     return False
 
 
+# SEMANTIC-FIRST-2.1 — the bare payment verbs "จ่ายเงิน"/"ชำระเงิน" also
+# appear as an ordinary CHECKOUT-STEP mention inside a how-to about
+# something else ("เอาโค้ดคูปองไปกรอกช่องไหนตอนจ่ายเงิน" — a coupon-usage
+# question). Same disambiguation spirit as warranty / invoice above: a
+# genuine payment-STATUS lookup needs an outstanding-balance word, a
+# self-reference paired with a payment verb, or a real order/customer
+# number — never the bare verb alone.
+_PAYMENT_LOOKUP_EVIDENCE_RE = re.compile(
+    r"ค้างชำระ|ยอดค้าง|ยังไม่ได้จ่าย|ยังไม่ได้ชำระ|ค้างจ่าย|ยอดที่ต้องชำระ|ต้องจ่ายเท่าไหร่|จ่ายไปแล้ว"
+    r"|(?:ของผม|ของฉัน|บิลผม|บิลฉัน|บัญชีผม|บัญชีฉัน)\s*\S{0,20}(?:ชำระ|จ่ายเงิน|payment)"
+    r"|(?:ชำระ|จ่ายเงิน|payment)\s*\S{0,12}(?:ของผม|ของฉัน|บิลผม|บิลฉัน)",
+    re.IGNORECASE,
+)
+
+
+def _is_genuine_payment_lookup_request(text: str) -> bool:
+    """Disambiguates a bare "จ่ายเงิน"/"ชำระเงิน" mention the same way the
+    warranty / invoice gates do — a checkout-step reference inside an
+    unrelated how-to is not a private payment-status lookup."""
+    if _PAYMENT_LOOKUP_EVIDENCE_RE.search(text):
+        return True
+    if _SLOT_PATTERNS["order_number"].search(text) or _SLOT_PATTERNS["customer_code"].search(text):
+        return True
+    return False
+
+
 def detect_erp_intent(text: str) -> Optional[str]:
     """First-matching ERP intent, or None if the text doesn't ask about
     any ERP-backed topic at all — None means "this workflow layer has
@@ -192,6 +218,8 @@ def detect_erp_intent(text: str) -> Optional[str]:
             if intent == "warranty" and not _is_genuine_product_warranty(text):
                 continue
             if intent == "invoice" and not _is_genuine_invoice_lookup_request(text):
+                continue
+            if intent == "payment" and not _is_genuine_payment_lookup_request(text):
                 continue
             return intent
     return None

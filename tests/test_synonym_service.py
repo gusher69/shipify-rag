@@ -18,7 +18,8 @@ class TestSynonymGroupLoading(unittest.TestCase):
     def test_default_json_loads_the_documented_groups(self):
         groups = _load_from_json(_DEFAULT_JSON_PATH)
         canonical_terms = {g["canonical_term"] for g in groups}
-        self.assertEqual(canonical_terms, {"พิกัด", "โกดัง", "เรท", "CBM", "ใบกำกับ", "Tracking", "บริษัท"})
+        self.assertEqual(canonical_terms,
+                         {"พิกัด", "โกดัง", "เรท", "CBM", "ใบกำกับ", "Tracking", "บริษัท", "คูปอง"})
 
     def test_get_synonym_groups_is_cached_and_reloadable(self):
         groups1 = get_synonym_groups()

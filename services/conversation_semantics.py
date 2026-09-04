@@ -834,3 +834,19 @@ FAMILY_TO_ACTIONABLE_INTENT = {
     "GENERAL": None,
     "UNKNOWN": None,
 }
+
+
+# SEMANTIC-FIRST-2.1 — the families that are ALWAYS a PUBLIC company-
+# information question (policy / how-to / location / service), never an
+# identity-gated ERP or customer-data lookup and never a general-
+# knowledge chit-chat turn. Consumed by the Decision Engine (to keep
+# identity-gated Business Actions out of the candidate set) and by the
+# RAG orchestrator (to keep the turn on the company-knowledge path
+# instead of the General Chat Fallback). Deliberately excludes:
+# SHIPMENT_STATUS / MY_COUPONS (private-account), ADDRESS_CHANGE
+# (operational workflow), SHIPPING_ESTIMATE (its own calculator flow,
+# resolved earlier), IMPORT_INTEREST / GENERAL / UNKNOWN (not decisive).
+PUBLIC_INFO_FAMILIES = frozenset({
+    "PICKUP_LOCATION", "SELF_PICKUP", "COUPON_USAGE",
+    "PRODUCT_POLICY", "CHARTER_TRUCK", "INVOICE",
+})

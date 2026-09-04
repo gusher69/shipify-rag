@@ -81,6 +81,7 @@ from services.conversation_semantics import (
     resolve_followup as _resolve_frame_followup,
     frame_ack_reply as _frame_ack_reply,
     interpret as _interpret_message,
+    PUBLIC_INFO_FAMILIES as _PUBLIC_INFO_FAMILIES,
 )
 # CUSTOMER-RAG-2.1 — charter-truck (เหมารถ / TC19) multi-turn slot
 # collection (deterministic, history-derived — no LLM, no pending table).
@@ -3221,6 +3222,50 @@ class DecisionEngine:
                 # action selection) is completely unchanged, since none of
                 # it depends on identity-gated actions being present.
                 turn_intent = classify_turn_intent(message)
+
+                # SEMANTIC-FIRST-2.1 — the ONE central interpretation is
+                # the authority on whether this turn is a PUBLIC company-
+                # INFORMATION question. When it named a public-information
+                # family (warehouse / pickup location, self-pickup
+                # permission, coupon USAGE how-to, prohibited-goods,
+                # charter service info, invoice / document policy), the
+                # turn must never be offered an identity-gated ERP /
+                # customer-data Business Action — no matter what the
+                # lexical `classify_turn_intent` returned, and regardless
+                # of an incidental self-pronoun ("ผมใช้คูปองยังไง" is a
+                # how-to, not an account query). Guards, mirroring the
+                # public_clarification_continuity coercion below:
+                #   • never when the turn already reads PRIVATE_ACTION or
+                #     a confirmed private-state inquiry owns it;
+                #   • never when the message carries a real account /
+                #     order / record identifier (decisive private
+                #     evidence — "ขอชื่อคูปองของลูกค้า SP1014");
+                #   • never when the message ITSELF decisively resolves to
+                #     a configured Business Action (an explicit private
+                #     coupon/customer lookup action keyworded on the same
+                #     noun still wins its own turn) — checked memory-free.
+                if (turn_intent != "PRIVATE_ACTION" and not private_state_inquiry
+                        and getattr(semantic, "intent_family", None) in _PUBLIC_INFO_FAMILIES
+                        and not any(_validate_generic_identifier(tok) and not tok.isdigit()
+                                    for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)):
+                    # A DECISIVE public-info reading (the compositional
+                    # meaning model scored a full OBJECT+ACTION shape,
+                    # confidence >= 0.75) always wins — an identity-gated
+                    # ERP action that merely scored on a shared parameter
+                    # or a mapped-field keyword is the exact over-reach.
+                    # A weaker reading ("คูปอง" alone — could be MY_COUPONS
+                    # or a how-to) only coerces when NO Business Action
+                    # decisively claims the turn as its own.
+                    _sf21_conf = float(getattr(semantic, "confidence", 0.0) or 0.0)
+                    _sf21_own = None
+                    if _sf21_conf < 0.75:
+                        _sf21_own = select_best_action(
+                            search_candidate_actions(self.registry, workflow=workflow_hint,
+                                                      message=message, collected_slots={}),
+                            minimum_score=1.0 if not workflow_hint else 0.5)
+                    if _sf21_conf >= 0.75 or _sf21_own is None:
+                        turn_intent = "SHIPIFY_INFORMATION"
+                        developer_trace["turn_intent_coerced"] = "semantic_public_information_family"
 
                 # Immediate-Context-Over-Stale-ERP guard (2026-09-01) — a
                 # short contextual follow-up ("แล้วจีนล่ะ" after a Thai-

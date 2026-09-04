@@ -20,6 +20,9 @@ from rag.query_resolution import resolve_conversation, requested_transport_modes
 from rag.canonical_query import rewrite_canonical_query
 from rag.query_understanding import classify_actionable_intent
 from rag.confidence import compute_confidence, confidence_label as _confidence_label_from_score
+# SEMANTIC-FIRST-2.1 — the central-interpreter families that are always a
+# PUBLIC company-information question (never general chit-chat).
+from services.conversation_semantics import PUBLIC_INFO_FAMILIES as _PUBLIC_INFO_COMPANY_FAMILIES
 from services.rag_service import get_rag_service
 from services.policy_engine import evaluate as evaluate_policies, get_escalation_settings, get_messaging_settings, PolicyVerdict
 from services.policy_studio_service import get_default_policy_set
@@ -1641,7 +1644,17 @@ def run_playground_turn(
               or _rag_topic_continuity_followup
               or _rag_faq_exact
               or multi_component_request or (single_elig is not None) or (process_comp is not None)
-              or _is_ambiguous_rag_continuity_followup(question, history)):
+              or _is_ambiguous_rag_continuity_followup(question, history)
+              # SEMANTIC-FIRST-2.1 — the ONE central interpreter named this
+              # a PUBLIC company-information family (warehouse / pickup,
+              # self-pickup, coupon USAGE, prohibited-goods, charter
+              # service, invoice / document). It is a company-knowledge
+              # question by MEANING, not general chit-chat — keep it on
+              # the company RAG path so an unseen paraphrase with no
+              # trusted evidence returns the honest company "no
+              # information" answer (Answerability Gate), never a general-
+              # chat guess.
+              or getattr(interpretation, "intent_family", None) in _PUBLIC_INFO_COMPANY_FAMILIES):
         # General Chat Fallback (Hybrid RAG + General AI Chat, 2026-08-27;
         # moved ahead of the Answerability Gate 2026-08-27 same day — Final
         # Hybrid Stabilization) — confirmed live: "จีนอยู่ทวีปอะไร" (a pure
@@ -2037,7 +2050,17 @@ def run_playground_turn(
               or _rag_topic_continuity_followup
               or _rag_faq_exact
               or multi_component_request or (single_elig is not None) or (process_comp is not None)
-              or _is_ambiguous_rag_continuity_followup(question, history)):
+              or _is_ambiguous_rag_continuity_followup(question, history)
+              # SEMANTIC-FIRST-2.1 — the ONE central interpreter named this
+              # a PUBLIC company-information family (warehouse / pickup,
+              # self-pickup, coupon USAGE, prohibited-goods, charter
+              # service, invoice / document). It is a company-knowledge
+              # question by MEANING, not general chit-chat — keep it on
+              # the company RAG path so an unseen paraphrase with no
+              # trusted evidence returns the honest company "no
+              # information" answer (Answerability Gate), never a general-
+              # chat guess.
+              or getattr(interpretation, "intent_family", None) in _PUBLIC_INFO_COMPANY_FAMILIES):
         # General Chat Fallback (see the matching branch above) answers
         # from the LLM's own general knowledge with empty context — the
         # retrieved context_chunks here are whatever (possibly irrelevant)
