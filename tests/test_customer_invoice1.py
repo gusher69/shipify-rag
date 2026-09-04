@@ -16,8 +16,10 @@ import unittest
 
 from services.playground_orchestrator import (
     _is_invoice_issuance_question,
+    _invoice_issuance_branch_applies,
     _INVOICE_ISSUANCE_ANSWER,
 )
+from services.conversation_semantics import interpret, Interpretation
 
 
 class TestInvoiceIssuanceRecognizer(unittest.TestCase):
@@ -39,6 +41,58 @@ class TestInvoiceIssuanceRecognizer(unittest.TestCase):
         for q in ["นำเข้าจากจีนต้องเสียภาษีไหม", "ต้องเสียภาษีนำเข้าเท่าไหร่",
                   "ขอเบอร์ติดต่อ", "สนใจนำเข้ารองเท้า", "ชำระบัตรเครดิตได้ไหม"]:
             self.assertFalse(_is_invoice_issuance_question(q), q)
+
+
+class TestInvoiceRegression1SemanticFirstGate(unittest.TestCase):
+    """INVOICE-REGRESSION-1 — the trusted-invoice branch keys on the
+    central INVOICE family, so paraphrases the literal phrase regex
+    misses ("tax invoice", "ใบเสร็จค่าขนส่ง", "e-tax invoice") still
+    reach the trusted answer instead of Fix-2 Human Handoff."""
+
+    def _interp(self, fam):
+        return Interpretation(intent_family=fam, confidence=0.85)
+
+    def test_case_A_exact_real_failure_applies(self):
+        self.assertTrue(_invoice_issuance_branch_applies(
+            "ใบกำกับค่าสินค้าออกได้ไหม", "invoice_policy", self._interp("INVOICE")))
+
+    def test_case_B_tax_invoice_request_applies(self):
+        self.assertTrue(_invoice_issuance_branch_applies(
+            "ขอใบกำกับภาษีครับ", "invoice_policy", self._interp("INVOICE")))
+
+    def test_case_C_tax_invoice_paraphrase_applies_via_family(self):
+        # literal regex misses this — the family carries it
+        self.assertFalse(_is_invoice_issuance_question("บริษัทออก tax invoice ให้ไหมครับ"))
+        self.assertTrue(_invoice_issuance_branch_applies(
+            "บริษัทออก tax invoice ให้ไหมครับ", "invoice_policy", self._interp("INVOICE")))
+
+    def test_more_unseen_invoice_paraphrases_apply(self):
+        for q in ["ขอใบเสร็จค่าขนส่งได้ไหม", "มี e-tax invoice ไหมครับ",
+                  "บริษัทออกใบกำกับให้หรือเปล่า", "อยากได้ใบเสร็จตัวจริงขอได้ไหม"]:
+            self.assertEqual(interpret(q, []).intent_family, "INVOICE", q)
+            self.assertTrue(_invoice_issuance_branch_applies(q, "invoice_policy", interpret(q, [])), q)
+
+    def test_case_D_download_never_applies(self):
+        for q in ["โหลดใบกำกับยังไง", "ดาวน์โหลดใบกำกับภาษีทำยังไง", "ใบกำกับหาได้ที่ไหน"]:
+            self.assertFalse(_invoice_issuance_branch_applies(q, "invoice_policy", self._interp("INVOICE")), q)
+
+    def test_non_invoice_intent_never_applies(self):
+        # a different actionable intent -> branch is off regardless of wording
+        self.assertFalse(_invoice_issuance_branch_applies(
+            "ใบกำกับค่าสินค้าออกได้ไหม", "tracking_status", self._interp("INVOICE")))
+
+    def test_import_tax_question_does_not_apply(self):
+        # "ภาษีนำเข้า..." is not an invoice question; family is not INVOICE
+        self.assertNotEqual(interpret("ภาษีนำเข้าคิดยังไงครับ", []).intent_family, "INVOICE")
+        self.assertFalse(_invoice_issuance_branch_applies(
+            "ภาษีนำเข้าคิดยังไงครับ", "prohibited_goods", interpret("ภาษีนำเข้าคิดยังไงครับ", [])))
+
+    def test_no_interpretation_still_covers_the_literal_cases(self):
+        # Playground / benchmark callers pass no interpretation
+        self.assertTrue(_invoice_issuance_branch_applies(
+            "ใบกำกับค่าสินค้าออกได้ไหม", "invoice_policy", None))
+        self.assertFalse(_invoice_issuance_branch_applies(
+            "บริษัทออก tax invoice ให้ไหมครับ", "invoice_policy", None))
 
 
 class TestInvoiceIssuanceAnswer(unittest.TestCase):

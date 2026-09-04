@@ -441,6 +441,22 @@ def _is_invoice_issuance_question(question: str) -> bool:
     return bool(_INVOICE_ISSUANCE_Q_RE.search(q) and not _INVOICE_DOWNLOAD_RE.search(q))
 
 
+def _invoice_issuance_branch_applies(question, actionable_intent, interpretation=None) -> bool:
+    """INVOICE-REGRESSION-1 — the deterministic trusted-invoice branch
+    applies when the turn is an invoice ISSUANCE/policy question (not the
+    download how-to). Primary signal is the central SEMANTIC-FIRST-1
+    INVOICE family (so every paraphrase interpret() resolves — "tax
+    invoice", "ใบเสร็จค่าขนส่ง", "e-tax invoice" — is covered); the
+    literal-phrase recogniser is kept as the signal for callers that pass
+    no interpretation (Playground / benchmark)."""
+    if actionable_intent != "invoice_policy":
+        return False
+    if _INVOICE_DOWNLOAD_RE.search(question or ""):
+        return False
+    return bool(_is_invoice_issuance_question(question)
+                or getattr(interpretation, "intent_family", None) == "INVOICE")
+
+
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,
 # 2026-08-27; broadened 2026-08-27 same day — Final Hybrid Stabilization;
 # broadened again 2026-08-27 same day — Semantic RAG Retrieval fix) — a
@@ -1518,8 +1534,18 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
-    elif (intent_result["actionable_intent"] == "invoice_policy"
-          and _is_invoice_issuance_question(question)):
+    elif _invoice_issuance_branch_applies(question, intent_result["actionable_intent"], interpretation):
+        # INVOICE-REGRESSION-1 — the issuance branch now keys on the
+        # CENTRAL INVOICE family (SEMANTIC-FIRST-1), not only the literal
+        # "ใบกำกับ + ออก/ขอ/ได้" phrase shape. So "ออก tax invoice ให้ไหม",
+        # "ขอใบเสร็จค่าขนส่งได้ไหม", "มี e-tax invoice ไหม" — every
+        # paraphrase interpret() resolves to INVOICE — reaches the trusted
+        # answer instead of falling through retrieval to the Answerability
+        # Gate and Fix-2 Human Handoff. The download how-to
+        # ("โหลดใบกำกับยังไง") is still excluded (_INVOICE_DOWNLOAD_RE) and
+        # keeps its own 5-step FAQ (389645f9). No _INVOICE_RE phrase
+        # dictionary is grown — the family is the primary signal.
+        #
         # CUSTOMER-INVOICE-1 — "can you issue a goods invoice?"
         # (ใบกำกับค่าสินค้าออกได้ไหม / …ไม่ได้หรอ / ขอ…ไม่ได้หรอ). The
         # FAQ-exact matcher returns the Quick_FAQ_Patch row 546c1bd5
