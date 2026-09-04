@@ -37,15 +37,30 @@ _METHOD_TH = {"road": "ทางรถ", "sea": "ทางเรือ"}
 # ── intent / signal patterns ─────────────────────────────────────────
 # a calculator VERB — the customer explicitly asks for a calculation.
 _CALC_VERB_RE = re.compile(
-    r"ช่วยคำนวณ|คำนวณให้|คำนวณค่า|ประเมินค่า|ประเมินราคา|คิดค่า(?:ขนส่ง|ส่ง|นำเข้า)|"
-    r"ขอประเมิน|ประเมินเบื้องต้น")
+    r"ช่วยคำนวณ|คำนวณให้|คำนวณค่า|คำนวนค่า|ประเมินค่า|ประเมินราคา|ขอประเมิน|ประเมินเบื้องต้น|"
+    r"คิดค่า(?:ขนส่ง|ส่ง|นำเข้า)|คิดราคาค่า(?:ขนส่ง|ส่ง|สินค้า|นำเข้า)|ช่วยคิด[^\n]{0,12}(?:ราคา|ค่า)")
 # a calculator TOPIC — only opens the flow together with a concrete value.
 _CALC_TOPIC_RE = re.compile(r"ค่านำเข้า|ค่าขนส่ง|ค่าส่ง|เรทนำเข้า|ค่าจัดส่ง")
-# this flow's own missing-slot / estimate prompt (so a multi-turn flow
-# is recognised on the next turn).
-_EST_PROMPT_RE = re.compile(r"ประเมินเบื้องต้นสำหรับทาง|ต้องการประเมินทางรถหรือทางเรือ|"
-                            r"รบกวนแจ้ง(?:น้ำหนัก|ขนาด).{0,40}(?:เพื่อประเมิน|สำหรับประเมิน)|ยังขาดข้อมูลสำหรับประเมิน")
+# this flow's own missing-slot / route question (episode is COLLECTING).
+_EST_PROMPT_RE = re.compile(r"ต้องการประเมินทางรถหรือทางเรือ|"
+                            r"รบกวนแจ้ง(?:น้ำหนัก|ขนาด)[^\n]{0,40}(?:เพื่อประเมิน|สำหรับประเมิน)|"
+                            r"ยังขาดข้อมูลสำหรับประเมิน")
+# this flow's own delivered ESTIMATE (episode is COMPLETE/CLOSED).
+_EST_RESULT_RE = re.compile(r"ประเมินเบื้องต้นสำหรับ[^\n]{0,20}ประมาณ")
 _METHOD_RE = re.compile(r"ทางรถ|ทางบก|ทางเรือ|โดยรถ|โดยเรือ|(?<![ก-๙])รถ(?![ก-๙])|(?<![ก-๙])เรือ(?![ก-๙])")
+# a SHORT natural route answer while a flow is active ("รถ", "รถครับ",
+# "ทางรถค่ะ", "เอารถ", "ขอทางเรือ") — a structural token parser, not a
+# sentence list. Only consulted inside an active calculator context.
+_ROUTE_ANSWER_RE = re.compile(
+    r"^\s*(?:เอา|ขอ|ใช้|เป็น)?\s*(?:ทาง|โดย)?\s*(รถ|บก|เรือ|เครื่องบิน|อากาศ)\s*"
+    r"(?:ครับ|ค่ะ|คะ|นะ|น่ะ|จ้า|จ๊ะ|คับ|ครัช|เลย|ก็ได้|ดีกว่า)*\s*$")
+# a CLEAR correction / comparison / anaphoric follow-up of the just-
+# completed estimate — reuse existing SEM-GEN-style correction wording.
+_CORRECTION_RE = re.compile(
+    r"ไม่ใช่[^\n]{0,16}(?:เป็น|เอา)\s*\S"
+    r"|เปลี่ยน(?:เป็น|ไปเป็น|เป็นน้ำหนัก)?\s*\d|แก้(?:เป็น|ให้เป็น)\s*\d"
+    r"|(?:ถ้า(?:เป็น)?|แล้ว|ลอง|เอา|ขอ|งั้น)\s*(?:ทาง|โดย)?\s*(?:รถ|เรือ|บก)"
+    r"[^\n]{0,8}(?:ล่ะ|แทน|บ้าง|ดู|มั้ย|ไหม|ครับ|ค่ะ|ดีกว่า)?\s*$")
 _QUANTITY_RE = re.compile(r"(\d+)\s*(?:ชิ้น|กล่อง|อัน|ใบ|ลัง|pcs?|box(?:es)?)", re.IGNORECASE)
 # quantity / count phrases that must NOT be read as dimension numbers.
 _COUNT_PHRASE_RE = re.compile(
@@ -104,13 +119,27 @@ class EstimateState:
 
 
 def _method_of(text: str) -> Optional[str]:
+    """Shipping method from a message. Trims trailing politeness
+    particles so "รถครับ" / "เรือค่ะ" normalize, and accepts a SHORT
+    natural route answer ("รถ", "เอาเรือ", "ขอทางรถ")."""
     if not text:
         return None
-    if re.search(r"ทางเรือ|โดยเรือ|(?<![ก-๙])เรือ(?![ก-๙])", text):
+    t = re.sub(r"[\s]*(?:ครับ|ค่ะ|คะ|นะ|น่ะ|จ้า|จ๊ะ|คับ|ครัช|เลย|ก็ได้|ดีกว่า)+\s*$", "", (text or "").strip())
+    ra = _ROUTE_ANSWER_RE.match(t)
+    if ra:
+        w = ra.group(1)
+        return "sea" if w == "เรือ" else ("air" if w in ("เครื่องบิน", "อากาศ") else "road")
+    if re.search(r"ทางเรือ|โดยเรือ|(?<![ก-๙])เรือ(?![ก-๙])", t):
         return "sea"
-    if re.search(r"ทางรถ|ทางบก|โดยรถ|(?<![ก-๙])รถ(?![ก-๙])", text):
+    if re.search(r"ทางรถ|ทางบก|โดยรถ|(?<![ก-๙])รถ(?![ก-๙])", t):
         return "road"
     return None
+
+
+def _has_calc_signal(text: str) -> bool:
+    p = parse_dimension_input(text or "")
+    return bool(_CALC_VERB_RE.search(text or "") or _CALC_TOPIC_RE.search(text or "")
+                or _method_of(text or "") or p["weight"] is not None or len(p["dimension_values"]) >= 2)
 
 
 def extract_estimate_fields(message: str, into: Optional[EstimateState] = None) -> EstimateState:
@@ -188,49 +217,87 @@ def opens_estimate_flow(message: str, state: EstimateState) -> bool:
     return False
 
 
+def _is_explicit_new_request(text: str) -> bool:
+    """The customer explicitly starts a NEW calculation — a calculator
+    VERB, or a shipping-cost TOPIC together with a concrete value. A bare
+    value / route answer / correction is NOT this (it continues the
+    current thread)."""
+    t = text or ""
+    if _OTHER_BUSINESS_INTENT_RE.search(t):
+        return False
+    if _CALC_VERB_RE.search(t):
+        return True
+    p = parse_dimension_input(t)
+    has_value = (p["weight"] is not None or len(p["dimension_values"]) >= 2
+                 or _WEIGHT_RE.search(t) is not None)
+    return bool(_CALC_TOPIC_RE.search(t) and has_value)
+
+
 def derive_estimate_state(history: Optional[List[Dict]], current_message: str) -> Optional[EstimateState]:
-    """The active shipping-estimate collection (accumulated from EVERY
-    user turn since the flow opened), or None. Deterministic, no LLM."""
+    """State of the CURRENT calculation thread, or None.
+
+    Episode lifecycle:  NEW -> COLLECTING -> COMPLETE/CALCULATED -> CLOSED.
+      * An EXPLICIT NEW calculator request always starts a fresh thread —
+        it inherits NOTHING from any prior (even incomplete) thread.
+      * A short value / route answer / correction / comparison continues
+        the current thread — accumulated from the last explicit-new
+        request, so corrections chain correctly across recomputes.
+      * Anything else after a delivered estimate is not a calculator turn.
+    Deterministic, no LLM.
+    """
     turns = list(history or [])[-_LOOKBACK:]
+    cur_msg = (current_message or "").strip()
 
-    # walk backward: collect user turns; skip our own mid-flow prompts;
-    # stop at the first substantive non-prompt assistant turn.
-    user_turns: List[str] = []
-    saw_prompt = False
-    for turn in reversed(turns):
-        role = turn.get("role")
-        c = turn.get("content") or ""
-        if role == "user":
-            user_turns.append(c)
-        elif role == "assistant":
-            if _EST_PROMPT_RE.search(c) or "ประเมินเบื้องต้นสำหรับ" in c:
-                saw_prompt = True
-                continue  # our own prompt/result — keep walking to the trigger
-            break  # an unrelated assistant turn — the flow (if any) is newer
-    user_turns.reverse()  # oldest first
+    # A) explicit NEW request -> fresh thread, no inheritance.
+    if _is_explicit_new_request(cur_msg):
+        return extract_estimate_fields(cur_msg)
 
-    # is a flow active?
-    active = saw_prompt
-    if not active:
-        for u in user_turns + [current_message]:
-            if opens_estimate_flow(u, extract_estimate_fields(u)):
-                active = True
-                break
-    if not active:
+    # is there an estimate-flow assistant turn in the recent window
+    # (the newest assistant turn only — anything else means the topic
+    # moved on)?
+    flow_open = False
+    for t in reversed(turns):
+        if t.get("role") != "assistant":
+            continue
+        c = t.get("content") or ""
+        flow_open = bool(_EST_RESULT_RE.search(c) or _EST_PROMPT_RE.search(c))
+        break
+    if not flow_open:
+        # no active thread — only THIS message, standing alone, can open
+        # one (a method + weight/dims, or weight + >=2 dims).
+        cur = extract_estimate_fields(cur_msg)
+        return cur if opens_estimate_flow(cur_msg, cur) else None
+
+    # B) a short value / route answer / correction / comparison continues
+    # the current thread. Anything else is not a calculator turn.
+    is_route = _method_of(cur_msg) is not None
+    parsed_cur = parse_dimension_input(cur_msg)
+    is_value = (parsed_cur["weight"] is not None or bool(parsed_cur["dimension_values"])
+                or _WEIGHT_RE.search(cur_msg) is not None)
+    is_corr = bool(_CORRECTION_RE.search(cur_msg))
+    if not (is_route or is_value or is_corr):
         return None
 
-    # staleness — the newest prior user turn is a hard non-calculator
-    # subject with no calc value.
-    if user_turns:
-        last = user_turns[-1]
-        if _FLOW_EXIT_RE.search(last) and not (
-                _method_of(last) or parse_dimension_input(last)["weight"] is not None
-                or parse_dimension_input(last)["dimension_values"]):
-            return None
+    # accumulate the thread: every user turn since the most recent
+    # explicit-new request (or the start of the window).
+    start = 0
+    for i in range(len(turns) - 1, -1, -1):
+        t = turns[i]
+        if t.get("role") == "user" and _is_explicit_new_request(t.get("content") or ""):
+            start = i
+            break
+    users = [t.get("content") or "" for i, t in enumerate(turns)
+             if t.get("role") == "user" and i >= start]
+    if users and _FLOW_EXIT_RE.search(users[-1]) and not _has_calc_signal(users[-1]):
+        return None
 
     st = EstimateState()
-    for u in user_turns:
+    for u in users:
         extract_estimate_fields(u, st)
+    # fold in THIS turn's value / route / correction — a comparison
+    # ("ถ้าเป็นทางเรือล่ะ") or correction ("ไม่ใช่ 2 กิโล เป็น 3 กิโล")
+    # overwrites the relevant slot, everything else is retained.
+    extract_estimate_fields(cur_msg, st)
     return st
 
 
