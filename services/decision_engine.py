@@ -1364,6 +1364,24 @@ _PSI_DOMAIN_RES = (
     ("shipment", re.compile(r"พัสดุ|สินค้า|กล่อง|ของที่ส่ง|ของผม|ของฉัน|ของหนู|บิลขนส่ง|ของเข้าไทย|ของ(เรา|ผม|ฉัน)", re.IGNORECASE)),
 )
 _PSI_OWNERSHIP_RE = re.compile(r"ผม|ฉัน|ดิฉัน|หนู|เรา|ของผม|ของฉัน|บัญชีของ|บัญชีผม|ในระบบ|ที่ผูก|ที่ลงทะเบียน|ที่สั่งไป")
+
+# SEMANTIC-FIRST-2 — a small STRUCTURAL cue (not a sentence dictionary):
+# a shipment/order STATUS question framed around the SELLER's dispatch
+# ("ร้านส่ง…", "ต้นทางส่ง…", "ฝั่งร้านปล่อยของ…") is an ORDER-domain
+# inquiry (the CS-approved reply asks for the order/purchase bill), vs a
+# parcel-in-transit question -> shipment domain.
+_SELLER_DISPATCH_RE = re.compile(r"ร้าน|ต้นทาง|ฝั่งร้าน|ร้านค้า|ร้านจีน|shop|เจ้าของร้าน", re.IGNORECASE)
+# a duration / transit-time question is a PUBLIC FAQ, never a private
+# status inquiry.
+_TRANSIT_TIME_Q_RE = re.compile(r"กี่วัน|กี่ชั่วโมง|กี่ชม|ระยะเวลา|ใช้เวลา|นานไหม|นานแค่ไหน|กี่สัปดาห์|เท่าไหร่วัน")
+# SEMANTIC-FIRST-2 / FIX-2 BOUNDARY — a bare elliptical possessive /
+# demonstrative follow-up with no referent the engine could resolve
+# ("ของผมล่ะ", "อันนี้ล่ะคะ", "แล้วของผมไหม") is UNCLEAR LANGUAGE, not
+# missing company knowledge — it must be met with a clarification, never
+# routed to Human CS as an unsupported company fact.
+_ELLIPTICAL_NO_REFERENT_RE = re.compile(
+    r"(?:แล้ว\s*)?(?:ของ)?(?:ผม|ฉัน|หนู|เรา|ดิฉัน|อันนี้|อันนั้น|ตัวนี้|อันของผม|ของผม|ของฉัน)"
+    r"\s*(?:ล่ะ|หละ|ล้ะ|ไหม|มั้ย|ยัง)?\s*(?:คะ|ครับ|ค่ะ|น่ะ|อ่ะ|อะ)?\s*$", re.IGNORECASE)
 # PPC (2026-09-03) — a facility LOCATION / hours question ("โกดังรับสินค้า
 # อยู่ที่ไหน", "สาขานนทบุรีเปิดกี่โมง") is always PUBLIC FAQ, never a
 # private shipment-status inquiry — even though it contains "สินค้า" +
@@ -2689,6 +2707,41 @@ class DecisionEngine:
             # _classify_private_state_inquiry, so a genuine continuation
             # ("FT318…", "12 กก.") is unaffected.
             private_state_inquiry = _classify_private_state_inquiry(message)
+
+            # SEMANTIC-FIRST-2 — a novel / short paraphrase of a
+            # shipment/order STATUS question ("ร้านส่งของออกมายัง",
+            # "ต้นทางส่งมาหรือยัง", "ฝั่งร้านปล่อยของหรือยัง", "ส่งยังครับ")
+            # that the deterministic private-state recognizer's
+            # record-noun regex did not catch, but the ONE central
+            # semantic interpreter did (SHIPMENT_STATUS). Treat it as the
+            # SAME private status inquiry so it enters the matching
+            # Status-Inquiry Business Action's collection flow — ask for
+            # the bill / tracking / order id — instead of falling through
+            # to RAG -> Answerability Gate -> Fix-2 -> Human CS. The
+            # semantic layer only NAMES the intent; authorization,
+            # shipment ownership and the ERP status stay deterministic
+            # downstream. A duration/transit-time question ("กี่วัน",
+            # "ใช้เวลานานไหม") is a PUBLIC FAQ and is excluded, and a
+            # remembered last_business_action is left for the
+            # conversation-reference resolver below to resume (a genuine
+            # continuation, not a fresh synthesized inquiry).
+            if (private_state_inquiry is None
+                    and semantic.intent_family == "SHIPMENT_STATUS"
+                    and not customer_context.get("last_business_action")
+                    and not _TRANSIT_TIME_Q_RE.search(message or "")):
+                _sf2_has_id = any(
+                    _validate_generic_identifier(tok) and not tok.isdigit()
+                    for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
+                _sf2_domain = "order" if _SELLER_DISPATCH_RE.search(message or "") else "shipment"
+                private_state_inquiry = {
+                    "domain": _sf2_domain, "intent": "status_inquiry",
+                    "ownership_scope": "USER_PRIVATE",
+                    "record_scope": "EXPLICIT_RECORD" if _sf2_has_id else "UNSPECIFIED",
+                    "confidence": round(max(getattr(semantic, "confidence", 0.0) or 0.0, 0.7), 2),
+                    "source": "semantic_first_2",
+                }
+                developer_trace["private_state_inquiry_semantic_synth"] = private_state_inquiry
+
             # Only the per-record domains have a list-vs-detail record-scope
             # hazard; customer_data (wallet/coupon) is account-scoped by the
             # customer id itself, so a remembered customer lookup may still
@@ -4425,6 +4478,13 @@ class DecisionEngine:
             # company_fact flag), and a supported/grounded answer or a
             # General-Chat-Fallback reply never sets the flag either.
             if result_payload.get("unsupported_company_fact"):
+                # SEMANTIC-FIRST-2 / FIX-2 BOUNDARY — an understood change
+                # request that just needs input, or a referent-less
+                # elliptical follow-up, is not "missing company knowledge".
+                _sf2_supp = self._fix2_boundary_suppression(
+                    message, context, developer_trace, start, alert, workflow=workflow)
+                if _sf2_supp is not None:
+                    return _sf2_supp
                 _noinfo_text = (result_payload.get("answer") or "").strip() \
                     or "ขออภัยค่ะ ตอนนี้ยังไม่พบข้อมูลยืนยันในส่วนนี้ค่ะ"
                 reply = _build_response(text=_noinfo_text)
@@ -4845,6 +4905,43 @@ class DecisionEngine:
                                developer_trace=developer_trace, context=context, start=start,
                                alert=alert, handoff_payload=handoff_payload)
 
+    # ── Fix-2 boundary (SEMANTIC-FIRST-2) ──────────────────────────────────
+
+    def _fix2_boundary_suppression(self, message: str, context: Dict, developer_trace: Dict,
+                                    start: float, alert, *, workflow: Optional[str]) -> Optional[Dict]:
+        """SEMANTIC-FIRST-2 / FIX-2 BOUNDARY. Fix-2 (unsupported COMPANY
+        fact -> Human CS) must fire ONLY when a genuinely understood
+        Shipify question has no trusted evidence. It must NOT fire when
+        the turn is really (a) an understood operational CHANGE request
+        that just needs the record id + new value, or (b) a bare
+        elliptical follow-up with no resolvable referent (unclear
+        language). Both are handled here with a clarify / collect reply
+        instead. Called from every Fix-2 site so the boundary is applied
+        once, consistently. Returns a finalized response dict to short-
+        circuit, or None to let the caller proceed to the Fix-2 handoff.
+
+        The ONE central interpretation (stashed on context by decide())
+        is the authority on whether the *meaning* was understood."""
+        _sem = context.get("_semantic_interpretation")
+        _family = getattr(_sem, "intent_family", None)
+        if _family == "ADDRESS_CHANGE":
+            developer_trace["fix2_suppressed"] = "understood_change_request_missing_input"
+            return self._finalize(
+                reply=_build_response(text=(
+                    "ได้ค่ะ รบกวนแจ้งเลขบิลขนส่ง (FT/FE/SA/SP) ที่ต้องการเปลี่ยนที่อยู่ "
+                    "พร้อมที่อยู่ปลายทางใหม่ ชื่อผู้รับ และเบอร์โทรผู้รับด้วยนะคะ")),
+                routing_type="WORKFLOW", workflow=workflow,
+                developer_trace=developer_trace, context=context, start=start, alert=alert)
+        if _ELLIPTICAL_NO_REFERENT_RE.match((message or "").strip()):
+            developer_trace["fix2_suppressed"] = "elliptical_no_referent_clarify"
+            return self._finalize(
+                reply=_build_response(text=(
+                    "ขออภัยค่ะ ไม่แน่ใจว่าหมายถึงรายการไหน รบกวนแจ้งเลขบิล เลขคำสั่งซื้อ "
+                    "หรือรายละเอียดที่ต้องการให้ช่วยตรวจสอบเพิ่มเติมนะคะ")),
+                routing_type="WORKFLOW", workflow=workflow,
+                developer_trace=developer_trace, context=context, start=start, alert=alert)
+        return None
+
     # ── Safe Fallback ──────────────────────────────────────────────────────
 
     def _route_safe_fallback(self, message: str, history: List[Dict], context: Dict, developer_trace: Dict,
@@ -4872,6 +4969,10 @@ class DecisionEngine:
             # genuine unsupported company fact reaches the RAG pipeline
             # via this fallback path instead.
             if result_payload.get("unsupported_company_fact"):
+                _sf2_supp = self._fix2_boundary_suppression(
+                    message, context, developer_trace, start, alert, workflow=None)
+                if _sf2_supp is not None:
+                    return _sf2_supp
                 reply = _build_response(text=answer_text.strip())
                 developer_trace["unsupported_company_fact_handoff"] = True
                 return self._finalize(reply=reply, routing_type="HUMAN_HANDOFF", workflow=None,

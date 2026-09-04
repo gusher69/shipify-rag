@@ -650,9 +650,14 @@ def _llm_family(message: str, history: Optional[List[Dict]]) -> Optional[Dict]:
     return out
 
 
+# a message that is ONLY a social greeting / acknowledgement / bare
+# confirmation (optionally with trailing politeness particles) — no task
+# content. Anchored both ends so "ตกลงราคาได้ไหม" is NOT a match.
 _GREET_CONFIRM_RE = re.compile(
-    r"^(?:สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ขอบคุณ|โอเค|okay|ok|ครับ|ค่ะ|คะ|จ้า|ได้ครับ|ได้ค่ะ|"
-    r"ยืนยัน|ตกลง|เข้าใจแล้ว|รับทราบ|thanks?|thank you)\b", re.IGNORECASE)
+    r"^(?:สวัสดี\S*|หวัดดี\S*|ดีครับ|ดีค่ะ|ดีจ้า|ขอบคุณ\S*|ขอบใจ\S*|โอเค\S*|โอเต\S*|"
+    r"okay|ok|k|thx|thanks?|thank\s*you|"
+    r"ยืนยัน|ตกลง|รับทราบ|เข้าใจแล้ว|เข้าใจ|ได้ครับ|ได้ค่ะ|ได้เลย)"
+    r"[\s\.!,~ครับคับค่ะคะจ้าาๆนะฮะฮ่ะผมโว้ยว้อยเลย]*$", re.IGNORECASE)
 _INTENT_SHAPE_RES = (_OBJ_INVOICE, _OBJ_WAREHOUSE, _OBJ_COUPON, _OBJ_TRUCK, _OBJ_COST,
                      _OBJ_PARCEL, _OBJ_ADDRESS, _ACT_LOCATE, _ACT_STATUS, _ACT_ISSUE_GET,
                      _ACT_HOWTO, _ACT_LIST_MINE, _ACT_ESTIMATE, _ACT_CHANGE, _ACT_CHARTER,
@@ -660,16 +665,24 @@ _INTENT_SHAPE_RES = (_OBJ_INVOICE, _OBJ_WAREHOUSE, _OBJ_COUPON, _OBJ_TRUCK, _OBJ
 
 
 def _worth_llm_disambiguation(t: str) -> bool:
-    """The gated LLM family call fires ONLY for a genuinely conversational,
-    intent-shaped message the deterministic tier could not resolve — never
-    for greetings, confirmations, bare values, single tokens or noise."""
-    if not _THAI_CHAR_RE.search(t) or not (6 <= len(t) <= 80):
+    """SEMANTIC-FIRST-2 — the gated LLM family call fires for ANY genuinely
+    conversational Thai message the deterministic tier could not resolve.
+    It is NOT pre-gated on a deterministic topic marker matching first —
+    that made novel/short phrasings ("ร้านส่งหรือยังคะ", "ต้นทางส่งมาหรือ
+    ยัง") fall straight through to no-info / Fix-2. Still excluded:
+    greetings, confirmations, bare structural values, empty / single-char
+    or over-long noise. Still one gated call, still degrades safely, still
+    self-disables for the process on the first unreachable-LLM error."""
+    s = (t or "").strip()
+    if not _THAI_CHAR_RE.search(s) or not (4 <= len(s) <= 120):
         return False
-    if _GREET_CONFIRM_RE.match(t.strip()):
+    if _GREET_CONFIRM_RE.match(s):
         return False
-    if len(t.split()) < 1:
+    if _structural_kind(s) is not None:
         return False
-    return any(rx.search(t) for rx in _INTENT_SHAPE_RES) or bool(_ACT_PERMIT.search(t))
+    if _MEASURE_RE.fullmatch(s):   # a bare weight / dimensions value
+        return False
+    return True
 
 
 # INVOICE-PRODUCT-REGRESSION-2 (Problem B) — the assistant asked the
@@ -772,7 +785,12 @@ def interpret(message: str, history: Optional[List[Dict]] = None,
                                   source="deterministic")
 
     source = "deterministic"
-    if (fam == "UNKNOWN" or conf < 0.5) and _worth_llm_disambiguation(t):
+    # SEMANTIC-FIRST-2 — the gated LLM family call also runs when the
+    # deterministic tier could only reach GENERAL: "conversational but no
+    # specific family" is exactly the case one semantic call is meant to
+    # disambiguate (e.g. "ช่วยกะราคาส่งของกล่องนี้ให้หน่อยดิ" -> GENERAL
+    # deterministically, SHIPPING_ESTIMATE once interpreted).
+    if (fam in ("UNKNOWN", "GENERAL") or conf < 0.5) and _worth_llm_disambiguation(t):
         llm = _llm_family(t, history)
         if llm and llm["family"] != "UNKNOWN":
             fam = llm["family"]
