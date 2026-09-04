@@ -140,6 +140,38 @@ def _generate_parameter_question(param: Dict) -> str:
     return f"กรุณาแจ้ง{display}ค่ะ"
 
 
+# CUSTOMER-ERP-READ-1 — the private ERP READ status-inquiry actions. The
+# error-taxonomy handling below (MALFORMED_IDENTIFIER / VALID_NOT_FOUND)
+# is scoped to these keys ONLY — never a WRITE flow
+# (requestshippingaddresschange) and never a synthetic test action.
+_ERP_READ_STATUS_ACTIONS = {"searchdatashipment", "searchdataorder", "searchdatatracking"}
+# A shipment-bill code that is bill-SHAPED (2 letters + digits) but too
+# short to be a complete Shipify code — real codes are a 2-letter prefix
+# + 15 digits (17 chars); the customer's own documented incomplete
+# example "FT31822026072" is 2 + 11. Deterministic, format-only.
+_SHORT_SHIPMENT_CODE_RE = re.compile(r"\b[A-Za-z]{2}\d{6,12}\b")
+
+
+def _incomplete_shipment_code(message: str, expecting_param: Optional[Dict], action_key: Optional[str]) -> Optional[str]:
+    """The truncated shipment-code token in `message` when the
+    searchdatashipment flow is asking for its ShipmentCode and the
+    customer's value is bill-shaped but too short to be complete, else
+    None. Scoped to searchdatashipment / ShipmentCode so it can never
+    touch CustCode, a WRITE flow, or a synthetic test action."""
+    if action_key != "searchdatashipment":
+        return None
+    if (expecting_param or {}).get("name", "").strip().lower() != "shipmentcode":
+        return None
+    m = _SHORT_SHIPMENT_CODE_RE.search(message or "")
+    return m.group(0) if m else None
+
+
+def _incomplete_identifier_prompt(param: Dict, token: str) -> str:
+    display = (param or {}).get("display_name") or (param or {}).get("name") or "เลขที่บิลขนส่ง"
+    return (f"เลขที่แจ้งมา ({token}) ดูเหมือนจะไม่ครบถ้วนค่ะ "
+            f"รบกวนตรวจสอบและส่ง{display}แบบเต็มอีกครั้งนะคะ")
+
+
 # Generic Collection Status Query (Address Change Full UAT — Status
 # Query fix, 2026-08-24) — a customer asking "what do you have so far /
 # what's still missing" mid-collection, deterministic and Registry-
@@ -3908,8 +3940,16 @@ class DecisionEngine:
                 workflow=workflow_hint, message_override=escalation_message)
 
         if not is_complete:
+            _incomplete_tok = _incomplete_shipment_code(
+                message, next_after, full_action.get("action_key"))
             if ambiguous_candidates:
                 question = f"พบข้อมูล {len(ambiguous_candidates)} รายการค่ะ รบกวนระบุว่าต้องการใช้ค่าใด"
+            elif _incomplete_tok:
+                # CUSTOMER-ERP-READ-1 state C — a bill-shaped but truncated
+                # ShipmentCode: ask for the COMPLETE number (never a
+                # generic re-ask, never an ERP call, never Human CS).
+                question = _incomplete_identifier_prompt(next_after, _incomplete_tok)
+                developer_trace["erp_read_result"] = "malformed_identifier"
             elif next_after:
                 question = _generate_parameter_question(next_after)
             else:
@@ -3955,6 +3995,23 @@ class DecisionEngine:
             return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow_hint,
                                    developer_trace=developer_trace, context=context, start=start,
                                    alert=_detect_alert(message, context))
+
+        # CUSTOMER-ERP-READ-1 state C — a bill-shaped but truncated
+        # ShipmentCode that the loose validation_pattern happened to
+        # accept must not be sent to the ERP (it would only come back
+        # not-found). Ask for the full number. Scoped to the
+        # searchdatashipment READ flow / ShipmentCode slot only.
+        if full_action.get("action_key") == "searchdatashipment":
+            _sc = str(collected.get("ShipmentCode") or "")
+            if _sc and re.fullmatch(r"[A-Za-z]{2}\d{6,12}", _sc):
+                developer_trace["erp_read_result"] = "malformed_identifier"
+                _scp = next((p for p in full_action.get("parameters") or []
+                             if (p.get("name") or "").lower() == "shipmentcode"), {})
+                return self._finalize(
+                    reply=_build_response(text=_incomplete_identifier_prompt(_scp, _sc)),
+                    routing_type="WORKFLOW", workflow=workflow_hint,
+                    developer_trace=developer_trace, context=context, start=start,
+                    alert=_detect_alert(message, context))
 
         return self._execute_selected_action(
             full_action, candidates, message, history, context, developer_trace, start,
@@ -4342,6 +4399,33 @@ class DecisionEngine:
                 routing_type = "GENERAL"
         else:
             full_mapped = result_payload.get("mapped_fields")
+
+            # CUSTOMER-ERP-READ-1 state D — VALID_NOT_FOUND. A private ERP
+            # READ status inquiry (searchdatashipment / searchdataorder /
+            # searchdatatracking) that returned HTTP-OK but with NO
+            # matching record: tell the customer it was not found and to
+            # re-check the number — never the generic "ดำเนินการเรียบร้อย
+            # ค่ะ" (implies success) and never "ระบบขัดข้อง" (only a real
+            # ERP_FAILURE, handled by the status=="error" branch above).
+            # LIST actions keep their own empty-result wording
+            # (_aggregate_list_reply). Scoped to the three READ status
+            # keys so a WRITE/notification flow is never affected.
+            if (selected.get("action_key") in _ERP_READ_STATUS_ACTIONS
+                    and not _detect_aggregation_request(message)):
+                _rec_id = next(
+                    (collected_slots.get(k) for k in ("ShipmentCode", "OrderCode", "Tracking")
+                     if collected_slots.get(k)), None)
+                _no_record = (not full_mapped) or (
+                    isinstance(full_mapped, dict)
+                    and all(v in (None, "", [], {}) for v in full_mapped.values()))
+                if _rec_id and _no_record:
+                    developer_trace["erp_read_result"] = "valid_not_found"
+                    reply = _build_response(text=(
+                        f"ไม่พบข้อมูลรายการสำหรับเลขที่ {_rec_id} ในระบบค่ะ "
+                        "รบกวนตรวจสอบเลขที่บิลขนส่งหรือเลขแทร็กอีกครั้งแล้วแจ้งมาใหม่นะคะ"))
+                    return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                           developer_trace=developer_trace, context=context, start=start, alert=alert)
+
             # Response-Derived Identifier Memory (2026-08-15, Issue 2) —
             # a successful list/search execution often names the record's
             # OWN identifier in its response (response_mapping rows tagged
