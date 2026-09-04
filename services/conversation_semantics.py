@@ -543,9 +543,19 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
     # PRODUCT POLICY — a can-I-ship / can-I-import move on some goods,
     # without a cost / warehouse / coupon / invoice object.
     if a_permit and v_ship and not (obj_cost or obj_wh or obj_cp or obj_inv):
-        lead = re.split(r"\s+", t.strip())[0]
-        if lead and _THAI_CHAR_RE.search(lead):
-            ent["product"] = lead
+        # the product noun is the phrase BEFORE the ship / permit verb.
+        # A run-on Thai phrase ("กล่องพลาสติกนำเข้าได้ไหมครับ") has no
+        # spaces, so a bare split(" ")[0] would capture the WHOLE
+        # sentence and echo it back downstream (REAL LINE regression).
+        _cut = len(t)
+        for _rx in (_SHIP_VERB, _ACT_PERMIT):
+            _mm = _rx.search(t)
+            if _mm and _mm.start() < _cut:
+                _cut = _mm.start()
+        _noun = _bare_product_noun(t[:_cut]) or (
+            re.split(r"\s+", t[:_cut].strip())[-1] if _cut else "")
+        if _noun and 2 <= len(_noun) <= 30 and _THAI_CHAR_RE.search(_noun):
+            ent["product"] = _noun
         return "PRODUCT_POLICY", 0.7, ent
 
     # SHIPMENT STATUS — a parcel object (or a strong status phrasing)

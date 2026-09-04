@@ -124,7 +124,10 @@ def _method_of(text: str) -> Optional[str]:
     natural route answer ("รถ", "เอาเรือ", "ขอทางรถ")."""
     if not text:
         return None
-    t = re.sub(r"[\s]*(?:ครับ|ค่ะ|คะ|นะ|น่ะ|จ้า|จ๊ะ|คับ|ครัช|เลย|ก็ได้|ดีกว่า)+\s*$", "", (text or "").strip())
+    t = re.sub(
+        r"[\s]*(?:ครับ|ค่ะ|คะ|นะ|น่ะ|จ้า|จ๊ะ|คับ|ครัช|เลย|ก็ได้|ดีกว่า|"
+        r"ล่ะ|หละ|ล้ะ|บ้าง|แทน|ดู|มั้ย|ไหม|หรือเปล่า|รึเปล่า)+\s*$",
+        "", (text or "").strip())
     ra = _ROUTE_ANSWER_RE.match(t)
     if ra:
         w = ra.group(1)
@@ -133,6 +136,15 @@ def _method_of(text: str) -> Optional[str]:
         return "sea"
     if re.search(r"ทางรถ|ทางบก|โดยรถ|(?<![ก-๙])รถ(?![ก-๙])", t):
         return "road"
+    # CALCULATOR-REGRESSION-2 — a COMPARISON follow-up glues the route
+    # word straight onto a connector ("ถ้าเป็นเรือล่ะ", "แล้วรถล่ะ",
+    # "งั้นเอาเรือ") so the strict word-boundary checks above miss it.
+    # Only a leading comparison/choice connector immediately before the
+    # bare route noun counts — "เรือสินค้ามาถึงยัง" / "นำเข้ารถ" have no
+    # such connector and stay unmatched (their own regression test).
+    cm = re.search(r"(?:ถ้า|เป็น|แล้ว|ลอง|งั้น|เอา|ขอ|ใช้)(?:ทาง|โดย|เป็น)?\s*(รถ|เรือ|บก)(?![ก-๙])", t)
+    if cm:
+        return "sea" if cm.group(1) == "เรือ" else "road"
     return None
 
 
@@ -228,13 +240,24 @@ def _is_explicit_new_request(text: str, interpretation: Optional[object] = None)
         return False
     fam = getattr(interpretation, "intent_family", None) if interpretation is not None else None
     op = getattr(interpretation, "follow_up_op", "NONE") if interpretation is not None else "NONE"
-    if fam == "SHIPPING_ESTIMATE" and op in ("NONE", "SET_VALUE"):
-        return True
-    if _CALC_VERB_RE.search(t):
-        return True
     p = parse_dimension_input(t)
     has_value = (p["weight"] is not None or len(p["dimension_values"]) >= 2
                  or _WEIGHT_RE.search(t) is not None)
+    # CALCULATOR-REGRESSION-2 — a BARE route/method answer ("เอารถครับ",
+    # "รถ", "เรือค่ะ") is a CONTINUATION value, never a fresh calculation
+    # — even though the widened SEMANTIC-FIRST-2 LLM gate now labels it
+    # SHIPPING_ESTIMATE / SET_VALUE. It carries no weight / dimensions /
+    # calc verb of its own, so branch B (accumulate the active thread)
+    # must own it; treating it as "explicit new" wiped the retained
+    # weight + dimensions on the REAL LINE route-answer turn.
+    if _method_of(t) is not None and not has_value and not _CALC_VERB_RE.search(t):
+        return False
+    if fam == "SHIPPING_ESTIMATE" and op == "NONE":
+        return True
+    if fam == "SHIPPING_ESTIMATE" and op == "SET_VALUE" and (has_value or _CALC_VERB_RE.search(t)):
+        return True
+    if _CALC_VERB_RE.search(t):
+        return True
     return bool(_CALC_TOPIC_RE.search(t) and has_value)
 
 

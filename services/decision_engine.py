@@ -1383,6 +1383,20 @@ _TRANSIT_TIME_Q_RE = re.compile(r"กี่วัน|กี่ชั่วโม
 _ELLIPTICAL_NO_REFERENT_RE = re.compile(
     r"(?:แล้ว\s*)?(?:ของ)?(?:ผม|ฉัน|หนู|เรา|ดิฉัน|อันนี้|อันนั้น|ตัวนี้|อันของผม|ของผม|ของฉัน)"
     r"\s*(?:ล่ะ|หละ|ล้ะ|ไหม|มั้ย|ยัง)?\s*(?:คะ|ครับ|ค่ะ|น่ะ|อ่ะ|อะ)?\s*$", re.IGNORECASE)
+# SYSTEM-STATE-EMERGENCY-1 — a recent assistant turn that itself put a
+# SPECIFIC private-data topic on the table (offered / asked about a
+# coupon, a wallet balance, a shipment / order status, tracking, a named
+# bill). Only then does a following bare "ของผมล่ะ" HAVE a referent and
+# may resolve to that topic. A charter slot prompt, a warehouse
+# clarification, an invoice-policy answer, a rate reply — none establish
+# one, so a bare possessive there must be met with a clarification, never
+# a customer-profile / wallet ERP read.
+_PRIVATE_REFERENT_OFFER_RE = re.compile(
+    r"(?:ต้องการ|อยาก|จะ|ให้|จะให้)\s*(?:ช่วย)?\s*(?:ตรวจสอบ|เช็ก|เช็ค|ดู|แจ้ง)\s*\S{0,18}"
+    r"(?:คูปอง|coupon|wallet|วอลเล็ท|กระเป๋าเงิน|ยอดเงิน|พัสดุ|ออเดอร์|คำสั่งซื้อ|บิล|แทร็ก|tracking|สถานะ)"
+    r"|(?:คูปอง|coupon|ยอด\s*wallet|ยอดเงิน\s*wallet|สถานะพัสดุ|สถานะสินค้า|สถานะออเดอร์)\s*\S{0,10}"
+    r"(?:ไหมคะ|ไหมครับ|มั้ยคะ|มั้ยครับ|หรือเปล่า|รึเปล่า|ใช่ไหม)",
+    re.IGNORECASE)
 # PPC (2026-09-03) — a facility LOCATION / hours question ("โกดังรับสินค้า
 # อยู่ที่ไหน", "สาขานนทบุรีเปิดกี่โมง") is always PUBLIC FAQ, never a
 # private shipment-status inquiry — even though it contains "สินค้า" +
@@ -2370,6 +2384,72 @@ def classify_turn_intent(message: str) -> str:
 # message, instead of un-selecting one after the fact.
 _IDENTITY_GATED_ACTION_TYPES = ("API", "WEBHOOK")
 
+# SYSTEM-STATE-EMERGENCY-1 — CENTRAL current-turn authority.
+#
+# `_ACTIONABLE_INTENT_FAMILIES` = every central-interpreter family that
+# names a concrete, actionable customer request. A DECISIVE one of these
+# in the CURRENT message (follow_up_op == "NONE", confidence >= 0.55)
+# that is NOT the family a pending flow serves, and is NOT a value that
+# flow's own slot extractor accepts, is an explicit NEW intent that must
+# beat stale unrelated pending state (a sticky charter / calculator /
+# operational / Business-Action collection). GENERAL / UNKNOWN /
+# IMPORT_INTEREST stay ambiguous and never break a flow on their own; a
+# follow-up op (SET_VALUE / CORRECTION / COMPARISON / CONTINUE) always
+# CONTINUES the active flow.
+_ACTIONABLE_INTENT_FAMILIES = frozenset({
+    "SHIPPING_ESTIMATE", "CHARTER_TRUCK", "PICKUP_LOCATION", "SELF_PICKUP",
+    "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "INVOICE",
+    "SHIPMENT_STATUS", "ADDRESS_CHANGE",
+})
+# The subset that is NEVER itself a Business-Action collection — used
+# where the pending flow's own family is unknown (a generic
+# `_resolve_continuation_action` continuation), so a same-domain
+# SHIPMENT_STATUS / INVOICE / MY_COUPONS / ADDRESS_CHANGE elaboration is
+# NOT misread as a topic change (the existing question-marker / RAG_ONLY
+# diversion guards still own those).
+_FLOW_ONLY_INTENT_FAMILIES = frozenset({
+    "SHIPPING_ESTIMATE", "CHARTER_TRUCK", "PICKUP_LOCATION",
+    "SELF_PICKUP", "COUPON_USAGE", "PRODUCT_POLICY",
+})
+
+
+# SYSTEM-STATE-EMERGENCY-1 — a clear, non-charter QUESTION shape. Used as
+# a last-resort break signal for the (history-sticky) charter collection
+# when the LLM family read is degraded/GENERAL but the turn is plainly
+# not a charter slot answer.
+_CHARTER_NONCONTINUATION_Q_RE = re.compile(
+    r"ไหม|มั้ย|กี่วัน|กี่ชั่วโมง|กี่บาท|เท่าไหร่|เท่าไร|ยังไง|ยังงัย|อย่างไร|"
+    r"ตรงไหน|ที่ไหน|อยู่ไหน|แถวไหน|หรือยัง|รึยัง|ได้ไหม|ออกได้|ใช้ยังไง|ขอ.*หน่อย")
+
+
+def _current_intent_breaks_pending_flow(semantic, message, *, flow_family=None,
+                                         flow_extract=None, families=None) -> bool:
+    """The ONE central arbitration rule, applied BEFORE every flow-local
+    pending-state continuation (charter / operational / calculator /
+    Business-Action collection). Returns True when the CURRENT message
+    carries a decisive NEW actionable intent the pending flow must NOT
+    consume.
+
+    A turn CONTINUES the flow (returns False) when: it is that flow's own
+    family; it carries a follow-up op; the interpreter could only reach
+    an ambiguous GENERAL / UNKNOWN / low-confidence read; or the flow's
+    own slot extractor accepts the message as a value.
+    """
+    fam = getattr(semantic, "intent_family", "UNKNOWN")
+    op = getattr(semantic, "follow_up_op", "NONE")
+    conf = float(getattr(semantic, "confidence", 0.0) or 0.0)
+    if fam == flow_family or op != "NONE":
+        return False
+    if fam not in (families or _ACTIONABLE_INTENT_FAMILIES) or conf < 0.55:
+        return False
+    if flow_extract is not None:
+        try:
+            if flow_extract(message):
+                return False
+        except Exception:
+            pass
+    return True
+
 
 def search_candidate_actions(registry, *, workflow: Optional[str], message: str,
                               collected_slots: Optional[Dict] = None,
@@ -2709,6 +2789,34 @@ class DecisionEngine:
             # ("FT318…", "12 กก.") is unaffected.
             private_state_inquiry = _classify_private_state_inquiry(message)
 
+            # SYSTEM-STATE-EMERGENCY-1 (2nd blocker) — a bare possessive /
+            # demonstrative follow-up with NO resolvable referent
+            # ("ของผมล่ะ", "แล้วอันนี้ล่ะ", "อันนั้นของผมล่ะ") must NEVER
+            # default to a customer-profile / wallet / account-summary
+            # ERP read. A private ERP read requires BOTH an authorized
+            # identity AND an explicit or recent-context-resolved private
+            # intent — a possessive pronoun alone is neither. REAL LINE:
+            # "ของผมล่ะ" (right after a charter slot prompt) returned the
+            # full profile + Purchase Wallet + email + phone. Resolve it
+            # against the last few assistant turns: only when one
+            # genuinely offered a specific private-data topic does the
+            # normal private-state path continue; otherwise ASK which
+            # data they mean. Runs BEFORE _resolve_conversation_reference
+            # / the private-state consumption / getdatacustomer.
+            if _ELLIPTICAL_NO_REFERENT_RE.match((message or "").strip()):
+                _recent_asst_txt = " ".join(
+                    (t.get("content") or "") for t in (history or [])[-4:]
+                    if t.get("role") == "assistant")
+                if not _PRIVATE_REFERENT_OFFER_RE.search(_recent_asst_txt):
+                    developer_trace["referentless_private_clarify"] = True
+                    return self._finalize(
+                        reply=_build_response(text=(
+                            "ขออภัยค่ะ ไม่แน่ใจว่าหมายถึงข้อมูลส่วนไหน "
+                            "รบกวนระบุเพิ่มเติม เช่น สถานะสินค้า คูปอง หรือยอด Wallet ค่ะ")),
+                        routing_type="WORKFLOW", workflow=None,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+
             # SEMANTIC-FIRST-2 — a novel / short paraphrase of a
             # shipment/order STATUS question ("ร้านส่งของออกมายัง",
             # "ต้นทางส่งมาหรือยัง", "ฝั่งร้านปล่อยของหรือยัง", "ส่งยังครับ")
@@ -2816,6 +2924,26 @@ class DecisionEngine:
             # _count_genuine_retries below for the companion fix that
             # keeps retry counting itself from over-counting a turn like
             # this one after the fact.
+            if continuation_action and _current_intent_breaks_pending_flow(
+                    semantic, message, flow_family=None,
+                    families=_FLOW_ONLY_INTENT_FAMILIES):
+                # SYSTEM-STATE-EMERGENCY-1 / CALCULATOR-REGRESSION-2 —
+                # a decisive NEW deterministic-flow / public-RAG intent
+                # (calculator, charter, warehouse, coupon-usage, product
+                # policy) in THIS message overrides a stale, unrelated
+                # pending Business-Action collection. REAL LINE: after
+                # "ร้านส่งหรือยังคะ" left a searchdataorder collection
+                # pending, "ช่วยคำนวณค่าส่ง น้ำหนัก 2 โล ขนาด 54x12x43"
+                # (a clear SHIPPING_ESTIMATE request, no "…หน่อย" marker)
+                # was swallowed as a failed OrderCode answer. Restricted
+                # to _FLOW_ONLY_INTENT_FAMILIES so a same-domain
+                # SHIPMENT_STATUS / INVOICE elaboration is NOT misread as
+                # a topic change (the question-marker diversion guard
+                # below still owns those).
+                developer_trace["pending_flow_broken_by_current_intent"] = \
+                    f"continuation->{getattr(semantic, 'intent_family', None)}"
+                continuation_action = None
+
             if continuation_action:
                 diversion_candidates = search_candidate_actions(
                     self.registry, workflow=workflow_hint, message=message, collected_slots={})
@@ -3062,6 +3190,33 @@ class DecisionEngine:
                 # Deterministic, history-derived — no LLM.
                 _charter = _derive_charter_state(history)
                 if _charter is not None:
+                    # SYSTEM-STATE-EMERGENCY-1 — the charter collection
+                    # opened by a TC19 FAQ answer used to consume EVERY
+                    # later turn until its 4 slots were full (REAL LINE:
+                    # "ช่วยคำนวณค่าส่ง…", "ใบกำกับ…", "ผมมีคูปอง…",
+                    # "ทางเรือกี่วัน", "อยากเปลี่ยนที่อยู่จัดส่ง",
+                    # "ร้านส่งหรือยัง" all got the charter slot prompt).
+                    # A turn only CONTINUES charter when it is a plausible
+                    # charter slot value, a CHARTER_TRUCK re-trigger, or a
+                    # follow-up op. Anything else — a decisive new
+                    # actionable family, a confirmed private-state
+                    # inquiry, or a clear non-charter question — breaks it
+                    # (the central `_current_intent_breaks_pending_flow`
+                    # plus the deterministic SEM-1 recognizer, so an LLM
+                    # hiccup that reads "ร้านส่งหรือยัง" as GENERAL is
+                    # still handled).
+                    _charter_slot_value = bool(_extract_charter_fields(message).as_dict())
+                    _charter_is_followup = getattr(semantic, "follow_up_op", "NONE") != "NONE"
+                    _charter_is_same = getattr(semantic, "intent_family", None) == "CHARTER_TRUCK"
+                    if (not _charter_slot_value and not _charter_is_followup and not _charter_is_same
+                            and (_current_intent_breaks_pending_flow(
+                                    semantic, message, flow_family="CHARTER_TRUCK")
+                                 or private_state_inquiry is not None
+                                 or bool(_CHARTER_NONCONTINUATION_Q_RE.search(message or "")))):
+                        developer_trace["pending_flow_broken_by_current_intent"] = \
+                            f"charter->{getattr(semantic, 'intent_family', None)}"
+                        _charter = None
+                if _charter is not None:
                     _extract_charter_fields(message, _charter)
                     developer_trace["selection_source"] = "charter_truck_collection"
                     developer_trace["charter_truck_state"] = _charter.as_dict()
@@ -3102,6 +3257,24 @@ class DecisionEngine:
                 # its own requestshippingaddresschange flow. Deterministic,
                 # history-derived; Semantic-First supplies the intent.
                 _opreq = _derive_operational_state(history, message, interpretation=semantic)
+                if _opreq is not None and history and _current_intent_breaks_pending_flow(
+                        semantic, message, flow_family="ADDRESS_CHANGE",
+                        flow_extract=lambda m: any(
+                            _validate_generic_identifier(tok) and not tok.isdigit()
+                            for tok in _TOKEN_SPLIT_RE.split(m or "") if tok)
+                        or bool(re.search(r"(?<!\d)0\d{8,9}(?!\d)", m or ""))) \
+                        and _derive_operational_state(None, message, interpretation=semantic) is None:
+                    # SYSTEM-STATE-EMERGENCY-1 — same central guard, but
+                    # ONLY when the operational collection is HISTORY-
+                    # sticky (a recent ack in `history`) and the CURRENT
+                    # message alone would NOT open one: a decisive new
+                    # actionable intent then breaks it. A FRESH operational
+                    # request ("บิลขนส่ง FT ต้องการเปลี่ยนเป็นรับเอง" —
+                    # classify_operational_request already used the
+                    # interpretation) is never touched.
+                    developer_trace["pending_flow_broken_by_current_intent"] = \
+                        f"operational->{getattr(semantic, 'intent_family', None)}"
+                    _opreq = None
                 if _opreq is not None:
                     _extract_operational_fields(message, _opreq)
                     developer_trace["selection_source"] = "operational_change_collection"

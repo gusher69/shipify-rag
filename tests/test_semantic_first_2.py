@@ -215,13 +215,17 @@ class TestAmbiguityClarifies(unittest.TestCase):
             self.assertNotEqual(o["handoff"], "unsupported_company_information",
                                 f"{m!r} -> Fix-2 Human CS: {o['reply'][:60]!r}")
 
-    def test_elliptical_possessive_is_suppressed_even_if_gate_fires(self):
-        # even if the answerability gate DID flag it, a bare possessive
-        # follow-up with no referent is unclear language -> clarify.
+    def test_elliptical_possessive_with_no_referent_clarifies_not_data_dump(self):
+        # SYSTEM-STATE-EMERGENCY-1 — a bare possessive follow-up with no
+        # referent in recent context is met with a clarification well
+        # BEFORE any private-state / conversation-reference / Fix-2 path;
+        # it must never return a customer-profile / wallet ERP read.
         o = _decide(self.eng, "ของผมล่ะ", unsupported=True)
-        self.assertEqual(o["fix2_suppressed"], "elliptical_no_referent_clarify")
         self.assertEqual(o["routing"], "WORKFLOW")
-        self.assertIn("ไม่แน่ใจว่าหมายถึงรายการไหน", o["reply"])
+        self.assertNotEqual(o["handoff"], "unsupported_company_information")
+        self.assertIn("ไม่แน่ใจว่าหมายถึง", o["reply"])
+        self.assertNotIn("Wallet 6", o["reply"])   # no wallet figures
+        self.assertNotIn("ยอดเงิน Purchase", o["reply"])
 
 
 # ── 4. MISSING-INPUT — understood change request -> ask, not Fix-2 ─────
