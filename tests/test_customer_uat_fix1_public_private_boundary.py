@@ -616,8 +616,21 @@ class Fix13_NonSlotPublicTaskDataStaysPublicViaRag(unittest.TestCase):
         self._assert_public_rag_continuation(r, mr)
 
     def test_product_type_reply_stays_public(self):
+        # INVOICE-PRODUCT-REGRESSION-2 — a product-NAME reply to a
+        # product question is now understood by the central Semantic-First
+        # layer as a PRODUCT entity and routed to the trusted product-
+        # policy path. Still PUBLIC, still the shared RAG pipeline, never
+        # an ERP call or the identity/entity-code ambiguity prompt.
         r, mr = self._decide("เสื้อผ้า", "ได้ค่ะ ไม่ทราบว่าสินค้าประเภทไหนคะ")
-        self._assert_public_rag_continuation(r, mr)
+        dev = r.get("developer") or {}
+        self.assertEqual(r["reply"]["text"], "RAG-PIPELINE-REACHED")
+        self.assertNotIn(_GENERIC_AMBIGUITY_MARKER, r["reply"]["text"])
+        self.assertNotEqual(r["routing"]["type"], "API")
+        self.assertIsNone(dev.get("selected_business_action"))
+        mr.assert_not_called()
+        si = dev.get("semantic_interpretation") or {}
+        self.assertEqual(si.get("intent_family"), "PRODUCT_POLICY")
+        self.assertEqual((si.get("entities") or {}).get("product"), "เสื้อผ้า")
 
     def test_url_reply_stays_public(self):
         r, mr = self._decide("https://example-shop.test/p/abc123",

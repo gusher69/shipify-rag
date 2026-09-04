@@ -1800,6 +1800,24 @@ def run_playground_turn(
             stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                                  f"FIX-2.3 product/import-interest continuation ({_pi_note}) — "
                                  "not a company-fact no-info, no LLM call, no Human CS"))
+        elif (getattr(interpretation, "intent_family", None) == "PRODUCT_POLICY"
+              and (getattr(interpretation, "entities", {}) or {}).get("product")):
+            # INVOICE-PRODUCT-REGRESSION-2 (Problem B) — the CENTRAL semantic
+            # layer recognised this turn as a PRODUCT entity (a product name
+            # the customer gave, generically — no product dictionary). An
+            # ORDINARY product whose exact noun is unseen carries no trusted
+            # prohibited-policy evidence, but that is NOT "Shipify has no
+            # company information" — it must continue the service
+            # conversation, never Fix-2 / Human CS. (A prohibited product
+            # surfaces its own policy evidence via retrieval and never
+            # reaches this no_information branch.)
+            _sf_noun = (interpretation.entities or {}).get("product")
+            answer_text, _sf_note = _product_answer_service_continuation(
+                _sf_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
+                history=history, transport_known=_pac_transport_known)
+            stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
+                                 f"SEMANTIC-FIRST product entity ({_sf_note}) — novel product noun is "
+                                 "not a company-fact no-info, no LLM call, no Human CS"))
         else:
             answer_text = "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ"
             if _COMPLAINT_SIGNAL_RE.search(question or ""):

@@ -2529,6 +2529,23 @@ class DecisionEngine:
             # (bare ids / URLs / numeric-only / postbacks) skip it.
             semantic = _interpret_message(message, history, context)
             developer_trace["semantic_interpretation"] = semantic.as_dict()
+
+            # INVOICE-PRODUCT-REGRESSION-2 (Problem B) — the central layer
+            # recognised a bare product NAME given in reply to the
+            # assistant's own "what product?" question. Normalise it to the
+            # canonical import-eligibility form so the existing, well-tested
+            # prohibited-goods / product-policy retrieval path decides the
+            # verdict — the trusted policy, never the semantic layer, and
+            # never a company-fact no-info / Human CS just because the noun
+            # is novel. Structural rewrite only; the entity is preserved in
+            # `semantic` for the answerability-gate safe-ack path.
+            if (semantic.intent_family == "PRODUCT_POLICY"
+                    and semantic.follow_up_op == "SET_VALUE"
+                    and (semantic.entities or {}).get("product")):
+                _prod = semantic.entities["product"]
+                message = f"{_prod}นำเข้าได้ไหม"
+                developer_trace["semantic_rewrite"] = message
+
             # stash for _run_rag_pipeline -> run_playground_turn so the RAG
             # answer-planner intent is the SAME central result (context is
             # a per-call copy — no leak to the caller).

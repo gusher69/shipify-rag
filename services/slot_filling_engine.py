@@ -154,8 +154,17 @@ def _is_genuine_product_warranty(text: str) -> bool:
 # retrieval request: self-reference, a polite request marker, or a real
 # invoice/order number already given — never the bare word "ใบกำกับภาษี"/
 # "ใบเสร็จ" alone.
+# INVOICE-PRODUCT-REGRESSION-2 (INVOICE B) — a bare polite request
+# ("ขอใบกำกับภาษีหน่อยครับ") is an issuance-POLICY question, not a
+# retrieval of an existing document; it must reach the trusted invoice
+# policy via RAG, not the invoice/order-number collection. Genuine
+# LOOKUP now needs self-reference, a real invoice/order number, OR an
+# explicit RETRIEVAL verb (ส่ง / เช็ค / ตรวจสอบ / ดู / โหลด) on the
+# document — "ช่วยส่งใบเสร็จให้หน่อย" still counts.
 _INVOICE_LOOKUP_EVIDENCE_RE = re.compile(
-    r"ของผม|ของฉัน|ของดิฉัน|(ขอ|ช่วย|รบกวน).{0,40}(หน่อย|ด้วย)"
+    r"ของผม|ของฉัน|ของดิฉัน"
+    r"|(?:ส่ง|เช็ค|เช็ก|ตรวจสอบ|ขอดู|ดู|โหลด|ดาวน์โหลด)\s*\S{0,20}(?:ใบกำกับ|ใบเสร็จ|invoice)",
+    re.IGNORECASE,
 )
 
 

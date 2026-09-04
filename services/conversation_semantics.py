@@ -672,6 +672,67 @@ def _worth_llm_disambiguation(t: str) -> bool:
     return any(rx.search(t) for rx in _INTENT_SHAPE_RES) or bool(_ACT_PERMIT.search(t))
 
 
+# INVOICE-PRODUCT-REGRESSION-2 (Problem B) — the assistant asked the
+# customer WHICH product (a legitimate product-elicitation turn). A small
+# structural marker set, never a product list.
+_ASSISTANT_ASKED_PRODUCT_RE = re.compile(
+    r"สินค้า\S{0,4}(?:อะไร|ชนิดไหน|ประเภทไหน|แบบไหน|อะไรบ้าง)"
+    r"|(?:นำเข้า|สั่ง|ฝากสั่ง|ฝากนำเข้า)\S{0,4}อะไร"
+    r"|สินค้าที่(?:ต้องการ|จะ|อยาก)\S{0,20}(?:คืออะไร|อะไร)"
+    r"|เป็นสินค้าอะไร|สินค้าของลูกค้าเป็นอะไร|ประเภทสินค้า\S{0,4}(?:คือ|อะไร)"
+    r"|รบกวน\S{0,10}(?:ประเภท|ชนิด)สินค้า")
+# a Thai question particle that would make the reply itself a question,
+# not a bare answer.
+_REPLY_IS_QUESTION_RE = re.compile(r"ไหม|มั้ย|หรือเปล่า|หรือไม่|ยังไง|อย่างไร|เท่าไหร่|กี่|ที่ไหน|\?")
+_BARE_PRODUCT_STRIP_RE = re.compile(
+    r"^(?:เป็น|คือ|ก็|น่าจะ|ประมาณ|พวก|เป็นพวก|จำพวก|ชนิด|ประเภท|สินค้า|ของ|อยากได้|ต้องการ|สั่ง|นำเข้า)\s*"
+    r"|\s*(?:ครับ|ค่ะ|คะ|ค่า|นะ|น่ะ|จ้า|จ้ะ|เลย|อ่ะ|อะ|ล่ะ|หน่อย|ด้วย|ค่ะๆ|ครับๆ|ใส่ของ|ใส่ของได้)+\s*$")
+
+
+def _assistant_asked_for_product(history: Optional[List[Dict]]) -> bool:
+    for t in reversed(list(history or [])[-4:]):
+        if t.get("role") == "assistant":
+            return bool(_ASSISTANT_ASKED_PRODUCT_RE.search(t.get("content") or ""))
+        if t.get("role") == "user":
+            continue
+    return False
+
+
+_QUANTITY_REPLY_RE = re.compile(
+    r"\d+\s*(?:ชิ้น|อัน|ใบ|กล่อง|ลัง|ตัว|ชุด|คู่|โหล|แพ็ค|แพ็ก|pcs?|kg|กิโล|กก|โล|ตัน|บาท|หยวน)",
+    re.IGNORECASE)
+
+
+def _looks_like_bare_product(t: str) -> bool:
+    s = (t or "").strip()
+    if not (1 <= len(s) <= 42) or not _THAI_CHAR_RE.search(s):
+        return False
+    if _GREET_CONFIRM_RE.match(s) or _REPLY_IS_QUESTION_RE.search(s):
+        return False
+    # not a structural value — weight / dimensions / bare number /
+    # a quantity ("500 ชิ้น"), a price, a URL/id.
+    if (_MEASURE_RE.search(s) or _QUANTITY_REPLY_RE.search(s)
+            or re.fullmatch(r"[\d\s.,x×*/\-]+", s)
+            or _STRUCT_URL_RE.match(s) or _STRUCT_ID_RE.match(s)):
+        return False
+    # too digit-heavy to be a product noun
+    if sum(ch.isdigit() for ch in s) > len(s) / 3:
+        return False
+    # not one of the other intent families (a real request, not a noun)
+    if any(rx.search(s) for rx in (_OBJ_INVOICE, _OBJ_WAREHOUSE, _OBJ_COUPON, _OBJ_TRUCK,
+                                   _OBJ_COST, _ACT_CHANGE, _ACT_ESTIMATE)):
+        return False
+    return True
+
+
+def _bare_product_noun(t: str) -> Optional[str]:
+    s = (t or "").strip()
+    for _ in range(3):
+        s = _BARE_PRODUCT_STRIP_RE.sub("", s).strip()
+    s = re.sub(r"\s+", "", s)
+    return s if 2 <= len(s) <= 30 and _THAI_CHAR_RE.search(s) else None
+
+
 def interpret(message: str, history: Optional[List[Dict]] = None,
               context: Optional[Dict] = None) -> Interpretation:
     """The ONE central semantic interpretation. Natural language ->
@@ -694,6 +755,21 @@ def interpret(message: str, history: Optional[List[Dict]] = None,
     op = _followup_op(t)
     fam, conf, ent = _compose(t)
     is_priv = bool(_ROLE_SELF.search(t))
+
+    # INVOICE-PRODUCT-REGRESSION-2 (Problem B) — a bare product NAME given
+    # in reply to the assistant's own "what product?" question is a
+    # PRODUCT-slot response, not an UNKNOWN standalone company question.
+    # Structural: the previous assistant turn asked for the product AND
+    # this turn is a short noun phrase (no product dictionary). Trusted
+    # policy still decides the verdict downstream — here we only name the
+    # entity.
+    if fam == "UNKNOWN" and _assistant_asked_for_product(history) and _looks_like_bare_product(t):
+        noun = _bare_product_noun(t)
+        if noun:
+            return Interpretation(intent_family="PRODUCT_POLICY",
+                                  entities={"product": noun}, is_private=is_priv,
+                                  follow_up_op="SET_VALUE", confidence=0.7,
+                                  source="deterministic")
 
     source = "deterministic"
     if (fam == "UNKNOWN" or conf < 0.5) and _worth_llm_disambiguation(t):

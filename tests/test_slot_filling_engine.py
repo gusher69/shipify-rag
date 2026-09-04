@@ -26,7 +26,10 @@ class TestIntentDetection(unittest.TestCase):
         self.assertEqual(detect_erp_intent("อยากเคลมสินค้า"), "warranty")
 
     def test_invoice_intent_detected(self):
-        self.assertEqual(detect_erp_intent("ขอใบกำกับภาษีหน่อย"), "invoice")
+        # a genuine RETRIEVAL request (send / check the existing document)
+        self.assertEqual(detect_erp_intent("ช่วยส่งใบกำกับภาษีให้หน่อย"), "invoice")
+        # a bare issuance-POLICY question falls through to RAG (INVOICE B)
+        self.assertIsNone(detect_erp_intent("ขอใบกำกับภาษีหน่อยครับ"))
 
     def test_payment_intent_detected(self):
         self.assertEqual(detect_erp_intent("ยอดค้างชำระเท่าไหร่"), "payment")
