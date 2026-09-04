@@ -1,7 +1,7 @@
 {
-  "checkpoint_sha": "0702e64216fcc75401920cf3f6780dc9fe179b0f",
-  "measured_at": "REGRESSION-GATE-1",
-  "note": "Per-case PASS/FAIL snapshot at the locked checkpoint, for the repeatable gate to diff against. A case flipping PASS->FAIL is a NEW REGRESSION (blocks deploy); a case staying FAIL is pre-existing (tracked in CUSTOMER_MASTER_FAILURE_INVENTORY, not a gate blocker).",
+  "checkpoint_sha": "CUSTOMER-LINK-1 (pending commit)",
+  "measured_at": "CUSTOMER-LINK-1",
+  "note": "Per-case PASS/FAIL snapshot, for the repeatable gate to diff against. A case flipping PASS->FAIL is a NEW REGRESSION (blocks deploy); a case staying FAIL is pre-existing (tracked in CUSTOMER_MASTER_FAILURE_INVENTORY.md, not a gate blocker). Updated by CUSTOMER-LINK-1: CUS-P20 flipped FAIL->PASS (link conversion no longer asks for a customer code) — this is the new reference point going forward.",
   "cases": {
     "CUS-G01": {
       "failed": false,
@@ -260,8 +260,8 @@
       "primary_root_class": "HUMAN_HANDOFF"
     },
     "CUS-P20": {
-      "failed": true,
-      "primary_root_class": "LINK_CONVERSION"
+      "failed": false,
+      "primary_root_class": null
     },
     "CUS-RL-genuine_continuation": {
       "failed": false,

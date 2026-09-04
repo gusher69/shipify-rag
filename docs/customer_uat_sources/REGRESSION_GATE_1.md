@@ -1,5 +1,17 @@
 # REGRESSION-GATE-1 — Regression Gate Definition
 
+> **Update (CUSTOMER-LINK-1):** the Product Link Conversion capability
+> (`geturlproductdetail`) was implemented on top of this gate. `CUS-P20`
+> moved FAIL → PASS (see `CUSTOMER_MASTER_FAILURE_INVENTORY.md`); Customer
+> Master is now 48/69. A genuine conflict surfaced during that work
+> (a prior test suite claimed the real upstream empirically requires
+> CustCode; CUS-P20's customer source says the opposite) was resolved by
+> the product owner in favor of the customer source — see `tests/
+> test_decision_engine.py::TestUrlConversionActionAndCrossActionIdentifierReuse`'s
+> class docstring for the full resolution. `tests/customer_uat/
+> known_baseline_case_status.json` was regenerated to reflect this as the
+> new reference point for future gate runs.
+
 **Locked checkpoint:** `0702e64216fcc75401920cf3f6780dc9fe179b0f` — manually
 smoke-tested by the product owner on REAL LINE (6 journeys, all PASS; see
 "Locked REAL-LINE cases" below). This gate exists to make sure nothing that

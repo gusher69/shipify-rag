@@ -1802,31 +1802,48 @@ class TestDynamicBusinessActionDrivenCollection(unittest.TestCase):
 
 
 class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
-    """GetUrlProductDetail ('แปลงลิงก์สินค้า') customer-reported defect
-    (2026-08-19): CustCode is genuinely required by the real ERP (proven
-    empirically — a live request with URL only returns HTTP 400, adding a
-    real CustCode returns 200 with a customer-specific converted link), so
-    it must NOT be stripped from the action's required parameters. The fix
-    is generic identifier reuse (already-existing IDENTIFIER_MEMORY_FIELDS
-    machinery) plus two real bugs found while verifying that reuse against
-    the shape of the real production actions:
+    """GetUrlProductDetail ('แปลงลิงก์สินค้า').
 
-    1. `_bind_message_to_action`'s generic digit-bearing candidate scanner
-       was tokenizing the URL's OWN internal structure (e.g. "1688" out of
-       "https://detail.1688.com/...") as a plausible identifier value for
-       an unrelated sibling action's parameter (e.g. a Tracking-shaped
-       field), which then out-scored the real URL-consuming action in
-       _resolve_continuation_action's "already collected" tie-break —
-       confirmed live: after asking for CustCode, the customer's very next
-       reply silently misrouted to a different, unrelated action.
-    2. `_extract_system_values()` only ever read the URL from THIS turn's
-       message, so a URL given on an earlier turn vanished by the time
-       CustCode was supplied on a later turn — the ERP call would go out
-       with URL missing.
+    CUSTOMER-LINK-1 (this session) CONTRACT CHANGE — documented
+    explicitly because it directly reverses this class's own prior
+    design: the 2026-08-19 docstring here previously claimed CustCode
+    was "proven empirically" required by the real ERP (a live request
+    with URL only allegedly returned HTTP 400) and built the feature to
+    ask an anonymous customer for it. That directly contradicts the
+    actual customer source for this capability (`tests/customer_uat/
+    customer_uat_master.jsonl` CUS-P20, linked CUS-G29/CUS-S20; PDF
+    reviewer's own annotation in `docs/customer_uat_sources/
+    CUSTOMER_UAT_SOURCE_MANIFEST.md`: "don't require identity for link
+    conversion") — CUS-P20's own expected_behavior is explicit: "Link
+    conversion is NOT an internal-data check — it must NOT require a
+    customer code or identity verification." Given the two sources
+    conflict and the prior "empirical" claim could not be re-verified
+    against the real upstream from this session, the product owner was
+    asked directly and chose to trust the customer source: CustCode is
+    NEVER asked of the customer, at any verification state. A verified
+    customer's own `cust_code` (from `customer_channel_bindings` via
+    `context["customer_context"]`, never `user_profiles.cust_code`) is
+    still supplied automatically, best-effort, when available — never
+    required, never blocking, never a reason to ask. If the real
+    upstream genuinely rejects an anonymous request, that surfaces
+    honestly (`services.link_conversion_flow.classify_conversion_
+    result` -> CONVERSION_NOT_FOUND_OR_REJECTED / UPSTREAM_FAILURE) —
+    never a fake success, and still never an identity demand.
 
-    The fixture below seeds two actions sharing the exact same
-    auto-generated "please give your customer code" question — reproducing
-    the exact ambiguity that exposed both bugs."""
+    The fixture's parameter schema now matches the LIVE registry fix
+    (`tools/fix_link_conversion_customer_facing_identity.py`): CustCode
+    `required=False`, `input_source="customer_profile"`.
+
+    Two genuine regression protections from the original 2026-08-19
+    investigation are preserved (still real bugs regardless of the
+    CustCode contract):
+    1. `_bind_message_to_action`'s generic digit-bearing candidate
+       scanner must never tokenize a URL's OWN internal structure (e.g.
+       "1688" out of "https://detail.1688.com/...") as a plausible
+       identifier value for an unrelated sibling action's parameter.
+    2. `_extract_system_values()` must still find a URL given on an
+       EARLIER turn when a later turn's message alone carries none.
+    """
 
     def setUp(self):
         self.reg = BusinessActionRegistry(_FakeSupabase())
@@ -1840,9 +1857,10 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
         self.reg.replace_parameters(action_id, [
             {"name": "SecretCode", "display_name": "รหัสยืนยันตัวตน", "required": True,
              "input_source": "credential_store", "credential_ref": "secretcode"},
-            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": True,
-             "input_source": "customer_message", "validation_pattern": r"^[A-Za-z]{2}\d+$"},
-            {"name": "URL", "display_name": "ลิงก์สินค้า", "required": True, "input_source": "system_generated"},
+            {"name": "CustCode", "display_name": "รหัสลูกค้า", "required": False,
+             "input_source": "customer_profile", "visible_to_customer": False},
+            {"name": "URL", "display_name": "ลิงก์สินค้า", "required": True, "input_source": "system_generated",
+             "description": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ"},
         ])
         self.reg.replace_response_mapping(action_id, [
             {"json_path": "$.data.Link", "mapped_label": "ลิงก์รายละเอียดสินค้า", "field_metadata": {}},
@@ -1853,9 +1871,9 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
         return action_id
 
     def _seed_tracking_sibling(self):
-        """Shaped like the real SearchDataTracking action — same CustCode
-        question, plus a Tracking parameter whose validator would
-        otherwise happily accept a bare digit-run like "1688"."""
+        """Shaped like the real SearchDataTracking action — a Tracking
+        parameter whose validator would otherwise happily accept a bare
+        digit-run like "1688"."""
         action_id = _seed_action(
             self.reg, key="search_data_tracking", action_type="API", category="Shipment Tracking",
             ai_description="ค้นหาสถานะพัสดุจากเลขแทรค", keywords=["แทรค", "tracking", "เลขพัสดุ"])
@@ -1874,27 +1892,33 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
         return patch("services.credential_store.CredentialStore.resolve",
                      return_value={"ok": True, "value": "resolved-secret", "error": None})
 
-    # A. URL only, nothing known anywhere -> asks naturally, no raw JSON, no fabricated link
-    def test_a_url_only_no_custcode_anywhere_asks_naturally(self):
-        self._seed_geturlproductdetail()
-        result = self.engine.decide("https://detail.1688.com/offer/682345678901.html", history=[], context={})
-        self.assertEqual(result["routing"]["type"], "WORKFLOW")
-        text = result["reply"]["text"]
-        self.assertIn("รหัสลูกค้า", text)
-        self.assertNotIn("{", text)
-        self.assertNotIn("http", text.lower())  # no fabricated link before CustCode is known
+    def _exec_patch(self, link="https://www.shipify.co.th/PageProductDetail/1688/682345678901"):
+        return patch("services.action_executor.requests.request",
+                     return_value=MagicMock(status_code=200, json=lambda: {
+                         "status": "success", "data": {"Link": link}}))
 
-    # B. Natural phrase + URL + CustCode already known via customer_context (profile reuse)
+    # A. URL only, no identity known anywhere -> converts anyway (PUBLIC,
+    # per CUS-P20), never asks for a customer code, no raw JSON leak.
+    def test_a_url_only_no_custcode_anywhere_converts_without_asking_identity(self):
+        self._seed_geturlproductdetail()
+        with self._credential_patch(), self._exec_patch() as mock_req:
+            result = self.engine.decide("https://detail.1688.com/offer/682345678901.html", history=[], context={})
+        self.assertEqual(result["routing"]["type"], "API")
+        text = result["reply"]["text"]
+        self.assertNotIn("รหัสลูกค้า", text)
+        self.assertNotIn("{", text)
+        sent = mock_req.call_args.kwargs.get("data") or {}
+        self.assertNotIn("CustCode", sent)
+
+    # B. Natural phrase + URL + CustCode already known via customer_context
+    # (profile reuse) -> supplied automatically, still never asked.
     def test_b_natural_phrase_with_known_custcode_in_profile_executes_immediately(self):
         self._seed_geturlproductdetail()
         # channel="admin" (Task 06 Authorization Gate) -- this test proves
         # cross-turn identifier reuse/binding mechanics, not customer
         # authorization.
         context = {"customer_context": {"cust_code": "SP1014"}, "channel": "admin"}
-        with self._credential_patch(), \
-             patch("services.action_executor.requests.request",
-                   return_value=MagicMock(status_code=200, json=lambda: {
-                       "status": "success", "data": {"Link": "https://www.shipify.co.th/PageProductDetail/1688/682345678901"}})) as mock_req:
+        with self._credential_patch(), self._exec_patch() as mock_req:
             result = self.engine.decide(
                 "ช่วยแปลงลิงก์นี้ให้หน่อย https://detail.1688.com/offer/682345678901.html",
                 history=[], context=context)
@@ -1906,33 +1930,30 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
         self.assertIn("https://www.shipify.co.th", text)
         self.assertNotIn("{", text)
         self.assertNotIn('"status"', text)
+        self.assertNotIn("รหัสลูกค้า", text)
         # The politeness particle must never be glued directly onto the URL.
         self.assertNotIn("682345678901ค่ะ", text)
 
-    # C/D. Cross-turn: URL given turn 1 (asked for CustCode), CustCode given
-    # turn 2 -- must reuse the ORIGINAL URL (not lose it) and must NOT
-    # misroute to the sibling Tracking action just because "1688" appears
-    # inside the URL.
-    def test_c_url_then_custcode_across_turns_reuses_url_and_does_not_misroute(self):
+    # C. Cross-turn: turn 1 has NO url (asks for it), turn 2 supplies a
+    # bare URL -- must reuse it correctly and must NOT misroute to the
+    # sibling Tracking action just because "1688" appears inside it.
+    def test_c_bare_url_follow_up_reuses_original_ask_and_does_not_misroute(self):
         self._seed_geturlproductdetail()
         self._seed_tracking_sibling()
-        msg1 = "https://detail.1688.com/offer/682345678901.html"
-        turn1 = self.engine.decide(msg1, history=[], context={})
+        turn1 = self.engine.decide("ช่วยแปลงลิงก์ 1688 ให้หน่อย", history=[], context={})
         self.assertEqual(turn1["routing"]["type"], "WORKFLOW")
-        self.assertIn("รหัสลูกค้า", turn1["reply"]["text"])
+        self.assertNotIn("รหัสลูกค้า", turn1["reply"]["text"])
 
-        history = [{"role": "user", "content": msg1}, {"role": "assistant", "content": turn1["reply"]["text"]}]
-        with self._credential_patch(), \
-             patch("services.action_executor.requests.request",
-                   return_value=MagicMock(status_code=200, json=lambda: {
-                       "status": "success", "data": {"Link": "https://www.shipify.co.th/x"}})) as mock_req:
-            turn2 = self.engine.decide("SP1014", history=history, context={"channel": "admin"})
+        history = [{"role": "user", "content": "ช่วยแปลงลิงก์ 1688 ให้หน่อย"},
+                   {"role": "assistant", "content": turn1["reply"]["text"]}]
+        msg2 = "https://detail.1688.com/offer/682345678901.html"
+        with self._credential_patch(), self._exec_patch(link="https://www.shipify.co.th/x") as mock_req:
+            turn2 = self.engine.decide(msg2, history=history, context={"channel": "admin"})
         self.assertEqual(turn2["routing"]["type"], "API")
         sent_url = mock_req.call_args.args[1] if mock_req.call_args.args else mock_req.call_args.kwargs.get("url")
         self.assertIn("GetUrlProductDetail", sent_url)  # never silently switched to the Tracking sibling
         sent = mock_req.call_args.kwargs.get("data") or {}
-        self.assertEqual(sent.get("CustCode"), "SP1014")
-        self.assertEqual(sent.get("URL"), msg1)  # URL from turn 1 must survive to turn 2's execution
+        self.assertEqual(sent.get("URL"), msg2)
 
     # E. Existing order/tracking context already active must not hijack a fresh product-URL message.
     def test_e_active_tracking_context_does_not_hijack_url_conversion_request(self):
@@ -1940,10 +1961,7 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
         self._seed_tracking_sibling()
         context = {"customer_context": {"cust_code": "SP1014", "last_business_action": "search_data_tracking"},
                    "channel": "admin"}
-        with self._credential_patch(), \
-             patch("services.action_executor.requests.request",
-                   return_value=MagicMock(status_code=200, json=lambda: {
-                       "status": "success", "data": {"Link": "https://www.shipify.co.th/y"}})) as mock_req:
+        with self._credential_patch(), self._exec_patch(link="https://www.shipify.co.th/y") as mock_req:
             result = self.engine.decide(
                 "https://detail.1688.com/offer/682345678901.html", history=[], context=context)
         self.assertEqual(result["routing"]["type"], "API")
@@ -1960,35 +1978,35 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
     def test_g_successful_conversion_reply_has_no_raw_json_leakage(self):
         self._seed_geturlproductdetail()
         context = {"customer_context": {"cust_code": "FT1004"}, "channel": "admin"}
-        with self._credential_patch(), \
-             patch("services.action_executor.requests.request",
-                   return_value=MagicMock(status_code=200, json=lambda: {
-                       "status": "success",
-                       "data": {"Link": "https://fasttrade.in.th/PageProductDetailGuest/1688/682345678901/home/guest/index"}})):
+        link = "https://fasttrade.in.th/PageProductDetailGuest/1688/682345678901/home/guest/index"
+        with self._credential_patch(), self._exec_patch(link=link):
             result = self.engine.decide(
                 "https://detail.1688.com/offer/682345678901.html", history=[], context=context)
         text = result["reply"]["text"]
         for token in ("{", "}", '"status"', '"data"'):
             self.assertNotIn(token, text)
-        self.assertIn("https://fasttrade.in.th", text)
+        self.assertIn(link, text)
 
-    # H. Multi-user isolation: one caller's customer_context must never leak into another's decide() call.
+    # H. Multi-user isolation: one caller's customer_context must never
+    # leak into another's decide() call — and an unverified second caller
+    # is STILL never asked for identity (CUS-P20), unlike the prior
+    # design this test replaces.
     def test_h_multi_user_customer_context_never_leaks_between_calls(self):
         self._seed_geturlproductdetail()
-        with self._credential_patch(), \
-             patch("services.action_executor.requests.request",
-                   return_value=MagicMock(status_code=200, json=lambda: {
-                       "status": "success", "data": {"Link": "https://www.shipify.co.th/user-a"}})) as mock_req:
+        with self._credential_patch(), self._exec_patch(link="https://www.shipify.co.th/user-a") as mock_req:
             self.engine.decide("https://detail.1688.com/offer/1.html", history=[],
                                 context={"customer_context": {"cust_code": "SP1014"}, "channel": "admin"})
             sent_a = mock_req.call_args.kwargs.get("data") or {}
         self.assertEqual(sent_a.get("CustCode"), "SP1014")
 
-        # A second, unrelated caller with NO customer_context must be asked
-        # fresh -- never silently inherit user A's CustCode.
-        result_b = self.engine.decide("https://detail.1688.com/offer/2.html", history=[], context={})
-        self.assertEqual(result_b["routing"]["type"], "WORKFLOW")
-        self.assertIn("รหัสลูกค้า", result_b["reply"]["text"])
+        # A second, unrelated, unverified caller must never inherit user
+        # A's CustCode, but is also never asked to supply one of their own.
+        with self._credential_patch(), self._exec_patch(link="https://www.shipify.co.th/user-b") as mock_req_b:
+            result_b = self.engine.decide("https://detail.1688.com/offer/2.html", history=[], context={})
+        self.assertEqual(result_b["routing"]["type"], "API")
+        self.assertNotIn("รหัสลูกค้า", result_b["reply"]["text"])
+        sent_b = mock_req_b.call_args.kwargs.get("data") or {}
+        self.assertNotIn("CustCode", sent_b)
 
 
 class TestSemanticParameterInference(unittest.TestCase):

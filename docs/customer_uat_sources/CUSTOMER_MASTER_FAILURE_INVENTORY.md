@@ -5,15 +5,17 @@ Full per-case classification of `tests/customer_uat/customer_uat_master.jsonl`
 source file, a pre-existing data-quality duplicate noted here rather than
 silently fixed or hidden; both rows PASS so it does not change any count).
 
-Measured at checkpoint **`0702e64216fcc75401920cf3f6780dc9fe179b0f`** via
-`python -m tests.customer_uat.run_baseline` (default scratch mode — the
-tracked `tests/customer_uat/baseline_results.json` /
+Measured originally at checkpoint **`0702e64216fcc75401920cf3f6780dc9fe179b0f`**
+(REGRESSION-GATE-1) via `python -m tests.customer_uat.run_baseline` (default
+scratch mode — the tracked `tests/customer_uat/baseline_results.json` /
 `docs/customer_uat_sources/CUSTOMER_UAT_BASELINE_REPORT.md` were **not**
 touched by this measurement; that tracked report was generated against an
 older candidate, `3e83ed9`, and is now superseded by this inventory for
 per-case accuracy — it is left in place as historical record, not deleted).
+**Updated by CUSTOMER-LINK-1**: `CUS-P20` moved FAIL → PASS (see its row
+below) after the Product Link Conversion fix.
 
-**RESULT: 47/69 logical cases PASS (68.1%). 22 FAIL.** This is a
+**RESULT: 48/69 logical cases PASS (69.6%). 21 FAIL.** This is a
 measurement, not an acceptance claim — every case remains REAL LINE
 REQUIRED. See `RELEASE READINESS` in the Regression Gate output
 (`python -m tests.run_regression_gate`) for the exact, un-rounded number to
@@ -113,12 +115,12 @@ classification cites.
 | CUS-SC3 | Correction/change target | CLARIFY/PUBLIC | **FAIL** | TEST_HARNESS_BUG | "54x12x43" (bare dimensions) is defined by its own `expected_behavior` as a MULTI-TURN case ("previous bot turn asked for weight and size") but carries no `replay_fixture`, so `run_baseline.py` runs it with EMPTY history — the engine cannot know a shipping-estimate collection is pending. The original REAL-LINE bug this case captured (`ai_actually_answered`: demanded phone-number identity verification, linked `fix1:54x12x43`) is CONFIRMED FIXED: the current bare-history reply does NOT ask for phone/customer code (the customer's explicit hard constraint), it just can't disambiguate a lone dimension string with zero context, which is expected. Roadmap: give this case a `replay_fixture` carrying the prior "weight+size?" turn so it can be scored correctly. |
 | CUS-P07 | Shipping rate/calc | RAG/PUBLIC | **FAIL** | STALE_EXPECTATION | "คิดค่านำเข้าให้หน่อย" — customer's answer says "at least send the self-serve rate link"; the current calculator-collection flow (asks weight/dims/method to compute a real number) exceeds that minimum bar and is the LOCKED, REAL-LINE-verified "Calculator initial request" behaviour. `expected_route` should allow WORKFLOW, not RAG-only. |
 | CUS-P06 | No-information/handoff | HUMAN_CS/PUBLIC | **FAIL** | TEST_HARNESS_BUG | Genuine no-info-in-KB case, built to exercise Fix-2 (`unsupported_company_fact` → real Human CS handoff via the Answerability-Gate). The routing-only harness stubs RAG to always answer something, so Fix-2's no-info branch — and this case — can never fire in this measurement pass by construction (documented in the harness's own report: "the routing pass stubs RAG so `unsupported_company_fact` is never set"). Verified correct separately by `tests.test_customer_uat_fix2_unsupported_fact_handoff` (its own dedicated, passing suite). |
-| CUS-P20 | Link conversion | WORKFLOW/PUBLIC | **FAIL** | OUT_OF_SCOPE | CUSTOMER-LINK-1 — explicitly out of scope for REGRESSION-GATE-1 (scope lock: "no Link Conversion"). Current behaviour (`geturlproductdetail` asks for a customer code) is the known, previously-audited issue CUSTOMER-LINK-1 was opened to fix; that task remains open and unstarted. |
+| CUS-P20 | Link conversion | WORKFLOW/PUBLIC | PASS | — | Fixed by CUSTOMER-LINK-1 (was OUT_OF_SCOPE for REGRESSION-GATE-1). `geturlproductdetail` no longer asks for a customer code at any verification state (`services/link_conversion_flow.py` + the registry fix in `tools/fix_link_conversion_customer_facing_identity.py`); a verified customer's own code is still supplied internally, best-effort, never blocking. |
 | CUS-RL-genuine_continuation | Context/follow-up | ERP/NA | PASS | — | |
 | CUS-RL-p0_01_repeat_after_completed_cycle | Context/follow-up | WORKFLOW/NA | PASS | — | |
 | CUS-RL-p0_01_stale_cycle | Context/follow-up | WORKFLOW/NA | PASS | — | |
 
-## Classification totals (22 failures)
+## Classification totals (21 failures, post-CUSTOMER-LINK-1)
 
 | Classification | Count | Cases |
 |---|---|---|
@@ -126,7 +128,6 @@ classification cites.
 | STALE_EXPECTATION | 6 | G19, S05, S07, S12, SC3\*, P07 |
 | BUSINESS_LOGIC_BUG | 5 | G04, G11\*, G17, G21, S06\*, S16 |
 | DEFERRED_FEATURE | 2 | S10 |
-| OUT_OF_SCOPE | 1 | P20 |
 
 \* SC3 is TEST_HARNESS_BUG (fixture gap) — listed once above, not double-counted.
 \* G11 and S06 are also DEFERRED_FEATURE in nature (no matching capability
@@ -134,12 +135,12 @@ configured); classified BUSINESS_LOGIC_BUG/DEFERRED_FEATURE per the closest
 fit above — see each row's Notes for the precise reasoning, counts are not
 meant to be read as mutually exclusive buckets beyond the row-level detail.
 
-**None of the 22 failures were reclassified to OUT_OF_SCOPE merely to
-improve the count** — 21 of 22 have a concrete, evidenced root cause
-(harness rubric gap, stale master expectation, or a real product gap);
-only CUS-P20 is OUT_OF_SCOPE, and it is OUT_OF_SCOPE because it is the
-explicit subject of a separate, already-opened, not-yet-started task
-(CUSTOMER-LINK-1), not because it was hard to classify.
+**None of the 21 remaining failures are classified OUT_OF_SCOPE merely to
+improve the count** — every one has a concrete, evidenced root cause
+(harness rubric gap, stale master expectation, or a real product gap).
+CUS-P20 (the only case previously OUT_OF_SCOPE) is now PASS — CUSTOMER-
+LINK-1 fixed it — so no case in this inventory currently carries an
+OUT_OF_SCOPE classification.
 
 ## Regression Gate vs Release Readiness (do not conflate)
 
@@ -148,5 +149,5 @@ explicit subject of a separate, already-opened, not-yet-started task
   known_baseline_case_status.json` (the locked-checkpoint snapshot). A case
   flipping PASS→FAIL blocks deployment. A case that was already failing and
   stays failing does **not** block deployment — it is tracked above.
-- **Release Readiness**: **47/69 (68.1%)** logical cases pass right now.
+- **Release Readiness**: **48/69 (69.6%)** logical cases pass right now.
   This is not "ALL CUSTOMER UAT PASS" and must never be reported as such.

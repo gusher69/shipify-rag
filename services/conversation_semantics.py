@@ -36,6 +36,11 @@ import re
 from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional
 
+from services.link_conversion_flow import (
+    is_link_conversion_signal as _is_link_conversion_signal,
+    classify_link_request as _classify_link_request,
+)
+
 _RESOLVER_MODEL = "gpt-4o-mini"
 
 # ── deterministic frame derivation ────────────────────────────────────
@@ -348,6 +353,7 @@ INTENT_FAMILIES = (
     "SHIPMENT_STATUS", "INVOICE", "PICKUP_LOCATION", "SELF_PICKUP",
     "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "CHARTER_TRUCK",
     "SHIPPING_ESTIMATE", "ADDRESS_CHANGE", "IMPORT_INTEREST",
+    "LINK_CONVERSION",
     "GENERAL", "UNKNOWN",
 )
 
@@ -489,6 +495,21 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
     m = _method_label(t) if _METHOD_WORD_RE.search(t) else None
     if m:
         ent["method"] = m
+
+    # LINK CONVERSION (CUSTOMER-LINK-1) — an explicit conversion verb, or
+    # an actual https?:// URL anywhere in the message, is itself decisive
+    # (checked first: a link-conversion ask naming a warehouse/coupon/
+    # invoice word incidentally in surrounding text must never be
+    # mis-routed by a later, less specific branch). A bare textual
+    # mention of a platform name with no verb and no URL is deliberately
+    # NOT a signal (Case 6: "ผมซื้อของใน 1688" is not a conversion ask).
+    if _is_link_conversion_signal(t):
+        req = _classify_link_request(t)
+        if req.get("url"):
+            ent["url"] = req["url"]
+        if req.get("platform"):
+            ent["platform"] = req["platform"]
+        return "LINK_CONVERSION", 0.85, ent
 
     # CHARTER TRUCK — a charter-truck object is itself decisive (a hire /
     # request move is implied by naming it).
@@ -772,6 +793,20 @@ def interpret(message: str, history: Optional[List[Dict]] = None,
             ent["identifier"] = t
         elif kind == "url":
             ent["url"] = t
+            # CUSTOMER-LINK-1 — a bare pasted URL (the WHOLE message, no
+            # surrounding text) is exactly CUS-S20's own worked example
+            # ("just paste the link"). Still fully deterministic/
+            # structural (no LLM): a supported-platform hostname is a
+            # decisive LINK_CONVERSION signal even with zero framing
+            # text; an unsupported-domain bare URL stays UNKNOWN here —
+            # the fresh Business-Action candidate search's own
+            # unsupported-domain handling covers that case instead of
+            # this generic structural fast-path guessing at intent.
+            req = _classify_link_request(t)
+            if req.get("platform"):
+                return Interpretation(intent_family="LINK_CONVERSION",
+                                      entities={"url": req["url"], "platform": req["platform"]},
+                                      follow_up_op="NONE", confidence=0.9, source="structural")
         return Interpretation(intent_family="UNKNOWN", entities=ent,
                               follow_up_op="NONE", confidence=0.0, source="structural")
 
@@ -840,6 +875,7 @@ FAMILY_TO_ACTIONABLE_INTENT = {
     "CHARTER_TRUCK": "service_information",
     "SHIPPING_ESTIMATE": "shipping_calculation",
     "ADDRESS_CHANGE": None,
+    "LINK_CONVERSION": None,
     "IMPORT_INTEREST": None,
     "GENERAL": None,
     "UNKNOWN": None,

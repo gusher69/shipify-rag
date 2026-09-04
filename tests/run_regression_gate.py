@@ -75,6 +75,7 @@ PROTECTED_SUITES = [
     "tests.test_system_state_emergency_1",
     "tests.test_calculator_regression_2",
     "tests.test_business_action_registry",
+    "tests.test_customer_link1",
 ]
 
 KNOWN_REAL_LINE_SUITE = "tests.test_known_real_line_cases"

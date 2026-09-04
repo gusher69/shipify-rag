@@ -115,6 +115,17 @@ from services.shipping_estimate_flow import (
 # never imports services/hybrid_playground_router.py (Playground-only).
 from services.hybrid_runtime_service import synthesize_hybrid_answer
 
+# CUSTOMER-LINK-1 — Product Link Conversion (1688/Taobao/Tmall). Owns
+# ONLY deterministic URL/domain validation and conversion-result truth
+# typing; intent recognition stays in conversation_semantics.interpret().
+from services.link_conversion_flow import (
+    classify_link_request as _classify_link_request,
+    classify_conversion_result as _classify_conversion_result,
+    reply_for_state as _link_reply_for_state,
+    reply_for_success as _link_reply_for_success,
+    is_link_conversion_signal as _is_link_conversion_signal,
+)
+
 # ── Dynamic, Business-Action-driven Information Collection ────────────────
 #
 # Single Source of Truth refactor: required parameters now come from the
@@ -316,6 +327,21 @@ def _next_expected_parameter(action: Dict, registry, collected: Dict) -> Optiona
         for name in group.get("members") or []:
             if name not in collected and name in askable:
                 return askable[name]
+    # CUSTOMER-LINK-1 — a still-missing REQUIRED system_generated
+    # parameter (e.g. geturlproductdetail's URL) has no traditional
+    # slot-collection prompt (_NON_ASKABLE_INPUT_SOURCES deliberately
+    # excludes system_generated, same as a secret), but unlike a secret
+    # it genuinely CAN be supplied by the customer directly (pasted, or
+    # auto-extracted from the message on a later turn). Without this,
+    # _is_execution_ready() sees "nothing askable left" and the Executor
+    # is reached with the value simply absent. Generic to any action
+    # shaped this way (verified: geturlproductdetail's URL is currently
+    # the only required system_generated parameter in the registry —
+    # zero behavior change for every other existing action).
+    for name in validation.get("missing_required") or []:
+        for p in action.get("parameters") or []:
+            if p["name"] == name and p.get("input_source") == "system_generated":
+                return p
     return None  # nothing left to ask (e.g. only a secret is missing)
 
 
@@ -2399,14 +2425,23 @@ _IDENTITY_GATED_ACTION_TYPES = ("API", "WEBHOOK")
 _ACTIONABLE_INTENT_FAMILIES = frozenset({
     "SHIPPING_ESTIMATE", "CHARTER_TRUCK", "PICKUP_LOCATION", "SELF_PICKUP",
     "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "INVOICE",
-    "SHIPMENT_STATUS", "ADDRESS_CHANGE",
+    "SHIPMENT_STATUS", "ADDRESS_CHANGE", "LINK_CONVERSION",
 })
 # The subset that is NEVER itself a Business-Action collection — used
 # where the pending flow's own family is unknown (a generic
 # `_resolve_continuation_action` continuation), so a same-domain
 # SHIPMENT_STATUS / INVOICE / MY_COUPONS / ADDRESS_CHANGE elaboration is
 # NOT misread as a topic change (the existing question-marker / RAG_ONLY
-# diversion guards still own those).
+# diversion guards still own those). LINK_CONVERSION (CUSTOMER-LINK-1) is
+# excluded for the SAME reason as SHIPMENT_STATUS/INVOICE: it IS itself
+# an ordinary Business-Action collection (geturlproductdetail's own
+# pending url-ask), so a same-family elaboration (e.g. a second pasted
+# URL) must not misread as breaking its own continuation. A genuinely
+# DIFFERENT pending flow (charter/calculator/shipment/...) is still
+# correctly broken by a decisive LINK_CONVERSION read via the topical-
+# evidence diversion check just below (geturlproductdetail's own
+# keyword/description overlap) and via `_ACTIONABLE_INTENT_FAMILIES` at
+# the charter/calculator branches' own bespoke break-checks.
 _FLOW_ONLY_INTENT_FAMILIES = frozenset({
     "SHIPPING_ESTIMATE", "CHARTER_TRUCK", "PICKUP_LOCATION",
     "SELF_PICKUP", "COUPON_USAGE", "PRODUCT_POLICY",
@@ -3180,6 +3215,50 @@ class DecisionEngine:
                 candidates = [selected]
                 developer_trace["selection_source"] = "conversation_reference_detail"
             else:
+                # CUSTOMER-LINK-1 — Product Link Conversion (1688/Taobao/
+                # Tmall). Checked FIRST among the bespoke flows (ahead of
+                # charter/operational/calculator) so a decisive
+                # LINK_CONVERSION read always wins over any of their
+                # stale pending state. `interpret()` already requires a
+                # genuine signal (explicit verb, a real URL, or a
+                # link+platform composite — see conversation_semantics.
+                # _compose()'s LINK_CONVERSION branch / the structural
+                # bare-URL branch) before ever assigning this family, so
+                # reaching it here needs no further gating. Intercepting
+                # this early (rather than relying only on the generic
+                # candidate search) also sidesteps a real, separate defect
+                # confirmed live: classify_turn_intent's SHIPIFY_
+                # INFORMATION read excludes every API/WEBHOOK-type action
+                # from the candidate pool by action_type alone
+                # (_IDENTITY_GATED_ACTION_TYPES), which hid
+                # geturlproductdetail for some phrasings even though it no
+                # longer requires verified identity (services/
+                # authorization_service.py::requires_verified_identity() —
+                # confirmed False for this action after the CUSTOMER-
+                # LINK-1 registry fix). A pending "please send the link"
+                # ask also continues here (never re-asks CustCode, never
+                # loses the pending state to an ambiguous reply) unless
+                # the SAME central arbitration rule (plus the SAME
+                # degraded-LLM question-shape fallback the charter branch
+                # below already uses) says the current turn is a
+                # decisive, different actionable intent.
+                _link_pending_ask = _link_reply_for_state("MISSING_URL")
+                _last_asst_turn = next((h.get("content") or "" for h in reversed(history or [])
+                                        if h.get("role") == "assistant"), "")
+                _link_was_pending = _last_asst_turn.strip() == (_link_pending_ask or "").strip()
+                if semantic.intent_family == "LINK_CONVERSION" or (
+                        _link_was_pending
+                        and not _current_intent_breaks_pending_flow(
+                            semantic, message, flow_family="LINK_CONVERSION",
+                            families=_ACTIONABLE_INTENT_FAMILIES)
+                        and not _CHARTER_NONCONTINUATION_Q_RE.search(message or "")):
+                    _link_action = self.registry.get_by_key("geturlproductdetail")
+                    if _link_action is not None and _link_action.get("enabled"):
+                        return self._execute_selected_action(
+                            _link_action, [_link_action], message, history, context,
+                            developer_trace, start, workflow=workflow_hint, intent=None,
+                            collected_slots={})
+
                 # CUSTOMER-RAG-2.1 — an active charter-truck (เหมารถ /
                 # TC19) collection. TC19's FAQ answer opened it; collect
                 # bill / destination / recipient name / phone over one or
@@ -4520,6 +4599,52 @@ class DecisionEngine:
         alert = _detect_alert(message, context)
         routing_type = selected.get("action_type") or "SAFE_FALLBACK"
 
+        # CUSTOMER-LINK-1 — deterministic pre-execution gate, scoped ONLY
+        # to geturlproductdetail (same established pattern as
+        # _ERP_READ_STATUS_ACTIONS's own scoped truth-typing below): a
+        # missing / malformed / multiple-URLs / unsupported-domain
+        # message must get its own distinct, honest reply and NEVER reach
+        # the Action Executor at all (no fake success, no CustCode ask,
+        # no Human CS for a simple structural link problem). URL parsing
+        # is deterministic per the explicit spec constraint ("LLM must
+        # NOT decide whether the URL itself is valid") — this never
+        # touches an LLM.
+        if selected.get("action_key") == "geturlproductdetail":
+            _link_req = _classify_link_request(message, history=history)
+            _last_asst = next((h.get("content") or "" for h in reversed(history or [])
+                               if h.get("role") == "assistant"), "")
+            _link_pending = _last_asst.strip() == _link_reply_for_state("MISSING_URL").strip()
+            if _link_req["state"] == "MISSING_URL" and not _is_link_conversion_signal(message) \
+                    and not _link_pending:
+                # Case 6 — a message that only INCIDENTALLY names a
+                # platform ("ผมซื้อของใน 1688") reached this branch purely
+                # via search_candidate_actions' generic keyword overlap
+                # (search_candidate_actions itself deliberately never
+                # filters by action_key — see its own docstring); the
+                # central semantic interpreter agrees this carries no
+                # genuine link-conversion signal (no verb, no URL, no
+                # pending url-ask), so this is NOT auto-treated as a
+                # conversion request. Never calls the converter, never
+                # invents a link-conversion-specific reply for an
+                # unrelated turn.
+                developer_trace["link_conversion_state"] = "NO_GENUINE_SIGNAL"
+                reply, _reason = _safe_fallback_response("link_conversion_no_genuine_signal")
+                return self._finalize(reply=reply, routing_type="SAFE_FALLBACK", workflow=workflow,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert)
+            if _link_req["state"] != "VALID":
+                # TEST QUALITY / observability — populated even on this
+                # early-return (not only after a real Executor call) so a
+                # test/eval harness can verify the right capability
+                # genuinely engaged, not only that some reply text looked
+                # plausible. Never set for the NO_GENUINE_SIGNAL branch
+                # above — there, this action correctly did NOT engage.
+                developer_trace["selected_business_action"] = "geturlproductdetail"
+                developer_trace["link_conversion_state"] = _link_req["state"]
+                reply = _build_response(text=_link_reply_for_state(_link_req["state"]))
+                return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert)
+            developer_trace["link_conversion_state"] = "VALID"
+
         if routing_type == "RAG":
             # Production Integration Sprint (2026-08-02), Phase 1 Step C —
             # the ONE production RAG execution path (services/
@@ -4764,6 +4889,23 @@ class DecisionEngine:
                         "รบกวนตรวจสอบเลขที่บิลขนส่งหรือเลขแทร็กอีกครั้งแล้วแจ้งมาใหม่นะคะ"))
                     return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
                                            developer_trace=developer_trace, context=context, start=start, alert=alert)
+
+            # CUSTOMER-LINK-1 — conversion-RESULT truth typing, scoped to
+            # geturlproductdetail (same established per-action-key scoping
+            # as _ERP_READ_STATUS_ACTIONS just above). Never falls through
+            # to _compose_natural_reply's generic "ดำเนินการเรียบร้อยค่ะ"
+            # default (a success-looking phrase) on anything but a REAL
+            # converted link.
+            if selected.get("action_key") == "geturlproductdetail":
+                _lc_result = _classify_conversion_result(
+                    executor_error=bool(exec_result.get("error")), mapped_fields=full_mapped)
+                developer_trace["link_conversion_result"] = _lc_result["state"]
+                if _lc_result["state"] == "CONVERSION_SUCCESS":
+                    reply = _build_response(text=_link_reply_for_success(_lc_result["link"]))
+                else:
+                    reply = _build_response(text=_link_reply_for_state(_lc_result["state"]))
+                return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert)
 
             # Response-Derived Identifier Memory (2026-08-15, Issue 2) —
             # a successful list/search execution often names the record's

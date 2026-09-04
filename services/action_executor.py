@@ -91,7 +91,22 @@ def _resolve_param_value(param: Dict, context: Dict, secret_values: Dict[str, Op
             return None
         return param.get("example_value") if not param.get("required") else None
     if source == "customer_profile":
-        return (context.get("customer_context") or {}).get(name)
+        # CUSTOMER-LINK-1 — a parameter's own `name` is the real API's
+        # wire field name (arbitrary casing, e.g. "CustCode"), while every
+        # existing caller populates `customer_context` with the platform's
+        # own snake_case convention (e.g. "cust_code", see line_bot/
+        # webhook.py's verified-binding assembly). An exact-name lookup
+        # first (so an admin who deliberately names a parameter to match
+        # customer_context verbatim is never second-guessed), falling back
+        # to a snake_case-normalized lookup only when that misses — purely
+        # additive (no existing action currently uses this input_source at
+        # all, confirmed live against the production registry, so this
+        # changes behavior for nothing that exists today).
+        ctx = context.get("customer_context") or {}
+        if name in ctx:
+            return ctx.get(name)
+        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+        return ctx.get(snake)
     if source == "conversation_context":
         return (context.get("conversation_context") or {}).get(name)
     if source == "fixed_configuration":
