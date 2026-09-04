@@ -217,14 +217,19 @@ def opens_estimate_flow(message: str, state: EstimateState) -> bool:
     return False
 
 
-def _is_explicit_new_request(text: str) -> bool:
-    """The customer explicitly starts a NEW calculation — a calculator
-    VERB, or a shipping-cost TOPIC together with a concrete value. A bare
-    value / route answer / correction is NOT this (it continues the
-    current thread)."""
+def _is_explicit_new_request(text: str, interpretation: Optional[object] = None) -> bool:
+    """The customer explicitly starts a NEW calculation. SEMANTIC-FIRST-1:
+    the central Interpretation's SHIPPING_ESTIMATE family is the primary
+    signal; the calculator VERB / cost TOPIC regex is the fallback for a
+    degraded / absent interpretation. A bare value / route answer /
+    correction is NOT a new request (it continues the current thread)."""
     t = text or ""
     if _OTHER_BUSINESS_INTENT_RE.search(t):
         return False
+    fam = getattr(interpretation, "intent_family", None) if interpretation is not None else None
+    op = getattr(interpretation, "follow_up_op", "NONE") if interpretation is not None else "NONE"
+    if fam == "SHIPPING_ESTIMATE" and op in ("NONE", "SET_VALUE"):
+        return True
     if _CALC_VERB_RE.search(t):
         return True
     p = parse_dimension_input(t)
@@ -233,7 +238,8 @@ def _is_explicit_new_request(text: str) -> bool:
     return bool(_CALC_TOPIC_RE.search(t) and has_value)
 
 
-def derive_estimate_state(history: Optional[List[Dict]], current_message: str) -> Optional[EstimateState]:
+def derive_estimate_state(history: Optional[List[Dict]], current_message: str,
+                          interpretation: Optional[object] = None) -> Optional[EstimateState]:
     """State of the CURRENT calculation thread, or None.
 
     Episode lifecycle:  NEW -> COLLECTING -> COMPLETE/CALCULATED -> CLOSED.
@@ -247,9 +253,10 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str) -
     """
     turns = list(history or [])[-_LOOKBACK:]
     cur_msg = (current_message or "").strip()
+    _op = getattr(interpretation, "follow_up_op", "NONE") if interpretation is not None else "NONE"
 
     # A) explicit NEW request -> fresh thread, no inheritance.
-    if _is_explicit_new_request(cur_msg):
+    if _is_explicit_new_request(cur_msg, interpretation):
         return extract_estimate_fields(cur_msg)
 
     # is there an estimate-flow assistant turn in the recent window
@@ -274,7 +281,7 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str) -
     parsed_cur = parse_dimension_input(cur_msg)
     is_value = (parsed_cur["weight"] is not None or bool(parsed_cur["dimension_values"])
                 or _WEIGHT_RE.search(cur_msg) is not None)
-    is_corr = bool(_CORRECTION_RE.search(cur_msg))
+    is_corr = bool(_CORRECTION_RE.search(cur_msg)) or _op in ("CORRECTION", "COMPARISON")
     if not (is_route or is_value or is_corr):
         return None
 

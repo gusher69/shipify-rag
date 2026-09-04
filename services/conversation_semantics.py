@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional
 
 _RESOLVER_MODEL = "gpt-4o-mini"
@@ -316,3 +316,427 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     elif not frame.weight:
         ask = " รบกวนแจ้งน้ำหนักโดยประมาณเพิ่มเติมได้ไหมคะ"
     return f"{head}({summary}){ask}"
+
+
+# ═════════════════════════════════════════════════════════════════════
+# SEMANTIC-FIRST-1 — central conversational semantic interpretation
+# ═════════════════════════════════════════════════════════════════════
+# GENERALISES this module from an import-interest follow-up backbone into
+# the ONE semantic interpretation layer the Decision Engine consults
+# FIRST, before any workflow-local text handling. Every existing
+# conversational business flow (shipment status, invoice, warehouse /
+# pickup, self-pickup, coupon, product policy, charter truck, shipping
+# estimate, address change, import interest, public/private, short
+# follow-ups / corrections / comparisons / topic changes) consumes the
+# normalised {intent_family, entities, is_private, follow_up_op} contract
+# `interpret()` produces — they no longer each re-classify the raw Thai.
+#
+# It is a COMPOSITIONAL meaning model, NOT a phrase list: a small set of
+# orthogonal marker dimensions (OBJECT / ACTION / ROLE / FOLLOW-UP) is
+# detected independently and COMPOSED into a family, so paraphrases that
+# share meaning collapse to the same family without an exact-phrase rule.
+# A single gated LLM call (same pattern as resolve_followup) only
+# disambiguates genuinely novel / ambiguous phrasing and always degrades
+# back to the deterministic result. Genuinely structural inputs (bare
+# ids, URLs, numeric-only, empty, platform postbacks) skip semantics.
+#
+# Security / authorization / business truth stay deterministic: is_private
+# is a pure self-reference test and NO policy verdict or eligibility fact
+# is ever produced here.
+
+INTENT_FAMILIES = (
+    "SHIPMENT_STATUS", "INVOICE", "PICKUP_LOCATION", "SELF_PICKUP",
+    "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "CHARTER_TRUCK",
+    "SHIPPING_ESTIMATE", "ADDRESS_CHANGE", "IMPORT_INTEREST",
+    "GENERAL", "UNKNOWN",
+)
+
+FOLLOWUP_OPS = ("CORRECTION", "COMPARISON", "TOPIC_CHANGE", "CONTINUE",
+                "SET_VALUE", "NONE")
+
+
+@dataclass
+class Interpretation:
+    """The normalised semantic contract every conversational flow reads."""
+    intent_family: str = "UNKNOWN"
+    entities: Dict[str, object] = field(default_factory=dict)
+    is_private: bool = False
+    follow_up_op: str = "NONE"
+    confidence: float = 0.0
+    source: str = "none"          # structural | deterministic | llm | degraded
+
+    def as_dict(self) -> Dict:
+        d = asdict(self)
+        d["entities"] = {k: v for k, v in (self.entities or {}).items() if v not in (None, "", [])}
+        return d
+
+
+# ── orthogonal meaning markers ───────────────────────────────────────
+# OBJECT — what the message is ABOUT.
+_OBJ_INVOICE = re.compile(r"ใบกำกับ|ใบเสร็จ|ใบแจ้งหนี้|tax\s*invoice|ภาษีมูลค่าเพิ่ม|\bvat\b|ออกบิลภาษี|เอกสารภาษี", re.IGNORECASE)
+_OBJ_WAREHOUSE = re.compile(r"โกดัง|คลังสินค้า|คลังไทย|คลังจีน|จุดรับ|จุดรับของ|จุดส่ง|ที่รับของ|ที่รับสินค้า|โรงพัก|สาขา|warehouse", re.IGNORECASE)
+_OBJ_COUPON = re.compile(r"คูปอง|ส่วนลด|โค้ดส่วนลด|coupon|voucher|โปรโมชั่นส่วนลด", re.IGNORECASE)
+_OBJ_TRUCK = re.compile(r"เหมารถ|เหมา\s*รถ|รถเหมา|เรียกรถ|จ้างรถ|รถส่งต่อ|เหมาคันรถ|charter\s*truck", re.IGNORECASE)
+_OBJ_COST = re.compile(r"ค่าส่ง|ค่าขนส่ง|ค่านำเข้า|ค่าจัดส่ง|เรทส่ง|เรทนำเข้า|ราคาส่ง|ค่าระวาง|shipping\s*cost", re.IGNORECASE)
+_OBJ_PARCEL = re.compile(r"พัสดุ|ออเดอร์|order|ล็อตสินค้า|กล่องสินค้า|ของที่สั่ง|ของที่ส่ง|สินค้าที่สั่ง|ของผม|ของฉัน|สินค้าผม|บิลผม|บิลฉัน|เลขบิลผม", re.IGNORECASE)
+_OBJ_ADDRESS = re.compile(r"ที่อยู่จัดส่ง|ที่อยู่ผู้รับ|ที่อยู่ในการจัดส่ง|ปลายทางจัดส่ง|delivery\s*address|ที่อยู่ส่งของ|ที่อยู่|ปลายทาง|ผู้รับ|เบอร์ผู้รับ", re.IGNORECASE)
+
+# ACTION — what they want DONE.
+_ACT_LOCATE = re.compile(r"ที่ไหน|ตรงไหน|อยู่ไหน|ที่ใด|ที่ตั้ง|แผนที่|พิกัด|เส้นทางไป|ไปยังไง|แถวไหน|ย่านไหน|โซนไหน|เขตไหน|อยู่แถว|\bwhere\b", re.IGNORECASE)
+_ACT_STATUS = re.compile(r"ถึงไหน|ถึงหรือยัง|ถึงไทย|ถึงจีน|มาถึงยัง|ไปถึงไหน|สถานะ|คืบหน้า|อัปเดต|อัพเดท|เป็น(?:ยัง)?ไงบ้าง|ออกจากจีนยัง|ส่งของ(?:ให้)?\S{0,6}(?:หรือ)?ยัง|เช็ก\S{0,4}สถานะ|เช็คสถานะ|ตรวจสอบสถานะ|ติดตามพัสดุ|ติดตามสินค้า", re.IGNORECASE)
+_ACT_ISSUE_GET = re.compile(r"ออก\S{0,6}(?:ได้ไหม|ให้|หรือเปล่า|หรือไม่)|ออกให้ได้|ขอ\S{0,3}(?:ใบ|เอกสาร)|มี\S{0,10}(?:ไหม|มั้ย)|ให้\S{0,6}(?:หรือเปล่า|ไหม|มั้ย)|issue|provide", re.IGNORECASE)
+_ACT_HOWTO = re.compile(r"ใช้\S{0,6}(?:ยังไง|อย่างไร|ตรงไหน|ที่ไหน)|วิธีใช้|กดตรงไหน|กดยังไง|กดใช้\S{0,4}(?:ตรงไหน|ยังไง)|ทำยังไง|ขั้นตอน\S{0,6}ใช้|how\s*to\s*use", re.IGNORECASE)
+_ACT_LIST_MINE = re.compile(r"มี\S{0,10}อะไรบ้าง|มี\S{0,6}(?:กี่|เท่าไหร่)|เหลือ\S{0,6}(?:ไหม|เท่าไหร่|กี่)|ของผม\S{0,12}(?:มี|เหลือ)|บัญชีผม|บัญชีฉัน|ในระบบผม", re.IGNORECASE)
+_ACT_PERMIT = re.compile(r"ได้ไหม|ได้มั้ย|ได้มัย|ได้ป่าว|ได้บ่|ได้หรือเปล่า|ได้รึเปล่า|ได้หรือไม่|สามารถ\S{0,24}ได้|\bcan\s+i\b|allowed", re.IGNORECASE)
+# an explicit CALCULATE / ESTIMATE verb — distinct from a bare "how much"
+# price question (that stays a rate FAQ, per CUSTOMER-CALC-1).
+_ACT_CALC_VERB = re.compile(r"คำนวณ|คำนวน|ประเมิน|ช่วยคิด|คิดค่า|คิดราคา|ตีราคา|estimate|calculate|quote", re.IGNORECASE)
+_PRICE_Q_RE = re.compile(r"เท่าไหร่|เท่าไร|กี่บาท|ราคาเท่า|ราวๆ\s*กี่", re.IGNORECASE)
+# a description of a SPECIFIC parcel — turns a price question into a
+# calculation request.
+_PARCEL_DESC_RE = re.compile(
+    r"กล่อง|ลัง|ชิ้นนี้|ของชิ้นนี้|ชิ้นเดียว|ของเท่านี้|เท่านี้|"
+    r"ขนาด\s*(?:ประมาณ|นี้|เท่านี้)|น้ำหนัก\s*\d|\d+\s*(?:กิโล|กก|โล|ชิ้น|กล่อง|ลัง)", re.IGNORECASE)
+_ACT_ESTIMATE = _ACT_CALC_VERB   # back-compat alias for _worth_llm_disambiguation
+_ACT_CHANGE = re.compile(r"เปลี่ยน|เปลี่ยนแปลง|สลับ|แก้ไข|เเก้ไข|แก้\s*(?:เป็น|ให้|ที่อยู่|ที่ส่ง|ปลายทาง|ชื่อ|เบอร์|ข้อมูล|ผู้รับ)|ย้าย|ปรับ\S{0,4}(?:เป็น|ที่)|ขอเปลี่ยน|ขอแก้|ขอสลับ|modify|\bchange\b", re.IGNORECASE)
+_ACT_SELF_DO = re.compile(r"เอง|ด้วยตัวเอง|ตัวเอง|มารับเอง|ไปรับเอง|มาเอาเอง|ไปเอาเอง|self\s*pick", re.IGNORECASE)
+_ACT_CHARTER = re.compile(r"เหมา|เรียก|จ้าง|ใช้บริการเหมา|\bhire\b", re.IGNORECASE)
+_PICKUP_VERB = re.compile(r"รับของ|รับสินค้า|มารับ|ไปรับ|เข้ารับ|มาเอา|ไปเอา|รับเอง|รับพัสดุ", re.IGNORECASE)
+_SHIP_VERB = re.compile(r"ส่งได้|ส่งไหว|นำเข้า|เอาเข้า|ขนส่งได้|ส่งไป(?:ได้)?|ส่งเข้า(?:มา)?|ส่งมา(?:ไทย)?|เข้ามาได้|ฝากส่ง|ฝากนำเข้า", re.IGNORECASE)
+
+_ROLE_SELF = re.compile(r"ของผม|ของฉัน|ของดิฉัน|ของหนู|ของเรา|ของกระผม|บิลผม|บิลฉัน|ออเดอร์ผม|ออเดอร์ฉัน|พัสดุผม|พัสดุฉัน|บัญชีผม|บัญชีฉัน|เลขบิลผม|ผมสั่ง|ฉันสั่ง|ที่ผมสั่ง|ที่ฉันสั่ง", re.IGNORECASE)
+# a record-identifying private marker — excludes SELF_PICKUP (that stays a
+# public how-to per CUSTOMER-RAG-1.1) but not a bare first-person pronoun.
+_PRIV_RECORD_RE = re.compile(r"เลขบิล|เลขที่บิล|บิลผม|บิลฉัน|ออเดอร์ผม|พัสดุผม|order\s*id", re.IGNORECASE)
+
+_STATUS_STRONG = re.compile(r"ถึงไหน(?:แล้ว)?|ถึง(?:ไทย|จีน|โกดัง)?(?:แล้ว)?(?:หรือ)?ยัง|มาถึงยัง|ไปถึงไหน|ออกจาก(?:จีน|โกดัง|ไทย)?(?:แล้ว)?(?:หรือ)?ยัง|ของถึงยัง|เช็ก\S{0,4}สถานะ|เช็คสถานะ|ตรวจสอบสถานะ|ติดตามพัสดุ|ส่งของให้\S{0,6}(?:หรือ)?ยัง", re.IGNORECASE)
+_EST_COMPOSITE = re.compile(
+    r"เสีย(?:เงิน|ค่า)?\S{0,8}(?:เท่าไหร่|เท่าไร|กี่บาท)"
+    r"|(?:คิด|ประเมิน|คำนวณ|คำนวน|ตี)\S{0,4}(?:ค่าส่ง|ค่าขนส่ง|ค่านำเข้า|ราคาค่าส่ง)", re.IGNORECASE)
+_MEASURE_RE = re.compile(r"\d+\s*(?:กิโล|กก\.?|kg|โล|ตัน)|\d+\s*[x×*]\s*\d+|กว้าง\s*\d+|ยาว\s*\d+|สูง\s*\d+", re.IGNORECASE)
+_DEST_MARKER_RE = re.compile(r"(?:ไป|ปลายทาง|ส่งไปที่|ส่งไป|ที่)\s*([ก-๙A-Za-z][ก-๙A-Za-z0-9 .\-]{1,20})", re.IGNORECASE)
+
+# a follow-up that clearly changes the CURRENT calculation / frame.
+_CORR_RE = re.compile(r"ไม่ใช่\s*\S+.{0,12}(?:เป็น|เอา)\s*\S")
+_CMP_RE = re.compile(r"^\s*(?:ถ้า|แล้วถ้า|หากเป็น|สมมติ|งั้นถ้า).{0,28}(?:ล่ะ|ล้ะ|หละ|มั้ย|ไหม)\s*(?:คะ|ครับ|ค่ะ)?\s*$|แล้ว\S{0,18}(?:ล่ะ|หละ)\s*(?:คะ|ครับ|ค่ะ)?\s*$")
+_TOPIC_RE = re.compile(r"งั้น.{0,24}(?:ดีกว่า|แทน|แล้วกัน)|เปลี่ยนไป(?:ถาม|เรื่อง)|ขอถามเรื่อง|เอาเป็นว่าถาม|ไม่เอาแล้ว\s*ถาม")
+
+# genuinely structural (non-conversational) inputs — skip semantics.
+_STRUCT_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+_STRUCT_ID_RE = re.compile(r"^[A-Za-z]{1,4}\d{5,}[A-Za-z0-9\-]*$")
+_STRUCT_NUMERIC_RE = re.compile(r"^[\d\s.,:x×*/\-]+$", re.IGNORECASE)
+_STRUCT_POSTBACK_RE = re.compile(r"^(?:action=|postback[:=]|__|/[a-z_]+$)", re.IGNORECASE)
+_THAI_CHAR_RE = re.compile(r"[ก-๙]")
+
+
+def _structural_kind(t: str) -> Optional[str]:
+    if not t:
+        return "empty"
+    if _STRUCT_URL_RE.match(t):
+        return "url"
+    if _STRUCT_POSTBACK_RE.match(t):
+        return "postback"
+    if _STRUCT_ID_RE.match(t) and " " not in t:
+        return "identifier"
+    if _STRUCT_NUMERIC_RE.match(t) and not _THAI_CHAR_RE.search(t):
+        return "numeric"
+    return None
+
+
+def _followup_op(t: str) -> str:
+    if _CORR_RE.search(t):
+        return "CORRECTION"
+    if _CMP_RE.search(t):
+        return "COMPARISON"
+    if _TOPIC_RE.search(t):
+        return "TOPIC_CHANGE"
+    if is_frame_followup(t):
+        if _USER_QTY_RE.search(t) or re.match(r"^\s*(?:ประมาณ\s*)?\d", t):
+            return "SET_VALUE"
+        return "CONTINUE"
+    return "NONE"
+
+
+def _compose(t: str) -> "tuple[str, float, Dict]":
+    """Deterministic compositional classification. Returns
+    (intent_family, confidence, entities). Order = most distinctive
+    composite first."""
+    ent: Dict[str, object] = {}
+    obj_inv = bool(_OBJ_INVOICE.search(t))
+    obj_wh = bool(_OBJ_WAREHOUSE.search(t))
+    obj_cp = bool(_OBJ_COUPON.search(t))
+    obj_tk = bool(_OBJ_TRUCK.search(t))
+    obj_cost = bool(_OBJ_COST.search(t))
+    obj_parcel = bool(_OBJ_PARCEL.search(t))
+    obj_addr = bool(_OBJ_ADDRESS.search(t))
+
+    a_locate = bool(_ACT_LOCATE.search(t))
+    a_status = bool(_ACT_STATUS.search(t)) or bool(_STATUS_STRONG.search(t))
+    a_issue = bool(_ACT_ISSUE_GET.search(t))
+    a_howto = bool(_ACT_HOWTO.search(t))
+    a_listmine = bool(_ACT_LIST_MINE.search(t))
+    a_permit = bool(_ACT_PERMIT.search(t))
+    a_calc = bool(_ACT_CALC_VERB.search(t))
+    a_price_q = bool(_PRICE_Q_RE.search(t))
+    a_parcel_desc = bool(_PARCEL_DESC_RE.search(t))
+    a_est_composite = bool(_EST_COMPOSITE.search(t))
+    a_change = bool(_ACT_CHANGE.search(t))
+    a_self = bool(_ACT_SELF_DO.search(t))
+    a_charter = bool(_ACT_CHARTER.search(t))
+    v_pickup = bool(_PICKUP_VERB.search(t))
+    v_ship = bool(_SHIP_VERB.search(t))
+    has_measure = bool(_MEASURE_RE.search(t))
+    m = _method_label(t) if _METHOD_WORD_RE.search(t) else None
+    if m:
+        ent["method"] = m
+
+    # CHARTER TRUCK — a charter-truck object is itself decisive (a hire /
+    # request move is implied by naming it).
+    if obj_tk:
+        md = _DEST_MARKER_RE.search(t)
+        if md:
+            ent["destination"] = md.group(1).strip()
+        return "CHARTER_TRUCK", 0.85, ent
+
+    # SHIPPING ESTIMATE — an explicit calculate/estimate verb, a
+    # "how-much-will-it-cost-me" phrasing, or a price question about a
+    # SPECIFIC parcel. A bare generic rate question ("ค่านำเข้าเท่าไหร่",
+    # no parcel, no verb) is NOT this — it stays a rate FAQ
+    # (CUSTOMER-CALC-1).
+    if a_calc and (obj_cost or obj_parcel or has_measure or a_price_q or a_parcel_desc):
+        return "SHIPPING_ESTIMATE", 0.85, ent
+    if a_est_composite:
+        return "SHIPPING_ESTIMATE", 0.8, ent
+    if a_price_q and a_parcel_desc and (v_ship or obj_cost or re.search(r"ส่งมา|มาไทย|ส่งของ", t)):
+        return "SHIPPING_ESTIMATE", 0.75, ent
+    if obj_cost and (has_measure or m):
+        return "SHIPPING_ESTIMATE", 0.7, ent
+
+    # INVOICE — a tax-document object with an issue / permit / how-to move.
+    if obj_inv and (a_issue or a_permit or a_howto or a_locate):
+        return "INVOICE", 0.85, ent
+    if obj_inv:
+        return "INVOICE", 0.55, ent
+
+    # SELF PICKUP — a self / personally marker with a pickup verb and NO
+    # where-question (a public how-to, per CUSTOMER-RAG-1.1: "เอง" + a
+    # where-question is a LOCATION question, handled next).
+    if a_self and (v_pickup or obj_wh) and not _PRIV_RECORD_RE.search(t) and not a_locate:
+        return "SELF_PICKUP", 0.8, ent
+
+    # PICKUP LOCATION — a warehouse / pickup-point object (or a pickup
+    # verb) with a where-question. A "เอง" marker does NOT block this
+    # (CUSTOMER-RAG-1.1: the where-question dominates).
+    if (obj_wh or v_pickup) and a_locate:
+        return "PICKUP_LOCATION", 0.85, ent
+
+    # COUPON — how-to vs. list-mine.
+    if obj_cp and a_howto:
+        return "COUPON_USAGE", 0.85, ent
+    if obj_cp and a_listmine:
+        return "MY_COUPONS", 0.8, ent
+    if obj_cp and (a_permit or a_issue):
+        return "COUPON_USAGE", 0.6, ent
+    if obj_cp:
+        return "COUPON_USAGE", 0.5, ent
+
+    # PRODUCT POLICY — a can-I-ship / can-I-import move on some goods,
+    # without a cost / warehouse / coupon / invoice object.
+    if a_permit and v_ship and not (obj_cost or obj_wh or obj_cp or obj_inv):
+        lead = re.split(r"\s+", t.strip())[0]
+        if lead and _THAI_CHAR_RE.search(lead):
+            ent["product"] = lead
+        return "PRODUCT_POLICY", 0.7, ent
+
+    # SHIPMENT STATUS — a parcel object (or a strong status phrasing)
+    # asking about progress.
+    if (obj_parcel and a_status) or _STATUS_STRONG.search(t):
+        return "SHIPMENT_STATUS", 0.8, ent
+
+    # ADDRESS CHANGE — a change move on a delivery-address object, or a
+    # "send it somewhere else instead" phrasing (the "instead" IS the
+    # change signal).
+    if (a_change and obj_addr) or re.search(
+            r"ส่งไป\S{0,12}(?:อีกที่|ที่อื่น|ที่ใหม่)|เปลี่ยนที่ส่ง|ส่ง(?:ของ)?ไป(?:ที่|ยัง)\S{1,20}แทน|"
+            r"ส่ง\S{0,8}ที่อื่น\S{0,4}แทน|จัดส่ง\S{0,8}ที่อื่นแทน", t):
+        return "ADDRESS_CHANGE", 0.8, ent
+
+    # IMPORT INTEREST — reuse the FIX-2.3 recogniser verbatim.
+    if _is_import_interest(t):
+        p = _import_noun(t)
+        if p:
+            ent["product"] = p
+        return "IMPORT_INTEREST", 0.7, ent
+
+    # a recognised OBJECT but no actionable move -> a general FAQ turn
+    # (keeps it OUT of the LLM-disambiguation tier and lets the ordinary
+    # RAG / regex path answer it).
+    if obj_cost or obj_inv or obj_wh or obj_cp or obj_parcel or obj_addr:
+        return "GENERAL", 0.5, ent
+
+    return "UNKNOWN", 0.0, ent
+
+
+# ── gated LLM family disambiguation ──────────────────────────────────
+_FAMILY_SYS_PROMPT = (
+    "You label ONE Thai customer message for an import / logistics support "
+    "bot with its INTENT FAMILY. Output STRICT JSON only, no prose.\n"
+    "Schema: {\"family\": <one of " + "|".join(INTENT_FAMILIES) + ">, "
+    "\"is_private\": <true|false>, \"product\": <string|null>, "
+    "\"destination\": <string|null>, \"method\": <\"road\"|\"sea\"|\"air\"|null>}\n"
+    "Families: SHIPMENT_STATUS=asking progress/where-is-it of a shipment/order; "
+    "INVOICE=tax invoice / receipt issuance; PICKUP_LOCATION=where is the "
+    "warehouse / pickup point; SELF_PICKUP=may I collect it myself / how; "
+    "COUPON_USAGE=how to use a coupon/discount; MY_COUPONS=what coupons do I "
+    "have (private); PRODUCT_POLICY=can this kind of goods be shipped/imported; "
+    "CHARTER_TRUCK=hire / charter a whole truck for local delivery; "
+    "SHIPPING_ESTIMATE=estimate/quote a shipping cost; ADDRESS_CHANGE=change "
+    "the delivery address/recipient; IMPORT_INTEREST=wants to import some "
+    "product (early sales interest); GENERAL=any other FAQ; UNKNOWN=cannot "
+    "tell.\n"
+    "is_private=true only when it refers to the customer's OWN specific "
+    "record/account. Classify MEANING ONLY — never a policy verdict, an "
+    "eligibility answer, or personal data."
+)
+
+
+# once the resolver LLM is proven unreachable in this process, stop
+# calling it — every caller then just keeps the deterministic family.
+_LLM_RESOLVER_DOWN = False
+
+
+def _llm_family(message: str, history: Optional[List[Dict]]) -> Optional[Dict]:
+    """Single gated LLM call -> {family, is_private, product, destination,
+    method}. Returns None on any failure so the caller marks the result
+    'degraded' and keeps the deterministic family."""
+    global _LLM_RESOLVER_DOWN
+    if _LLM_RESOLVER_DOWN:
+        return None
+    try:
+        from services.llm_service import get_llm_service
+        recent = " | ".join(
+            (t.get("content") or "")[:80] for t in (history or [])[-4:] if t.get("role") == "user")
+        user = "recent_user_turns=" + json.dumps(recent, ensure_ascii=False) + \
+               "\nmessage=" + json.dumps(message or "", ensure_ascii=False)
+        resp = get_llm_service().generate(
+            [{"role": "system", "content": _FAMILY_SYS_PROMPT},
+             {"role": "user", "content": user}],
+            model=_RESOLVER_MODEL, temperature=0.0, max_tokens=90)
+        raw = (resp.text or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
+        s, e = raw.find("{"), raw.rfind("}")
+        if s == -1 or e == -1:
+            return None
+        data = json.loads(raw[s:e + 1])
+    except Exception as ex:  # pragma: no cover - network/parse degradation
+        name = type(ex).__name__
+        if any(k in name for k in ("Connection", "Timeout", "Auth", "APIError", "RateLimit")):
+            _LLM_RESOLVER_DOWN = True
+        print(f"[conversation_semantics] family resolver degraded ({ex!r})")
+        return None
+    fam = str(data.get("family") or "").strip().upper()
+    if fam not in INTENT_FAMILIES:
+        return None
+    out = {"family": fam, "is_private": bool(data.get("is_private")),
+           "product": None, "destination": None, "method": None}
+    for k in ("product", "destination"):
+        v = data.get(k)
+        if isinstance(v, str) and 1 < len(v.strip()) <= 40:
+            out[k] = v.strip()
+    mth = str(data.get("method") or "").strip().lower()
+    if mth in ("road", "sea", "air"):
+        out["method"] = mth
+    return out
+
+
+_GREET_CONFIRM_RE = re.compile(
+    r"^(?:สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ขอบคุณ|โอเค|okay|ok|ครับ|ค่ะ|คะ|จ้า|ได้ครับ|ได้ค่ะ|"
+    r"ยืนยัน|ตกลง|เข้าใจแล้ว|รับทราบ|thanks?|thank you)\b", re.IGNORECASE)
+_INTENT_SHAPE_RES = (_OBJ_INVOICE, _OBJ_WAREHOUSE, _OBJ_COUPON, _OBJ_TRUCK, _OBJ_COST,
+                     _OBJ_PARCEL, _OBJ_ADDRESS, _ACT_LOCATE, _ACT_STATUS, _ACT_ISSUE_GET,
+                     _ACT_HOWTO, _ACT_LIST_MINE, _ACT_ESTIMATE, _ACT_CHANGE, _ACT_CHARTER,
+                     _PICKUP_VERB, _SHIP_VERB)
+
+
+def _worth_llm_disambiguation(t: str) -> bool:
+    """The gated LLM family call fires ONLY for a genuinely conversational,
+    intent-shaped message the deterministic tier could not resolve — never
+    for greetings, confirmations, bare values, single tokens or noise."""
+    if not _THAI_CHAR_RE.search(t) or not (6 <= len(t) <= 80):
+        return False
+    if _GREET_CONFIRM_RE.match(t.strip()):
+        return False
+    if len(t.split()) < 1:
+        return False
+    return any(rx.search(t) for rx in _INTENT_SHAPE_RES) or bool(_ACT_PERMIT.search(t))
+
+
+def interpret(message: str, history: Optional[List[Dict]] = None,
+              context: Optional[Dict] = None) -> Interpretation:
+    """The ONE central semantic interpretation. Natural language ->
+    normalised {intent_family, entities, is_private, follow_up_op}. A
+    single gated LLM call only disambiguates novel / ambiguous phrasing
+    and always degrades to the deterministic result."""
+    raw = message or ""
+    t = raw.strip()
+
+    kind = _structural_kind(t)
+    if kind is not None:
+        ent: Dict[str, object] = {}
+        if kind == "identifier":
+            ent["identifier"] = t
+        elif kind == "url":
+            ent["url"] = t
+        return Interpretation(intent_family="UNKNOWN", entities=ent,
+                              follow_up_op="NONE", confidence=0.0, source="structural")
+
+    op = _followup_op(t)
+    fam, conf, ent = _compose(t)
+    is_priv = bool(_ROLE_SELF.search(t))
+
+    source = "deterministic"
+    if (fam == "UNKNOWN" or conf < 0.5) and _worth_llm_disambiguation(t):
+        llm = _llm_family(t, history)
+        if llm and llm["family"] != "UNKNOWN":
+            fam = llm["family"]
+            conf = max(conf, 0.6)
+            source = "llm"
+            if llm.get("is_private"):
+                is_priv = True
+            for k in ("product", "destination", "method"):
+                if llm.get(k) and not ent.get(k):
+                    ent[k] = llm[k]
+        elif llm is None:
+            source = "degraded"
+
+    # a short in-frame follow-up refines the op and, when the family is
+    # still unknown, attributes it to the running import-interest frame.
+    frame = derive_active_frame(history)
+    if frame and frame.product and op in ("CORRECTION", "COMPARISON", "TOPIC_CHANGE", "CONTINUE", "SET_VALUE"):
+        ent.setdefault("product", frame.product)
+        if fam == "UNKNOWN":
+            fam, conf = "IMPORT_INTEREST", max(conf, 0.55)
+
+    return Interpretation(intent_family=fam, entities=ent, is_private=is_priv,
+                          follow_up_op=op, confidence=round(conf, 2), source=source)
+
+
+# family -> the existing rag/query_understanding.py actionable_intent
+# bucket. None => let the ordinary Business-Action / private-state
+# routing own the turn (never force a RAG intent).
+FAMILY_TO_ACTIONABLE_INTENT = {
+    "SHIPMENT_STATUS": "tracking_status",
+    "INVOICE": "invoice_policy",
+    "PICKUP_LOCATION": "warehouse_location",
+    "SELF_PICKUP": "self_pickup_permission",
+    "COUPON_USAGE": "coupon_policy",
+    "MY_COUPONS": None,
+    "PRODUCT_POLICY": "prohibited_goods",
+    "CHARTER_TRUCK": "service_information",
+    "SHIPPING_ESTIMATE": "shipping_calculation",
+    "ADDRESS_CHANGE": None,
+    "IMPORT_INTEREST": None,
+    "GENERAL": None,
+    "UNKNOWN": None,
+}

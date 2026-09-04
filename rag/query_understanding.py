@@ -428,7 +428,8 @@ def _classify_actionable(text: str, entities: Dict[str, Optional[str]]) -> "tupl
     return "unknown", 0.0
 
 
-def classify_actionable_intent(question: str, entities: Optional[Dict[str, Optional[str]]] = None) -> Dict:
+def classify_actionable_intent(question: str, entities: Optional[Dict[str, Optional[str]]] = None,
+                               interpretation: Optional[object] = None) -> Dict:
     """Unified Intent Classification — the single entry point for both
     the broad intent (unchanged, still used by retrieval-adjacent
     Explainability/metadata matching) and the new, precise
@@ -458,7 +459,26 @@ def classify_actionable_intent(question: str, entities: Optional[Dict[str, Optio
     """
     entities = entities or {}
     broad = detect_intent(question)
-    actionable, confidence = _classify_actionable(question, entities)
+
+    # SEMANTIC-FIRST-1 — when the caller supplies the central semantic
+    # Interpretation (services/conversation_semantics.py::interpret), its
+    # normalised intent_family is the PRIMARY signal: map it to the
+    # matching actionable bucket. The regex `_classify_actionable` below
+    # is used only as the fallback (family UNKNOWN / no mapping, or no
+    # interpretation passed — e.g. the Playground / benchmark callers).
+    actionable, confidence = None, 0.0
+    fam = getattr(interpretation, "intent_family", None) if interpretation is not None else None
+    if fam and fam != "UNKNOWN":
+        try:
+            from services.conversation_semantics import FAMILY_TO_ACTIONABLE_INTENT
+            mapped = FAMILY_TO_ACTIONABLE_INTENT.get(fam)
+        except Exception:
+            mapped = None
+        if mapped and mapped in ACTIONABLE_INTENTS:
+            actionable = mapped
+            confidence = max(float(getattr(interpretation, "confidence", 0.0) or 0.0), 0.6)
+    if actionable is None:
+        actionable, confidence = _classify_actionable(question, entities)
 
     payment_method = "credit_card" if _CREDIT_CARD_RE.search(question) else None
 

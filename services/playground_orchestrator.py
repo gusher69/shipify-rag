@@ -799,6 +799,7 @@ def run_playground_turn(
     history: Optional[List[Dict]] = None,
     lead_stage: Optional[str] = None,
     sentiment_status: Optional[str] = None,
+    interpretation: Optional[object] = None,
 ) -> PlaygroundResult:
     stages: List[Stage] = []
     services_used: List[Dict] = []
@@ -964,7 +965,8 @@ def run_playground_turn(
     for key, value in current_entities.items():
         if value:
             merged_entities[key] = value
-    intent_result = classify_actionable_intent(canonical_question, entities=merged_entities)
+    intent_result = classify_actionable_intent(canonical_question, entities=merged_entities,
+                                               interpretation=interpretation)
     stages.append(Stage("Intent Classification", "success", (time.time() - t0) * 1000,
                          f"broad={intent_result['broad_intent']}, actionable={intent_result['actionable_intent']} "
                          f"(conf={intent_result['confidence']:.2f})"))

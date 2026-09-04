@@ -80,6 +80,7 @@ from services.conversation_semantics import (
     is_frame_followup as _is_frame_followup,
     resolve_followup as _resolve_frame_followup,
     frame_ack_reply as _frame_ack_reply,
+    interpret as _interpret_message,
 )
 # CUSTOMER-RAG-2.1 — charter-truck (เหมารถ / TC19) multi-turn slot
 # collection (deterministic, history-derived — no LLM, no pending table).
@@ -2475,13 +2476,31 @@ class DecisionEngine:
             # in this codebase — same convention every other
             # conversation-intelligence module here already follows).
 
+            # SEMANTIC-FIRST-1 — ONE central semantic interpretation, at
+            # the very start of conversational decision processing. Every
+            # downstream flow consumes this normalised
+            # {intent_family, entities, is_private, follow_up_op} contract
+            # (services/conversation_semantics.py::interpret) instead of
+            # re-classifying the raw Thai message. Deterministic
+            # compositional meaning model + one gated LLM disambiguation
+            # that degrades to the deterministic result. Structural inputs
+            # (bare ids / URLs / numeric-only / postbacks) skip it.
+            semantic = _interpret_message(message, history, context)
+            developer_trace["semantic_interpretation"] = semantic.as_dict()
+            # stash for _run_rag_pipeline -> run_playground_turn so the RAG
+            # answer-planner intent is the SAME central result (context is
+            # a per-call copy — no leak to the caller).
+            context["_semantic_interpretation"] = semantic
+
             # 4. Intent resolution — determines CUSTOMER INTENT only. It
             # narrows candidate Business Actions (via `workflow` below,
             # still used as a category-matching score signal); it no
             # longer defines required slots/parameters for anything that
             # has a configured Business Action — see the Single Source of
-            # Truth refactor note at the top of this module.
-            actionable_intent = classify_actionable_intent(message)
+            # Truth refactor note at the top of this module. The regex
+            # classifier is now the FALLBACK — `semantic.intent_family`
+            # drives it whenever it is not UNKNOWN.
+            actionable_intent = classify_actionable_intent(message, interpretation=semantic)
             workflow_hint = resolve_active_erp_intent(history, message)
             developer_trace["intent"] = actionable_intent
             developer_trace["workflow"] = workflow_hint
@@ -2968,7 +2987,7 @@ class DecisionEngine:
                 # Answerability Gate. A bare "เรทเท่าไหร่" / "ค่านำเข้า
                 # เท่าไหร่" (no value, no calc verb) is NOT opened -> the
                 # rate FAQ answers it, unchanged.
-                _est = _derive_estimate_state(history, message)
+                _est = _derive_estimate_state(history, message, interpretation=semantic)
                 if _est is not None:
                     _extract_estimate_fields(message, _est)
                     developer_trace["selection_source"] = "shipping_estimate_flow"
@@ -4781,7 +4800,8 @@ class DecisionEngine:
         t0 = time.time()
         try:
             result = run_playground_turn(message, template_id=template_id, history=pg_history,
-                                          lead_stage=pg_lead_stage, sentiment_status=pg_sentiment)
+                                          lead_stage=pg_lead_stage, sentiment_status=pg_sentiment,
+                                          interpretation=context.get("_semantic_interpretation"))
             latency_ms = round((time.time() - t0) * 1000, 2)
             cited = [c.get("citation") for c in (result.chunks or []) if c.get("cited") and c.get("citation")]
             exec_result = {
