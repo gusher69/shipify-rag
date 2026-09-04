@@ -90,6 +90,16 @@ from services.charter_truck_flow import (
     charter_missing_prompt as _charter_missing_prompt,
     charter_handoff_summary as _charter_handoff_summary,
 )
+# CUSTOMER-ACTION-1 — operational change / verify requests that have NO
+# executable Business Action: acknowledge -> collect the one identifier
+# -> Human CS. Same deterministic history-derived pattern.
+from services.operational_change_flow import (
+    derive_operational_state as _derive_operational_state,
+    extract_operational_fields as _extract_operational_fields,
+    operational_ask_prompt as _operational_ask_prompt,
+    operational_handoff_summary as _operational_handoff_summary,
+    OPERATIONAL_HANDOFF_REPLY as _OPERATIONAL_HANDOFF_REPLY,
+)
 # CUSTOMER-CALC-1 — shipping-cost estimate multi-turn slot collection
 # (deterministic, history-derived; reuses the dimension/weight parser).
 from services.shipping_estimate_flow import (
@@ -3008,6 +3018,40 @@ class DecisionEngine:
                         handoff_payload={"reason": "charter_truck_request",
                                          "details": _charter.as_dict(),
                                          "summary": _charter_handoff_summary(_charter)})
+
+                # CUSTOMER-ACTION-1 — an operational CHANGE / VERIFY request
+                # on the customer's own record that has NO executable
+                # Business Action (แก้จำนวนในบิล / เปลี่ยนวิธีจัดส่ง /
+                # เปลี่ยนเป็นรับเอง / บิลซ้ำ / ตรวจสอบที่อยู่โกดังจีน /
+                # ยอดเงินเติมแล้วไม่เข้า). Customer-approved behaviour:
+                # acknowledge + ask for the ONE required identifier, then
+                # hand to Human CS — never a "no information" dead-end,
+                # never a fake success, never an unrelated ERP read. A
+                # delivery-address change (CUS-S09) is excluded — it keeps
+                # its own requestshippingaddresschange flow. Deterministic,
+                # history-derived; Semantic-First supplies the intent.
+                _opreq = _derive_operational_state(history, message, interpretation=semantic)
+                if _opreq is not None:
+                    _extract_operational_fields(message, _opreq)
+                    developer_trace["selection_source"] = "operational_change_collection"
+                    developer_trace["operational_change_state"] = _opreq.as_dict()
+                    if not _opreq.has_input():
+                        return self._finalize(
+                            reply=_build_response(text=_operational_ask_prompt(_opreq)),
+                            routing_type="WORKFLOW", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    developer_trace.setdefault("information_collection_status", {})["collected_parameters"] = {
+                        k: v for k, v in {"ShipmentCode": _opreq.bill,
+                                          "CustPhone": _opreq.phone}.items() if v}
+                    return self._finalize(
+                        reply=_build_response(text=_OPERATIONAL_HANDOFF_REPLY),
+                        routing_type="HUMAN_HANDOFF", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context),
+                        handoff_payload={"reason": f"operational_change_request: {_opreq.kind}",
+                                         "details": _opreq.as_dict(),
+                                         "summary": _operational_handoff_summary(_opreq)})
 
                 # CUSTOMER-CALC-1 — a shipping-cost ESTIMATE request. A
                 # recognized calculator intent with a missing input is

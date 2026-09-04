@@ -788,7 +788,15 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         # sees the flow is complete and does not re-collect.
         _charter_handoff = reason == "charter_truck_request"
         _CHARTER_COORDINATION_CLAUSE = " เดี๋ยวเจ้าหน้าที่จะติดต่อประสานงานเรื่องเหมารถให้นะคะ"
-        _promises_followup = _unsupported_fact_handoff or _charter_handoff
+        # CUSTOMER-ACTION-1 — an operational change/verify request with no
+        # executable action: SAME truth rule as the charter handoff. The
+        # coordination line is added ONLY when a real notification for
+        # THIS episode is on the books (this-turn success or already
+        # NOTIFIED/PENDING); on send failure the customer keeps the plain
+        # "รับเรื่อง…" wording with no promise.
+        _op_change_handoff = (reason or "").split(":", 1)[0].strip() == "operational_change_request"
+        _OP_CHANGE_COORDINATION_CLAUSE = " เดี๋ยวเจ้าหน้าที่จะติดต่อดำเนินการให้นะคะ"
+        _promises_followup = _unsupported_fact_handoff or _charter_handoff or _op_change_handoff
         # Fix-2.2 (2026-09-03) — Service-Mind wording. The RAG pipeline's
         # P7.1 no-info text ends with a SELF-SERVICE line ("go ask staff
         # yourself"), which is wrong once the system has already taken
@@ -824,6 +832,8 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                 reply_text = reply_text + _STAFF_COORDINATION_CLAUSE
             elif _charter_handoff and _CHARTER_COORDINATION_CLAUSE.strip() not in reply_text:
                 reply_text = reply_text + _CHARTER_COORDINATION_CLAUSE
+            elif _op_change_handoff and _OP_CHANGE_COORDINATION_CLAUSE.strip() not in reply_text:
+                reply_text = reply_text + _OP_CHANGE_COORDINATION_CLAUSE
         else:
             if conversation:
                 session_service.set_handoff_status(conversation["id"], "PENDING", reason=reason)
@@ -865,11 +875,16 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                 last_shipment_code=collected.get("ShipmentCode") or (profile or {}).get("last_shipment_code"),
                 last_tracking=collected.get("Tracking") or (profile or {}).get("last_tracking"),
             )
-            if send_result.get("sent") and _unsupported_fact_handoff \
-                    and _STAFF_COORDINATION_CLAUSE.strip() not in reply_text:
+            if send_result.get("sent"):
                 # Real notification went out — now it is true to tell the
-                # customer that WE will coordinate a staff follow-up.
-                reply_text = reply_text + _STAFF_COORDINATION_CLAUSE
+                # customer that WE will coordinate a staff follow-up. Each
+                # handoff kind uses its own coordination wording.
+                if _unsupported_fact_handoff and _STAFF_COORDINATION_CLAUSE.strip() not in reply_text:
+                    reply_text = reply_text + _STAFF_COORDINATION_CLAUSE
+                elif _charter_handoff and _CHARTER_COORDINATION_CLAUSE.strip() not in reply_text:
+                    reply_text = reply_text + _CHARTER_COORDINATION_CLAUSE
+                elif _op_change_handoff and _OP_CHANGE_COORDINATION_CLAUSE.strip() not in reply_text:
+                    reply_text = reply_text + _OP_CHANGE_COORDINATION_CLAUSE
             if conversation:
                 if send_result.get("sent"):
                     session_service.set_handoff_status(conversation["id"], "NOTIFIED", reason=reason)
