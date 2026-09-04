@@ -226,6 +226,16 @@ _FUZZY_CORRECTION_PHRASE_GUARDS = [
     # false no_information. Generic ordering and the explicit ฝากสั่ง
     # service are distinct; the customer must name ฝากสั่ง themselves.
     re.compile(r"การสั่ง"),
+    # CUSTOMER-RAG-AUDIT (CUS-G09 / CUS-G26) — same class, same mechanism.
+    # "ชำระค่าสินค้ายังไง" had its "ะค่าสินค้า" window fuzzy-corrected into
+    # the registered tag term "เคลมสินค้า" ("claim goods"), routing a
+    # purchase-bill PAYMENT question into the claims FAQ and dead-ending
+    # it. "ชำระค่านำเข้ายังไง" had "่านำเข้า" corrected into "การนำเข้า",
+    # corrupting an import-bill payment question into a no_information
+    # Human handoff. "ค่าสินค้า" / "ค่านำเข้า" are core, correctly-spelled
+    # domain phrases that must never be fuzzy-mangled.
+    re.compile(r"ค่าสินค้า"),
+    re.compile(r"ค่านำเข้า"),
 ]
 
 

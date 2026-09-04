@@ -453,8 +453,16 @@ def _invoice_issuance_branch_applies(question, actionable_intent, interpretation
         return False
     if _INVOICE_DOWNLOAD_RE.search(question or ""):
         return False
-    return bool(_is_invoice_issuance_question(question)
-                or getattr(interpretation, "intent_family", None) == "INVOICE")
+    if _is_invoice_issuance_question(question):
+        return True
+    # the central INVOICE family opens the branch ONLY when the
+    # deterministic compositional tier resolved it (it requires an actual
+    # invoice noun — ใบกำกับ / ใบเสร็จ / tax invoice). An LLM family GUESS
+    # must not drive a deterministic trusted-answer branch: e.g.
+    # "ชำระบัตรเครดิตได้ไหม" / "บิลขนส่งชำระได้เลยไหม" are payment-policy
+    # questions the resolver sometimes labels INVOICE by association.
+    return (getattr(interpretation, "intent_family", None) == "INVOICE"
+            and getattr(interpretation, "source", None) == "deterministic")
 
 
 # Company/Operational Topic Guard (Hybrid RAG + General AI Chat,

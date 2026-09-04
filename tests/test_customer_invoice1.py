@@ -49,8 +49,17 @@ class TestInvoiceRegression1SemanticFirstGate(unittest.TestCase):
     misses ("tax invoice", "ใบเสร็จค่าขนส่ง", "e-tax invoice") still
     reach the trusted answer instead of Fix-2 Human Handoff."""
 
-    def _interp(self, fam):
-        return Interpretation(intent_family=fam, confidence=0.85)
+    def _interp(self, fam, source="deterministic"):
+        return Interpretation(intent_family=fam, confidence=0.85, source=source)
+
+    def test_llm_family_guess_does_not_drive_the_branch(self):
+        # CUSTOMER-RAG-AUDIT — "ชำระบัตรเครดิตได้ไหม" / "บิลขนส่งชำระได้
+        # เลยไหม" are payment questions the resolver sometimes labels
+        # INVOICE by association; an LLM guess must not open the branch.
+        self.assertFalse(_invoice_issuance_branch_applies(
+            "ชำระบัตรเครดิตได้ไหม", "invoice_policy", self._interp("INVOICE", source="llm")))
+        self.assertFalse(_invoice_issuance_branch_applies(
+            "บิลขนส่งชำระได้เลยไหมคะ", "invoice_policy", self._interp("INVOICE", source="llm")))
 
     def test_case_A_exact_real_failure_applies(self):
         self.assertTrue(_invoice_issuance_branch_applies(
