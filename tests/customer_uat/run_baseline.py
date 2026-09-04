@@ -8,14 +8,27 @@ with the RAG pipeline and the ERP HTTP call replaced by deterministic
 fakes — exactly the isolation `tools/replay_real_turn.py` uses. No
 network, no DB writes, no LLM, no destructive ERP call.
 
-    python -m tests.customer_uat.run_baseline            # routing baseline
+    python -m tests.customer_uat.run_baseline            # routing baseline (scratch output, tracked files untouched)
     python -m tests.customer_uat.run_baseline --rag      # + live retrieval probe (costs embeddings)
+    python -m tests.customer_uat.run_baseline --commit-baseline   # overwrite the TRACKED baseline files (deliberate only)
 
-Outputs:
+Outputs (default — safe for the repeatable Regression Gate / CI):
+    tests/customer_uat/.gate_scratch/baseline_results.json
+    tests/customer_uat/.gate_scratch/CUSTOMER_UAT_BASELINE_REPORT.md
+
+Outputs (only with --commit-baseline — the TRACKED files, deliberate re-measurement):
     tests/customer_uat/baseline_results.json
     docs/customer_uat_sources/CUSTOMER_UAT_BASELINE_REPORT.md
 
-This file changes NO production logic. It is evaluation tooling only.
+REGRESSION-GATE-1 TEST-ISOLATION NOTE: earlier callers ran this harness
+with no way to avoid clobbering the two TRACKED files above as a side
+effect, which corrupted an unrelated test
+(`tests.test_customer_calc1.TestTrustedRates`) that reads
+`baseline_results.json` expecting specific rate-FAQ text, whenever this
+harness was invoked mid-session for ad-hoc measurement. `--commit-baseline`
+makes that overwrite opt-in and explicit; the repeatable gate command
+never passes it. This file changes NO production logic. It is
+evaluation tooling only.
 """
 from __future__ import annotations
 
@@ -35,8 +48,17 @@ from services.decision_engine import DecisionEngine                          # n
 import services.decision_engine as _de                                      # noqa: E402
 
 _MASTER = _ROOT / "tests" / "customer_uat" / "customer_uat_master.jsonl"
-_OUT_JSON = _ROOT / "tests" / "customer_uat" / "baseline_results.json"
-_OUT_MD = _ROOT / "docs" / "customer_uat_sources" / "CUSTOMER_UAT_BASELINE_REPORT.md"
+# TRACKED (committed) baseline artifacts — written only with --commit-baseline.
+_TRACKED_OUT_JSON = _ROOT / "tests" / "customer_uat" / "baseline_results.json"
+_TRACKED_OUT_MD = _ROOT / "docs" / "customer_uat_sources" / "CUSTOMER_UAT_BASELINE_REPORT.md"
+# Scratch (gitignored) default outputs — safe for the repeatable Regression
+# Gate / CI to run repeatedly without disturbing the tracked measurement.
+_SCRATCH_DIR = _ROOT / "tests" / "customer_uat" / ".gate_scratch"
+_SCRATCH_OUT_JSON = _SCRATCH_DIR / "baseline_results.json"
+_SCRATCH_OUT_MD = _SCRATCH_DIR / "CUSTOMER_UAT_BASELINE_REPORT.md"
+# resolved per-invocation in main() based on --commit-baseline
+_OUT_JSON = _TRACKED_OUT_JSON
+_OUT_MD = _TRACKED_OUT_MD
 
 # ── Deterministic (non-LLM) signal extractors ────────────────────────────
 _NOINFO_RE = re.compile(r"ยังไม่มีข้อมูล|ไม่มีข้อมูลยืนยัน|ไม่มีข้อมูลเกี่ยวกับ")
@@ -278,11 +300,24 @@ def _score(case, sig):
 
 
 def main(argv=None):
+    global _OUT_JSON, _OUT_MD
     ap = argparse.ArgumentParser()
     ap.add_argument("--rag", action="store_true", help="also run the bounded live RAG pass")
     ap.add_argument("--report-only", action="store_true",
                     help="regenerate the .md from the existing baseline_results.json (no re-run)")
+    ap.add_argument("--commit-baseline", action="store_true",
+                    help="write the TRACKED tests/customer_uat/baseline_results.json + "
+                         "docs/customer_uat_sources/CUSTOMER_UAT_BASELINE_REPORT.md (deliberate "
+                         "re-measurement only). Default: write to the gitignored "
+                         "tests/customer_uat/.gate_scratch/ so the repeatable Regression Gate can "
+                         "run this repeatedly without disturbing the committed measurement.")
     args = ap.parse_args(argv)
+
+    if args.commit_baseline:
+        _OUT_JSON, _OUT_MD = _TRACKED_OUT_JSON, _TRACKED_OUT_MD
+    else:
+        _OUT_JSON, _OUT_MD = _SCRATCH_OUT_JSON, _SCRATCH_OUT_MD
+        _SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.report_only:
         _write_report(json.loads(_OUT_JSON.read_text(encoding="utf-8")))

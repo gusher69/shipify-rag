@@ -20,6 +20,7 @@ from services.charter_truck_flow import (
 )
 from services.decision_engine import DecisionEngine
 from tests.test_decision_engine import _fake_playground_result
+from tests.test_business_action_registry import reset_real_registry
 
 _TC19 = ("สวัสดีค่ะ ทางเรามีบริการเหมารถให้ได้นะคะ คุณลูกค้าแจ้งเลขบิล และโลเคชั่น"
          "ปลายทาง พร้อมกับชื่อผู้รับ และเบอร์โทรผู้รับมาได้เลยนะคะ")
@@ -80,6 +81,7 @@ class TestCharterFieldExtraction(unittest.TestCase):
 class TestCharterRoutingE2E(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        reset_real_registry()  # TEST-ISOLATION (REGRESSION-GATE-1) — see reset_real_registry() docstring
         cls.eng = DecisionEngine()
 
     def _run(self, msg, hist):

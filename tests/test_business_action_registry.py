@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from services.business_action_registry import (
     BusinessActionRegistry, mask_secret, mask_execution_secrets, build_embedding_source_text,
+    _cache_clear as _ba_config_cache_clear,
 )
 
 
@@ -100,11 +101,56 @@ class _Query:
 
 
 class _FakeSupabase:
+    """TEST-ISOLATION (REGRESSION-GATE-1) — services/business_action_
+    registry.py's `_CONFIG_CACHE` is a deliberate, process-wide 300s TTL
+    read cache (a real production feature: BA config is admin-edited
+    static configuration, so a per-`sb`-instance cache would be wrong in
+    production too). Its cache KEY is a plain string ("list",
+    "get:<id>", ...) with no registry-instance scoping, so two DIFFERENT
+    `_FakeSupabase()` fixtures built by two different tests can read each
+    other's stale rows if anything populated the cache without going
+    through a mutator (`create`/`replace_parameters`/... — every one of
+    which already calls `_cache_clear()`). Clearing it here, at the
+    START of every fresh fake registry's life, is the one guaranteed
+    invalidation point regardless of how a given test seeds its data —
+    a test-fixture-only fix, no production code touched."""
     def __init__(self):
+        _ba_config_cache_clear()
         self.store = {}
 
     def table(self, name):
         return _Query(self.store, name)
+
+
+def reset_real_registry():
+    """TEST-ISOLATION (REGRESSION-GATE-1) — companion to `_FakeSupabase`
+    above, for the handful of test files that deliberately construct
+    `DecisionEngine()` with NO `sb` (test_system_state_emergency_1,
+    test_calculator_regression_2, test_customer_calc1,
+    test_customer_calc11_conversation_state,
+    test_customer_rag2_1_charter_slots, test_customer_action1,
+    test_semantic_first_1 — the SYSTEM-STATE-EMERGENCY-1 methodology of
+    replaying against the REAL, deployed Business Action registry rather
+    than a hand-seeded approximation). `get_registry()` with no `sb`
+    caches ONE module-level `BusinessActionRegistry` singleton
+    (`business_action_registry._instance`) for the life of the process,
+    on top of the same process-wide `_CONFIG_CACHE`. Confirmed via a
+    full combined-suite run (`docs/customer_uat_sources/
+    REGRESSION_GATE_1.md`): `_resilient_read`'s legitimate production
+    fail-open behavior (an 18s wall-clock read timeout returns `.data ==
+    []` rather than hanging the LINE webhook) can, under the network
+    load of dozens of test files sharing one process, cause a SINGLE
+    transient timeout to cache an EMPTY registry for the full 300s TTL —
+    starving every later real-registry test in the same run of its
+    business actions (observed as `SAFE_FALLBACK` / `src=None` /
+    unrelated `RAG` routing with no candidate action found). Calling
+    this at the top of `setUpClass` forces a fresh real read for that
+    class alone, bounding any transient-timeout blast radius to a single
+    test class instead of the rest of the suite. Test-fixture-only fix —
+    `_resilient_read`'s production fail-open behavior is untouched."""
+    import services.business_action_registry as _bar
+    _bar._instance = None
+    _ba_config_cache_clear()
 
 
 def _sample_payload(key="tracking_lookup"):

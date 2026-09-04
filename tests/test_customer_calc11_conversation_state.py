@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 from services.decision_engine import DecisionEngine
 from services.shipping_estimate_flow import _method_of, derive_estimate_state
 from tests.test_decision_engine import _fake_playground_result
+from tests.test_business_action_registry import reset_real_registry
 
 
 class TestRouteTokenNormalisation(unittest.TestCase):
@@ -108,6 +109,7 @@ class TestRealLineSequenceOneSession(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        reset_real_registry()  # TEST-ISOLATION (REGRESSION-GATE-1) — see reset_real_registry() docstring
         cls.eng = DecisionEngine()
 
     def setUp(self):
@@ -199,6 +201,7 @@ class TestRealLineSequenceOneSession(unittest.TestCase):
 class TestProtectedBehaviourUnchanged(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        reset_real_registry()  # TEST-ISOLATION (REGRESSION-GATE-1) — see reset_real_registry() docstring
         cls.eng = DecisionEngine()
 
     def _run(self, msg, hist=None):

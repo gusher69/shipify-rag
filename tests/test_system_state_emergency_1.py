@@ -33,6 +33,7 @@ from unittest.mock import MagicMock, patch
 
 from services.decision_engine import DecisionEngine
 from tests.test_decision_engine import _fake_playground_result
+from tests.test_business_action_registry import reset_real_registry
 
 _UID = "Uc5f5717bc090934f9eaa067513388178"
 _BIND = {"cust_code": "FT3182", "status": "verified", "channel": "line",
@@ -71,6 +72,7 @@ def _llm(message, history=None):
 class _Session(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        reset_real_registry()  # TEST-ISOLATION (REGRESSION-GATE-1) — see reset_real_registry() docstring
         cls.eng = DecisionEngine()
 
     def setUp(self):

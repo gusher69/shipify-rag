@@ -34,6 +34,7 @@ from services.decision_engine import DecisionEngine
 from services.shipping_estimate_flow import _method_of, _is_explicit_new_request, derive_estimate_state
 from services.conversation_semantics import interpret
 from tests.test_decision_engine import _fake_playground_result
+from tests.test_business_action_registry import reset_real_registry
 
 
 def _llm_calc(message, history=None):
@@ -71,6 +72,7 @@ _CALC_MSG = "ช่วยคำนวณค่าส่ง น้ำหนัก
 class _E2E(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        reset_real_registry()  # TEST-ISOLATION (REGRESSION-GATE-1) — see reset_real_registry() docstring
         cls.eng = DecisionEngine()
 
     def _say(self, msg, history, *, llm=_llm_calc):

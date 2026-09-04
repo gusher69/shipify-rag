@@ -89,3 +89,7 @@ node_modules/
 docs/customer_uat_sources/*.xlsx
 docs/customer_uat_sources/*.pdf
 docs/customer_uat_sources/screenshot/
+
+# REGRESSION-GATE-1 — scratch output for tests/customer_uat/run_baseline.py default runs
+# (the repeatable gate never passes --commit-baseline, so this stays out of the tracked baseline)
+tests/customer_uat/.gate_scratch/

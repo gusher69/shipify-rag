@@ -237,10 +237,17 @@ class TestB_ExplicitNewBusinessActionAfterPublicAnswer(unittest.TestCase):
         return result, mock_req
 
     def test_new_shipment_action_is_not_coerced_and_collects_its_identifier(self):
+        # REGRESSION-GATE-1 audit: `turn_intent_coerced` may legitimately
+        # read "private_state_inquiry" now (SEM-1, 2026-09-03 — a LATER
+        # customer-approved fix that also recognises "ขอเช็กพัสดุเดียว
+        # ครับ" as a private shipment-status inquiry and resolves to the
+        # SAME searchdatashipment DETAIL action). The public-clarification-
+        # continuity swallow this test protects against is asserted
+        # directly; the customer-facing contract (WORKFLOW, asks for the
+        # shipment bill, no ERP call) is unchanged and re-verified below.
         result, mock_req = self._run("ขอเช็กพัสดุเดียวครับ")
         dev = result.get("developer") or {}
-        # continuity did NOT fire — the message owns its turn
-        self.assertIsNone(dev.get("turn_intent_coerced"))
+        self.assertNotEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
         # DETAIL selected, now collecting the missing record identifier
         self.assertEqual(result["routing"]["type"], "WORKFLOW")
         self.assertIn("บิลขนส่ง", result["reply"]["text"])
@@ -386,13 +393,25 @@ class Fix12_PublicAnswerPoliteWordingDoesNotVetoContinuity(unittest.TestCase):
         self.assertNotIn("FT318220260726001", result["reply"]["text"])
 
     def test_3_explicit_new_business_action_still_wins_after_polite_public_answer(self):
-        # Fix 1.1 preserved: an explicitly-phrased new request is NOT coerced
+        # Fix 1.1 preserved: an explicitly-phrased new request is NOT
+        # coerced to the PUBLIC clarification path. REGRESSION-GATE-1
+        # audit: `turn_intent_coerced` may now legitimately read
+        # "private_state_inquiry" instead of None — SEM-1 (2026-09-03,
+        # a LATER customer-approved fix, added after this test) also
+        # recognises "ขอเช็กพัสดุเดียวครับ" as a private shipment-status
+        # inquiry and coerces PRIVATE_ACTION via that path instead of
+        # via plain fresh-search; it still resolves to the SAME DETAIL
+        # action. The customer-facing contract this test protects —
+        # never coerced to the PUBLIC clarification path, DETAIL action
+        # (or none) selected, never RAG — is asserted directly instead
+        # of pinning the internal coercion source.
         result, mock_req = self._decide("ขอเช็กพัสดุเดียวครับ", _PUBLIC_CALC_ASKS_WEIGHT_KRUNA)
         dev = result.get("developer") or {}
-        self.assertIsNone(dev.get("turn_intent_coerced"))
+        self.assertNotEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
         # DETAIL owns the turn (P8.3.1); no plain public-clarification swallow
         self.assertIn(dev.get("selected_business_action"), ("searchdatashipment", None))
         self.assertNotEqual(result["routing"]["type"], "RAG")
+        mock_req.assert_not_called()   # no ERP call — the identifier is still missing
 
 
 class Fix12_SelfVerificationContinuationNotCoerced(unittest.TestCase):
@@ -497,10 +516,16 @@ class Fix13_DecisionEngineRoutesCoercedPublicTurnToRag(unittest.TestCase):
         mock_req.assert_not_called()
 
     def test_2_explicit_new_business_action_still_wins(self):
-        result, _ = self._decide("ขอเช็กพัสดุเดียวครับ")
+        # REGRESSION-GATE-1 audit: SEM-1 (a LATER customer-approved fix)
+        # may now coerce this message via "private_state_inquiry" rather
+        # than leave it uncoerced — see TestB's own note. The contract
+        # this test protects is that the turn is never swallowed into
+        # the PUBLIC RAG-clarification pipeline; asserted directly.
+        result, mock_req = self._decide("ขอเช็กพัสดุเดียวครับ")
         dev = result.get("developer") or {}
-        self.assertIsNone(dev.get("turn_intent_coerced"))
+        self.assertNotEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
         self.assertNotEqual(result["reply"]["text"], "RAG-PIPELINE-REACHED")
+        mock_req.assert_not_called()
 
     def test_3_new_private_intent_still_wins(self):
         result, _ = self._decide("ยอด Wallet ของผมเท่าไหร่")

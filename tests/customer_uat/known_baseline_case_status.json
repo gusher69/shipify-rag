@@ -1,0 +1,279 @@
+{
+  "checkpoint_sha": "0702e64216fcc75401920cf3f6780dc9fe179b0f",
+  "measured_at": "REGRESSION-GATE-1",
+  "note": "Per-case PASS/FAIL snapshot at the locked checkpoint, for the repeatable gate to diff against. A case flipping PASS->FAIL is a NEW REGRESSION (blocks deploy); a case staying FAIL is pre-existing (tracked in CUSTOMER_MASTER_FAILURE_INVENTORY, not a gate blocker).",
+  "cases": {
+    "CUS-G01": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G02": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G03": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G04": {
+      "failed": true,
+      "primary_root_class": "SEMANTIC_INTENT"
+    },
+    "CUS-G05": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G06": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G07": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G08": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G09": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G10": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G11": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-G12": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G13": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G14": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G15": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G16": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G17": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-G18": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-G19": {
+      "failed": true,
+      "primary_root_class": "HUMAN_HANDOFF"
+    },
+    "CUS-G20": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G21": {
+      "failed": true,
+      "primary_root_class": "SEMANTIC_INTENT"
+    },
+    "CUS-G22": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G23": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G24": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G25": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G26": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G27": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G28": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-G29": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-S01": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-S02": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-S03": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-S04": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-S05": {
+      "failed": true,
+      "primary_root_class": "SEMANTIC_INTENT"
+    },
+    "CUS-S06": {
+      "failed": true,
+      "primary_root_class": "HUMAN_HANDOFF"
+    },
+    "CUS-S07": {
+      "failed": true,
+      "primary_root_class": "SEMANTIC_INTENT"
+    },
+    "CUS-S08": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-S09": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-S10": {
+      "failed": true,
+      "primary_root_class": "HUMAN_HANDOFF"
+    },
+    "CUS-S11": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-S12": {
+      "failed": true,
+      "primary_root_class": "SEMANTIC_INTENT"
+    },
+    "CUS-S13": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-S14": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-S15": {
+      "failed": true,
+      "primary_root_class": "ERP_FLOW"
+    },
+    "CUS-S16": {
+      "failed": true,
+      "primary_root_class": "HUMAN_HANDOFF"
+    },
+    "CUS-S17": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-S18": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-S20": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F01": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F02": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F03": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F04": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F05": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F06": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F07": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F08": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F09": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F10": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-F11": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-SC1": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-SC2": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-SC3": {
+      "failed": true,
+      "primary_root_class": "CONTEXT_OPERATION"
+    },
+    "CUS-P07": {
+      "failed": true,
+      "primary_root_class": "SEMANTIC_INTENT"
+    },
+    "CUS-P06": {
+      "failed": true,
+      "primary_root_class": "HUMAN_HANDOFF"
+    },
+    "CUS-P20": {
+      "failed": true,
+      "primary_root_class": "LINK_CONVERSION"
+    },
+    "CUS-RL-genuine_continuation": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-RL-p0_01_repeat_after_completed_cycle": {
+      "failed": false,
+      "primary_root_class": null
+    },
+    "CUS-RL-p0_01_stale_cycle": {
+      "failed": false,
+      "primary_root_class": null
+    }
+  }
+}

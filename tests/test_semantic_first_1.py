@@ -19,6 +19,7 @@ from services.conversation_semantics import (
 from rag.query_understanding import classify_actionable_intent
 from services.decision_engine import DecisionEngine
 from tests.test_decision_engine import _fake_playground_result
+from tests.test_business_action_registry import reset_real_registry
 
 
 # unseen paraphrase -> expected family. None of these strings appear in
@@ -154,6 +155,7 @@ class TestActionableIntentIsSemanticFirst(unittest.TestCase):
 class TestDownstreamRoutingConsumesTheInterpretation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        reset_real_registry()  # TEST-ISOLATION (REGRESSION-GATE-1) — see reset_real_registry() docstring
         cls.eng = DecisionEngine()
 
     def _run(self, msg, hist=None):

@@ -15,6 +15,7 @@ from services.operational_change_flow import (
     extract_operational_fields, OperationalState, operational_handoff_summary,
 )
 from services.decision_engine import DecisionEngine
+from tests.test_business_action_registry import reset_real_registry
 
 LINE_UID = "Uc5f5717bc090934f9eaa067513388178"
 CUST = "FT3182"
@@ -90,6 +91,7 @@ class TestStateAndSummary(unittest.TestCase):
 class TestRoutingE2E(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        reset_real_registry()  # TEST-ISOLATION (REGRESSION-GATE-1) — see reset_real_registry() docstring
         cls.eng = DecisionEngine()
 
     def _run(self, msg, history=None):
