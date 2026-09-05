@@ -1652,6 +1652,90 @@ _PSI_THAI_TRACKING_OUTPUT_RE = re.compile(
     r"(?:แทรค|แทร็ก|แทรก|tracking|ติดตาม).{0,15}ไทย|ไทย.{0,15}(?:แทรค|แทร็ก|แทรก|tracking|ติดตาม)",
     re.IGNORECASE)
 
+# SHIPMENT-DIRECT-ANSWER-1 — shipment follow-up RESPONSE COMPOSITION.
+# The generic ERP field-dump composer (_compose_natural_reply) answers
+# "what fields does this action return" rather than "what did the
+# customer actually ask" — a customer asking "สินค้าจะเข้าไทยตอนไหนคะ"
+# got back ShipmentCode/Status/TrackingCH/TotalSum instead of an ETA
+# answer. These 3 patterns recognize the question SHAPE (ETA / warehouse
+# arrival / current stage); Thai-tracking-availability reuses the
+# already-existing _PSI_THAI_TRACKING_OUTPUT_RE above. Scoped strictly
+# to composing a reply from searchdatashipment's OWN already-fetched
+# fields — no new ERP call, no routing/authorization change.
+_ETA_QUESTION_RE = re.compile(
+    r"เข้าไทย.{0,10}(?:ตอนไหน|วันไหน|เมื่อไหร่|เมื่อไร)|(?:ตอนไหน|วันไหน|เมื่อไหร่|เมื่อไร).{0,10}เข้าไทย")
+_WAREHOUSE_QUESTION_RE = re.compile(r"ถึงโกดัง.{0,6}(?:หรือยัง|รึยัง|หรือเปล่า)|โกดัง.{0,6}(?:หรือยัง|รึยัง)")
+_CURRENT_STATUS_QUESTION_RE = re.compile(
+    r"ตอนนี้.{0,6}ถึงไหน|ถึงไหนแล้ว|สถานะตอนนี้|สถานะล่าสุด|แล้วสถานะล่ะ|แล้วตอนนี้ยังไง")
+# statuses that indicate the shipment has AT LEAST reached the China
+# warehouse — the actual ERP status text is always the source of truth;
+# this never invents "arrived" for a status it doesn't recognize.
+_WAREHOUSE_ARRIVED_STATUS_RE = re.compile(
+    r"รับเข้าที่จีน|รับเข้าโกดังจีน|ถึงโกดังจีน|เข้าโกดังจีน|ส่งออกจากจีน|อยู่ระหว่างนำส่ง|ถึงไทยแล้ว")
+_STATUS_METHOD_ROAD_RE = re.compile(r"ทางรถ|โดยรถ|(?<![ก-๙])รถ(?![ก-๙])")
+_STATUS_METHOD_SEA_RE = re.compile(r"ทางเรือ|โดยเรือ|(?<![ก-๙])เรือ(?![ก-๙])")
+_ROAD_ETA_LINE = "หากจัดส่งทางรถปกติใช้เวลาประมาณ 7-10 วันนับจากเข้าโกดังจีนค่ะ"
+_SEA_ETA_LINE = "หากจัดส่งทางเรือปกติใช้เวลาประมาณ 14-20 วันนับจากเข้าโกดังจีนค่ะ"
+_BOTH_ETA_LINE = "หากจัดส่งทางรถปกติใช้เวลาประมาณ 7-10 วัน และทางเรือประมาณ 14-20 วันนับจากเข้าโกดังจีนค่ะ"
+
+
+def _shipment_mapped_value(full_mapped, response_mapping, suffix):
+    """The mapped_label + value of the searchdatashipment field whose
+    json_path ends with `.suffix` (e.g. "code" / "status" / "trackingth")
+    — config-driven, never a hardcoded display label string."""
+    label = next((r.get("mapped_label") for r in (response_mapping or [])
+                  if (r.get("json_path") or "").lower().endswith("." + suffix)), None)
+    if not label:
+        return None
+    return (full_mapped or {}).get(label)
+
+
+def _compose_shipment_followup_reply(message: str, full_mapped, response_mapping) -> Optional[str]:
+    """A direct, natural answer to the customer's ACTUAL shipment
+    follow-up question (ETA / warehouse arrival / current stage), or
+    None when the message doesn't match one of those shapes — the
+    caller then falls through to the existing generic composer
+    unaffected. Never fabricates a confirmed arrival date or a shipping
+    method the ERP data doesn't actually state."""
+    bill = _shipment_mapped_value(full_mapped, response_mapping, "code")
+    if not bill:
+        return None
+    status = (_shipment_mapped_value(full_mapped, response_mapping, "status") or "").strip()
+    t = message or ""
+
+    if _ETA_QUESTION_RE.search(t):
+        if status:
+            status_line = f"อยู่สถานะ{status}แล้วค่ะ"
+        else:
+            status_line = "ยังไม่มีข้อมูลสถานะที่ยืนยันในระบบค่ะ"
+        if _STATUS_METHOD_SEA_RE.search(status) and not _STATUS_METHOD_ROAD_RE.search(status):
+            eta_line = _SEA_ETA_LINE
+        elif _STATUS_METHOD_ROAD_RE.search(status) and not _STATUS_METHOD_SEA_RE.search(status):
+            eta_line = _ROAD_ETA_LINE
+        else:
+            eta_line = _BOTH_ETA_LINE
+        return f"ตอนนี้บิล {bill} {status_line} ยังไม่มีวันเข้าไทยที่ยืนยันในระบบ {eta_line}"
+
+    if _WAREHOUSE_QUESTION_RE.search(t):
+        if not status:
+            return f"ยังไม่มีข้อมูลสถานะที่ยืนยันสำหรับบิล {bill} ในระบบค่ะ"
+        if _WAREHOUSE_ARRIVED_STATUS_RE.search(status):
+            return f"ถึงโกดังจีนแล้วค่ะ ตอนนี้บิล {bill} อยู่สถานะ{status}ค่ะ"
+        return f"ยังไม่ถึงโกดังจีนค่ะ ตอนนี้บิล {bill} อยู่สถานะ{status}ค่ะ"
+
+    if _PSI_THAI_TRACKING_OUTPUT_RE.search(t) and "จีน" not in t:
+        tracking_th = (_shipment_mapped_value(full_mapped, response_mapping, "trackingth") or "").strip()
+        if tracking_th:
+            return f"บิล {bill} มีเลข Tracking ไทยแล้วค่ะ: {tracking_th}"
+        return f"ตอนนี้บิล {bill} ยังไม่มีเลข Tracking ไทยในระบบค่ะ"
+
+    if _CURRENT_STATUS_QUESTION_RE.search(t):
+        if not status:
+            return f"ยังไม่มีข้อมูลสถานะที่ยืนยันสำหรับบิล {bill} ในระบบค่ะ"
+        return f"ตอนนี้บิล {bill} อยู่สถานะ{status}ค่ะ"
+
+    return None
+
 _PSI_DOMAIN_ACTION_HINTS = {
     "shipment": {"cat_key": ("shipment", "parcel", "ขนส่ง", "พัสดุ"), "track_hint": ()},
     "order": {"cat_key": ("order", "คำสั่งซื้อ", "สั่งซื้อ", "ออเดอร์"), "track_hint": ()},
@@ -3862,10 +3946,26 @@ class DecisionEngine:
                     _recent_asst = [t.get("content") for t in history
                                     if t.get("role") == "assistant"][-2:]
                     _msg = message or ""
+                    # SHIPMENT-DIRECT-ANSWER-1 — a shipment follow-up
+                    # question ("แทรคไทยมีหรือยัง") carries none of the
+                    # markers above (no "ตอนนี้"/"ถึงหรือยัง"/etc.) and,
+                    # memory-free, decisively matches NO Business Action
+                    # at the action-keyword level (its only real evidence
+                    # is a FIELD-level keyword _resolve_conversation_
+                    # reference checks separately) — REAL LINE: it got
+                    # coerced to SHIPIFY_INFORMATION and its otherwise-
+                    # correct conversation_reference match was then
+                    # suppressed by the stale-identity-gated-action guard
+                    # right below. These 4 question shapes are exactly as
+                    # decisive private evidence as the markers above.
                     _carries_private_evidence = bool(
                         _SELF_REGISTERED_RE.search(_msg)
                         or _PRIVATE_STATE_QUERY_RE.search(_msg)
-                        or _REFERENCE_MARKER_RE.search(_msg))
+                        or _REFERENCE_MARKER_RE.search(_msg)
+                        or _ETA_QUESTION_RE.search(_msg)
+                        or _WAREHOUSE_QUESTION_RE.search(_msg)
+                        or _CURRENT_STATUS_QUESTION_RE.search(_msg)
+                        or (_PSI_THAI_TRACKING_OUTPUT_RE.search(_msg) and "จีน" not in _msg))
                     _prev_is_action_prompt = any(
                         _assistant_text_is_generated_action_prompt(c, self.registry)
                         for c in _recent_asst)
@@ -5174,6 +5274,29 @@ class DecisionEngine:
                     reply = _build_response(text=(
                         f"ไม่พบข้อมูลรายการสำหรับเลขที่ {_rec_id} ในระบบค่ะ "
                         "รบกวนตรวจสอบเลขที่บิลขนส่งหรือเลขแทร็กอีกครั้งแล้วแจ้งมาใหม่นะคะ"))
+                    return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                           developer_trace=developer_trace, context=context, start=start, alert=alert)
+
+            # SHIPMENT-DIRECT-ANSWER-1 — a shipment FOUND (full_mapped
+            # non-empty; the not-found case above already returned) and
+            # the customer's own message matches one of the 4 known
+            # follow-up question shapes (ETA / warehouse arrival /
+            # Thai-tracking availability / current stage): answer THAT
+            # question directly using the SAME already-fetched fields,
+            # instead of the generic ERP field-dump composer below.
+            # Scoped to searchdatashipment only; every other action's
+            # reply composition is unaffected. Falls through (None) for
+            # any other searchdatashipment question (e.g. a request for
+            # a specific unrelated field), which keeps today's generic
+            # composer behaviour exactly as before.
+            if (selected.get("action_key") == "searchdatashipment"
+                    and isinstance(full_mapped, dict) and full_mapped
+                    and any(v not in (None, "", [], {}) for v in full_mapped.values())):
+                _direct = _compose_shipment_followup_reply(
+                    message, full_mapped, selected.get("response_mapping"))
+                if _direct:
+                    developer_trace["shipment_followup_direct_answer"] = True
+                    reply = _build_response(text=_direct)
                     return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
                                            developer_trace=developer_trace, context=context, start=start, alert=alert)
 
