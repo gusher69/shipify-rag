@@ -3667,13 +3667,14 @@ class DecisionEngine:
                     developer_trace["pending_flow_broken_by_current_intent"] = \
                         f"operational->{_fresh_opreq.kind}"
                     _opreq = _fresh_opreq
-                elif _opreq is not None and history and _current_intent_breaks_pending_flow(
-                        semantic, message, flow_family="ADDRESS_CHANGE",
-                        flow_extract=lambda m: any(
-                            _validate_generic_identifier(tok) and not tok.isdigit()
-                            for tok in _TOKEN_SPLIT_RE.split(m or "") if tok)
-                        or bool(re.search(r"(?<!\d)0\d{8,9}(?!\d)", m or ""))) \
-                        and _fresh_opreq is None:
+                elif _opreq is not None and history and _fresh_opreq is None and (
+                        _current_intent_breaks_pending_flow(
+                            semantic, message, flow_family="ADDRESS_CHANGE",
+                            flow_extract=lambda m: any(
+                                _validate_generic_identifier(tok) and not tok.isdigit()
+                                for tok in _TOKEN_SPLIT_RE.split(m or "") if tok)
+                            or bool(re.search(r"(?<!\d)0\d{8,9}(?!\d)", m or "")))
+                        or private_state_inquiry is not None):
                     # SYSTEM-STATE-EMERGENCY-1 — same central guard, but
                     # ONLY when the operational collection is HISTORY-
                     # sticky (a recent ack in `history`) and the CURRENT
@@ -3682,6 +3683,20 @@ class DecisionEngine:
                     # request ("บิลขนส่ง FT ต้องการเปลี่ยนเป็นรับเอง" —
                     # classify_operational_request already used the
                     # interpretation) is never touched.
+                    #
+                    # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 — the semantic-
+                    # family check alone missed short private-record
+                    # follow-ups the CENTRAL deterministic PSI classifier
+                    # (private_state_inquiry, already computed above) DOES
+                    # recognize decisively ("ขอแทรคไทยค่ะ" reads UNKNOWN to
+                    # the semantic-family layer but is a confirmed tracking-
+                    # domain status inquiry) — REAL LINE: it got swallowed
+                    # by a still-PENDING (not yet handed off)
+                    # change_shipping_method collection instead of asking
+                    # for the shipment bill. private_state_inquiry's own
+                    # domains (shipment/order/tracking/customer_data) are
+                    # never any operational kind's own subject, so its mere
+                    # presence is always decisive, unrelated evidence here.
                     developer_trace["pending_flow_broken_by_current_intent"] = \
                         f"operational->{getattr(semantic, 'intent_family', None)}"
                     _opreq = None

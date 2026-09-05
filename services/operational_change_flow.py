@@ -45,8 +45,19 @@ _KINDS = [
     ("modify_bill_qty", _CHANGE_VERB_RE,
      re.compile(r"จำนวน(?:สินค้า)?(?:ในบิล|บิล|ที่สั่ง)|จำนวนในบิล|จำนวนสินค้า"),
      "แอดมินขอเลขบิลสั่งซื้อของรายการนี้หน่อยนะคะ", "เลขบิลสั่งซื้อ"),
+    # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 — "เป็น(?:ทาง)?รถ|เรือ"
+    # (the "ทาง" is now OPTIONAL): a real-line-style paraphrase
+    # ("เปลี่ยนจากเรือเป็นรถได้ไหม") never says "ทางรถ"/"ทางเรือ", only
+    # the bare mode word after "เป็น" (become). Thai has no word
+    # delimiters, so a generic word-boundary lookaround for a bare
+    # "รถ"/"เรือ" anywhere in the sentence risks false negatives (fails
+    # unless it sits next to non-Thai text) and false positives inside
+    # a compound word ("รถไฟ") alike; anchoring on the SAME "เป็น"
+    # marker _extract_shipping_target_method() already relies on is
+    # both reliable and reuses one mechanism instead of two.
     ("change_shipping_method", _CHANGE_VERB_RE,
-     re.compile(r"(?:จัดส่ง|ส่ง|ขนส่ง)[^\n]{0,6}(?:ทางรถ|ทางเรือ)|เป็นทาง(?:รถ|เรือ)|วิธี(?:ส่ง|จัดส่ง|ขนส่ง)|ทาง(?:รถ|เรือ)[^\n]{0,6}ได้ไหม"),
+     re.compile(r"(?:จัดส่ง|ส่ง|ขนส่ง)[^\n]{0,6}(?:ทางรถ|ทางเรือ)|เป็น(?:ทาง)?(?:รถ|เรือ)|วิธี(?:ส่ง|จัดส่ง|ขนส่ง)"
+                r"|ทาง(?:รถ|เรือ)[^\n]{0,6}ได้ไหม"),
      "สามารถเปลี่ยนได้ค่ะ แอดมินรบกวนขอเลขบิลหน่อยนะคะ", "เลขบิล"),
     ("change_carrier_or_selfpickup", _CHANGE_VERB_RE,
      re.compile(r"เป็นรับเอง|มารับเอง|รับสินค้าเอง|ส่งเอกชน|เป็นเอกชน|ขนส่งเอกชน|ส่ง\s*flash|เป็น\s*flash", re.IGNORECASE),
@@ -117,12 +128,49 @@ _ACK_MARKER_RE = re.compile(
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ\s*VAT"
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีน"
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า"
-    r"|รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถ")
+    r"|รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถ"
+    r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นทางรถหรือทางเรือคะ")
 
 _FRAME_LOOKBACK = 10
 
 _BILL_TOKEN_RE = re.compile(r"\b([A-Za-z]{2,4}\d{4,})\b")
 _PHONE_RE = re.compile(r"(?<!\d)(0\d[\d\- ]{7,10}\d)(?!\d)")
+
+# CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 — CUS-S03's own api_input_hint
+# is "bill_no + shipping_type (road/sea)": change_shipping_method needs
+# BOTH, unlike every other kind here which needs only one input. When
+# the message explicitly says "เปลี่ยน...เป็น X" (change ... TO X), X is
+# the decisive TARGET method even if the FROM method is also named in
+# the same sentence ("เปลี่ยนจากทางรถเป็นทางเรือ" -> sea, not road).
+# Otherwise, a message naming exactly one of the two words is
+# unambiguous on its own ("เรือค่ะ" -> sea); naming both with no "เป็น"
+# marker (the exact customer wording itself, "...ทางรถ,ทางเรือได้ไหมคะ")
+# or naming neither is genuinely ambiguous/missing, and must be asked
+# for explicitly rather than guessed.
+_TARGET_METHOD_AFTER_RE = re.compile(r"เป็น(?:ทาง)?(รถ|เรือ)")
+_ROAD_WORD_RE = re.compile(r"ทางรถ|(?<![ก-๙])รถ(?![ก-๙])")
+_SEA_WORD_RE = re.compile(r"ทางเรือ|(?<![ก-๙])เรือ(?![ก-๙])")
+_SHIPPING_METHOD_TH = {"road": "ทางรถ", "sea": "ทางเรือ"}
+# the two DYNAMIC follow-up prompts operational_ask_prompt() emits once
+# ONE of change_shipping_method's two required inputs is already known
+# (never its own static _KINDS ack, which asks for the bill only) --
+# named here so derive_operational_state()'s open-collection recovery
+# can recognize them as the SAME kind too.
+_SHIPPING_BILL_ONLY_ASK_PROMPT = "แอดมินรบกวนขอเลขบิลหน่อยนะคะ"
+_SHIPPING_METHOD_ASK_PROMPT = "รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นทางรถหรือทางเรือคะ"
+
+
+def _extract_shipping_target_method(text: str) -> Optional[str]:
+    t = text or ""
+    m = _TARGET_METHOD_AFTER_RE.search(t)
+    if m:
+        return "sea" if m.group(1) == "เรือ" else "road"
+    has_road, has_sea = bool(_ROAD_WORD_RE.search(t)), bool(_SEA_WORD_RE.search(t))
+    if has_road and not has_sea:
+        return "road"
+    if has_sea and not has_road:
+        return "sea"
+    return None
 
 
 def classify_operational_request(message: str, interpretation: Optional[object] = None) -> Optional[Dict]:
@@ -159,11 +207,20 @@ class OperationalState:
     bills: List[str] = field(default_factory=list)
     free_text: Optional[str] = None     # address / other free-form detail
     phone: Optional[str] = None
+    # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 — change_shipping_method's
+    # own second required input ("road" | "sea"); every other kind
+    # leaves this None and is completely unaffected.
+    shipping_method: Optional[str] = None
 
     def as_dict(self) -> Dict:
         return {k: v for k, v in asdict(self).items() if v}
 
     def has_input(self) -> bool:
+        if self.kind == "change_shipping_method":
+            # CUS-S03's own api_input_hint requires BOTH the bill and
+            # the target method — the ONE kind here needing an AND,
+            # not an OR, of its collected fields.
+            return bool(self.bill and self.shipping_method)
         return bool(self.bill or self.bills or self.free_text or self.phone)
 
 
@@ -195,6 +252,10 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
         m = _PHONE_RE.search(t)
         if m:
             into.phone = re.sub(r"[\s\-]", "", m.group(1))
+    if into.kind == "change_shipping_method" and not into.shipping_method:
+        method = _extract_shipping_target_method(t)
+        if method:
+            into.shipping_method = method
     # for the verify-address / slip cases a free-text detail counts as the
     # required input once the customer replies with something substantive.
     if into.kind in ("verify_warehouse_address", "topup_not_credited") and not into.free_text:
@@ -261,15 +322,52 @@ def derive_operational_state(history: Optional[List[Dict]], current_message: str
                 if ack in c:
                     open_kind = (kind, ack, label)
                     break
+            else:
+                # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 -- once bill
+                # OR method is already known, operational_ask_prompt()
+                # emits a DYNAMIC follow-up ('...ขอเลขบิลหน่อยนะคะ' /
+                # '...ทางรถหรือทางเรือคะ') asking ONLY for whatever is
+                # still missing -- neither IS change_shipping_method's
+                # own static _KINDS ack verbatim, so the generic loop
+                # above never finds it (real production bug: the very
+                # NEXT turn supplying the still-missing piece was read
+                # as a fresh, unrelated message and fell through to an
+                # ERP read of the bill number instead of continuing
+                # this collection). Recognized here as the SAME kind,
+                # using its one true static ack/label from _KINDS so
+                # state.ack still reads correctly if either field is
+                # later cleared/re-asked.
+                if c.strip() in (_SHIPPING_METHOD_ASK_PROMPT, _SHIPPING_BILL_ONLY_ASK_PROMPT):
+                    _csm = next((k for k in _KINDS if k[0] == "change_shipping_method"), None)
+                    if _csm:
+                        open_kind = (_csm[0], _csm[3], _csm[4])
         break
 
     if open_kind:
         kind, _ack_txt, label = open_kind
         st = OperationalState(kind=kind, ack=_ack_txt, input_label=label)
-        # accumulate every user turn since the ack
+        # accumulate every user turn since the ack — PLUS the one user
+        # turn that TRIGGERED the very first ack, which is otherwise
+        # silently lost on every later turn: step 3 (a fresh request)
+        # extracts fields from that message directly on the turn it
+        # arrives, but once the conversation moves on and this branch
+        # reconstructs the episode from `history` instead, that same
+        # message is never revisited (accumulation only starts AFTER
+        # the ack, never at-or-before it). Invisible for every kind
+        # needing only ONE input (its trigger message finishing early
+        # supplies that on turn 1 itself, before this branch is ever
+        # reached again) but a real loss for change_shipping_method
+        # (CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1): its trigger message
+        # can name the target method while the bill is still missing,
+        # and that method must survive into the bill-supplying turn.
+        # extract_operational_fields never overwrites an already-set
+        # field (bill/shipping_method) and only appends genuinely NEW
+        # bills, so re-processing this one turn is always safe.
         seen_ack = False
-        for t in turns:
+        for i, t in enumerate(turns):
             if t.get("role") == "assistant" and _ACK_MARKER_RE.search(t.get("content") or ""):
+                if not seen_ack and i > 0 and turns[i - 1].get("role") == "user":
+                    extract_operational_fields(turns[i - 1].get("content") or "", st)
                 seen_ack = True
                 continue
             if seen_ack and t.get("role") == "user":
@@ -300,6 +398,18 @@ _KIND_TH = {
 
 
 def operational_ask_prompt(state: OperationalState) -> str:
+    # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 -- once the bill is
+    # already known but the target method is still missing (or vice
+    # versa), re-showing state.ack in full would re-ask for the bill
+    # even though the customer already gave it. Ask ONLY for whatever
+    # is still missing; when NEITHER is known yet, state.ack (the
+    # source's own first-stage wording, asking for the bill) is
+    # unchanged.
+    if state.kind == "change_shipping_method":
+        if state.bill and not state.shipping_method:
+            return _SHIPPING_METHOD_ASK_PROMPT
+        if state.shipping_method and not state.bill:
+            return _SHIPPING_BILL_ONLY_ASK_PROMPT
     return state.ack
 
 
@@ -308,7 +418,9 @@ def operational_handoff_summary(state: OperationalState) -> str:
     if state.bills:
         parts.append("เลขบิลขนส่งที่ต้องการรวม: " + ", ".join(state.bills))
     if state.bill:
-        parts.append(f"เลขบิل/แทรค: {state.bill}")
+        parts.append(f"เลขบิล/แทรค: {state.bill}")
+    if state.shipping_method:
+        parts.append(f"วิธีขนส่งที่ต้องการเปลี่ยนเป็น: {_SHIPPING_METHOD_TH[state.shipping_method]}")
     if state.phone:
         parts.append(f"เบอร์: {state.phone}")
     if state.free_text:
@@ -343,4 +455,18 @@ _KIND_HANDOFF_REPLY = {
 
 
 def operational_handoff_reply(state: OperationalState) -> str:
+    # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 -- CUS-S03's own source
+    # (Ai.xlsx row 3 / CSW3) has no wired write API for changing the
+    # shipping method (confirmed via a live registry audit -- only
+    # searchdatashipment/searchdatashipmentlist/requestshippingaddress
+    # change exist, none of them a method-change write), so this stays
+    # Human-CS-only, exactly like combine_bills_charter: an honest
+    # "request received" reply naming the TARGET method, never the
+    # source's own literal completion wording ("...ให้เรียบร้อยค่ะ"),
+    # which stays reserved for a real staff-confirmed result this
+    # platform has no way to detect automatically.
+    if state.kind == "change_shipping_method" and state.shipping_method:
+        return (
+            f"รับเรื่องขอเปลี่ยนวิธีขนส่งเป็น{_SHIPPING_METHOD_TH[state.shipping_method]}แล้วค่ะ "
+            "เดี๋ยวแอดมินตรวจสอบและดำเนินการเปลี่ยนให้นะคะ")
     return _KIND_HANDOFF_REPLY.get(state.kind, OPERATIONAL_HANDOFF_REPLY)
