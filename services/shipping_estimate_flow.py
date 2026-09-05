@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional
 
-from rag.slot_filling_flow import parse_dimension_input, _merge_captured
+from rag.slot_filling_flow import parse_dimension_input, _merge_captured, _dimension_unit
 
 # ── trusted rate policy ───────────────────────────────────────────────
 # Source of truth: the Production "เรทนำเข้า" FAQ — verified verbatim
@@ -34,6 +34,17 @@ RATES = {
 }
 _METHOD_TH = {"road": "ทางรถ", "sea": "ทางเรือ"}
 
+# CUSTOMER-CALC-MULTITURN-1 — the customer explicitly wants BOTH methods
+# compared in one answer ("ของทั้งรถและเรือ", "รถกับเรือ", ...). Checked
+# BEFORE the single-method patterns in _method_of since some of these
+# phrases contain "รถ"/"เรือ" as substrings that would otherwise match
+# the single-method branch first.
+_BOTH_METHOD_RE = re.compile(
+    r"ทั้งรถและเรือ|ทั้งเรือและรถ|ทั้งรถทั้งเรือ|ทั้งเรือทั้งรถ|"
+    r"รถกับเรือ|เรือกับรถ|"
+    r"ทั้งสองแบบ|ทั้งสองทาง|ทั้งสองวิธี|"
+    r"ทางรถและทางเรือ|ทางเรือและทางรถ")
+
 # ── intent / signal patterns ─────────────────────────────────────────
 # a calculator VERB — the customer explicitly asks for a calculation.
 _CALC_VERB_RE = re.compile(
@@ -46,7 +57,11 @@ _EST_PROMPT_RE = re.compile(r"ต้องการประเมินทา�
                             r"รบกวนแจ้ง(?:น้ำหนัก|ขนาด)[^\n]{0,40}(?:เพื่อประเมิน|สำหรับประเมิน)|"
                             r"ยังขาดข้อมูลสำหรับประเมิน")
 # this flow's own delivered ESTIMATE (episode is COMPLETE/CLOSED).
-_EST_RESULT_RE = re.compile(r"ประเมินเบื้องต้นสำหรับ[^\n]{0,20}ประมาณ")
+# CUSTOMER-CALC-MULTITURN-1 — also matches the BOTH-methods result
+# opening phrase (estimate_reply's "both" branch), so the episode still
+# reads as OPEN (flow_open) for a follow-up correction/comparison after
+# a combined road+sea answer, exactly like a single-method result does.
+_EST_RESULT_RE = re.compile(r"ประเมินเบื้องต้นสำหรับ[^\n]{0,20}ประมาณ|ประเมินเบื้องต้นให้ทั้งสองทาง")
 _METHOD_RE = re.compile(r"ทางรถ|ทางบก|ทางเรือ|โดยรถ|โดยเรือ|(?<![ก-๙])รถ(?![ก-๙])|(?<![ก-๙])เรือ(?![ก-๙])")
 # a SHORT natural route answer while a flow is active ("รถ", "รถครับ",
 # "ทางรถค่ะ", "เอารถ", "ขอทางเรือ") — a structural token parser, not a
@@ -61,6 +76,22 @@ _CORRECTION_RE = re.compile(
     r"|เปลี่ยน(?:เป็น|ไปเป็น|เป็นน้ำหนัก)?\s*\d|แก้(?:เป็น|ให้เป็น)\s*\d"
     r"|(?:ถ้า(?:เป็น)?|แล้ว|ลอง|เอา|ขอ|งั้น)\s*(?:ทาง|โดย)?\s*(?:รถ|เรือ|บก)"
     r"[^\n]{0,8}(?:ล่ะ|แทน|บ้าง|ดู|มั้ย|ไหม|ครับ|ค่ะ|ดีกว่า)?\s*$")
+# CUSTOMER-CALC-MULTITURN-1 — a pure UNIT correction with no new numbers
+# ("เมื่อกี้หน่วยผิด แก้เป็น cm ค่ะ") — recognized only together with a
+# unit token actually present (_dimension_unit), so this never fires on
+# an unrelated "ผิด"/"แก้" mention.
+_UNIT_CORRECTION_RE = re.compile(r"หน่วยผิด|ผิดหน่วย|หน่วยเป็น|แก้หน่วย|หน่วยแก้เป็น|เปลี่ยนหน่วย")
+# a bare "please recalculate" request with no new values of its own —
+# recomputes the CURRENT merged state, never resets it (see _NEW_EPISODE_RE
+# below for the genuinely-different-package signal).
+_RECALC_RE = re.compile(r"คำนวณใหม่|คำนวณอีกครั้ง|ลองคำนวณอีกที|คิดใหม่|คำนวณให้หน่อย")
+# an explicit NEW calculator episode — a genuinely DIFFERENT package, not
+# a correction/recalculation of the current one. Deliberately excludes
+# bare "คำนวณใหม่" (see _RECALC_RE) — that phrase alone just asks to
+# redo the math with whatever is currently known, and any new values in
+# the SAME message already replace the relevant slot via the normal
+# merge/correction mechanism, never requiring a full wipe.
+_NEW_EPISODE_RE = re.compile(r"เริ่มใหม่|อีกกล่อง(?:นึง|หนึ่ง)?|อีกชิ้น|อีกอัน|กล่องใหม่|เคสใหม่|พัสดุใหม่")
 _QUANTITY_RE = re.compile(r"(\d+)\s*(?:ชิ้น|กล่อง|อัน|ใบ|ลัง|pcs?|box(?:es)?)", re.IGNORECASE)
 # quantity / count phrases that must NOT be read as dimension numbers.
 _COUNT_PHRASE_RE = re.compile(
@@ -121,9 +152,14 @@ class EstimateState:
 def _method_of(text: str) -> Optional[str]:
     """Shipping method from a message. Trims trailing politeness
     particles so "รถครับ" / "เรือค่ะ" normalize, and accepts a SHORT
-    natural route answer ("รถ", "เอาเรือ", "ขอทางรถ")."""
+    natural route answer ("รถ", "เอาเรือ", "ขอทางรถ"). Returns "both"
+    when the customer explicitly asks for both methods compared
+    together (CUSTOMER-CALC-MULTITURN-1) — checked first since some of
+    those phrases contain "รถ"/"เรือ" as substrings."""
     if not text:
         return None
+    if _BOTH_METHOD_RE.search(text):
+        return "both"
     t = re.sub(
         r"[\s]*(?:ครับ|ค่ะ|คะ|นะ|น่ะ|จ้า|จ๊ะ|คับ|ครัช|เลย|ก็ได้|ดีกว่า|"
         r"ล่ะ|หละ|ล้ะ|บ้าง|แทน|ดู|มั้ย|ไหม|หรือเปล่า|รึเปล่า)+\s*$",
@@ -278,10 +314,6 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str,
     cur_msg = (current_message or "").strip()
     _op = getattr(interpretation, "follow_up_op", "NONE") if interpretation is not None else "NONE"
 
-    # A) explicit NEW request -> fresh thread, no inheritance.
-    if _is_explicit_new_request(cur_msg, interpretation):
-        return extract_estimate_fields(cur_msg)
-
     # is there an estimate-flow assistant turn in the recent window
     # (the newest assistant turn only — anything else means the topic
     # moved on)?
@@ -292,11 +324,32 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str,
         c = t.get("content") or ""
         flow_open = bool(_EST_RESULT_RE.search(c) or _EST_PROMPT_RE.search(c))
         break
+
     if not flow_open:
-        # no active thread — only THIS message, standing alone, can open
-        # one (a method + weight/dims, or weight + >=2 dims).
+        # A) no active thread. An explicit NEW request, or the message
+        # standing alone, can open one (a method + weight/dims, or
+        # weight + >=2 dims). Nothing prior to inherit either way.
+        if _is_explicit_new_request(cur_msg, interpretation):
+            return extract_estimate_fields(cur_msg)
         cur = extract_estimate_fields(cur_msg)
         return cur if opens_estimate_flow(cur_msg, cur) else None
+
+    # CUSTOMER-CALC-MULTITURN-1 — a flow IS already open. Two signals
+    # discard the accumulated state and start fresh: an explicit "this
+    # is a DIFFERENT package" wording (_NEW_EPISODE_RE — "เริ่มใหม่",
+    # "อีกกล่องนึง", ...), or the message NAMING THE COST TOPIC itself
+    # (_CALC_TOPIC_RE — "ค่านำเข้า", "ค่าส่ง", ...), which is how a
+    # customer opens a genuinely NEW ask ("ค่านำเข้าเท่าไหร่คะ ... ",
+    # "ช่วยคิดค่าส่งใหม่ ...") even right after a completed estimate —
+    # CUSTOMER-CALC-1.1's own protected behaviour. A bare calc VERB with
+    # NO topic word ("ลองคำนวณให้หน่อย" attached to a dimension
+    # correction) is NOT by itself enough — it merges into the current
+    # thread like every other continuation instead (REAL LINE: "52cm
+    # 22cm 110cm ลองคำนวณให้หน่อย" after a complete 20kg+BOTH state
+    # wiped weight/method because ANY calc-verb mention used to force a
+    # full reset here).
+    if _NEW_EPISODE_RE.search(cur_msg) or _CALC_TOPIC_RE.search(cur_msg):
+        return extract_estimate_fields(cur_msg)
 
     # B) a short value / route answer / correction / comparison continues
     # the current thread. Anything else is not a calculator turn.
@@ -304,16 +357,21 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str,
     parsed_cur = parse_dimension_input(cur_msg)
     is_value = (parsed_cur["weight"] is not None or bool(parsed_cur["dimension_values"])
                 or _WEIGHT_RE.search(cur_msg) is not None)
-    is_corr = bool(_CORRECTION_RE.search(cur_msg)) or _op in ("CORRECTION", "COMPARISON")
+    is_unit_only_correction = bool(_dimension_unit(cur_msg)) and _UNIT_CORRECTION_RE.search(cur_msg)
+    is_corr = (bool(_CORRECTION_RE.search(cur_msg)) or _op in ("CORRECTION", "COMPARISON")
+               or bool(is_unit_only_correction) or bool(_RECALC_RE.search(cur_msg)))
     if not (is_route or is_value or is_corr):
         return None
 
-    # accumulate the thread: every user turn since the most recent
-    # explicit-new request (or the start of the window).
+    # accumulate the thread: every user turn since the most recent reset
+    # (the SAME two signals that reset the state above — a "different
+    # package" wording or a fresh cost-topic ask), or the start of the
+    # window.
     start = 0
     for i in range(len(turns) - 1, -1, -1):
         t = turns[i]
-        if t.get("role") == "user" and _is_explicit_new_request(t.get("content") or ""):
+        tc = t.get("content") or ""
+        if t.get("role") == "user" and (_NEW_EPISODE_RE.search(tc) or _CALC_TOPIC_RE.search(tc)):
             start = i
             break
     users = [t.get("content") or "" for i, t in enumerate(turns)
@@ -333,6 +391,8 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str,
 
 # ── computation ──────────────────────────────────────────────────────
 def _to_cm(v: float, unit: Optional[str]) -> float:
+    if unit == "mm":
+        return v * 0.1
     if unit == "inch":
         return v * 2.54
     if unit == "m":
@@ -370,17 +430,35 @@ def _fmt(v: float) -> str:
     return f"{v:.2f}" if v % 1 else str(int(v))
 
 
+def _basis_line(c: Dict) -> str:
+    if c["basis"] == "cbm":
+        return (f"โดยคิดจากปริมาตร {c['cbm']:g} CBM ({_fmt(c['cbm_charge'])} บาท) "
+                f"ซึ่งมีค่ามากกว่าการคิดตามน้ำหนัก ({_fmt(c['kg_charge'])} บาท)")
+    return (f"โดยคิดจากน้ำหนัก {_fmt(c['weight'])} กก. ({_fmt(c['kg_charge'])} บาท) "
+            f"ซึ่งมีค่ามากกว่าการคิดตามปริมาตร {c['cbm']:g} CBM ({_fmt(c['cbm_charge'])} บาท)")
+
+
+_ESTIMATE_FOOTER = ("เป็นการประเมินเบื้องต้นจากข้อมูลที่แจ้งมา "
+                    "ค่าจริงจะคิดจากการวัดขนาดและน้ำหนักที่โกดังอีกครั้งค่ะ")
+
+
 def estimate_reply(state: EstimateState) -> str:
+    # CUSTOMER-CALC-MULTITURN-1 — BOTH methods requested: compute road
+    # AND sea with compute_estimate() (the SAME single source of truth
+    # used for a single method, never a parallel calculation), return
+    # both in one answer, never ask which one.
+    if state.method == "both":
+        c_road = compute_estimate(state, "road")
+        c_sea = compute_estimate(state, "sea")
+        return (
+            f"ประเมินเบื้องต้นให้ทั้งสองทางค่ะ\n"
+            f"ทางรถ: ประมาณ {c_road['estimate']:.2f} บาท ({_basis_line(c_road)})\n"
+            f"ทางเรือ: ประมาณ {c_sea['estimate']:.2f} บาท ({_basis_line(c_sea)})\n"
+            f"({_ESTIMATE_FOOTER})")
     c = compute_estimate(state, state.method)
     m_th = _METHOD_TH[state.method]
-    if c["basis"] == "cbm":
-        basis_line = (f"โดยคิดจากปริมาตร {c['cbm']:g} CBM ({_fmt(c['cbm_charge'])} บาท) "
-                      f"ซึ่งมีค่ามากกว่าการคิดตามน้ำหนัก ({_fmt(c['kg_charge'])} บาท)")
-    else:
-        basis_line = (f"โดยคิดจากน้ำหนัก {_fmt(c['weight'])} กก. ({_fmt(c['kg_charge'])} บาท) "
-                      f"ซึ่งมีค่ามากกว่าการคิดตามปริมาตร {c['cbm']:g} CBM ({_fmt(c['cbm_charge'])} บาท)")
-    return (f"ประเมินเบื้องต้นสำหรับ{m_th}ประมาณ {c['estimate']:.2f} บาทค่ะ {basis_line} "
-            f"(เป็นการประเมินเบื้องต้นจากข้อมูลที่แจ้งมา ค่าจริงจะคิดจากการวัดขนาดและน้ำหนักที่โกดังอีกครั้งค่ะ)")
+    return (f"ประเมินเบื้องต้นสำหรับ{m_th}ประมาณ {c['estimate']:.2f} บาทค่ะ {_basis_line(c)} "
+            f"({_ESTIMATE_FOOTER})")
 
 
 _MISSING_TH = {"weight": "น้ำหนักสินค้า", "dimensions": "ขนาดสินค้า (กว้าง x ยาว x สูง)",
@@ -398,7 +476,7 @@ def estimate_missing_prompt(state: EstimateState) -> str:
         got.append(f"ขนาด {_fmt(state.length)}x{_fmt(state.width)}x{_fmt(state.height)} "
                    f"{state.dim_unit or 'ซม.'}")
     if state.method:
-        got.append(_METHOD_TH[state.method])
+        got.append("ทั้งทางรถและทางเรือ" if state.method == "both" else _METHOD_TH[state.method])
     # only method left -> the short preferred question
     if miss == ["method"]:
         head = f"รับทราบค่ะ ({' • '.join(got)}) " if got else ""

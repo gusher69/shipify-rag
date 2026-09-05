@@ -48,13 +48,23 @@ _CANCELLATION_RE = re.compile(r"ไม่คำนวณแล้ว|ยกเ�
 # "Data entry vs Math", "4*6 ได้เท่าไหร่" -> explicit math intent).
 _EXPLICIT_MATH_RE = re.compile(r"เท่าไหร่|ช่วยคำนวณ|คำนวณให้|บวก|คูณ|หาร|calculate", re.IGNORECASE)
 
+# CUSTOMER-CALC-MULTITURN-1 — each labeled pattern tolerates an
+# intervening correction phrase ("แก้", "เป็น", "ให้เป็น") between the
+# dimension-name word and its number, so "ความยาวเป็น 52 cm" / "กว้างแก้
+# เป็น 22" / "สูงแก้เป็น 100 cm" are recognized exactly like the plain
+# "ยาว 40" form already was — a single-dimension CORRECTION is still
+# just a labeled capture, never a new mechanism.
 _LABELED_DIM_PATTERNS = {
-    "length": re.compile(r"ยาว\s*(\d+\.?\d*)"),
-    "width": re.compile(r"กว้าง\s*(\d+\.?\d*)"),
-    "height": re.compile(r"สูง\s*(\d+\.?\d*)"),
+    "length": re.compile(r"ยาว(?:แก้)?(?:เป็น|ให้เป็น)?\s*(\d+\.?\d*)"),
+    "width": re.compile(r"กว้าง(?:แก้)?(?:เป็น|ให้เป็น)?\s*(\d+\.?\d*)"),
+    "height": re.compile(r"สูง(?:แก้)?(?:เป็น|ให้เป็น)?\s*(\d+\.?\d*)"),
 }
 _WEIGHT_WITH_UNIT_RE = re.compile(r"(\d+\.?\d*)\s*(กก\.?|kg|กิโล(?:กรัม)?)", re.IGNORECASE)
-_CM_UNIT_RE = re.compile(r"\bcm\b|ซม\.?|เซนติเมตร", re.IGNORECASE)
+# mm checked before cm/m — "มม." shares no substring with the others, and
+# `\bm\b(?!m)` already excludes "mm" from matching the meter pattern, but
+# checking mm first keeps unit precedence obvious.
+_MM_UNIT_RE = re.compile(r"\bmm\b|มม\.?|มิลลิเมตร|millimeter", re.IGNORECASE)
+_CM_UNIT_RE = re.compile(r"\bcm\b|ซม\.?|เซนติเมตร|centimeter", re.IGNORECASE)
 _INCH_UNIT_RE = re.compile(r"นิ้ว|\binch(?:es)?\b", re.IGNORECASE)
 _METER_UNIT_RE = re.compile(r"(?<![a-zA-Z])\bm\b(?!m)|เมตร(?!ริก)", re.IGNORECASE)
 _BARE_NUMBER_RE = re.compile(r"\d+\.?\d*")
@@ -70,6 +80,8 @@ def is_explicit_math_intent(text: str) -> bool:
 
 
 def _dimension_unit(text: str) -> Optional[str]:
+    if _MM_UNIT_RE.search(text):
+        return "mm"
     if _CM_UNIT_RE.search(text):
         return "cm"
     if _INCH_UNIT_RE.search(text):
@@ -150,11 +162,26 @@ def _merge_captured(existing: Dict, new: Dict) -> Dict:
     # ORDER, skipping slots already filled by an earlier labeled/bare
     # turn — never overwriting an already-captured value with a bare,
     # ambiguous later number.
-    if new.get("dimension_values"):
+    #
+    # CUSTOMER-CALC-MULTITURN-1 — the one exception: a full new (L, W,
+    # H) TRIPLE ("52cm 22cm 110cm") is an explicit REPLACEMENT of the
+    # whole dimension set, even when every slot is already filled (a
+    # complete prior state) — it must never be silently discarded just
+    # because there was nowhere "open" to put it. A partial (1-2 value)
+    # bare update still only fills genuinely open slots — an ambiguous
+    # single bare number is never allowed to guess which already-filled
+    # slot it corrects (the customer uses a labeled correction for that,
+    # e.g. "สูงแก้เป็น 100 cm", handled by _LABELED_DIM_PATTERNS above).
+    new_dims = new.get("dimension_values")
+    if new_dims:
         slots_in_order = ["length", "width", "height"]
-        open_slots = [s for s in slots_in_order if merged.get(s) is None]
-        for value, slot in zip(new["dimension_values"], open_slots):
-            merged[slot] = value
+        if len(new_dims) >= 3:
+            for value, slot in zip(new_dims, slots_in_order):
+                merged[slot] = value
+        else:
+            open_slots = [s for s in slots_in_order if merged.get(s) is None]
+            for value, slot in zip(new_dims, open_slots):
+                merged[slot] = value
     return merged
 
 
