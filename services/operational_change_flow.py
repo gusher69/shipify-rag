@@ -118,9 +118,6 @@ _ACK_MARKER_RE = re.compile(
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีน"
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า"
     r"|รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถ")
-_DONE_MARKER_RE = re.compile(
-    r"รับเรื่องคำขอดำเนินการเรียบร้อยค่ะ|เจ้าหน้าที่จะติดต่อดำเนินการให้"
-    r"|รับข้อมูลบิลที่ต้องการรวมแล้วค่ะ")
 
 _FRAME_LOOKBACK = 10
 
@@ -211,34 +208,40 @@ def derive_operational_state(history: Optional[List[Dict]], current_message: str
                              interpretation: Optional[object] = None) -> Optional[OperationalState]:
     """Reconstruct an active operational-change collection, or open a new
     one from `current_message`. Returns None when nothing operational is
-    in play (or the request was already handed off)."""
+    in play — including right after the previous episode was handed
+    off, UNLESS `current_message` itself is a fresh, decisive
+    operational request (never blocked by an unrelated, already-closed
+    prior episode)."""
     turns = list(history or [])[-_FRAME_LOOKBACK:]
 
-    # 1/2. whether an episode is open, already closed, or neither is
-    # decided SOLELY by the MOST RECENT assistant turn — never by
-    # scanning the whole lookback window for a done-marker anywhere in
-    # it. REAL LINE regression (CUSTOMER-CSW2-REAL-1): a done-marker
-    # from an EARLIER, unrelated, already-closed episode (e.g. a
-    # combine_bills_charter handoff) sitting anywhere within the last
-    # _FRAME_LOOKBACK turns silently blocked EVERY subsequent
-    # operational request — including a brand-new, unrelated one
-    # ("ต้องการแก้จำนวนสินค้าในบิล") several turns later — because the
-    # old step 1 returned None unconditionally the instant it found
-    # ANY done-marker in the window, before step 2 ever got a chance to
-    # see that the actual MOST RECENT assistant turn was neither an ack
-    # nor a done-marker at all (an unrelated RAG/Coupon reply). Folded
-    # into one scan of only the single most recent assistant turn: a
-    # done-marker there means THIS episode just closed (nothing to
-    # reopen); an ack marker there means THIS episode is still open
-    # (recovers its kind, as before); anything else means neither, and
-    # a fresh request is free to open (step 3).
+    # 1/2. whether an episode is still OPEN is decided SOLELY by the
+    # MOST RECENT assistant turn matching an ACK marker — never by
+    # scanning the whole lookback window for a done-marker, and never
+    # by treating a done-marker as its own early-exit either.
+    #
+    # CUSTOMER-CSW2-REAL-1 fixed the first form of this bug: a
+    # done-marker from an EARLIER, unrelated, already-closed episode
+    # sitting anywhere within the last _FRAME_LOOKBACK turns silently
+    # blocked EVERY later operational request in the window.
+    #
+    # CUSTOMER-CSW2-REAL-2 (this fix) — narrowing the done-marker check
+    # to only the MOST RECENT turn was not enough: `return None`
+    # there STILL short-circuited step 3 (classify a FRESH request from
+    # the current message) even when the done-marker was the episode
+    # THIS VERY NEW request is unrelated to (REAL LINE: "แก้จำนวนสินค้า
+    # ได้ไหม" asked immediately after modify_bill_qty's OWN handoff
+    # closed — a textbook case of "current explicit intent must not be
+    # blocked by the immediately-preceding, already-finished episode").
+    # A done-marker is NEVER also an ack (the two patterns are disjoint
+    # by construction), so simply not matching _ACK_MARKER_RE already
+    # leaves `open_kind` at None and lets step 3 run normally — no
+    # special-cased early return is needed at all; a done-marker just
+    # means "nothing open", exactly like any other unrelated reply.
     open_kind = None
     for t in reversed(turns):
         if t.get("role") != "assistant":
             continue
         c = t.get("content") or ""
-        if _DONE_MARKER_RE.search(c):
-            return None
         if _ACK_MARKER_RE.search(c):
             # recover which kind from the ack wording. Match on the FULL
             # ack text, never a truncated prefix: several kinds share an
