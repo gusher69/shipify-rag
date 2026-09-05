@@ -36,8 +36,14 @@ _CHANGE_VERB_RE = re.compile(r"เปลี่ยน|แก้ไข|แก้|�
 
 _KINDS = [
     # kind, verb_re (or None), object_re, ack, input_label
+    # CUSTOMER-CSW2-QUANTITY-CHANGE-1 — "จำนวนสินค้า" alone (no "บิล"
+    # word) still counts as the object: a real-line-style paraphrase
+    # ("แก้จำนวนสินค้าได้ไหม") never names the bill explicitly, only the
+    # change verb + "quantity of the product". Safe to widen — no other
+    # kind's object pattern mentions "จำนวน", so this can't collide with
+    # a sibling kind, and the CHANGE VERB is still required.
     ("modify_bill_qty", _CHANGE_VERB_RE,
-     re.compile(r"จำนวน(?:สินค้า)?(?:ในบิล|บิล|ที่สั่ง)|จำนวนในบิล"),
+     re.compile(r"จำนวน(?:สินค้า)?(?:ในบิล|บิล|ที่สั่ง)|จำนวนในบิล|จำนวนสินค้า"),
      "แอดมินขอเลขบิลสั่งซื้อของรายการนี้หน่อยนะคะ", "เลขบิลสั่งซื้อ"),
     ("change_shipping_method", _CHANGE_VERB_RE,
      re.compile(r"(?:จัดส่ง|ส่ง|ขนส่ง)[^\n]{0,6}(?:ทางรถ|ทางเรือ)|เป็นทาง(?:รถ|เรือ)|วิธี(?:ส่ง|จัดส่ง|ขนส่ง)|ทาง(?:รถ|เรือ)[^\n]{0,6}ได้ไหม"),
