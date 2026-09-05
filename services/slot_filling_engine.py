@@ -315,6 +315,17 @@ def extract_candidates(text: str) -> List[str]:
     return candidates
 
 
+# CUSTOMER-CSW9-REAL-1 — obvious source/example PLACEHOLDER tokens
+# ("FTxxx", "FExxx", "SAxxx", "SPxxx", "POxxx", "PA-xxxx", …): a prefix
+# of 2-4 letters followed by a run of x's (optionally a few trailing
+# digits). These appear verbatim in the customer-source wording
+# ("บิลขนส่ง FTxxx ต้องการเปลี่ยนที่อยู่จัดส่ง") and must never be
+# accepted as a real identifier — the flow has to ask for the actual
+# bill number instead. Narrow by construction: a genuine code such as
+# "FT318220260726001" has digits where the x's are and never matches.
+_PLACEHOLDER_IDENTIFIER_RE = re.compile(r"[A-Za-z]{2,4}[-_ ]?[xX]{2,}\d{0,3}")
+
+
 def _validate_generic_identifier(candidate: str) -> bool:
     """The shape shared by tracking/order/invoice/customer/serial
     identifiers in this platform — alphanumeric (plus -_/), 4-20 chars,
@@ -322,6 +333,8 @@ def _validate_generic_identifier(candidate: str) -> bool:
     per the Core Principle, a tracking-specific (or any other slot-
     specific) regex must never be the thing deciding business meaning —
     only `next_expected_slot` (contextual binding) does that."""
+    if _PLACEHOLDER_IDENTIFIER_RE.fullmatch(candidate or ""):
+        return False
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9\-_/]{3,19}", candidate)) and any(ch.isdigit() for ch in candidate)
 
 

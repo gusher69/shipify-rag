@@ -896,6 +896,37 @@ def _assistant_text_is_generated_action_prompt(text: str, registry) -> bool:
     return False
 
 
+# CUSTOMER-CSW9-REAL-1 — stable literal fragments of
+# _generate_confirmation_question's output (its `base`), used to tell an
+# OPEN confirmation gate ("…awaiting ยืนยัน") from a CLOSED one (the
+# customer already answered it and the cycle executed) without needing
+# the exact per-turn summary text.
+_CONFIRM_Q_MARKER = "ยืนยันการดำเนินการ '"
+_CONFIRM_Q_TAIL = "กรุณาตอบ 'ยืนยัน' เพื่อดำเนินการต่อ"
+
+
+def _confirmation_gate_open(history: List[Dict]) -> bool:
+    """True only when the MOST RECENT assistant turn in `history` is an
+    as-yet-unanswered confirmation question. While it is open, a
+    confirmation-gated action's fully-collected slot set is a
+    legitimately-pending state and must survive replay untouched. Once
+    that turn is anything else (the execution / handoff reply, an
+    unrelated answer, a later question), the gated cycle has CLOSED and
+    its collected operation fields must NOT leak into a fresh request —
+    the same 'completed-cycle boundary' rule non-confirmation actions
+    already get (P0-01), which was previously skipped outright for every
+    confirmation-gated action (real LINE: a finished CSW9 address change
+    made every later 'ขอเปลี่ยนที่อยู่จัดส่งอีกบิล' jump straight to a
+    confirmation screen pre-filled with the PREVIOUS episode's bill,
+    receiver, phone and address)."""
+    for turn in reversed(history or []):
+        if turn.get("role") != "assistant":
+            continue
+        c = turn.get("content") or ""
+        return _CONFIRM_Q_MARKER in c and _CONFIRM_Q_TAIL in c
+    return False
+
+
 def _replay_business_action_collection(action: Dict, registry, history: List[Dict],
                                         customer_context: Optional[Dict] = None,
                                         *, is_continuation: bool = True) -> Dict[str, str]:
@@ -949,7 +980,14 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
         # `i == 0` uses (below), so a genuine still-open mid-collection
         # continuation (collected incomplete, or a confirmation-gated
         # action awaiting "ยืนยัน") is never touched.
-        _cycle_closed = (not _requires_confirmation(action)
+        # CUSTOMER-CSW9-REAL-1 — a confirmation-gated action's completed
+        # cycle is also a boundary, as long as its gate is not currently
+        # OPEN (the pending "awaiting ยืนยัน" state, which legitimately
+        # has a full `collected` and no next param). `history[:i + 1]`
+        # ends at this user turn, so _confirmation_gate_open() reads the
+        # assistant turn right before it.
+        _cycle_closed = ((not _requires_confirmation(action)
+                          or not _confirmation_gate_open(history[:i + 1]))
                          and not _next_expected_parameter(action, registry, collected)
                          and bool(collected) and collected != identity_seed)
         if i == 0 or _cycle_closed:
@@ -1047,7 +1085,12 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     # (customer identity) is preserved by the seed; a genuine
     # continuation and a confirmation-await turn are `is_continuation` /
     # `_requires_confirmation` and untouched.
-    if (not is_continuation and not _requires_confirmation(action)
+    # CUSTOMER-CSW9-REAL-1 — same widening as the mid-walk reset above:
+    # a confirmation-gated action whose gate is not currently OPEN has a
+    # CLOSED (executed) cycle at the window tail, so its operation fields
+    # must not carry into the fresh request either.
+    if (not is_continuation
+            and (not _requires_confirmation(action) or not _confirmation_gate_open(history))
             and collected != identity_seed
             and not _next_expected_parameter(action, registry, collected)):
         return dict(identity_seed)
