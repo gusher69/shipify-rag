@@ -74,16 +74,29 @@ _KINDS = [
      re.compile(r"สั่งผลิตตามสเปค|สั่งสกรีนโลโก้|สกรีนโลโก้|สั่งผลิต(?:สินค้า)?ตามสเปค|ผลิตตามสเปค|สั่งทำโลโก้"),
      "คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า จำนวน สีกับโลโก้มาให้แอดได้เลยค่ะ แอดจะประสานงานกับทางร้านให้นะคะ",
      "เลขบิลสั่งซื้อ, สเปคสินค้า, จำนวน, สี, โลโก้"),
-    # CUSTOMER-RED-8 — CUS-S16 (Ai.xlsx sheet '2.tongchecknairabop' row
-    # 16 / CSW16): combine multiple bills into one charter-truck
-    # shipment. Distinct from a FRESH single-shipment charter request
-    # (services/charter_truck_flow.py, opened only after its own TC19
-    # FAQ turn) — this is its own ack + collect + Human-CS coordination
-    # shape, reusing the SAME established pattern as every other kind
-    # here rather than a bespoke multi-bill collector.
+    # CUSTOMER-RED-8 / CUSTOMER-CHARTER-COMBINE-REAL-1 — CUS-S16
+    # (Ai.xlsx sheet '2.tongchecknairabop' row 16 / CSW16): combine
+    # multiple bills into one charter-truck shipment. Distinct from a
+    # FRESH single-shipment charter request (services/charter_truck_
+    # flow.py, opened only after its own TC19 FAQ turn) — this is its
+    # own ack + collect + Human-CS coordination shape, reusing the SAME
+    # established pattern as every other kind here rather than a
+    # bespoke multi-bill collector.
+    #
+    # REAL LINE (2026-09-05 ~17:13 ICT): the ORIGINAL ack ("รับทราบค่ะ
+    # แอดมินรวมบิลที่เข้าไทยเหมารถให้นะคะ") sounds like the combine is
+    # ALREADY under way and never actually asks for anything — so a
+    # customer who then supplied bill numbers just got the exact SAME
+    # sentence echoed back (operational_ask_prompt always returns
+    # state.ack, whether this is the first ask or a still-missing
+    # retry), reading as if nothing had been collected. Fixed: the ack
+    # now explicitly asks for the bill numbers, matching stage A of the
+    # 3-stage journey (A. request -> ask bills, B. bills collected ->
+    # forward to Human CS, C. real confirmed result only -> completion
+    # text) — never implying the combine itself has started.
     ("combine_bills_charter", None,
      re.compile(r"รวมบิล.{0,6}เหมารถ|เหมารถ.{0,6}รวมบิล|รวมบิลขนส่งเหมารถ"),
-     "รับทราบค่ะ แอดมินรวมบิลที่เข้าไทยเหมารถให้นะคะ",
+     "ได้ค่ะ รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถมาได้เลยค่ะ หากมีหลายบิลสามารถส่งมาพร้อมกันได้เลยนะคะ",
      "เลขบิลขนส่งที่ต้องการรวม"),
 ]
 
@@ -98,10 +111,10 @@ _ACK_MARKER_RE = re.compile(
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ\s*VAT"
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีน"
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า"
-    r"|แอดมินรวมบิลที่เข้าไทยเหมารถให้")
+    r"|รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถ")
 _DONE_MARKER_RE = re.compile(
     r"รับเรื่องคำขอดำเนินการเรียบร้อยค่ะ|เจ้าหน้าที่จะติดต่อดำเนินการให้"
-    r"|รับเรื่องรวมบิลเหมารถให้ค่ะ")
+    r"|รับข้อมูลบิลที่ต้องการรวมแล้วค่ะ")
 
 _FRAME_LOOKBACK = 10
 
@@ -287,24 +300,23 @@ def operational_handoff_summary(state: OperationalState) -> str:
 # notification for THIS episode actually goes out (or is already NOTIFIED).
 OPERATIONAL_HANDOFF_REPLY = "รับเรื่องคำขอดำเนินการเรียบร้อยค่ะ"
 
-# CUSTOMER-CHARTER-COMBINE-1.1 -- CUS-S16's own source (Ai.xlsx sheet
-# '2.tongchecknairabop' row 16 / CSW16) marks this a Human-CS-only
+# CUSTOMER-CHARTER-COMBINE-1.1 / -REAL-1 -- CUS-S16's own source (Ai.xlsx
+# sheet '2.tongchecknairabop' row 16 / CSW16) marks this a Human-CS-only
 # operation (H19="Human CS": staff physically combine the bills and
 # adjust their charter/เหมารถ status in the external warehouse system --
 # there is no API this platform can call to do it, and no way for this
 # platform to learn the result automatically either). The customer-
-# approved SECOND-stage answer ("รวมบิลเหมารถเรียบร้อยค่ะ, เป็นบิล ...")
+# approved THIRD-stage answer ("รวมบิลเหมารถเรียบร้อยค่ะ, เป็นบิล ...")
 # is only valid once that real, staff-confirmed result exists -- it is
 # NEVER used here, since collecting the bill list is not that
-# confirmation. This kind-specific handoff reply instead honestly says
-# the REQUEST (not the combine itself) was received, matching the
-# source's own two-stage wording ("รับทราบค่ะ ... " then, separately,
-# only after real completion, "...เรียบร้อยค่ะ"). Every other kind keeps
-# the generic OPERATIONAL_HANDOFF_REPLY, unchanged.
+# confirmation. This is stage B of the 3-stage journey (A. ask bills,
+# B. bills collected -> forward to Human CS/logistics -- THIS reply,
+# C. real confirmed result only -> completion text): it honestly says
+# the BILL LIST (not the combine itself) was received and forwarded.
+# Every other kind keeps the generic OPERATIONAL_HANDOFF_REPLY, unchanged.
 _KIND_HANDOFF_REPLY = {
     "combine_bills_charter": (
-        "รับเรื่องรวมบิลเหมารถให้ค่ะ เดี๋ยวเจ้าหน้าที่จะดำเนินการรวมบิลที่เข้าไทยเหมารถ "
-        "และแจ้งผลกลับไปให้นะคะ"),
+        "รับข้อมูลบิลที่ต้องการรวมแล้วค่ะ เดี๋ยวแอดมิน/ทีมขนส่งตรวจสอบและดำเนินการรวมบิลเหมารถให้นะคะ"),
 }
 
 
