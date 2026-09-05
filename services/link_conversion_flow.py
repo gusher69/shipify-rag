@@ -113,19 +113,36 @@ def classify_link_request(message: str, history: Optional[List[Dict]] = None) ->
     """Deterministic pre-execution classification for a LINK_CONVERSION
     turn. Returns {"state", "url", "platform"}. `state` is one of:
     MISSING_URL / MALFORMED_URL / MULTIPLE_URLS / UNSUPPORTED_DOMAIN /
-    VALID. Cross-turn carry-forward mirrors `services.decision_engine.
-    _extract_system_values`: only consulted when THIS turn's message
-    carries no URL of its own, most-recent user turn first."""
+    VALID.
+
+    CUSTOMER-LINK-REAL-2 (confirmed REAL LINE regression, session
+    6c9b9026-434e-403d-b513-e2c90752754b, turns 828-829): this used to
+    fall back to the most recent URL anywhere in `history` whenever the
+    CURRENT message carried none. That is exactly the "stale implicit
+    reuse" the customer flagged: a completed conversion at turn 826-827
+    (product 696614936668) leaked into a brand-new, URL-less "แปลงลิงก์
+    ให้ทีค่ะ" at turn 828, which wrongly re-announced success for the
+    OLD product instead of asking for a new link. Per the CORE RULE —
+    URL AUTHORITY, only two provenances are ever valid: the CURRENT
+    TURN's own URL, or a reply to an IMMEDIATE requested-URL slot — and
+    an immediate reply to that ask is, BY DEFINITION, a message that
+    itself contains the URL (that is what "answering the ask" means),
+    so it is already covered by scanning `message` alone. There is no
+    longer a second turn in this flow's own lifecycle (CustCode is
+    never collected after the URL, see CUSTOMER-LINK-1) where a value
+    from an EARLIER turn would need to be recalled at a LATER one.
+    `history` is intentionally unused here now — never consulted for a
+    URL, at any distance, for any reason. The `_extract_system_values`
+    carry-forward this originally mirrored solves a different, still
+    valid problem (system_generated resolution reading a URL back out
+    of `history` at ACTUAL EXECUTION time) — this pre-execution
+    classifier is reached BEFORE execution and gates it, so its own
+    "no URL" verdict here already prevents that carry-forward from ever
+    firing for a genuinely fresh, URL-less request (see decision_
+    engine.py's scoped MISSING_URL short-circuit, which returns before
+    the Executor — and therefore before `_extract_system_values` — is
+    ever reached)."""
     urls = extract_urls(message)
-    source_text = message or ""
-    if not urls and history:
-        for turn in reversed(history):
-            if turn.get("role") == "user":
-                found = extract_urls(turn.get("content") or "")
-                if found:
-                    urls = found
-                    source_text = turn.get("content") or ""
-                    break
     if not urls:
         if _BARE_DOMAIN_RE.search(message or ""):
             return {"state": "MALFORMED_URL", "url": None, "platform": None}
