@@ -363,8 +363,27 @@ def derive_operational_state(history: Optional[List[Dict]], current_message: str
         # extract_operational_fields never overwrites an already-set
         # field (bill/shipping_method) and only appends genuinely NEW
         # bills, so re-processing this one turn is always safe.
+        # CUSTOMER-CSW3-REAL-1 -- a HANDOFF reply anywhere inside this
+        # same window closes whatever episode came before it. Without
+        # this, an OLD, already-completed episode of the SAME kind
+        # sitting earlier in the lookback window gets its fields
+        # accumulated together with a NEW episode that reopened
+        # afterward, and since extract_operational_fields never
+        # overwrites an already-set field, the OLD (stale) value wins
+        # and the NEW episode's own, correct value is silently
+        # discarded (real production bug: a completed
+        # change_shipping_method->sea episode, followed by a fresh
+        # "เปลี่ยนจากเรือเป็นรถได้ไหม" + bill request, kept replying
+        # "...เป็นทางเรือ" -- the stale target from the FIRST episode --
+        # instead of the new "ทางรถ"). Reset the accumulator (and the
+        # ack-seen flag) at each handoff boundary so only turns from
+        # the LAST (current) episode are ever collected.
         seen_ack = False
         for i, t in enumerate(turns):
+            if t.get("role") == "assistant" and _HANDOFF_REPLY_RE.search(t.get("content") or ""):
+                st = OperationalState(kind=kind, ack=_ack_txt, input_label=label)
+                seen_ack = False
+                continue
             if t.get("role") == "assistant" and _ACK_MARKER_RE.search(t.get("content") or ""):
                 if not seen_ack and i > 0 and turns[i - 1].get("role") == "user":
                     extract_operational_fields(turns[i - 1].get("content") or "", st)
@@ -470,3 +489,18 @@ def operational_handoff_reply(state: OperationalState) -> str:
             f"รับเรื่องขอเปลี่ยนวิธีขนส่งเป็น{_SHIPPING_METHOD_TH[state.shipping_method]}แล้วค่ะ "
             "เดี๋ยวแอดมินตรวจสอบและดำเนินการเปลี่ยนให้นะคะ")
     return _KIND_HANDOFF_REPLY.get(state.kind, OPERATIONAL_HANDOFF_REPLY)
+
+
+# CUSTOMER-CSW3-REAL-1 -- recognizes ANY of the handoff replies above
+# (the generic one, every _KIND_HANDOFF_REPLY override, and change_
+# shipping_method's own method-naming one, matched on its stable prefix
+# since the method name itself varies) as an EPISODE-CLOSING reply, so
+# derive_operational_state's reconstruction can tell "an already-closed
+# episode's own turns" apart from "a NEW episode that reopened the SAME
+# kind after it". Never used as an early-exit gate (that caused
+# CUSTOMER-CSW2-REAL-2's regression) -- only as a reset point inside the
+# accumulation loop below.
+_HANDOFF_REPLY_RE = re.compile(
+    re.escape(OPERATIONAL_HANDOFF_REPLY) + "|"
+    + "|".join(re.escape(v) for v in _KIND_HANDOFF_REPLY.values())
+    + "|รับเรื่องขอเปลี่ยนวิธีขนส่งเป็น")
