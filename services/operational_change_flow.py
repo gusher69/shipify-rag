@@ -214,18 +214,31 @@ def derive_operational_state(history: Optional[List[Dict]], current_message: str
     in play (or the request was already handed off)."""
     turns = list(history or [])[-_FRAME_LOOKBACK:]
 
-    # 1. already handed off in this episode?
-    for t in reversed(turns):
-        if t.get("role") == "assistant" and _DONE_MARKER_RE.search(t.get("content") or ""):
-            return None
-
-    # 2. an open collection: the most recent assistant turn is one of our
-    #    ack prompts.
+    # 1/2. whether an episode is open, already closed, or neither is
+    # decided SOLELY by the MOST RECENT assistant turn — never by
+    # scanning the whole lookback window for a done-marker anywhere in
+    # it. REAL LINE regression (CUSTOMER-CSW2-REAL-1): a done-marker
+    # from an EARLIER, unrelated, already-closed episode (e.g. a
+    # combine_bills_charter handoff) sitting anywhere within the last
+    # _FRAME_LOOKBACK turns silently blocked EVERY subsequent
+    # operational request — including a brand-new, unrelated one
+    # ("ต้องการแก้จำนวนสินค้าในบิล") several turns later — because the
+    # old step 1 returned None unconditionally the instant it found
+    # ANY done-marker in the window, before step 2 ever got a chance to
+    # see that the actual MOST RECENT assistant turn was neither an ack
+    # nor a done-marker at all (an unrelated RAG/Coupon reply). Folded
+    # into one scan of only the single most recent assistant turn: a
+    # done-marker there means THIS episode just closed (nothing to
+    # reopen); an ack marker there means THIS episode is still open
+    # (recovers its kind, as before); anything else means neither, and
+    # a fresh request is free to open (step 3).
     open_kind = None
     for t in reversed(turns):
         if t.get("role") != "assistant":
             continue
         c = t.get("content") or ""
+        if _DONE_MARKER_RE.search(c):
+            return None
         if _ACK_MARKER_RE.search(c):
             # recover which kind from the ack wording. Match on the FULL
             # ack text, never a truncated prefix: several kinds share an
