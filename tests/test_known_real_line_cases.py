@@ -184,27 +184,30 @@ class TestRLWarehouse01PublicNoFakeSuccess(_Session):
 class TestRLTrackTH01ThaiTrackingViaShipmentBill(_Session):
     """Source: `tests/customer_uat/customer_uat_master.jsonl` CUS-S17
     ('ขอแทรคไทยค่ะ (กรณีลูกค้าไม่เข้ามาเช็คในระบบเอง)', Ai.xlsx sheet
-    '2.tongchecknairabop' row 17 / CSW17). Customer-approved answer asks
-    for the SHIPMENT BILL (`shipment_bill_no`), never a Chinese tracking
-    number, then returns the Thai-leg carrier status. Audited current
-    behaviour (`tests/customer_uat/.gate_scratch/baseline_results.json`,
-    case CUS-S17): routes to `searchdatatracking` as a PRIVATE-record
-    read (`route`/`semantic`/`public_private`/`erp_action` all PASS on
-    the routing-only harness) and its first ask is an identity gate
-    (`กรุณาแจ้งรหัสลูกค้าค่ะ`) — NOT a demand for a Chinese tracking
-    number. This satisfies the customer's explicit hard constraint
-    ('must NOT ask for Chinese tracking number'); it does not yet match
-    the customer's minimal one-line script verbatim (bill-number-first
-    rather than identity-first), which is the same identity-gated
-    pattern used by every other passing private-ERP case in this master
-    and is NOT registered as a failure here. PASS on the audited
-    constraint."""
+    '2.tongchecknairabop' row 17 / CSW17, api_input_hint: shipment_bill_no).
+    Customer-approved answer asks for the SHIPMENT BILL, never a Chinese
+    tracking number, then returns the Thai-leg tracking/status.
 
-    def test_thai_tracking_never_asks_for_chinese_tracking_number(self):
+    Fixed by CUSTOMER-TRACK-TH-1 (confirmed REAL LINE failures:
+    'กรุณาแจ้งเลข Tracking จีนค่ะ' and a false Human CS handoff). Root
+    cause: `_PSI_DOMAIN_ACTION_HINTS['tracking']['track_hint']` preferred
+    `searchdatatracking` (search BY a China tracking number — the
+    OPPOSITE direction, confirmed live via its own ai_description
+    'ค้นหาบิลขนส่งด้วยเลข Tracking จีน') for ANY message matching the
+    'tracking' domain, including a Thai-tracking OUTPUT ask that never
+    provides one. Fixed: `_PSI_THAI_TRACKING_OUTPUT_RE` detects this
+    shape and routes to `searchdatashipment` instead (ShipmentCode ->
+    TrackingTH/TrackingCH/Status/TotalSum), which already returns Thai
+    tracking directly with no China tracking as input."""
+
+    def test_thai_tracking_asks_shipment_bill_not_chinese_tracking(self):
         o = self.say("ขอแทรคไทยค่ะ (กรณีลูกค้าไม่เข้ามาเช็คในระบบเอง)")
         self.assertIn(o["routing"], ("API", "WORKFLOW"))
+        self.assertEqual(o["src"], "private_state_inquiry")
         self.assertFalse(_CHINESE_TRACK_ASK_RE.search(o["reply"]),
                           f"must never ask for a Chinese tracking number: {o['reply']!r}")
+        self.assertIn("บิลขนส่ง", o["reply"])
+        self.assertNotEqual(o["routing"], "HUMAN_HANDOFF")
 
 
 # ── RL-PRODUCT-01 — KNOWN RESIDUAL. Route is correct (PRODUCT_POLICY,

@@ -77,6 +77,7 @@ PROTECTED_SUITES = [
     "tests.test_business_action_registry",
     "tests.test_customer_link1",
     "tests.test_customer_link_real2",
+    "tests.test_customer_track_th1",
 ]
 
 KNOWN_REAL_LINE_SUITE = "tests.test_known_real_line_cases"

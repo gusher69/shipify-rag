@@ -1377,10 +1377,14 @@ _PSI_CATALOG_PROBE_RE = re.compile(r"มี.{0,15}(อะไร|บ้าง)")
 # how-to. "ขอที่อยู่โกดัง" / "ขอเบอร์ติดต่อ" carry no record-domain noun
 # and are filtered out by the domain gate.
 _PSI_DATA_REQUEST_RE = re.compile(
-    r"ขอ.{0,3}(เลข)?(แทรค|แทร็ก|แทรก|สถานะ|ราย(การ|ละเอียด)|ข้อมูล|ยอด)")
+    r"ขอ.{0,3}(เลข)?(แทรค|แทร็ก|แทรก|ติดตาม|tracking|สถานะ|ราย(การ|ละเอียด)|ข้อมูล|ยอด)", re.IGNORECASE)
 # generic record-domain nouns -> coarse capability domain
 _PSI_DOMAIN_RES = (
-    ("tracking", re.compile(r"แทรค|แทร็ก|แทรก|tracking|เลขพัสดุจีน|เลขจีน", re.IGNORECASE)),
+    # CUSTOMER-TRACK-TH-1: "ติดตาม" (a plain-Thai synonym for "track") added
+    # alongside the existing transliterations/loanword so "ขอเลขติดตาม
+    # ฝั่งไทยหน่อยครับ" collapses to the same "tracking" domain as
+    # "ขอแทรคไทยค่ะ" — one word, not a phrase dictionary.
+    ("tracking", re.compile(r"แทรค|แทร็ก|แทรก|tracking|ติดตาม|เลขพัสดุจีน|เลขจีน", re.IGNORECASE)),
     ("order", re.compile(r"ออเดอร์|คำสั่งซื้อ|บิลสั่งซื้อ|ร้าน.{0,6}ส่ง|ที่สั่งไป|ที่สั่งไว้|order", re.IGNORECASE)),
     ("customer_data", re.compile(
         r"วอลเล็ท|wallet|ยอดเงิน|เงินในระบบ|เงินที่เติม|เติมเงิน|เครดิต|คูปอง|coupon|ยอดของ"
@@ -1539,6 +1543,24 @@ def _classify_private_state_inquiry(message: str):
 # Config-driven: matched against each action's own `category`/`action_key`
 # /`name`, never a hardcoded id. `track_hint` names the per-record
 # tracking action for the tracking domain.
+# CUSTOMER-TRACK-TH-1 — an explicit ask for THAI tracking OUTPUT ("ขอ
+# แทรคไทย", "tracking ฝั่งไทย", "ขอเลขติดตามฝั่งไทย") is semantically the
+# OPPOSITE of the "tracking" domain's default `track_hint` preference (an
+# action whose OWN required input IS a Chinese tracking number, e.g.
+# searchdatatracking — "ค้นหาบิลขนส่งด้วยเลข Tracking จีน", confirmed via
+# a live registry audit). The customer's own source (Ai.xlsx sheet
+# '2.tongchecknairabop' row 17 / CSW17, api_input_hint: "shipment_bill_no")
+# never supplies a China tracking number for this ask — REAL LINE
+# confirmed the bug: "กรุณาแจ้งเลข Tracking จีนค่ะ" was wrong. "จีน"
+# (China) explicitly named, or an actual identifier-shaped token already
+# present in the message (the customer is quoting a real tracking value,
+# not merely asking for one), means the request genuinely is about a
+# China tracking number and the existing track_hint behavior stays
+# untouched.
+_PSI_THAI_TRACKING_OUTPUT_RE = re.compile(
+    r"(?:แทรค|แทร็ก|แทรก|tracking|ติดตาม).{0,15}ไทย|ไทย.{0,15}(?:แทรค|แทร็ก|แทรก|tracking|ติดตาม)",
+    re.IGNORECASE)
+
 _PSI_DOMAIN_ACTION_HINTS = {
     "shipment": {"cat_key": ("shipment", "parcel", "ขนส่ง", "พัสดุ"), "track_hint": ()},
     "order": {"cat_key": ("order", "คำสั่งซื้อ", "สั่งซื้อ", "ออเดอร์"), "track_hint": ()},
@@ -1580,7 +1602,8 @@ def _psi_is_list_shaped(action: Dict) -> bool:
         or "list" in (action.get("category") or "").lower()
 
 
-def _resolve_private_state_action(registry, domain: str, record_scope: str = "UNSPECIFIED"):
+def _resolve_private_state_action(registry, domain: str, record_scope: str = "UNSPECIFIED",
+                                   message: str = ""):
     """Pick the EXISTING enabled Business Action that serves a private
     status inquiry for `domain` at the given semantic `record_scope`
     (SEM-1.1) — never an invented action, never a hardcoded key.
@@ -1594,6 +1617,10 @@ def _resolve_private_state_action(registry, domain: str, record_scope: str = "UN
     - customer_data                -> the account action regardless of
                                      scope (it is scoped by the customer
                                      identifier itself, not a per-record id).
+    - tracking + a Thai-tracking-OUTPUT ask (CUSTOMER-TRACK-TH-1, see
+      _PSI_THAI_TRACKING_OUTPUT_RE) -> the per-shipment DETAIL action
+      (its response already returns TrackingTH), never the China-
+      tracking-number-search action `track_hint` would otherwise prefer.
 
     Returns a bare `business_actions` row or None when nothing matches
     (caller then keeps current behaviour)."""
@@ -1617,9 +1644,19 @@ def _resolve_private_state_action(registry, domain: str, record_scope: str = "UN
         return "list" in (a.get("action_key") or "").lower() or "list" in (a.get("category") or "").lower()
 
     if domain == "tracking":
-        track = [a for a in matched if any(h in (a.get("action_key") or "").lower() for h in hints["track_hint"])]
-        if track:
-            return track[0]
+        _wants_thai_output = bool(_PSI_THAI_TRACKING_OUTPUT_RE.search(message or "")) \
+            and "จีน" not in (message or "") \
+            and not any(_validate_generic_identifier(tok) and not tok.isdigit()
+                        for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
+        if _wants_thai_output:
+            shipment_detail = [a for a in matched
+                               if "shipment" in (a.get("action_key") or "").lower() and not _is_list(a)]
+            if shipment_detail:
+                return shipment_detail[0]
+        else:
+            track = [a for a in matched if any(h in (a.get("action_key") or "").lower() for h in hints["track_hint"])]
+            if track:
+                return track[0]
 
     if domain == "customer_data":
         non_list = [a for a in matched if not _is_list(a)]
@@ -3248,6 +3285,7 @@ class DecisionEngine:
                 _link_was_pending = _last_asst_turn.strip() == (_link_pending_ask or "").strip()
                 if semantic.intent_family == "LINK_CONVERSION" or (
                         _link_was_pending
+                        and private_state_inquiry is None
                         and not _current_intent_breaks_pending_flow(
                             semantic, message, flow_family="LINK_CONVERSION",
                             families=_ACTIONABLE_INTENT_FAMILIES)
@@ -4018,7 +4056,8 @@ class DecisionEngine:
                 if private_state_inquiry and not general_policy_question_vetoed:
                     _psi_scope = private_state_inquiry.get("record_scope", "UNSPECIFIED")
                     _psi_target = _resolve_private_state_action(
-                        self.registry, private_state_inquiry["domain"], record_scope=_psi_scope)
+                        self.registry, private_state_inquiry["domain"], record_scope=_psi_scope,
+                        message=message)
                     _psi_msg_has_id = any(
                         _validate_generic_identifier(tok) and not tok.isdigit()
                         for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
@@ -4887,6 +4926,41 @@ class DecisionEngine:
                     reply = _build_response(text=(
                         f"ไม่พบข้อมูลรายการสำหรับเลขที่ {_rec_id} ในระบบค่ะ "
                         "รบกวนตรวจสอบเลขที่บิลขนส่งหรือเลขแทร็กอีกครั้งแล้วแจ้งมาใหม่นะคะ"))
+                    return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                           developer_trace=developer_trace, context=context, start=start, alert=alert)
+
+            # CUSTOMER-TRACK-TH-1 — a Thai-tracking-output ask (see
+            # _PSI_THAI_TRACKING_OUTPUT_RE) whose shipment record WAS
+            # found (full_mapped non-empty) but whose Thai Tracking field
+            # came back empty must say so explicitly — never substitute
+            # China Tracking, never fall back to a generic no-info reply
+            # (the shipment itself was found; that would misreport a
+            # genuine "not yet assigned" state as "nothing found at
+            # all"). Scoped to searchdatashipment only (the action
+            # CUSTOMER-TRACK-TH-1 resolves this ask to); config-driven —
+            # finds the response_mapping row for TrackingTH by its own
+            # json_path, never a hardcoded label string. The ORIGINAL ask
+            # ("ขอเลขแทรคไทยค่ะ") is usually a turn EARLIER than the bare
+            # shipment-bill reply actually being executed here, so this
+            # checks the current message OR the last few user turns —
+            # bounded to avoid a much-older, unrelated mention elsewhere
+            # in a long session.
+            _recent_user_turns = [message or ""] + [
+                h.get("content") or "" for h in reversed(history or []) if h.get("role") == "user"][:4]
+            _asked_thai_tracking = any(
+                _PSI_THAI_TRACKING_OUTPUT_RE.search(t) and "จีน" not in t for t in _recent_user_turns)
+            if (selected.get("action_key") == "searchdatashipment"
+                    and _asked_thai_tracking
+                    and isinstance(full_mapped, dict) and full_mapped
+                    and any(v not in (None, "", [], {}) for v in full_mapped.values())):
+                _th_label = next((r.get("mapped_label") for r in (selected.get("response_mapping") or [])
+                                  if "trackingth" in (r.get("json_path") or "").lower()), None)
+                if _th_label and not (full_mapped.get(_th_label) or "").strip():
+                    developer_trace["thai_tracking_result"] = "shipment_found_no_thai_tracking"
+                    _base = self._compose_natural_reply(full_mapped, selected.get("response_mapping"),
+                                                          fallback_payload=full_mapped)
+                    reply = _build_response(text=(
+                        f"{_base}\nพบข้อมูลบิลแล้วค่ะ แต่ตอนนี้ยังไม่มีเลข Tracking ไทยในระบบ"))
                     return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
                                            developer_trace=developer_trace, context=context, start=start, alert=alert)
 
