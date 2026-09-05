@@ -34,6 +34,19 @@ from services.slot_filling_engine import _validate_generic_identifier as _valid_
 #    carries its own ack (part-1 of the CS-approved answer) + input label.
 _CHANGE_VERB_RE = re.compile(r"เปลี่ยน|แก้ไข|แก้|ปรับ|ขอเปลี่ยน|ขอแก้|ต้องการเปลี่ยน|ต้องการแก้|อยากเปลี่ยน|อยากแก้|ลืมเลือก|ต้องการ\s*vat|อยากได้\s*vat", re.IGNORECASE)
 
+# CUSTOMER-CSW4-VAT-1 — add_vat's own verb marker. CUS-S04's real
+# wording and its natural paraphrases use "add"-shaped verbs the
+# generic _CHANGE_VERB_RE never carried ("เพิ่ม VAT", "เอา VAT",
+# "ใส่ VAT", "ขอ VAT", "ติ๊ก VAT"), plus "ลืม(เลือก)". Kept SEPARATE
+# from _CHANGE_VERB_RE so widening it here cannot loosen the other
+# kinds that share that constant — add_vat's object still strictly
+# requires the literal "VAT" / "ภาษีมูลค่าเพิ่ม" token, which no
+# invoice-issuance / invoice-download FAQ phrasing contains, so the
+# wider verb list stays safely walled off from CUS-S07 / CUS-G05.
+_VAT_VERB_RE = re.compile(
+    r"เปลี่ยน|แก้ไข|แก้|ปรับ|ลืมเลือก|ลืม|ติ๊ก|เลือก|เพิ่ม|ใส่|เอา|ขอ|อยาก|ต้องการ",
+    re.IGNORECASE)
+
 _KINDS = [
     # kind, verb_re (or None), object_re, ack, input_label
     # CUSTOMER-CSW2-QUANTITY-CHANGE-1 — "จำนวนสินค้า" alone (no "บิล"
@@ -62,8 +75,17 @@ _KINDS = [
     ("change_carrier_or_selfpickup", _CHANGE_VERB_RE,
      re.compile(r"เป็นรับเอง|มารับเอง|รับสินค้าเอง|ส่งเอกชน|เป็นเอกชน|ขนส่งเอกชน|ส่ง\s*flash|เป็น\s*flash", re.IGNORECASE),
      "แอดมินรบกวนขอเลขบิลขนส่งหน่อยนะคะ", "เลขบิลขนส่ง"),
-    ("add_vat", _CHANGE_VERB_RE,
-     re.compile(r"\bvat\b|ภาษีมูลค่าเพิ่ม|ใบกำกับภาษี", re.IGNORECASE),
+    # CUSTOMER-CSW4-VAT-1 — object is now (?<![A-Za-z])vat(?![A-Za-z])
+    # instead of \bvat\b: Python's \b sees a Thai letter as a word
+    # char, so "รVAT" ("...ต้องการVATด้วยค่ะ", an EXACT CUS-S04 source
+    # variant) has NO boundary before "V" and \bvat\b silently missed
+    # it. The bare "ใบกำกับภาษี" alternative is dropped — a tax-invoice
+    # DOCUMENT request is CUS-S07 / CUS-G05 (RAG / invoice flow), never
+    # this "add the VAT flag/charge to my bill" operation; keeping it
+    # here would let the widened _VAT_VERB_RE ("ขอ", "ต้องการ") steal
+    # "ขอใบกำกับภาษีครับ" / "ต้องการใบกำกับภาษี".
+    ("add_vat", _VAT_VERB_RE,
+     re.compile(r"(?<![A-Za-z])vat(?![A-Za-z])|ภาษีมูลค่าเพิ่ม", re.IGNORECASE),
      "คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ VAT มาให้แอดมินได้เลยนะคะ", "เลขบิลสั่งซื้อ"),
     ("duplicate_bill", None,
      re.compile(r"บิลซ้ำ|บิลซ้ำกัน|มีบิลซ้ำ|บิลออกมาซ้ำ|บิลตีซ้ำ|บิลเบิ้ล"),
@@ -470,6 +492,15 @@ OPERATIONAL_HANDOFF_REPLY = "รับเรื่องคำขอดำเน
 _KIND_HANDOFF_REPLY = {
     "combine_bills_charter": (
         "รับข้อมูลบิลที่ต้องการรวมแล้วค่ะ เดี๋ยวแอดมิน/ทีมขนส่งตรวจสอบและดำเนินการรวมบิลเหมารถให้นะคะ"),
+    # CUSTOMER-CSW4-VAT-1 — CUS-S04 is a "Write API — เพิ่ม VAT flag"
+    # in the source, but no such action is wired (same as CSW3), and
+    # the source's own stage-2 text is informational guidance with a
+    # human-filled amount ("จำนวน .....") and a bank account, never an
+    # automated completion. So this stays a Human-CS handoff with an
+    # honest "request received, admin will check & proceed" reply that
+    # NAMES VAT — never "เพิ่ม VAT เรียบร้อยแล้ว".
+    "add_vat": (
+        "รับเรื่องขอเพิ่ม VAT ในบิลแล้วค่ะ เดี๋ยวแอดมินตรวจสอบและดำเนินการให้นะคะ"),
 }
 
 
