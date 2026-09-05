@@ -60,6 +60,31 @@ _KINDS = [
      re.compile(r"ยอดเงินไม่เข้า|ยอดไม่เข้า|เงิน(?:ที่เติม)?[^\n]{0,10}(?:ยัง)?ไม่เข้า"
                 r"|เติมเงินแล้ว[^\n]{0,16}(?:ไม่เข้า|ยังไม่เข้า|รอตรวจสอบ|ยอดยังไม่ขึ้น)"),
      "สวัสดีค่ะ แอดมินรบกวนขอสลิปการโอนเงินหน่อยนะคะ", "สลิปการโอนเงิน"),
+    # CUSTOMER-RED-8 — CUS-G11 (Ai.xlsx sheet '1.thameuangton' row 11):
+    # missing/incomplete item claim. Self-describing (no separate verb
+    # needed, same shape as duplicate_bill/topup_not_credited above).
+    ("missing_item_claim", None,
+     re.compile(r"ได้รับสินค้าไม่ครบ|สินค้าไม่ครบ|ของไม่ครบ|เคลมสินค้า|ขอเคลม|สินค้าเสียหาย|ของเสียหาย|พัสดุเสียหาย"),
+     "สวัสดีค่ะ คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีนที่ติดข้างกล่อง กับวิดิโอตอนแกะสินค้า "
+     "รวมทั้งรูปสินค้าทั้งหมดที่ได้รับมาให้แอดมินได้เลยนะคะ",
+     "เลขบิลสั่งซื้อ, รูปหน้าแทรคจีนที่ติดข้างกล่อง, วิดิโอตอนแกะสินค้า, รูปสินค้าทั้งหมด"),
+    # CUSTOMER-RED-8 — CUS-S06 (Ai.xlsx sheet '2.tongchecknairabop' row 6
+    # / CSW6): custom production / screen-print / order-to-spec.
+    ("custom_production", None,
+     re.compile(r"สั่งผลิตตามสเปค|สั่งสกรีนโลโก้|สกรีนโลโก้|สั่งผลิต(?:สินค้า)?ตามสเปค|ผลิตตามสเปค|สั่งทำโลโก้"),
+     "คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า จำนวน สีกับโลโก้มาให้แอดได้เลยค่ะ แอดจะประสานงานกับทางร้านให้นะคะ",
+     "เลขบิลสั่งซื้อ, สเปคสินค้า, จำนวน, สี, โลโก้"),
+    # CUSTOMER-RED-8 — CUS-S16 (Ai.xlsx sheet '2.tongchecknairabop' row
+    # 16 / CSW16): combine multiple bills into one charter-truck
+    # shipment. Distinct from a FRESH single-shipment charter request
+    # (services/charter_truck_flow.py, opened only after its own TC19
+    # FAQ turn) — this is its own ack + collect + Human-CS coordination
+    # shape, reusing the SAME established pattern as every other kind
+    # here rather than a bespoke multi-bill collector.
+    ("combine_bills_charter", None,
+     re.compile(r"รวมบิล.{0,6}เหมารถ|เหมารถ.{0,6}รวมบิล|รวมบิลขนส่งเหมารถ"),
+     "รับทราบค่ะ แอดมินรวมบิลที่เข้าไทยเหมารถให้นะคะ",
+     "เลขบิลขนส่งที่ต้องการรวม"),
 ]
 
 # a delivery-ADDRESS change is a different case (CUS-S09) with its own
@@ -70,7 +95,10 @@ _ADDRESS_CHANGE_RE = re.compile(r"ที่อยู่จัดส่ง|ที
 _ACK_MARKER_RE = re.compile(
     r"แอดมินขอเลขบิลสั่งซื้อของรายการนี้|แอดมินรบกวนขอเลขบิล|แอดมินเช็คบิลซ้ำและลบบิลให้"
     r"|แอดมินช่วยตรวจสอบความถูกต้องให้|แอดมินรบกวนขอสลิปการโอนเงิน"
-    r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ\s*VAT")
+    r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ\s*VAT"
+    r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีน"
+    r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า"
+    r"|แอดมินรวมบิลที่เข้าไทยเหมารถให้")
 _DONE_MARKER_RE = re.compile(r"รับเรื่องคำขอดำเนินการเรียบร้อยค่ะ|เจ้าหน้าที่จะติดต่อดำเนินการให้")
 
 _FRAME_LOOKBACK = 10

@@ -244,11 +244,11 @@ class TestRLCustomService01LogoPrintingRequest(_Session):
     ('ต้องการสั่งผลิตตามสเปค ,สั่งสกรีนโลโก้ได้ไหมคะ', Ai.xlsx sheet
     '2.tongchecknairabop' row 6 / CSW6). Customer-approved answer:
     acknowledge -> collect (bill number + product spec/qty/color/logo)
-    -> coordinate with the store -> report back. `services.operational_
-    change_flow._KINDS` does not yet include a custom-production/
-    screen-print kind, so this currently falls through to a RAG stub
-    instead of the ack+collect flow. Real capability gap, not a test
-    artifact — tracked here rather than hidden."""
+    -> coordinate with the store -> report back.
+
+    Fixed by CUSTOMER-RED-8: `services.operational_change_flow._KINDS`
+    gained a `custom_production` kind reusing the SAME established
+    ack+collect+Human-CS pattern as every other kind in that module."""
 
     def test_route_does_not_fabricate_an_answer(self):
         o = self.say("สั่งสกรีนโลโก้เสื้อได้ไหมคะ")
@@ -256,15 +256,10 @@ class TestRLCustomService01LogoPrintingRequest(_Session):
         # service the platform has no configured way to fulfil
         self.assertNotIn("ดำเนินการเรียบร้อย", o["reply"])
 
-    @unittest.expectedFailure
-    def test_KNOWN_FAILURE_no_ack_collect_flow_for_custom_production(self):
-        """KNOWN FAILURE (RL-CUSTOM-SERVICE-01) — no operational-change
-        kind covers 'custom production / screen-print / logo' yet, so
-        this does not yet ask for the bill + spec as the customer's
-        approved script requires. Remove this decorator once
-        `operational_change_flow._KINDS` gains that kind."""
+    def test_ack_collect_flow_for_custom_production(self):
         o = self.say("สั่งสกรีนโลโก้เสื้อได้ไหมคะ")
         self.assertIn("เลขบิล", o["reply"])
+        self.assertIn("สเปค", o["reply"])
 
 
 if __name__ == "__main__":

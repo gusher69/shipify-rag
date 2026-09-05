@@ -664,7 +664,8 @@ def _bind_all_from_message(action: Dict, registry, collected: Dict, message: str
 
 
 def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Optional[Dict],
-                             *, is_continuation: bool = True) -> Dict[str, str]:
+                             *, is_continuation: bool = True,
+                             history: Optional[List[Dict]] = None) -> Dict[str, str]:
     """Fills any still-missing ASKABLE parameter from Identifier Memory
     (a value the customer already established earlier — this
     conversation or a prior one — persisted onto their profile by
@@ -687,8 +688,6 @@ def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Op
     the customer meant "check A shipment", not "re-run the last one".
     Identifier Memory is NOT globally disabled: CustCode still fills, and
     every genuine continuation still reuses the record id it collected."""
-    if not customer_context:
-        return collected
     working = dict(collected)
     askable = _askable_parameters_by_name(action)
     for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
@@ -696,10 +695,72 @@ def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Op
             continue
         if not is_continuation and profile_field in _ACCOUNT_SCOPED_MEMORY_FIELDS:
             continue
-        remembered = customer_context.get(profile_field)
+        remembered = (customer_context or {}).get(profile_field)
         if remembered:
             working[param_name] = remembered
+            continue
+        # CUSTOMER-TRACK-TH-1.1 — account-scoped record identifiers
+        # (last_shipment_code / last_order_code / last_tracking) are
+        # deliberately NEVER persisted onto the profile row (Task 06,
+        # 2026-08-26 security fix: a user-typed identifier is never
+        # proof of account ownership and must not be remembered across
+        # SESSIONS). Recovering one from `history` instead is safe
+        # because it never leaves the current live conversation payload
+        # already passed into this exact call, is scoped to a value
+        # that was CONFIRMED successfully used (never a failed/
+        # malformed lookup), and only runs when `is_continuation` is
+        # already True — i.e. the caller already established (via
+        # _resolve_conversation_reference's own field-name / referring-
+        # expression-marker gate) that this turn is a decisive,
+        # genuine follow-up, never a bare unrelated re-trigger.
+        if is_continuation and history and profile_field in _ACCOUNT_SCOPED_MEMORY_FIELDS:
+            recovered = _recover_history_identifier(action, param_name, history)
+            if recovered:
+                working[param_name] = recovered
     return working
+
+
+# CUSTOMER-TRACK-TH-1.1 — the two reply shapes a genuinely FAILED
+# per-record lookup produces on this platform (both owned entirely by
+# this module, never customer-authored text): the VALID_NOT_FOUND
+# template (CUSTOMER-ERP-READ-1) and the incomplete/malformed-identifier
+# retry prompt (_incomplete_shipment_code). A history turn immediately
+# followed by either must never be recovered as a successful referent.
+_FAILED_LOOKUP_REPLY_RE = re.compile(r"ไม่พบข้อมูลรายการสำหรับเลขที่|ดูเหมือนจะไม่ครบถ้วนค่ะ")
+
+
+def _recover_history_identifier(action: Dict, param_name: str, history: List[Dict]) -> Optional[str]:
+    """A record identifier (e.g. ShipmentCode) the customer successfully
+    used EARLIER in THIS SAME live conversation, recovered purely from
+    `history` text — never written to the customer's profile row (see
+    the Task 06 removal this is deliberately NOT re-introducing).
+    Walks `history` in reverse for the most recent user turn whose
+    content structurally matches `param_name`'s OWN configured
+    validator (the exact same validator `_bind_message_to_action` uses
+    to bind a fresh reply — never a separate, looser shape check), where
+    the immediately-following assistant turn is a real reply (not a
+    repeat of the same question) and is NOT one of this platform's own
+    failed-lookup templates. Callers gate this on `is_continuation`
+    already being True — this function itself does not re-decide
+    whether the current turn is a genuine follow-up."""
+    param = next((p for p in (action.get("parameters") or []) if p.get("name") == param_name), None)
+    if not param:
+        return None
+    validator = _resolve_parameter_validator(param)
+    for i in range(len(history) - 1, -1, -1):
+        turn = history[i]
+        if turn.get("role") != "user":
+            continue
+        candidate = (turn.get("content") or "").strip()
+        if not candidate or not validator(candidate):
+            continue
+        reply = ""
+        if i + 1 < len(history) and history[i + 1].get("role") == "assistant":
+            reply = history[i + 1].get("content") or ""
+        if not reply or _FAILED_LOOKUP_REPLY_RE.search(reply):
+            continue
+        return candidate
+    return None
 
 
 def _last_assistant_turn_requests_input(text: str) -> bool:
@@ -835,7 +896,7 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     that point reconstructed collected={} instead of {ShipmentCode:...},
     re-asking for a field the customer had already supplied."""
     identity_seed: Dict[str, str] = _apply_identifier_memory(
-        action, {}, customer_context, is_continuation=is_continuation)
+        action, {}, customer_context, is_continuation=is_continuation, history=history)
     collected: Dict[str, str] = dict(identity_seed)
     for i, turn in enumerate(history):
         if turn.get("role") != "user":
@@ -1357,7 +1418,7 @@ _DETAIL_INTENT_RE = re.compile(r"รายละเอียด", re.IGNORECASE)
 _YET = r"(?:(?:หรือ|รึ)ยัง|ยัง(?=คะ|ครับ|คับ|ค่ะ|มั้ย|ไหม|เปล่า|\s|$|\?|,))"
 _PSI_STATE_PROBE_RE = re.compile(
     r"ถึงไหน|ถึงไหนแล้ว|ถึง.{0,6}(โกดัง|ไทย|จีน).{0,4}" + _YET
-    + r"|เข้า.{0,4}ไทย.{0,4}(?:" + _YET + r"|ไหม|มั้ย)"
+    + r"|เข้า.{0,4}ไทย.{0,4}(?:" + _YET + r"|ไหม|มั้ย|ตอนไหน|วันไหน|เมื่อไหร่|เมื่อไร)"
     + r"|ส่ง.{0,8}(?:" + _YET + r")|ส่งของ.{0,8}(?:" + _YET + r")"
     + r"|มา.{0,4}(?:" + _YET + r")|เข้า.{0,6}(?:" + _YET + r")"
     + r"|ได้รับ.{0,8}(?:" + _YET + r")"
@@ -4248,8 +4309,25 @@ class DecisionEngine:
         # session memory must not auto-fill and silently skip the
         # required question. CustCode (the customer's own identity) still
         # fills either way; see _apply_identifier_memory.
+        #
+        # CUSTOMER-TRACK-TH-1.1 — "conversation_reference" ADDED to this
+        # trusted set (REAL LINE regression: "ตอนนี้ถึงไหนแล้วคะ" right
+        # after a successful shipment lookup re-asked for the same bill
+        # number instead of reusing it). This selection_source is NEVER
+        # a "bare resurrection" — both its only two call sites assign
+        # `selected = referenced`, and `referenced` is ALWAYS the result
+        # of `_resolve_conversation_reference()`, which itself requires
+        # either (a) the message names a specific FIELD the remembered
+        # action's own response returns, or (b) a topic-free referring-
+        # expression marker (`_REFERENCE_MARKER_RE` — "ตอนนี้", "แล้ว...
+        # ล่ะ", "ถึงหรือยัง", ...). Both are decisive evidence of a
+        # genuine continuation, exactly as strong as the two sources
+        # already trusted here. A referentless possessive ("ของผมล่ะ"
+        # with no established topic) is unaffected — it never reaches
+        # this function at all, short-circuited earlier by the dedicated
+        # SYSTEM-STATE-EMERGENCY-1 referent-less-private guard.
         _is_continuation = developer_trace.get("selection_source") in (
-            "conversation_continuation", "conversation_reference_detail")
+            "conversation_continuation", "conversation_reference_detail", "conversation_reference")
         collected = _replay_business_action_collection(
             full_action, self.registry, history, customer_context, is_continuation=_is_continuation)
         # Multi-Intent Preservation fix (Task 03, 2026-08-25; corrected
@@ -4336,7 +4414,7 @@ class DecisionEngine:
         # missing, and is a no-op for anything replay already carried
         # through.)
         collected = _apply_identifier_memory(full_action, collected, customer_context,
-                                              is_continuation=_is_continuation)
+                                              is_continuation=_is_continuation, history=history)
 
         validation = self.registry.validate_can_execute(action_id, collected)
         next_after = None if validation["ok"] else _next_expected_parameter(full_action, self.registry, collected)

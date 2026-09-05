@@ -52,9 +52,18 @@ class _TrackE2E(_Session):
         bsvc.get_verified_binding.return_value = {"cust_code": "FT3182", "status": "verified"} if verified else None
         bsvc.get_verified_binding_for_custcode.return_value = (
             {"cust_code": "FT3182", "status": "verified"} if verified else None)
+        customer_context = {"cust_code": "FT3182", "identity_confirmed": True} if verified else {}
+        # Mirrors profiles/manager.py::update_profile_from_turn's own
+        # persistence of `last_business_action` (real ERP execution only
+        # — see that function's own guard) + line_bot/webhook.py loading
+        # it back into `customer_context` on the NEXT turn. A test-only
+        # simulation of real cross-turn behavior; never a hardcoded
+        # per-action shortcut.
+        _last_action = getattr(self, "_last_business_action", None)
+        if _last_action:
+            customer_context["last_business_action"] = _last_action
         ctx = {"channel": "line", "tenant_id": "default", "external_user_id": "Uc5f5717bc090934f9eaa067513388178",
-               "developer_mode": True,
-               "customer_context": {"cust_code": "FT3182", "identity_confirmed": True} if verified else {}}
+               "developer_mode": True, "customer_context": customer_context}
         with patch("services.conversation_semantics._llm_family",
                     side_effect=lambda m, history=None: {"family": "UNKNOWN"}), \
              patch("services.customer_binding_service.get_customer_binding_service", return_value=bsvc), \
@@ -65,9 +74,12 @@ class _TrackE2E(_Session):
             r = self.eng.decide(msg, history=list(history or self.h), context=ctx)
         dev = r.get("developer") or {}
         reply = (r.get("reply") or {}).get("text") or ""
+        routing_type = (r.get("routing") or {}).get("type")
+        if routing_type in ("API", "WEBHOOK") and dev.get("selected_business_action"):
+            self._last_business_action = dev["selected_business_action"]
         if history is None:
             self.h += [{"role": "user", "content": msg}, {"role": "assistant", "content": reply}]
-        return {"routing": (r.get("routing") or {}).get("type"), "reply": reply,
+        return {"routing": routing_type, "reply": reply,
                 "action": dev.get("selected_business_action"), "src": dev.get("selection_source"),
                 "erp_called": mock_req.called, "handoff": (r.get("handoff_payload") or {}).get("reason")}
 
