@@ -5313,6 +5313,33 @@ class DecisionEngine:
                     return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
                                            developer_trace=developer_trace, context=context, start=start, alert=alert)
 
+            # CUSTOMER-CSW9-ADDRESS-CHANGE-1 — requestshippingaddresschange
+            # is a NOTIFICATION-shaped write (setup_metadata.operation_type
+            # == "NOTIFICATION": the customer's request is forwarded to CS,
+            # who make the ERP edit themselves — it is NOT an automatic
+            # data write). It has no response_mapping, so on HTTP-OK
+            # `full_mapped` is empty and the generic composer below would
+            # fall through to `result_payload` and render the raw REST
+            # executor envelope ("status_code: 200 / execution_time_ms /
+            # attempts ...") straight to the customer. Same per-action-key
+            # truth-typing guard pattern as geturlproductdetail /
+            # searchdatashipment below: a successful call here means "the
+            # request reached CS", never "the address was changed", so the
+            # reply says exactly that — the source's own stage-2 closing
+            # ("ตรวจสอบและชำระบิลขนส่งได้เลย") without its "เรียบร้อยค่ะ"
+            # completion claim. A real failure already took the
+            # status=="error" branch above; a denial took status=="denied".
+            if selected.get("action_key") == "requestshippingaddresschange":
+                _acbill = collected_slots.get("ShipmentCode")
+                developer_trace["address_change_result"] = "request_submitted_to_cs"
+                reply = _build_response(text=(
+                    (f"รับเรื่องขอเปลี่ยนที่อยู่จัดส่งของบิล {_acbill} แล้วค่ะ "
+                     if _acbill else "รับเรื่องขอเปลี่ยนที่อยู่จัดส่งแล้วค่ะ ")
+                    + "เดี๋ยวแอดมินตรวจสอบและแก้ไขที่อยู่ในระบบให้นะคะ "
+                      "จากนั้นคุณลูกค้าตรวจสอบและชำระบิลขนส่งได้เลยค่ะ"))
+                return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                       developer_trace=developer_trace, context=context, start=start, alert=alert)
+
             # SHIPMENT-DIRECT-ANSWER-1 — a shipment FOUND (full_mapped
             # non-empty; the not-found case above already returned) and
             # the customer's own message matches one of the 4 known
