@@ -4928,7 +4928,17 @@ class DecisionEngine:
         retry_count = 0
         escalation_required = False
         escalation_reason = None
-        if not is_complete and next_after and not ambiguous_candidates:
+        # CUSTOMER-CSW9-REAL-5 — a fresh address-change opener starts a
+        # NEW episode with a fresh retry budget. `_count_genuine_retries`
+        # recomputes the count from `history`, and this long production
+        # session's window holds many "กรุณาแจ้งเลขที่บิล/Shipmentค่ะ" asks
+        # from earlier, abandoned CSW9 attempts (plus the trailing one
+        # with no answer yet) — enough to hit max_retry and escalate the
+        # brand-new opener straight to Human CS before it ever asks for
+        # the bill. Those asks belong to closed episodes; skip retry
+        # accounting entirely on the turn that opens a new one.
+        if (not is_complete and next_after and not ambiguous_candidates
+                and not _fresh_ac_opener):
             expected_question = _generate_parameter_question(next_after)
             retry_count = _count_genuine_retries(self.registry, history, expected_question)
             if _REFUSAL_RE.search(message or ""):
