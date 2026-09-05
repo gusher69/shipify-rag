@@ -959,6 +959,31 @@ def _confirmation_gate_open(history: List[Dict]) -> bool:
     return False
 
 
+def _is_fresh_address_change_opener(message: str, semantic) -> bool:
+    """CUSTOMER-CSW9-REAL-4 — a genuine NEW address-change request-opener
+    ("บิลขนส่ง FTxxx ต้องการเปลี่ยนที่อยู่จัดส่ง", "ขอเปลี่ยนที่อยู่จัดส่ง
+    อีกบิลค่ะ", "เปลี่ยนที่อยู่หน่อย"): ADDRESS_CHANGE semantic family AND
+    the message carries NO operation DATA of its own — parse_thai_address
+    finds nothing, and there is no shipment/order/tracking-shaped token.
+    A DATA-answer turn ("ผู้รับ มานะ 0899999999 ที่อยู่ 99/1 ต.บางรัก ..."
+    a bare bill number) can still read as the ADDRESS_CHANGE family
+    (especially via the gated LLM, on a message dominated by "ที่อยู่ …"),
+    so the family alone is NOT enough — it always also carries parseable
+    address data or an identifier. Only a real opener has neither, and
+    only then may the REAL-3 fresh-episode cleanup discard replayed
+    fields (real LINE: it fired on the composite address turn and wiped
+    the ShipmentCode collected one turn earlier)."""
+    if getattr(semantic, "intent_family", None) != "ADDRESS_CHANGE":
+        return False
+    from services.thai_address_parser import parse_thai_address
+    if parse_thai_address(message or ""):
+        return False
+    if any(_validate_generic_identifier(tok)
+           for tok in _TOKEN_SPLIT_RE.split(message or "") if tok):
+        return False
+    return True
+
+
 def _replay_business_action_collection(action: Dict, registry, history: List[Dict],
                                         customer_context: Optional[Dict] = None,
                                         *, is_continuation: bool = True) -> Dict[str, str]:
@@ -3335,7 +3360,7 @@ class DecisionEngine:
             # supplied pending row — a fresh opener abandons it by design.
             if (continuation_action
                     and continuation_action.get("action_key") == "requestshippingaddresschange"
-                    and getattr(semantic, "intent_family", None) == "ADDRESS_CHANGE"):
+                    and _is_fresh_address_change_opener(message, semantic)):
                 developer_trace["pending_flow_broken_by_current_intent"] = \
                     "continuation->fresh_ADDRESS_CHANGE_request"
                 continuation_action = None
@@ -4769,8 +4794,8 @@ class DecisionEngine:
         # still applied by the normal path afterwards.
         _fresh_ac_opener = (not _is_continuation
                             and full_action.get("action_key") == "requestshippingaddresschange"
-                            and getattr(context.get("_semantic_interpretation"), "intent_family", None)
-                            == "ADDRESS_CHANGE")
+                            and _is_fresh_address_change_opener(
+                                message, context.get("_semantic_interpretation")))
         collected = _replay_business_action_collection(
             full_action, self.registry, history, customer_context, is_continuation=_is_continuation)
         if _fresh_ac_opener:
