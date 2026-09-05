@@ -21,7 +21,7 @@ module only decides the deterministic workflow.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional
 
 from services.slot_filling_engine import _validate_generic_identifier as _valid_id
@@ -99,7 +99,9 @@ _ACK_MARKER_RE = re.compile(
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีน"
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า"
     r"|แอดมินรวมบิลที่เข้าไทยเหมารถให้")
-_DONE_MARKER_RE = re.compile(r"รับเรื่องคำขอดำเนินการเรียบร้อยค่ะ|เจ้าหน้าที่จะติดต่อดำเนินการให้")
+_DONE_MARKER_RE = re.compile(
+    r"รับเรื่องคำขอดำเนินการเรียบร้อยค่ะ|เจ้าหน้าที่จะติดต่อดำเนินการให้"
+    r"|รับเรื่องรวมบิลเหมารถให้ค่ะ")
 
 _FRAME_LOOKBACK = 10
 
@@ -132,6 +134,13 @@ class OperationalState:
     ack: str = ""
     input_label: str = ""
     bill: Optional[str] = None          # bill / tracking token, when supplied
+    # CUSTOMER-CHARTER-COMBINE-1.1 — combine_bills_charter's own
+    # required input is a LIST of shipment bills (CUS-S16's
+    # api_input_hint: "shipment_bill_no_list"), unlike every other kind
+    # here which needs only ONE. Kept as its own field rather than
+    # overloading `bill` so every existing single-bill kind is
+    # completely unaffected.
+    bills: List[str] = field(default_factory=list)
     free_text: Optional[str] = None     # address / other free-form detail
     phone: Optional[str] = None
 
@@ -139,7 +148,7 @@ class OperationalState:
         return {k: v for k, v in asdict(self).items() if v}
 
     def has_input(self) -> bool:
-        return bool(self.bill or self.free_text or self.phone)
+        return bool(self.bill or self.bills or self.free_text or self.phone)
 
 
 _CN_TRACKING_RE = re.compile(r"(?<!\d)(\d{9,16})(?!\d)")
@@ -147,7 +156,17 @@ _CN_TRACKING_RE = re.compile(r"(?<!\d)(\d{9,16})(?!\d)")
 
 def extract_operational_fields(message: str, into: OperationalState) -> OperationalState:
     t = message or ""
-    if not into.bill:
+    if into.kind == "combine_bills_charter":
+        # multiple bills may arrive in one message ("FT001 FT002") or
+        # accumulate across turns ("FT001" then later "FT002 ด้วยค่ะ") —
+        # every genuinely NEW bill token is appended, never replacing an
+        # earlier one, so nothing already supplied is lost.
+        for tok in _BILL_TOKEN_RE.findall(t):
+            if _valid_id(tok) and not tok.isdigit():
+                tok_u = tok.upper()
+                if tok_u not in into.bills:
+                    into.bills.append(tok_u)
+    elif not into.bill:
         m = _BILL_TOKEN_RE.search(t)
         if m and _valid_id(m.group(1)) and not m.group(1).isdigit():
             into.bill = m.group(1).upper()
@@ -239,6 +258,9 @@ _KIND_TH = {
     "duplicate_bill": "แจ้งบิลซ้ำ ขอให้ตรวจสอบและลบบิลซ้ำ",
     "verify_warehouse_address": "ขอให้ตรวจสอบความถูกต้องของที่อยู่โกดังจีนที่กรอกไว้",
     "topup_not_credited": "แจ้งเติมเงินแล้วยอดยังไม่เข้า ขอให้ตรวจสอบ",
+    "missing_item_claim": "แจ้งได้รับสินค้าไม่ครบ/เสียหาย ขอเคลม",
+    "custom_production": "ขอสั่งผลิตสินค้าตามสเปค / สกรีนโลโก้",
+    "combine_bills_charter": "ขอรวมบิลขนส่งที่เข้าไทยเป็นเหมารถ",
 }
 
 
@@ -248,6 +270,8 @@ def operational_ask_prompt(state: OperationalState) -> str:
 
 def operational_handoff_summary(state: OperationalState) -> str:
     parts = [_KIND_TH.get(state.kind, state.kind)]
+    if state.bills:
+        parts.append("เลขบิลขนส่งที่ต้องการรวม: " + ", ".join(state.bills))
     if state.bill:
         parts.append(f"เลขบิل/แทรค: {state.bill}")
     if state.phone:
@@ -262,3 +286,27 @@ def operational_handoff_summary(state: OperationalState) -> str:
 # (" เดี๋ยวเจ้าหน้าที่จะติดต่อดำเนินการให้นะคะ") only when a real Human CS
 # notification for THIS episode actually goes out (or is already NOTIFIED).
 OPERATIONAL_HANDOFF_REPLY = "รับเรื่องคำขอดำเนินการเรียบร้อยค่ะ"
+
+# CUSTOMER-CHARTER-COMBINE-1.1 -- CUS-S16's own source (Ai.xlsx sheet
+# '2.tongchecknairabop' row 16 / CSW16) marks this a Human-CS-only
+# operation (H19="Human CS": staff physically combine the bills and
+# adjust their charter/เหมารถ status in the external warehouse system --
+# there is no API this platform can call to do it, and no way for this
+# platform to learn the result automatically either). The customer-
+# approved SECOND-stage answer ("รวมบิลเหมารถเรียบร้อยค่ะ, เป็นบิล ...")
+# is only valid once that real, staff-confirmed result exists -- it is
+# NEVER used here, since collecting the bill list is not that
+# confirmation. This kind-specific handoff reply instead honestly says
+# the REQUEST (not the combine itself) was received, matching the
+# source's own two-stage wording ("รับทราบค่ะ ... " then, separately,
+# only after real completion, "...เรียบร้อยค่ะ"). Every other kind keeps
+# the generic OPERATIONAL_HANDOFF_REPLY, unchanged.
+_KIND_HANDOFF_REPLY = {
+    "combine_bills_charter": (
+        "รับเรื่องรวมบิลเหมารถให้ค่ะ เดี๋ยวเจ้าหน้าที่จะดำเนินการรวมบิลที่เข้าไทยเหมารถ "
+        "และแจ้งผลกลับไปให้นะคะ"),
+}
+
+
+def operational_handoff_reply(state: OperationalState) -> str:
+    return _KIND_HANDOFF_REPLY.get(state.kind, OPERATIONAL_HANDOFF_REPLY)

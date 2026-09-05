@@ -100,6 +100,7 @@ from services.operational_change_flow import (
     extract_operational_fields as _extract_operational_fields,
     operational_ask_prompt as _operational_ask_prompt,
     operational_handoff_summary as _operational_handoff_summary,
+    operational_handoff_reply as _operational_handoff_reply,
     OPERATIONAL_HANDOFF_REPLY as _OPERATIONAL_HANDOFF_REPLY,
 )
 # CUSTOMER-CALC-1 — shipping-cost estimate multi-turn slot collection
@@ -3145,14 +3146,33 @@ class DecisionEngine:
             # nothing is remembered at all) — an established DETAIL
             # referent (searchdatashipment, not searchdatashipmentlist) is
             # real, decisive evidence, not a coincidental list resurface.
+            # CUSTOMER-CHARTER-COMBINE-1.1 hotfix — the check above only
+            # verified the remembered action was NOT list-shaped, never
+            # that it was even the SAME DOMAIN as this private_state_
+            # inquiry. REAL regression: a remembered "getdatacustomer"
+            # (customer-data domain, not list-shaped) got treated as an
+            # "established detail referent" for a completely unrelated
+            # tracking/shipment inquiry, letting _resolve_conversation_
+            # reference's marker bypass resurrect getdatacustomer itself
+            # for "ขอแทรคไทยค่ะ" instead of asking for the shipment bill.
+            # Precise fix: the referent only counts when it IS the exact
+            # action this domain would itself resolve to (the SAME
+            # config-driven lookup _resolve_private_state_action uses
+            # everywhere else here) — never merely "some non-list action,
+            # any domain".
             _psi_established_detail_referent = False
             _psi_last_action_key = customer_context.get("last_business_action")
-            if _psi_last_action_key:
+            if _psi_last_action_key and private_state_inquiry:
                 try:
-                    _psi_last_action_row = self.registry.get_by_key(_psi_last_action_key)
+                    _psi_referent_target = _resolve_private_state_action(
+                        self.registry, private_state_inquiry["domain"],
+                        record_scope=private_state_inquiry.get("record_scope", "UNSPECIFIED"),
+                        message=message)
                 except Exception:
-                    _psi_last_action_row = None
-                if _psi_last_action_row and not _psi_is_list_shaped(_psi_last_action_row):
+                    _psi_referent_target = None
+                if (_psi_referent_target is not None
+                        and _psi_referent_target.get("action_key") == _psi_last_action_key
+                        and not _psi_is_list_shaped(_psi_referent_target)):
                     _psi_established_detail_referent = True
             _psi_self_contained = (
                 bool(private_state_inquiry)
@@ -3677,9 +3697,10 @@ class DecisionEngine:
                             alert=_detect_alert(message, context))
                     developer_trace.setdefault("information_collection_status", {})["collected_parameters"] = {
                         k: v for k, v in {"ShipmentCode": _opreq.bill,
+                                          "ShipmentCodeList": ", ".join(_opreq.bills) if _opreq.bills else None,
                                           "CustPhone": _opreq.phone}.items() if v}
                     return self._finalize(
-                        reply=_build_response(text=_OPERATIONAL_HANDOFF_REPLY),
+                        reply=_build_response(text=_operational_handoff_reply(_opreq)),
                         routing_type="HUMAN_HANDOFF", workflow=workflow_hint,
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context),
