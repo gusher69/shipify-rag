@@ -82,6 +82,7 @@ from services.conversation_semantics import (
     frame_ack_reply as _frame_ack_reply,
     interpret as _interpret_message,
     PUBLIC_INFO_FAMILIES as _PUBLIC_INFO_FAMILIES,
+    _compose as _compose_intent_family,
 )
 # CUSTOMER-RAG-2.1 — charter-truck (เหมารถ / TC19) multi-turn slot
 # collection (deterministic, history-derived — no LLM, no pending table).
@@ -400,6 +401,26 @@ def _count_genuine_retries(registry, history: List[Dict], expected_question: str
             reply = recent_history[i + 1].get("content") or ""
             candidates = search_candidate_actions(registry, workflow=None, message=reply, collected_slots={})
             if select_best_action(candidates, minimum_score=1.0):
+                continue
+            # CUSTOMER-RED-REAL-FAIL-1 (RED-2) — the Business-Action-only
+            # exclusion above never recognized a reply that was itself a
+            # decisive, DIFFERENT request answered by RAG/FAQ rather than
+            # any registered Business Action (e.g. "คูปองใช้ยังไงครับ" —
+            # Coupon Usage has no Business Action to match, so it scored
+            # nothing above and was wrongly counted as a failed identifier
+            # attempt). REAL LINE: an already-closed searchdatashipment
+            # ShipmentCode ask, correctly diverted to Coupon Usage for one
+            # turn, still pushed the NEXT, unrelated ShipmentCode ask over
+            # max_retry, escalating "สินค้าจะเข้าไทยตอนไหนคะ" to a false
+            # Human-CS "insufficient info" reply instead of simply asking
+            # for the bill. Reuses the SAME central deterministic
+            # interpreter tier (services/conversation_semantics.py
+            # `_compose`, no LLM call — this runs once per historical
+            # pair and must stay cheap) already used everywhere else for
+            # "does this message carry its own decisive intent" checks;
+            # never a new parallel classifier.
+            fam, conf, _ent = _compose_intent_family(reply)
+            if fam in _ACTIONABLE_INTENT_FAMILIES and conf >= 0.55:
                 continue
         count += 1
     return count
@@ -2524,6 +2545,7 @@ _ACTIONABLE_INTENT_FAMILIES = frozenset({
     "SHIPPING_ESTIMATE", "CHARTER_TRUCK", "PICKUP_LOCATION", "SELF_PICKUP",
     "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "INVOICE",
     "SHIPMENT_STATUS", "ADDRESS_CHANGE", "LINK_CONVERSION",
+    "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL",
 })
 # The subset that is NEVER itself a Business-Action collection — used
 # where the pending flow's own family is unknown (a generic
@@ -2543,6 +2565,14 @@ _ACTIONABLE_INTENT_FAMILIES = frozenset({
 _FLOW_ONLY_INTENT_FAMILIES = frozenset({
     "SHIPPING_ESTIMATE", "CHARTER_TRUCK", "PICKUP_LOCATION",
     "SELF_PICKUP", "COUPON_USAGE", "PRODUCT_POLICY",
+    # CUSTOMER-RED-REAL-FAIL-1 (RED-5/RED-6) — neither withdrawal family
+    # has its own Business-Action collection today (no executable
+    # ERP write action exists for either), so — like COUPON_USAGE /
+    # PRODUCT_POLICY — a decisive read of one always counts as breaking
+    # some OTHER stale pending flow (charter/operational/calculator/a
+    # Business-Action collection); there is no "own continuation" of
+    # theirs to protect.
+    "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL",
 })
 
 
@@ -3435,13 +3465,30 @@ class DecisionEngine:
                 # its own requestshippingaddresschange flow. Deterministic,
                 # history-derived; Semantic-First supplies the intent.
                 _opreq = _derive_operational_state(history, message, interpretation=semantic)
-                if _opreq is not None and history and _current_intent_breaks_pending_flow(
+                _fresh_opreq = _derive_operational_state(None, message, interpretation=semantic)
+                if _opreq is not None and _fresh_opreq is not None and _fresh_opreq.kind != _opreq.kind:
+                    # CUSTOMER-RED-REAL-FAIL-1 (RED-4/RED-8) — the CURRENT
+                    # message, on its own, decisively and independently
+                    # classifies as a DIFFERENT operational kind than the
+                    # one recovered from a history-sticky ack (e.g. a
+                    # custom_production ack still open in history, but
+                    # THIS message unambiguously matches combine_bills_
+                    # charter's own object marker). The old guard below
+                    # only ever asked "is None?" — since a fresh state
+                    # existed at all (regardless of KIND), it left the
+                    # STALE kind in place, silently re-asking for the
+                    # wrong thing. A message that freshly, decisively
+                    # matches its OWN kind always wins over a stale one.
+                    developer_trace["pending_flow_broken_by_current_intent"] = \
+                        f"operational->{_fresh_opreq.kind}"
+                    _opreq = _fresh_opreq
+                elif _opreq is not None and history and _current_intent_breaks_pending_flow(
                         semantic, message, flow_family="ADDRESS_CHANGE",
                         flow_extract=lambda m: any(
                             _validate_generic_identifier(tok) and not tok.isdigit()
                             for tok in _TOKEN_SPLIT_RE.split(m or "") if tok)
                         or bool(re.search(r"(?<!\d)0\d{8,9}(?!\d)", m or ""))) \
-                        and _derive_operational_state(None, message, interpretation=semantic) is None:
+                        and _fresh_opreq is None:
                     # SYSTEM-STATE-EMERGENCY-1 — same central guard, but
                     # ONLY when the operational collection is HISTORY-
                     # sticky (a recent ack in `history`) and the CURRENT

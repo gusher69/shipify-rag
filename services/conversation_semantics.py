@@ -353,7 +353,7 @@ INTENT_FAMILIES = (
     "SHIPMENT_STATUS", "INVOICE", "PICKUP_LOCATION", "SELF_PICKUP",
     "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "CHARTER_TRUCK",
     "SHIPPING_ESTIMATE", "ADDRESS_CHANGE", "IMPORT_INTEREST",
-    "LINK_CONVERSION",
+    "LINK_CONVERSION", "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL",
     "GENERAL", "UNKNOWN",
 )
 
@@ -386,6 +386,17 @@ _OBJ_TRUCK = re.compile(r"เหมารถ|เหมา\s*รถ|รถเห�
 _OBJ_COST = re.compile(r"ค่าส่ง|ค่าขนส่ง|ค่านำเข้า|ค่าจัดส่ง|เรทส่ง|เรทนำเข้า|ราคาส่ง|ค่าระวาง|shipping\s*cost", re.IGNORECASE)
 _OBJ_PARCEL = re.compile(r"พัสดุ|ออเดอร์|order|ล็อตสินค้า|กล่องสินค้า|ของที่สั่ง|ของที่ส่ง|สินค้าที่สั่ง|ของผม|ของฉัน|สินค้าผม|บิลผม|บิลฉัน|เลขบิลผม", re.IGNORECASE)
 _OBJ_ADDRESS = re.compile(r"ที่อยู่จัดส่ง|ที่อยู่ผู้รับ|ที่อยู่ในการจัดส่ง|ปลายทางจัดส่ง|delivery\s*address|ที่อยู่ส่งของ|ที่อยู่|ปลายทาง|ผู้รับ|เบอร์ผู้รับ", re.IGNORECASE)
+
+# CUSTOMER-RED-REAL-FAIL-1 (RED-5/RED-6) — Ai.xlsx CUS-S05/CUS-S12: a
+# withdraw-money request against the customer's own account. Two
+# DISTINCT workflows (purchase-order credit vs. shipping-payment
+# credit) that must never collapse into each other or into an
+# unrelated add_vat / self-pickup / cancellation flow. Checked as its
+# own decisive verb+object composite, same shape as every other family
+# here — never a bare keyword-in-message check.
+_WITHDRAWAL_VERB_RE = re.compile(r"ถอนเงิน|จะถอนยังไง|จะถอนมายังไง|ถอนได้ไหม|ถอนยังไง", re.IGNORECASE)
+_PURCHASE_WITHDRAWAL_OBJ_RE = re.compile(r"สั่งซื้อ|ร้าน.{0,6}คืน|เครดิตสั่งซื้อ", re.IGNORECASE)
+_SHIPPING_WITHDRAWAL_OBJ_RE = re.compile(r"ขนส่ง", re.IGNORECASE)
 
 # ACTION — what they want DONE.
 _ACT_LOCATE = re.compile(r"ที่ไหน|ตรงไหน|อยู่ไหน|ที่ใด|ที่ตั้ง|แผนที่|พิกัด|เส้นทางไป|ไปยังไง|แถวไหน|ย่านไหน|โซนไหน|เขตไหน|อยู่แถว|\bwhere\b", re.IGNORECASE)
@@ -511,6 +522,18 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
             ent["platform"] = req["platform"]
         return "LINK_CONVERSION", 0.85, ent
 
+    # WITHDRAWAL (CUSTOMER-RED-REAL-FAIL-1 RED-5/RED-6) — an explicit
+    # withdraw-money verb is itself decisive; the OBJECT tells purchase
+    # vs. shipping apart. Checked before CHARTER_TRUCK/COUPON/etc so an
+    # incidental object word never steals it, and before the generic
+    # operational "add_vat"/change-request flow so a withdrawal is never
+    # mistaken for a VAT request.
+    if _WITHDRAWAL_VERB_RE.search(t):
+        if _SHIPPING_WITHDRAWAL_OBJ_RE.search(t):
+            return "SHIPPING_WITHDRAWAL", 0.85, ent
+        if _PURCHASE_WITHDRAWAL_OBJ_RE.search(t):
+            return "PURCHASE_WITHDRAWAL", 0.85, ent
+
     # CHARTER TRUCK — a charter-truck object is itself decisive (a hire /
     # request move is implied by naming it).
     if obj_tk:
@@ -622,9 +645,11 @@ _FAMILY_SYS_PROMPT = (
     "have (private); PRODUCT_POLICY=can this kind of goods be shipped/imported; "
     "CHARTER_TRUCK=hire / charter a whole truck for local delivery; "
     "SHIPPING_ESTIMATE=estimate/quote a shipping cost; ADDRESS_CHANGE=change "
-    "the delivery address/recipient; IMPORT_INTEREST=wants to import some "
-    "product (early sales interest); GENERAL=any other FAQ; UNKNOWN=cannot "
-    "tell.\n"
+    "the delivery address/recipient; PURCHASE_WITHDRAWAL=withdraw money from "
+    "a purchase-order credit/refund wallet; SHIPPING_WITHDRAWAL=withdraw "
+    "money from a shipping-payment wallet; IMPORT_INTEREST=wants to import "
+    "some product (early sales interest); GENERAL=any other FAQ; "
+    "UNKNOWN=cannot tell.\n"
     "is_private=true only when it refers to the customer's OWN specific "
     "record/account. Classify MEANING ONLY — never a policy verdict, an "
     "eligibility answer, or personal data."
@@ -876,6 +901,8 @@ FAMILY_TO_ACTIONABLE_INTENT = {
     "SHIPPING_ESTIMATE": "shipping_calculation",
     "ADDRESS_CHANGE": None,
     "LINK_CONVERSION": None,
+    "PURCHASE_WITHDRAWAL": None,
+    "SHIPPING_WITHDRAWAL": None,
     "IMPORT_INTEREST": None,
     "GENERAL": None,
     "UNKNOWN": None,

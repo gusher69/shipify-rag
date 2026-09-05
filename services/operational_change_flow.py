@@ -189,9 +189,22 @@ def derive_operational_state(history: Optional[List[Dict]], current_message: str
             continue
         c = t.get("content") or ""
         if _ACK_MARKER_RE.search(c):
-            # recover which kind from the ack wording
+            # recover which kind from the ack wording. Match on the FULL
+            # ack text, never a truncated prefix: several kinds share an
+            # identical opening clause ("คุณลูกค้าแจ้งเลขบิลสั่งซื้อ...") —
+            # add_vat / missing_item_claim / custom_production all start
+            # this way. A truncated N-char prefix check (`ack[:24] in c`)
+            # matches whichever kind is EARLIEST in this list purely
+            # because its short prefix happens to appear inside a LATER
+            # kind's longer, different ack (real production bug: a
+            # missing_item_claim ack was recovered as add_vat, then every
+            # unrelated follow-up intent — Purchase Withdrawal, Shipping
+            # Withdrawal, Custom Production, Charter Combine — was
+            # answered with the wrong, stale "VAT" ack). The FULL ack
+            # strings are themselves mutually non-overlapping, so this
+            # substring check is unambiguous.
             for kind, _vrx, _orx, ack, label in _KINDS:
-                if ack[:24] in c:
+                if ack in c:
                     open_kind = (kind, ack, label)
                     break
         break
