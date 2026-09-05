@@ -721,10 +721,22 @@ def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Op
     every genuine continuation still reuses the record id it collected."""
     working = dict(collected)
     askable = _askable_parameters_by_name(action)
+    # CUSTOMER-CSW9-REAL-2 — a confirmation-gated action performs a real
+    # side effect (here: submitting an address change for a specific
+    # shipment to CS). Its RECORD-identifier target (ShipmentCode /
+    # OrderCode / Tracking) must be given explicitly FOR THIS operation,
+    # never inherited from generic Identifier Memory ("the last shipment
+    # the customer asked about"). Real LINE: last_shipment_code kept
+    # pre-filling ShipmentCode, so (a) the customer's own bill answer to
+    # "which bill?" then had nowhere to bind and spilled into the
+    # loosely-validated ReceiverName slot, and (b) a fresh "อีกบิล"
+    # request silently re-targeted the previous shipment. CustCode (the
+    # customer's own identity, never account-SCOPED here) still fills.
+    _write_action = _requires_confirmation(action)
     for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
         if param_name in working or param_name not in askable:
             continue
-        if not is_continuation and profile_field in _ACCOUNT_SCOPED_MEMORY_FIELDS:
+        if profile_field in _ACCOUNT_SCOPED_MEMORY_FIELDS and (not is_continuation or _write_action):
             continue
         remembered = (customer_context or {}).get(profile_field)
         if remembered:
@@ -2125,6 +2137,16 @@ _ROUTING_TYPES = ("RAG", "GENERAL", "API", "TOOL", "WORKFLOW", "NOTIFICATION", "
 
 _URL_RE = re.compile(r"https?://\S+")
 
+# CUSTOMER-CSW9-REAL-2 — confirmed real-LINE misspellings of operational
+# verbs that otherwise silently miss both the semantic ADDRESS_CHANGE
+# family and the keyword action search (routing the turn to RAG / a
+# stale shipment lookup instead of CSW9). Exact literal substitutions
+# only, applied once at the top of decide(); add an entry per confirmed
+# typo, never a fuzzy rule.
+_OPERATIONAL_TYPO_FIXES = {
+    "เปเลี่ยน": "เปลี่ยน",
+}
+
 
 def _extract_system_values(message: str, history: Optional[List[Dict]] = None) -> Dict:
     """Generic, action-agnostic values derived from the raw message that
@@ -2928,6 +2950,18 @@ class DecisionEngine:
         developer_trace: Dict = {}
 
         try:
+            # CUSTOMER-CSW9-REAL-2 — narrow, deterministic typo
+            # normalization applied ONCE here so every downstream consumer
+            # (semantic interpreter, keyword action search, operational
+            # classifier) sees the corrected form — never a per-flow or
+            # final-response patch. Scoped to a tiny map of confirmed
+            # operational-verb misspellings seen on real LINE; extend by
+            # adding an entry, never by loosening it into fuzzy matching.
+            for _typo, _fix in _OPERATIONAL_TYPO_FIXES.items():
+                if _typo in message:
+                    message = message.replace(_typo, _fix)
+                    developer_trace["typo_normalized"] = {_typo: _fix}
+
             # 1-2. read message + history are inputs; 3. conversation state
             # is recomputed from `history` (no separate persistence layer
             # in this codebase — same convention every other
@@ -5120,6 +5154,31 @@ class DecisionEngine:
             # pipeline for AI Playground, LINE OA, and future channels.
             exec_result, exec_latency = self._run_rag_pipeline(message, history, context)
         elif _requires_confirmation(selected) and not context.get("confirmed"):
+            # CUSTOMER-CSW9-REAL-2 — cross-field sanity BEFORE the gate
+            # opens: a free-text address-component slot (ReceiverName,
+            # Address, …) must never hold this action's OWN record
+            # identifier value. If it does, the collection is corrupt
+            # (real LINE: a bare ShipmentCode answer spilled into
+            # ReceiverName). Drop just that slot and re-ask it — never
+            # show a confirmation screen built from an obviously wrong
+            # value, never execute one. Root cause is fixed above
+            # (_apply_identifier_memory no longer pre-seeds a write
+            # action's record id); this is the belt-and-braces guard.
+            _id_vals = {v for k, v in (collected_slots or {}).items()
+                        if k.lower() in ("shipmentcode", "ordercode", "tracking") and v}
+            _corrupt = [p["name"] for p in (selected.get("parameters") or [])
+                        if (p.get("field_metadata") or {}).get("address_component")
+                        and collected_slots.get(p["name"]) in _id_vals]
+            if _corrupt:
+                for _c in _corrupt:
+                    collected_slots.pop(_c, None)
+                developer_trace["cross_field_safety"] = {"dropped": _corrupt, "reason": "value_equals_record_identifier"}
+                _reask = _next_expected_parameter(selected, self.registry, collected_slots)
+                _reask_text = _generate_parameter_question(_reask) if _reask else \
+                    "รบกวนแจ้งข้อมูลผู้รับใหม่อีกครั้งนะคะ"
+                return self._finalize(reply=_build_response(text=_reask_text), routing_type="WORKFLOW",
+                                       workflow=workflow, developer_trace=developer_trace,
+                                       context=context, start=start, alert=alert)
             # Confirmation gate (2026-08-09, SendLineNotiCS enablement) —
             # a COMMAND-type action (real external side effect) never
             # reaches the Action Executor on the strength of parameter
