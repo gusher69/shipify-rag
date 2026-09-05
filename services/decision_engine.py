@@ -127,6 +127,15 @@ from services.link_conversion_flow import (
     is_link_conversion_signal as _is_link_conversion_signal,
 )
 
+# CUSTOMER-RED-HOTFIX-2 — Purchase Withdrawal / Shipping Withdrawal.
+# Deterministic brand resolution + a direct (never vector-similarity)
+# Knowledge Base lookup by stable `intent` tag.
+from services.withdrawal_flow import (
+    resolve_shipping_withdrawal_brand as _resolve_shipping_withdrawal_brand,
+    purchase_withdrawal_reply as _purchase_withdrawal_reply,
+    shipping_withdrawal_reply as _shipping_withdrawal_reply,
+)
+
 # ── Dynamic, Business-Action-driven Information Collection ────────────────
 #
 # Single Source of Truth refactor: required parameters now come from the
@@ -1760,14 +1769,15 @@ def _resolve_private_state_action(registry, domain: str, record_scope: str = "UN
     return None
 
 
-def _resolve_conversation_reference(registry, message: str, customer_context: Dict) -> Optional[Dict]:
+def _resolve_conversation_reference(registry, message: str, customer_context: Dict,
+                                     *, psi_domain_match: bool = False) -> Optional[Dict]:
     """Last-resort resolution for a follow-up message that carries NO
     Business-Action-selecting signal of its own (no keyword/pattern
     match — this is only ever called from decide() after a normal fresh
     search already came up empty) but the conversation clearly isn't
     over — the profile remembers which Business Action the customer was
     last using (profiles/manager.py's own Identifier Memory persistence,
-    extended to also remember `last_business_action`), and EITHER:
+    extended to also remember `last_business_action`), and ANY of:
 
     (a) the message names a specific FIELD that action's own response
     mapping is configured to return (Requested Field Filtering's own
@@ -1778,7 +1788,22 @@ def _resolve_conversation_reference(registry, message: str, customer_context: Di
     fixed sentence list), or
 
     (b) it matches a generic topic-free referring-expression marker (see
-    _REFERENCE_MARKER_RE, e.g. "แล้วของถึงหรือยัง").
+    _REFERENCE_MARKER_RE, e.g. "แล้วของถึงหรือยัง"), or
+
+    (c) `psi_domain_match=True` — the caller's own deterministic
+    private-state classifier (services/decision_engine.py
+    `_classify_private_state_inquiry`) ALREADY decisively named this
+    message a same-domain, UNSPECIFIED-scope status inquiry against an
+    established single-record referent (CUSTOMER-RED-HOTFIX-2: "สินค้า
+    จะเข้าไทยตอนไหนคะ" / "สินค้าถึงโกดังหรือยังคะ" right after a
+    successful searchdatashipment lookup — neither phrasing matches
+    _REFERENCE_MARKER_RE, but a decisive same-domain private-record
+    classification is at least as strong evidence of "still talking
+    about the same record" as that marker regex is). The caller is
+    responsible for only ever passing True when it has ALSO confirmed
+    the remembered action is a per-record DETAIL action, never a LIST
+    action (see _psi_is_list_shaped) — this function never re-derives
+    that itself.
 
     LIST -> DETAIL sibling preference (Issue 3): if the remembered action
     is a LIST-shaped action (its own response_mapping returns a raw
@@ -1817,7 +1842,7 @@ def _resolve_conversation_reference(registry, message: str, customer_context: Di
         if any(kw and str(kw).lower() in message_l for kw in keywords):
             field_match = True
             break
-    marker_match = bool(_REFERENCE_MARKER_RE.search(message or ""))
+    marker_match = bool(_REFERENCE_MARKER_RE.search(message or "")) or psi_domain_match
     # Pure Identifier Guard extended to continuation: a message that IS,
     # in its entirety, a bare identifier-shaped token ("FT3182") carries
     # no field/marker signal of its own, but it must still fill the
@@ -3018,10 +3043,38 @@ class DecisionEngine:
             # hazard; customer_data (wallet/coupon) is account-scoped by the
             # customer id itself, so a remembered customer lookup may still
             # be resumed for it.
+            #
+            # CUSTOMER-RED-HOTFIX-2 (SHIPMENT REFERENT RULE) — this
+            # suppression's own original purpose (see the comment two
+            # blocks up) was to stop a NAKED "ของผมเข้าไทยหรือยัง"-style
+            # question, with NO established single-shipment context, from
+            # wrongly resurrecting a remembered LIST action's "latest"
+            # record via _resolve_conversation_reference. It was never
+            # meant to also block reusing an ALREADY-ESTABLISHED single
+            # shipment (a real successful searchdatashipment lookup just
+            # now) for an immediate same-domain follow-up that happens to
+            # use the same UNSPECIFIED-scope wording ("สินค้าจะเข้าไทย
+            # ตอนไหนคะ", "สินค้าถึงโกดังหรือยังคะ" — REAL LINE: both
+            # re-asked for the bill instead of reusing it). Exempt exactly
+            # the case the original fix targeted: only suppress when the
+            # remembered last_business_action is itself LIST-shaped (or
+            # nothing is remembered at all) — an established DETAIL
+            # referent (searchdatashipment, not searchdatashipmentlist) is
+            # real, decisive evidence, not a coincidental list resurface.
+            _psi_established_detail_referent = False
+            _psi_last_action_key = customer_context.get("last_business_action")
+            if _psi_last_action_key:
+                try:
+                    _psi_last_action_row = self.registry.get_by_key(_psi_last_action_key)
+                except Exception:
+                    _psi_last_action_row = None
+                if _psi_last_action_row and not _psi_is_list_shaped(_psi_last_action_row):
+                    _psi_established_detail_referent = True
             _psi_self_contained = (
                 bool(private_state_inquiry)
                 and private_state_inquiry.get("record_scope") == "UNSPECIFIED"
-                and private_state_inquiry.get("domain") in ("shipment", "order", "tracking"))
+                and private_state_inquiry.get("domain") in ("shipment", "order", "tracking")
+                and not _psi_established_detail_referent)
             _social_only = _is_social_only(message)
             _suppress_stale_workflow = _psi_self_contained or _social_only
             if _suppress_stale_workflow:
@@ -3453,6 +3506,34 @@ class DecisionEngine:
                                          "details": _charter.as_dict(),
                                          "summary": _charter_handoff_summary(_charter)})
 
+                # CUSTOMER-RED-HOTFIX-2 — Purchase Withdrawal (CUS-S05) /
+                # Shipping Withdrawal (CUS-S12). Both are plain,
+                # non-personalized HOW-TO instructions, so the answer
+                # itself lives in the Knowledge Base (services/
+                # withdrawal_flow.py fetches it by a STABLE `intent` tag —
+                # a direct deterministic lookup, never vector similarity,
+                # per the customer source's own explicit instruction not
+                # to leave this to "which chunk scores highest"). Checked
+                # before the operational-change flow (add_vat etc.) so a
+                # withdrawal request is never mistaken for one of those.
+                if semantic.intent_family == "PURCHASE_WITHDRAWAL":
+                    developer_trace["selection_source"] = "purchase_withdrawal_kb"
+                    return self._finalize(
+                        reply=_build_response(text=_purchase_withdrawal_reply(self.registry._sb)),
+                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+                if semantic.intent_family == "SHIPPING_WITHDRAWAL":
+                    developer_trace["selection_source"] = "shipping_withdrawal_kb"
+                    developer_trace["shipping_withdrawal_brand"] = _resolve_shipping_withdrawal_brand(
+                        customer_context)
+                    return self._finalize(
+                        reply=_build_response(text=_shipping_withdrawal_reply(
+                            self.registry._sb, customer_context)),
+                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+
                 # CUSTOMER-ACTION-1 — an operational CHANGE / VERIFY request
                 # on the customer's own record that has NO executable
                 # Business Action (แก้จำนวนในบิล / เปลี่ยนวิธีจัดส่ง /
@@ -3881,8 +3962,13 @@ class DecisionEngine:
                 # SEM-1.2 — a self-contained UNSPECIFIED private-state
                 # inquiry must not resurrect a remembered list/latest
                 # action via a bare reference marker ("ของผม" alone).
+                _psi_domain_match = bool(
+                    private_state_inquiry and not _psi_self_contained
+                    and private_state_inquiry.get("record_scope") == "UNSPECIFIED"
+                    and private_state_inquiry.get("domain") in ("shipment", "order", "tracking")
+                    and _psi_established_detail_referent)
                 referenced = None if _psi_self_contained else _resolve_conversation_reference(
-                    self.registry, message, customer_context)
+                    self.registry, message, customer_context, psi_domain_match=_psi_domain_match)
 
                 # Stale-identity-gated-action guard (P1 hotfix, 2026-09-01)
                 # — _resolve_conversation_reference resurrects the
@@ -4176,7 +4262,22 @@ class DecisionEngine:
                         # of falling through to RAG ("ไม่มีข้อมูลยืนยัน").
                         selected = _psi_target
                         candidates = [selected]
-                        developer_trace["selection_source"] = "private_state_inquiry"
+                        # CUSTOMER-RED-HOTFIX-2 — same reasoning as the
+                        # SEM-1.1 redirect branch below: when the target
+                        # this private-state inquiry resolves to IS the
+                        # already-established single-record referent
+                        # (a real, recent successful lookup for the SAME
+                        # detail action), tag it "conversation_reference"
+                        # so _handle_dynamic_collection's existing
+                        # Identifier Memory recovery reuses the shipment
+                        # instead of asking for the bill again (REAL LINE:
+                        # "สินค้าถึงโกดังหรือยังคะ" right after a
+                        # successful lookup for the same shipment).
+                        if (_psi_established_detail_referent
+                                and _psi_target.get("action_key") == customer_context.get("last_business_action")):
+                            developer_trace["selection_source"] = "conversation_reference"
+                        else:
+                            developer_trace["selection_source"] = "private_state_inquiry"
                     elif (_psi_target is not None and selected is not None
                           and developer_trace.get("selection_source") == "fresh_search"
                           and _psi_scope == "UNSPECIFIED" and not _psi_msg_has_id
@@ -4201,7 +4302,29 @@ class DecisionEngine:
                             "reason": "unspecified_record_scope_would_auto_return_latest"}
                         selected = _psi_target
                         candidates = [selected]
-                        developer_trace["selection_source"] = "private_state_inquiry"
+                        # CUSTOMER-RED-HOTFIX-2 — this redirect picks the
+                        # right ACTION but, tagged "private_state_inquiry",
+                        # is treated downstream as a brand-new collection
+                        # (_handle_dynamic_collection's own continuation
+                        # gate does not trust this source), so it asks for
+                        # the identifier fresh even when one was already
+                        # established moments ago (REAL LINE: "สินค้าจะเข้า
+                        # ไทยตอนไหนคะ" re-asked for the bill right after a
+                        # successful searchdatashipment lookup for the
+                        # SAME shipment). When the redirect target IS the
+                        # already-established referent, tag it with the
+                        # SAME trusted continuation source used everywhere
+                        # else (_resolve_conversation_reference's own
+                        # "conversation_reference") so Identifier Memory
+                        # recovery (_apply_identifier_memory /
+                        # _recover_history_identifier) runs normally —
+                        # never a new mechanism, just the correct existing
+                        # label for genuinely continued evidence.
+                        if (_psi_established_detail_referent
+                                and _psi_target.get("action_key") == customer_context.get("last_business_action")):
+                            developer_trace["selection_source"] = "conversation_reference"
+                        else:
+                            developer_trace["selection_source"] = "private_state_inquiry"
 
             if not selected:
                 if workflow_hint:
