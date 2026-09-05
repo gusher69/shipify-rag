@@ -572,6 +572,26 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
         # a few lines below, for the same reason.
         is_address_component = bool((param.get("field_metadata") or {}).get("address_component"))
         param_candidates = group_candidates if is_address_component else candidates
+        if is_address_component:
+            # CUSTOMER-CSW9-REAL-3 — a free-text address-component slot
+            # (ReceiverName / Address / …, validation_type "non_empty")
+            # must NEVER accept a token that structurally IS this action's
+            # own RECORD identifier (ShipmentCode / OrderCode / Tracking
+            # — a configured validation_pattern). Real LINE: the bill
+            # number the customer typed in reply to "which bill?" got
+            # pre-consumed into ShipmentCode by history replay, then the
+            # SAME lone token fell through here and was bound to
+            # ReceiverName. If ShipmentCode is still missing the token
+            # belongs there (the pattern-first sort already tried it);
+            # if it is filled, this token is a duplicate, never a name.
+            _rec_id_patterns = [
+                p.get("validation_pattern") for p in (action.get("parameters") or [])
+                if (p.get("name") or "").strip().lower() in ("shipmentcode", "ordercode", "tracking")
+                and p.get("validation_pattern")]
+            if _rec_id_patterns:
+                param_candidates = [
+                    c for c in param_candidates
+                    if not any(re.fullmatch(pat, c) for pat in _rec_id_patterns)]
         binding = _bind_candidate_to_parameter(param_candidates, param)
         if binding["status"] == "bound":
             return {"bound": (name, binding["value"]), "ambiguous_candidates": []}
@@ -3298,6 +3318,28 @@ class DecisionEngine:
                     if pending_full_action and pending_full_action.get("enabled"):
                         continuation_action = pending_full_action
 
+            # CUSTOMER-CSW9-REAL-3 — a message that itself classifies as a
+            # fresh ADDRESS_CHANGE request-opener (a change VERB on an
+            # address OBJECT — "ต้องการเปลี่ยนที่อยู่จัดส่ง" / "ขอเปลี่ยน
+            # ที่อยู่จัดส่งอีกบิล" / "เปลี่ยนที่อยู่หน่อย") is the customer
+            # RE-STARTING the request, never a bare answer to whatever
+            # param the abandoned prior collection last asked for. Left
+            # as a "continuation", the history replay hydrates stale
+            # fields from the earlier episode still in the window (real
+            # LINE: a fresh CSW9 opener came back with ShipmentCode
+            # already filled from a previous abandoned attempt's bill
+            # answer, so it skipped straight to asking for the receiver).
+            # A DATA answer ("ผู้รับ มานะ ...", "เปลี่ยนเป็นชลบุรี", a bare
+            # value) never carries the ADDRESS_CHANGE family, so a genuine
+            # mid-collection turn is untouched. Overrides even a caller-
+            # supplied pending row — a fresh opener abandons it by design.
+            if (continuation_action
+                    and continuation_action.get("action_key") == "requestshippingaddresschange"
+                    and getattr(semantic, "intent_family", None) == "ADDRESS_CHANGE"):
+                developer_trace["pending_flow_broken_by_current_intent"] = \
+                    "continuation->fresh_ADDRESS_CHANGE_request"
+                continuation_action = None
+
             # Generic Continuation Intent Guard (Confirmation/Collection
             # Continuation Correctness fix, 2026-08-24) — confirmed live:
             # once an action asks a follow-up question, _resolve_
@@ -4711,8 +4753,34 @@ class DecisionEngine:
         # SYSTEM-STATE-EMERGENCY-1 referent-less-private guard.
         _is_continuation = developer_trace.get("selection_source") in (
             "conversation_continuation", "conversation_reference_detail", "conversation_reference")
+        # CUSTOMER-CSW9-REAL-3 — companion to the fresh-ADDRESS_CHANGE
+        # continuation break above: when THIS turn is itself a fresh
+        # address-change request-opener (semantic family ADDRESS_CHANGE)
+        # and not a genuine continuation, the collection MUST start clean.
+        # The history replay walk would otherwise still hydrate
+        # ShipmentCode / receiver fields from an earlier, abandoned CSW9
+        # episode's own question/answer pairs still inside the recent
+        # window (the completed-cycle boundary resets only fire once that
+        # earlier collection was actually COMPLETE — an abandoned one
+        # never is). Replay still runs so CustCode is recovered (it may
+        # come from a bare-CustCode history turn, not only memory); every
+        # operation-scoped field it hydrated is then dropped just below.
+        # This turn's own message and any real pending_parameters are
+        # still applied by the normal path afterwards.
+        _fresh_ac_opener = (not _is_continuation
+                            and full_action.get("action_key") == "requestshippingaddresschange"
+                            and getattr(context.get("_semantic_interpretation"), "intent_family", None)
+                            == "ADDRESS_CHANGE")
         collected = _replay_business_action_collection(
             full_action, self.registry, history, customer_context, is_continuation=_is_continuation)
+        if _fresh_ac_opener:
+            # Keep only the customer's own identity (CustCode — from a
+            # verified binding, Identifier Memory, or a bare-CustCode
+            # history turn); drop every operation-scoped field replay
+            # may have hydrated from an earlier, abandoned CSW9 episode
+            # still in the window (ShipmentCode + all address parts).
+            collected = {k: v for k, v in collected.items() if k.lower() == "custcode"}
+            developer_trace["fresh_address_change_episode"] = True
         # Multi-Intent Preservation fix (Task 03, 2026-08-25; corrected
         # 2026-08-26 — Production UAT finding) — a proxy for "is this
         # message the actual trigger" (a genuine continuation reply is
@@ -4748,7 +4816,10 @@ class DecisionEngine:
         # old setdefault() below always kept that stale value instead of
         # the customer's own correction. Only trusted for THIS exact
         # action id, never applied to a different one.
-        if context.get("pending_action_id") == action_id:
+        if context.get("pending_action_id") == action_id and not _fresh_ac_opener:
+            # CUSTOMER-CSW9-REAL-3 — a fresh ADDRESS_CHANGE opener
+            # abandons the caller's persisted mid-collection snapshot too;
+            # only the identity seed carries into the new episode.
             for name, value in (context.get("pending_parameters") or {}).items():
                 collected[name] = value
 
