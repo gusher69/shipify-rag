@@ -3778,14 +3778,28 @@ class DecisionEngine:
                 # to leave this to "which chunk scores highest"). Checked
                 # before the operational-change flow (add_vat etc.) so a
                 # withdrawal request is never mistaken for one of those.
-                if semantic.intent_family == "PURCHASE_WITHDRAWAL":
+                #
+                # PHASE-1-STATE-PRECEDENCE-ROOT-FIX-1 — but a decisive
+                # CURRENT operational request ("สั่งสกรีนโลโก้" ->
+                # custom_production, "เคลมของไม่ครบ" -> missing_item_claim,
+                # …) must beat a withdrawal family carried by the gated
+                # LLM / history from an earlier withdrawal turn (real
+                # LINE: "สั่งสกรีนโลโก้" sent after two withdrawal turns
+                # got the purchase-withdrawal KB text back). CURRENT-
+                # message-only classification, no history: a genuine
+                # withdrawal follow-up ("ถอนยังไง", "กดตรงไหน", "ใช้เวลา
+                # กี่วัน", "ถอนเงินขนส่ง") never classifies as an
+                # operational kind, so it stays on the withdrawal path.
+                _wd_yield_to_op = _derive_operational_state(
+                    None, message, interpretation=semantic) is not None
+                if semantic.intent_family == "PURCHASE_WITHDRAWAL" and not _wd_yield_to_op:
                     developer_trace["selection_source"] = "purchase_withdrawal_kb"
                     return self._finalize(
                         reply=_build_response(text=_purchase_withdrawal_reply(self.registry._sb)),
                         routing_type="WORKFLOW", workflow=workflow_hint,
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))
-                if semantic.intent_family == "SHIPPING_WITHDRAWAL":
+                if semantic.intent_family == "SHIPPING_WITHDRAWAL" and not _wd_yield_to_op:
                     developer_trace["selection_source"] = "shipping_withdrawal_kb"
                     developer_trace["shipping_withdrawal_brand"] = _resolve_shipping_withdrawal_brand(
                         customer_context)
@@ -3827,7 +3841,24 @@ class DecisionEngine:
                     _opreq = _fresh_opreq
                 elif _opreq is not None and history and _fresh_opreq is None and (
                         _current_intent_breaks_pending_flow(
-                            semantic, message, flow_family="ADDRESS_CHANGE",
+                            # PHASE-1-STATE-PRECEDENCE-ROOT-FIX-1 — the
+                            # PENDING flow here is a generic operational
+                            # kind (missing_item_claim / modify_bill_qty /
+                            # add_vat / custom_production / …), whose
+                            # family is none of _ACTIONABLE_INTENT_FAMILIES.
+                            # Passing flow_family="ADDRESS_CHANGE" made an
+                            # incoming ADDRESS_CHANGE opener look like a
+                            # same-family continuation of the claim, so it
+                            # could NEVER break it (real LINE: an abandoned
+                            # missing_item_claim from ~62 min earlier
+                            # answered "บิลขนส่ง FTxxx ต้องการเปลี่ยนที่อยู่
+                            # จัดส่ง"). flow_family=None lets a decisive
+                            # ADDRESS_CHANGE read break the stale
+                            # collection; flow_extract still protects a
+                            # genuine bare bill / phone slot answer, and
+                            # the conf/family gate still protects an
+                            # ambiguous GENERAL/UNKNOWN reply.
+                            semantic, message, flow_family=None,
                             flow_extract=lambda m: any(
                                 _validate_generic_identifier(tok) and not tok.isdigit()
                                 for tok in _TOKEN_SPLIT_RE.split(m or "") if tok)
