@@ -33,10 +33,20 @@ so a trusted binding never has to be re-asked; otherwise the customer
 is asked once, exactly as the source instructs.
 """
 import re
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 _BRAND_PREFIX_RE = re.compile(r"^([A-Za-z]+)")
 _KNOWN_BRANDS = ("SP", "FT")
+
+# CUSTOMER-CSW12-SHIPPING-WITHDRAWAL-SP-1 — a bare brand reply to the
+# SP-or-FT question ("SP", "FT ค่ะ", "แบรนด์ SP", "เอสพี"). Deliberately
+# tight (the whole message IS just the brand token) so it never fires on
+# an unrelated "SP…"-prefixed bill or a topic switch.
+_BRAND_ANSWER_RE = re.compile(
+    r"^\s*(?:แบรนด์\s*|เป็น\s*|ของ\s*|โค้ด\s*)?(SP|FT|เอสพี|เอฟที)\s*"
+    r"(?:ค่ะ|ค่า|คะ|ครับ|คับ|จ้า|จ้ะ|นะคะ|นะครับ)?\s*$",
+    re.IGNORECASE)
+_TH_BRAND = {"เอสพี": "SP", "เอฟที": "FT"}
 
 ASK_BRAND_REPLY = (
     "เรื่องนี้คำตอบจะแตกต่างกันไปตามแบรนด์ค่ะ รบกวนแจ้งด้วยนะคะว่าเป็นแบรนด์ SP หรือ FT คะ"
@@ -86,4 +96,24 @@ def shipping_withdrawal_reply(sb, customer_context: Optional[Dict]) -> str:
     brand = resolve_shipping_withdrawal_brand(customer_context)
     if brand is None:
         return ASK_BRAND_REPLY
+    return fetch_kb_answer(sb, f"SHIPPING_WITHDRAWAL_{brand}") or _KB_MISSING_REPLY
+
+
+def shipping_withdrawal_pending_brand_reply(
+        sb, history: Optional[List[Dict]], message: str) -> Optional[str]:
+    """CUSTOMER-CSW12-SHIPPING-WITHDRAWAL-SP-1 — when the IMMEDIATELY
+    preceding assistant turn was the SP-or-FT question and THIS message
+    is just that brand token, return the brand's KB answer (the source's
+    "ถามกลับเรื่องโค้ดไปก่อนแล้วค่อยตอบให้ตรงตามโค้ด" second step). The
+    bare "SP" / "FT" reply never carries a SHIPPING_WITHDRAWAL family on
+    its own, so without this it fell through to generic RAG. Returns None
+    (caller continues normal routing) unless BOTH conditions hold."""
+    h = history or []
+    if not h or h[-1].get("role") != "assistant" or ASK_BRAND_REPLY not in (h[-1].get("content") or ""):
+        return None
+    m = _BRAND_ANSWER_RE.match(message or "")
+    if not m:
+        return None
+    g = m.group(1)
+    brand = _TH_BRAND.get(g, g.upper())
     return fetch_kb_answer(sb, f"SHIPPING_WITHDRAWAL_{brand}") or _KB_MISSING_REPLY

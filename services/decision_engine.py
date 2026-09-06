@@ -135,6 +135,7 @@ from services.withdrawal_flow import (
     resolve_shipping_withdrawal_brand as _resolve_shipping_withdrawal_brand,
     purchase_withdrawal_reply as _purchase_withdrawal_reply,
     shipping_withdrawal_reply as _shipping_withdrawal_reply,
+    shipping_withdrawal_pending_brand_reply as _shipping_withdrawal_pending_brand_reply,
 )
 
 # ── Dynamic, Business-Action-driven Information Collection ────────────────
@@ -3834,6 +3835,22 @@ class DecisionEngine:
                 # operational kind, so it stays on the withdrawal path.
                 _wd_yield_to_op = _derive_operational_state(
                     None, message, interpretation=semantic) is not None
+                # CUSTOMER-CSW12-SHIPPING-WITHDRAWAL-SP-1 — a bare "SP" /
+                # "FT" answer to the immediately-preceding SP-or-FT
+                # question carries no SHIPPING_WITHDRAWAL family of its
+                # own, so complete step 2 of the source flow here. A
+                # decisive current operational intent still wins
+                # (_wd_yield_to_op); a topic switch does not match the
+                # brand-token shape and falls through untouched.
+                _wd_pending_brand = _shipping_withdrawal_pending_brand_reply(
+                    self.registry._sb, history, message)
+                if _wd_pending_brand is not None and not _wd_yield_to_op:
+                    developer_trace["selection_source"] = "shipping_withdrawal_kb"
+                    return self._finalize(
+                        reply=_build_response(text=_wd_pending_brand),
+                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
                 if semantic.intent_family == "PURCHASE_WITHDRAWAL" and not _wd_yield_to_op:
                     developer_trace["selection_source"] = "purchase_withdrawal_kb"
                     return self._finalize(
