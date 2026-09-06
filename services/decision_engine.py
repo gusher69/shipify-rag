@@ -572,7 +572,7 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
         # a few lines below, for the same reason.
         is_address_component = bool((param.get("field_metadata") or {}).get("address_component"))
         param_candidates = group_candidates if is_address_component else candidates
-        if is_address_component:
+        if is_address_component and action.get("action_key") == "requestshippingaddresschange":
             # CUSTOMER-CSW9-REAL-3 — a free-text address-component slot
             # (ReceiverName / Address / …, validation_type "non_empty")
             # must NEVER accept a token that structurally IS this action's
@@ -584,6 +584,10 @@ def _bind_message_to_action(action: Dict, registry, collected: Dict, message: st
             # ReceiverName. If ShipmentCode is still missing the token
             # belongs there (the pattern-first sort already tried it);
             # if it is filled, this token is a duplicate, never a name.
+            # PHASE-1-STABILIZATION-ISOLATE-CSW9-1 — action-key-scoped:
+            # generic free-text binding for every other action is
+            # untouched (no other enabled action has address-component
+            # params today, so this is behavior-preserving).
             _rec_id_patterns = [
                 p.get("validation_pattern") for p in (action.get("parameters") or [])
                 if (p.get("name") or "").strip().lower() in ("shipmentcode", "ordercode", "tracking")
@@ -741,10 +745,9 @@ def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Op
     every genuine continuation still reuses the record id it collected."""
     working = dict(collected)
     askable = _askable_parameters_by_name(action)
-    # CUSTOMER-CSW9-REAL-2 — a confirmation-gated action performs a real
-    # side effect (here: submitting an address change for a specific
-    # shipment to CS). Its RECORD-identifier target (ShipmentCode /
-    # OrderCode / Tracking) must be given explicitly FOR THIS operation,
+    # CUSTOMER-CSW9-REAL-2 — requestshippingaddresschange submits an
+    # address change for a SPECIFIC shipment to CS. Its RECORD-identifier
+    # target (ShipmentCode) must be given explicitly FOR THIS operation,
     # never inherited from generic Identifier Memory ("the last shipment
     # the customer asked about"). Real LINE: last_shipment_code kept
     # pre-filling ShipmentCode, so (a) the customer's own bill answer to
@@ -752,11 +755,15 @@ def _apply_identifier_memory(action: Dict, collected: Dict, customer_context: Op
     # loosely-validated ReceiverName slot, and (b) a fresh "อีกบิล"
     # request silently re-targeted the previous shipment. CustCode (the
     # customer's own identity, never account-SCOPED here) still fills.
-    _write_action = _requires_confirmation(action)
+    # PHASE-1-STABILIZATION-ISOLATE-CSW9-1 — action-key-scoped (was
+    # `_requires_confirmation(action)`, a whole class): every other
+    # Business Action keeps its exact pre-CSW9 Identifier-Memory
+    # behavior.
+    _csw9 = (action.get("action_key") == "requestshippingaddresschange")
     for profile_field, param_name in IDENTIFIER_MEMORY_FIELDS:
         if param_name in working or param_name not in askable:
             continue
-        if profile_field in _ACCOUNT_SCOPED_MEMORY_FIELDS and (not is_continuation or _write_action):
+        if profile_field in _ACCOUNT_SCOPED_MEMORY_FIELDS and (not is_continuation or _csw9):
             continue
         remembered = (customer_context or {}).get(profile_field)
         if remembered:
@@ -1017,6 +1024,12 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     identity_seed: Dict[str, str] = _apply_identifier_memory(
         action, {}, customer_context, is_continuation=is_continuation, history=history)
     collected: Dict[str, str] = dict(identity_seed)
+    # PHASE-1-STABILIZATION-ISOLATE-CSW9-1 — the confirmation-gate-aware
+    # completed-cycle resets below (CUSTOMER-CSW9-REAL-1) are scoped to
+    # requestshippingaddresschange ONLY; every other confirmation-gated
+    # Business Action keeps its exact pre-CSW9 replay behavior (the
+    # unchanged `not _requires_confirmation(action)` guard).
+    _csw9 = (action.get("action_key") == "requestshippingaddresschange")
     for i, turn in enumerate(history):
         if turn.get("role") != "user":
             continue
@@ -1044,7 +1057,7 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
         # ends at this user turn, so _confirmation_gate_open() reads the
         # assistant turn right before it.
         _cycle_closed = ((not _requires_confirmation(action)
-                          or not _confirmation_gate_open(history[:i + 1]))
+                          or (_csw9 and not _confirmation_gate_open(history[:i + 1])))
                          and not _next_expected_parameter(action, registry, collected)
                          and bool(collected) and collected != identity_seed)
         if i == 0 or _cycle_closed:
@@ -1147,7 +1160,8 @@ def _replay_business_action_collection(action: Dict, registry, history: List[Dic
     # CLOSED (executed) cycle at the window tail, so its operation fields
     # must not carry into the fresh request either.
     if (not is_continuation
-            and (not _requires_confirmation(action) or not _confirmation_gate_open(history))
+            and (not _requires_confirmation(action)
+                 or (_csw9 and not _confirmation_gate_open(history)))
             and collected != identity_seed
             and not _next_expected_parameter(action, registry, collected)):
         return dict(identity_seed)
@@ -5270,11 +5284,15 @@ class DecisionEngine:
             # value, never execute one. Root cause is fixed above
             # (_apply_identifier_memory no longer pre-seeds a write
             # action's record id); this is the belt-and-braces guard.
+            # PHASE-1-STABILIZATION-ISOLATE-CSW9-1 — action-key-scoped;
+            # the confirmation engine is not broadened for any other
+            # confirmation-gated action.
             _id_vals = {v for k, v in (collected_slots or {}).items()
-                        if k.lower() in ("shipmentcode", "ordercode", "tracking") and v}
+                        if k.lower() in ("shipmentcode", "ordercode", "tracking") and v} \
+                if selected.get("action_key") == "requestshippingaddresschange" else set()
             _corrupt = [p["name"] for p in (selected.get("parameters") or [])
                         if (p.get("field_metadata") or {}).get("address_component")
-                        and collected_slots.get(p["name"]) in _id_vals]
+                        and collected_slots.get(p["name"]) in _id_vals] if _id_vals else []
             if _corrupt:
                 for _c in _corrupt:
                     collected_slots.pop(_c, None)
