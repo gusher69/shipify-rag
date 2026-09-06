@@ -85,6 +85,16 @@ class TestLineUsersExportRoute(unittest.TestCase):
         # …placed before the Export Report button in source order
         self.assertLess(html.index('id="lu-search-btn"'), html.index('id="lu-export"'))
 
+    def test_export_button_has_loading_state(self):
+        login_as_test_admin(self.client)
+        html = self.client.get("/admin/line-users").text
+        # export fetches a blob and shows a spinner + disabled button while
+        # the (row-by-row) report is being built
+        self.assertIn("async function luExport()", html)
+        self.assertIn("lu-spin", html)
+        self.assertIn("กำลังสร้างรายงาน", html)
+        self.assertIn("btn.disabled = true", html)
+
 
 if __name__ == "__main__":
     unittest.main()

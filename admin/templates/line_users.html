@@ -29,6 +29,12 @@
 .lu-view{font-size:11.5px;padding:5px 11px;border:1px solid rgba(27,79,155,.4);border-radius:7px;background:rgba(27,79,155,.15);
   color:#e8edf5;cursor:pointer}
 .lu-view:hover{background:rgba(27,79,155,.3)}
+.lu-view:disabled{opacity:.6;cursor:progress}
+.lu-view:disabled:hover{background:rgba(27,79,155,.15)}
+.lu-spin{display:inline-block;width:11px;height:11px;margin-right:6px;vertical-align:-1px;
+  border:2px solid rgba(232,237,245,.35);border-top-color:#e8edf5;border-radius:50%;
+  animation:lu-spin .7s linear infinite}
+@keyframes lu-spin{to{transform:rotate(360deg)}}
 .lu-empty{padding:26px;text-align:center;color:rgba(232,237,245,.4);font-size:12.5px}
 
 .lu-ov{display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,14,30,.9);align-items:flex-start;
@@ -231,18 +237,39 @@ async function luLoad(){
 }
 
 // "Export Report" — download an .xlsx of the SAME rows the table shows,
-// with the SAME filters. No new query path: hits the export endpoint with
-// the current toolbar values; the browser downloads it (Content-Disposition
-// attachment) without leaving the page.
-function luExport(){
+// with the SAME filters. The report is built row-by-row on the server
+// (one detail lookup per user) so it can take a few seconds; fetch it as
+// a blob and keep the button in a loading state until the file is ready,
+// then trigger the download without leaving the page.
+async function luExport(){
+  const btn = document.getElementById('lu-export');
+  if(btn.dataset.busy === '1') return;            // ignore repeat clicks while building
   const q = encodeURIComponent(document.getElementById('lu-search').value.trim());
   const st = document.getElementById('lu-status').value;
   const lead = document.getElementById('lu-lead').value;
   const sent = document.getElementById('lu-sentiment').value;
   const url = `/admin/api/line-users/export.xlsx?search=${q}&status=${st}&lead=${lead}&sentiment=${sent}`;
-  const a = document.createElement('a');
-  a.href = url; a.rel = 'noopener';
-  document.body.appendChild(a); a.click(); a.remove();
+
+  const label = btn.innerHTML;
+  btn.dataset.busy = '1'; btn.disabled = true;
+  btn.innerHTML = '<span class="lu-spin"></span>กำลังสร้างรายงาน…';
+  try{
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    let fname = 'line-user-report.xlsx';
+    const m = (r.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
+    if(m) fname = m[1];
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl; a.download = fname; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+  }catch(e){
+    alert('สร้างรายงานไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+  }finally{
+    btn.dataset.busy = ''; btn.disabled = false; btn.innerHTML = label;
+  }
 }
 
 function luSentBadge(sentiment){
