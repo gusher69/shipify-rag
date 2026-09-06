@@ -76,6 +76,15 @@ class TestLineUsersExportRoute(unittest.TestCase):
         for banned in ("secret", "password", "token", "credential", "apikey", "api_key"):
             self.assertNotIn(banned, header)
 
+    def test_page_has_search_button_and_export_button(self):
+        login_as_test_admin(self.client)
+        html = self.client.get("/admin/line-users").text
+        # explicit "ค้นหา" button that re-runs the same filtered load…
+        self.assertIn('id="lu-search-btn"', html)
+        self.assertIn('onclick="luLoad()"', html)
+        # …placed before the Export Report button in source order
+        self.assertLess(html.index('id="lu-search-btn"'), html.index('id="lu-export"'))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -106,7 +106,7 @@
 <div class="lu-panel">
   <div class="lu-toolbar">
     <input class="lu-input" id="lu-search" type="text" placeholder="ค้นหาชื่อ หรือ CustCode"
-           oninput="luDebouncedLoad()">
+           oninput="luDebouncedLoad()" onkeydown="if(event.key==='Enter')luLoad()">
     <select class="lu-select" id="lu-status" onchange="luLoad()" aria-label="สถานะบัญชี">
       <option value="all">สถานะบัญชี: ทั้งหมด</option>
       <option value="verified">ยืนยันแล้ว</option>
@@ -123,6 +123,10 @@
       <option value="NORMAL">NORMAL</option>
       <option value="NEGATIVE">NEGATIVE</option>
     </select>
+    <button class="lu-view" id="lu-search-btn" onclick="luLoad()"
+            style="align-self:center" title="ค้นหาตามชื่อ/CustCode และตัวกรองที่เลือก">
+      ค้นหา
+    </button>
     <span class="lu-muted" id="lu-count" style="font-size:11.5px;align-self:center"></span>
     <button class="lu-view" id="lu-export" onclick="luExport()"
             style="margin-left:auto;align-self:center" title="ดาวน์โหลดรายงาน .xlsx ตามตัวกรองปัจจุบัน">
