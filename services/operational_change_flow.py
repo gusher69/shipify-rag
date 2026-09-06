@@ -113,11 +113,23 @@ _KINDS = [
     ("duplicate_bill", None,
      re.compile(r"บิลซ้ำ|บิลซ้ำกัน|มีบิลซ้ำ|บิลออกมาซ้ำ|บิลตีซ้ำ|บิลเบิ้ล"),
      "แอดมินเช็คบิลซ้ำและลบบิลให้นะคะ รบกวนขอเลขแทรคจีนหน่อยนะคะ", "เลขแทรคจีน"),
+    # CUSTOMER-CSW15-VERIFY-CHINA-WAREHOUSE-ADDRESS-1 — CUS-S15's
+    # api_input_hint is "customer_warehouse_address + customer_id".
+    # customer_id comes from the verified LINE/customer binding (the
+    # webhook passes it in customer_context and it rides the Human-CS
+    # handoff payload), so a verified customer is only asked for the ONE
+    # thing they must supply: the China-warehouse address they entered.
+    # The ack no longer asks for รหัสลูกค้า manually.
     ("verify_warehouse_address",
      re.compile(r"ถูกไหม|ถูกมั้ย|ถูกต้อง|ถูกรึเปล่า|ถูกหรือเปล่า|เช็ค|ตรวจสอบ|\bcheck\b", re.IGNORECASE),
-     re.compile(r"(?:ที่อยู่)?โกดังจีน"),
-     "แอดมินช่วยตรวจสอบความถูกต้องให้ค่ะ รบกวนแจ้งที่อยู่โกดังจีนที่กรอกไว้ในระบบและรหัสลูกค้ามาให้ตรวจสอบด้วยนะคะ",
-     "ที่อยู่โกดังจีนที่กรอกไว้ และรหัสลูกค้า"),
+     # "โกดังจีน" OR a bare "โกดัง...อีก" (a fresh-episode follow-up —
+     # "เช็คที่อยู่โกดังอีกอันให้หน่อย" — never re-names "จีน"). The
+     # verify VERB above is still REQUIRED, so a bare public
+     # warehouse-address FAQ ("ขอที่อยู่โกดัง", no verify verb) is
+     # untouched; "โกดังไทย" without "อีก" stays out too.
+     re.compile(r"(?:ที่อยู่)?โกดัง(?:จีน|.{0,4}อีก)"),
+     "แอดมินช่วยตรวจสอบความถูกต้องให้ค่ะ รบกวนส่งที่อยู่โกดังจีนที่กรอกไว้ในระบบมาให้ตรวจสอบหน่อยนะคะ",
+     "ที่อยู่โกดังจีนที่กรอกไว้"),
     ("topup_not_credited", None,
      re.compile(r"ยอดเงินไม่เข้า|ยอดไม่เข้า|เงิน(?:ที่เติม)?[^\n]{0,10}(?:ยัง)?ไม่เข้า"
                 r"|เติมเงินแล้ว[^\n]{0,16}(?:ไม่เข้า|ยังไม่เข้า|รอตรวจสอบ|ยอดยังไม่ขึ้น)"),
@@ -384,6 +396,14 @@ class OperationalState:
 
 _CN_TRACKING_RE = re.compile(r"(?<!\d)(\d{9,16})(?!\d)")
 
+# CUSTOMER-CSW15-VERIFY-CHINA-WAREHOUSE-ADDRESS-1 — "this message carries
+# a pasted address, not just a question": a CJK character (the China-
+# warehouse address itself), a 5+ digit run (phone / postal code), a
+# newline (multi-line address block), or a Thai address token. Used ONLY
+# to decide whether a trigger-turn message ALSO supplied the address.
+_VERIFY_ADDR_INLINE_RE = re.compile(
+    r"[一-鿿]|\d{5,}|\n|หมู่|ซอย|ตำบล|แขวง|อำเภอ|เขต|จังหวัด|รหัสไปรษณีย์")
+
 
 def extract_operational_fields(message: str, into: OperationalState) -> OperationalState:
     t = message or ""
@@ -470,8 +490,23 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
     # required input once the customer replies with something substantive.
     if into.kind in ("verify_warehouse_address", "topup_not_credited") and not into.free_text:
         stripped = t.strip()
-        if len(stripped) >= 6 and not classify_operational_request(stripped):
-            into.free_text = stripped[:400]
+        if len(stripped) >= 6:
+            _c = classify_operational_request(stripped)
+            if not _c:
+                into.free_text = stripped[:400]
+            elif (into.kind == "verify_warehouse_address"
+                  and _c.get("kind") == into.kind
+                  and _VERIFY_ADDR_INLINE_RE.search(stripped)):
+                # CUSTOMER-CSW15-VERIFY-CHINA-WAREHOUSE-ADDRESS-1 — the
+                # SAME message carries the check request AND the pasted
+                # address ("ใส่ที่อยู่โกดังจีนแบบนี้ถูกไหม <address>"): the
+                # whole thing still self-classifies as verify_warehouse_
+                # address, so the plain `not _c` gate above would miss it
+                # and re-ask. Capture it now when an address-strength
+                # signal is present (CJK chars / a 5+ digit run / a
+                # newline / a Thai address token) — NOT a general address
+                # parser, just "this is more than a bare question".
+                into.free_text = stripped[:400]
     return into
 
 
@@ -734,6 +769,16 @@ _KIND_HANDOFF_REPLY = {
     # "แทรคจีน xxx ลบบิลซ้ำทั้งหมดให้เรียบร้อยค่ะ"). Never that wording here.
     "duplicate_bill": (
         "รับเรื่องแจ้งบิลซ้ำแล้วค่ะ เดี๋ยวแอดมินตรวจสอบแทรคจีนกับบิลซ้ำในระบบและดำเนินการลบบิลซ้ำให้นะคะ"),
+    # CUSTOMER-CSW15-VERIFY-CHINA-WAREHOUSE-ADDRESS-1 — CUS-S15 is
+    # "Private ERP" in the source, but there is no wired lookup/compare
+    # action for a customer's entered China-warehouse address (S15 is
+    # listed in this module's docstring as a NO-executable-action case).
+    # Staff check the submitted address against the system and reply with
+    # the source's stage-2 template. So this is an honest "we received
+    # your address, admin will verify and report back" — NEVER a
+    # fabricated "ตรวจสอบแล้วถูกต้อง".
+    "verify_warehouse_address": (
+        "รับข้อมูลที่อยู่โกดังจีนแล้วค่ะ เดี๋ยวแอดมินตรวจสอบความถูกต้องแล้วแจ้งผลให้นะคะ"),
     # CUSTOMER-CSW4-VAT-1 — CUS-S04 is a "Write API — เพิ่ม VAT flag"
     # in the source, but no such action is wired (same as CSW3), and
     # the source's own stage-2 text is informational guidance with a
