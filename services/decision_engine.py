@@ -1806,7 +1806,8 @@ def _shipment_mapped_value(full_mapped, response_mapping, suffix):
     return (full_mapped or {}).get(label)
 
 
-def _compose_shipment_followup_reply(message: str, full_mapped, response_mapping) -> Optional[str]:
+def _compose_shipment_followup_reply(message: str, full_mapped, response_mapping,
+                                     recent_user_turns=None) -> Optional[str]:
     """A direct, natural answer to the customer's ACTUAL shipment
     follow-up question (ETA / warehouse arrival / current stage), or
     None when the message doesn't match one of those shapes — the
@@ -1818,6 +1819,24 @@ def _compose_shipment_followup_reply(message: str, full_mapped, response_mapping
         return None
     status = (_shipment_mapped_value(full_mapped, response_mapping, "status") or "").strip()
     t = message or ""
+
+    # CUSTOMER-G12-WAREHOUSE-ARRIVAL-RECEIVED-1 — the fresh-query shape
+    # ("สินค้าถึงโกดังหรือยัง" -> ask for the bill -> bare "FT..." reply)
+    # splits the question from the turn that actually executes the ERP
+    # read: the bare-bill turn carries no follow-up-question shape, so
+    # recover it from the most recent user turn that DID (LATEST wins).
+    # ONLY the warehouse / ETA / current-stage shapes are recovered here
+    # (a Thai-tracking-output ask has its OWN dedicated recent-turn
+    # handler at the call site, which also keeps the status line). Uses
+    # ONLY the existing canonical status semantics — no new taxonomy.
+    _shape_res = (_ETA_QUESTION_RE, _WAREHOUSE_QUESTION_RE, _CURRENT_STATUS_QUESTION_RE)
+    _cur_has_shape = (any(rx.search(t) for rx in _shape_res)
+                      or (_PSI_THAI_TRACKING_OUTPUT_RE.search(t) and "จีน" not in t))
+    if not _cur_has_shape:
+        for _prev in (recent_user_turns or []):
+            if any(rx.search(_prev) for rx in _shape_res):
+                t = _prev
+                break
 
     if _ETA_QUESTION_RE.search(t):
         if status:
@@ -5672,7 +5691,10 @@ class DecisionEngine:
                     and isinstance(full_mapped, dict) and full_mapped
                     and any(v not in (None, "", [], {}) for v in full_mapped.values())):
                 _direct = _compose_shipment_followup_reply(
-                    message, full_mapped, selected.get("response_mapping"))
+                    message, full_mapped, selected.get("response_mapping"),
+                    recent_user_turns=[
+                        h.get("content") or "" for h in reversed(history or [])
+                        if h.get("role") == "user"][:4])
                 if _direct:
                     developer_trace["shipment_followup_direct_answer"] = True
                     reply = _build_response(text=_direct)
