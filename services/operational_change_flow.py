@@ -160,6 +160,22 @@ _KINDS = [
      re.compile(r"รวมบิล.{0,6}เหมารถ|เหมารถ.{0,6}รวมบิล|รวมบิลขนส่งเหมารถ"),
      "ได้ค่ะ รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถมาได้เลยค่ะ หากมีหลายบิลสามารถส่งมาพร้อมกันได้เลยนะคะ",
      "เลขบิลขนส่งที่ต้องการรวม"),
+    # CUSTOMER-CSW10-REPACK-1 — CUS-S10 (Ai.xlsx sheet
+    # '2.tongchecknairabop' row 10 / CSW10): repack / consolidate-repack
+    # at the Thailand warehouse. Source: user "รีเเพ็คค่ะ",
+    # api_input_hint "shipment_bill_no_list" (a LIST — multi-bill IS
+    # confirmed), category "Operational/Human CS", expected_route
+    # HUMAN_CS. No wired write action exists (staff at the TH warehouse
+    # physically repack and re-quote shipping), so this is a bill-list
+    # collect + Human-CS handoff, the SAME multi-bill shape as
+    # combine_bills_charter. Self-describing (verb_re=None): "รีแพ็ค" /
+    # "รีเเพ็ค" (the doubled-เ typo in the real source) / "repack" is a
+    # distinctive compound needing no separate change verb.
+    ("repack", None,
+     re.compile(r"รี\s*(?:แ|เเ)\s*พ็?ค|\brepack", re.IGNORECASE),
+     "รับเรื่องขอรีแพ็คค่ะ แอดมินรบกวนขอเลขบิลขนส่ง (FT/FE/SA/SP) ที่ต้องการรีแพ็คมาได้เลยค่ะ "
+     "หากมีหลายบิลส่งมาพร้อมกันได้เลยนะคะ",
+     "เลขบิลขนส่งที่ต้องการรีแพ็ค"),
 ]
 
 # a delivery-ADDRESS change is a different case (CUS-S09) with its own
@@ -175,7 +191,8 @@ _ACK_MARKER_RE = re.compile(
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า"
     r"|รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถ"
     r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นทางรถหรือทางเรือคะ"
-    r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นรับเองหรือส่งเอกชนคะ")
+    r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นรับเองหรือส่งเอกชนคะ"
+    r"|ที่ต้องการรีแพ็ค")
 
 _FRAME_LOOKBACK = 10
 
@@ -216,7 +233,8 @@ _WRONG_BILL_DOMAIN_PREFIX = (
 # is a structurally valid identifier but the wrong domain and must not
 # satisfy the slot. combine_bills_charter keeps its own multi-bill
 # branch and is out of scope here.
-_SHIPMENT_BILL_KINDS = frozenset({"change_carrier_or_selfpickup"})
+# CUSTOMER-CSW10-REPACK-1 — repack also needs a SHIPMENT bill list.
+_SHIPMENT_BILL_KINDS = frozenset({"change_carrier_or_selfpickup", "repack"})
 _WRONG_SHIPMENT_BILL_PREFIX = (
     "เลขที่แจ้งมาเป็นเลขบิลสั่งซื้อค่ะ รายการนี้ต้องใช้เลขบิลขนส่ง (FT/FE/SA/SP) นะคะ")
 _PHONE_RE = re.compile(r"(?<!\d)(0\d[\d\- ]{7,10}\d)(?!\d)")
@@ -369,7 +387,7 @@ _CN_TRACKING_RE = re.compile(r"(?<!\d)(\d{9,16})(?!\d)")
 
 def extract_operational_fields(message: str, into: OperationalState) -> OperationalState:
     t = message or ""
-    if into.kind == "combine_bills_charter":
+    if into.kind in ("combine_bills_charter", "repack"):
         # multiple bills may arrive in one message ("FT001 FT002") or
         # accumulate across turns ("FT001" then later "FT002 ด้วยค่ะ") —
         # every genuinely NEW bill token is appended, never replacing an
@@ -377,8 +395,19 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
         for tok in _BILL_TOKEN_RE.findall(t):
             if _valid_id(tok) and not tok.isdigit():
                 tok_u = tok.upper()
+                # CUSTOMER-CSW10-REPACK-1 — repack needs a SHIPMENT bill;
+                # a purchase bill (PO/PA/POS/PE) is the wrong domain.
+                # Flag it (so operational_ask_prompt explains + re-asks)
+                # only while nothing valid has been collected yet; never
+                # append it. combine_bills_charter is unaffected.
+                if into.kind == "repack" and is_purchase_bill(tok_u):
+                    if not into.bills:
+                        into.wrong_domain_bill = tok_u
+                    continue
                 if tok_u not in into.bills:
                     into.bills.append(tok_u)
+                    if into.kind == "repack":
+                        into.wrong_domain_bill = None
     elif not into.bill:
         m = _BILL_TOKEN_RE.search(t)
         if m and _valid_id(m.group(1)) and not m.group(1).isdigit():
@@ -585,6 +614,7 @@ _KIND_TH = {
     "missing_item_claim": "แจ้งได้รับสินค้าไม่ครบ/เสียหาย ขอเคลม",
     "custom_production": "ขอสั่งผลิตสินค้าตามสเปค / สกรีนโลโก้",
     "combine_bills_charter": "ขอรวมบิลขนส่งที่เข้าไทยเป็นเหมารถ",
+    "repack": "ขอรีแพ็ค / รวมแพ็คสินค้าใหม่ที่โกดังไทย",
 }
 
 
@@ -595,7 +625,7 @@ def operational_ask_prompt(state: OperationalState) -> str:
     # what derive_operational_state's _ACK_MARKER_RE recovery keys on, so
     # a standalone prompt would silently break the still-open
     # collection). Checked before every other prompt shape.
-    if state.wrong_domain_bill and not state.bill:
+    if state.wrong_domain_bill and not state.bill and not state.bills:
         # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — the explanation points
         # the customer at the domain THIS kind needs: purchase bill for
         # _PURCHASE_BILL_KINDS, shipment bill for _SHIPMENT_BILL_KINDS.
@@ -630,7 +660,9 @@ def operational_ask_prompt(state: OperationalState) -> str:
 def operational_handoff_summary(state: OperationalState) -> str:
     parts = [_KIND_TH.get(state.kind, state.kind)]
     if state.bills:
-        parts.append("เลขบิลขนส่งที่ต้องการรวม: " + ", ".join(state.bills))
+        _blabel = ("เลขบิลขนส่งที่ต้องการรีแพ็ค" if state.kind == "repack"
+                   else "เลขบิลขนส่งที่ต้องการรวม")
+        parts.append(f"{_blabel}: " + ", ".join(state.bills))
     if state.bill:
         parts.append(f"เลขบิล/แทรค: {state.bill}")
     if state.shipping_method:
@@ -667,6 +699,15 @@ OPERATIONAL_HANDOFF_REPLY = "รับเรื่องคำขอดำเน
 _KIND_HANDOFF_REPLY = {
     "combine_bills_charter": (
         "รับข้อมูลบิลที่ต้องการรวมแล้วค่ะ เดี๋ยวแอดมิน/ทีมขนส่งตรวจสอบและดำเนินการรวมบิลเหมารถให้นะคะ"),
+    # CUSTOMER-CSW10-REPACK-1 — CUS-S10 is Human-CS in the source (staff
+    # at the TH warehouse physically repack and re-quote shipping; no
+    # wired write action, and no way for this platform to learn the
+    # result). Stage B of the journey (A. ask bills, B. list received ->
+    # forward to Human CS/warehouse — THIS reply, C. real staff-confirmed
+    # result only -> the source's completion text "รวมรีเเพ็คเรียบร้อยค่ะ
+    # ...ค่าขนส่งรวม ..บาท"). Never that completion wording here.
+    "repack": (
+        "รับเรื่องขอรีแพ็คแล้วค่ะ เดี๋ยวแอดมิน/ทีมโกดังไทยตรวจสอบและดำเนินการรีแพ็คให้นะคะ"),
     # CUSTOMER-CSW4-VAT-1 — CUS-S04 is a "Write API — เพิ่ม VAT flag"
     # in the source, but no such action is wired (same as CSW3), and
     # the source's own stage-2 text is informational guidance with a
