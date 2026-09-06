@@ -47,6 +47,15 @@ _VAT_VERB_RE = re.compile(
     r"เปลี่ยน|แก้ไข|แก้|ปรับ|ลืมเลือก|ลืม|ติ๊ก|เลือก|เพิ่ม|ใส่|เอา|ขอ|อยาก|ต้องการ",
     re.IGNORECASE)
 
+# CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — change_carrier_or_selfpickup's
+# own verb/context marker. Broader than _CHANGE_VERB_RE ("ขอ", "เอาเป็น",
+# "บิลนี้") to catch CUS-S11's real openers, but kept SEPARATE so that
+# widening cannot loosen modify_bill_qty / change_shipping_method which
+# share _CHANGE_VERB_RE. Still REQUIRED alongside the carrier object, so
+# a bare self-pickup FAQ ("รับสินค้าเองได้ไหมคะ") stays RAG.
+_CARRIER_VERB_RE = re.compile(
+    r"เปลี่ยน|แก้ไข|แก้|ปรับ|ขอ|เอาเป็น|บิลนี้|ต้องการ|อยาก", re.IGNORECASE)
+
 _KINDS = [
     # kind, verb_re (or None), object_re, ack, input_label
     # CUSTOMER-CSW2-QUANTITY-CHANGE-1 — "จำนวนสินค้า" alone (no "บิล"
@@ -72,8 +81,22 @@ _KINDS = [
      re.compile(r"(?:จัดส่ง|ส่ง|ขนส่ง)[^\n]{0,6}(?:ทางรถ|ทางเรือ)|เป็น(?:ทาง)?(?:รถ|เรือ)|วิธี(?:ส่ง|จัดส่ง|ขนส่ง)"
                 r"|ทาง(?:รถ|เรือ)[^\n]{0,6}ได้ไหม"),
      "สามารถเปลี่ยนได้ค่ะ แอดมินรบกวนขอเลขบิลหน่อยนะคะ", "เลขบิล"),
-    ("change_carrier_or_selfpickup", _CHANGE_VERB_RE,
-     re.compile(r"เป็นรับเอง|มารับเอง|รับสินค้าเอง|ส่งเอกชน|เป็นเอกชน|ขนส่งเอกชน|ส่ง\s*flash|เป็น\s*flash", re.IGNORECASE),
+    # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — its own verb regex
+    # (_CARRIER_VERB_RE), NOT the shared _CHANGE_VERB_RE: CUS-S11's
+    # real-line openers ("บิลนี้ขอรับเอง", "ขอให้ส่งเอกชน", "บิลนี้ขอ
+    # ส่งเอกชนค่ะ", "ขอไปรับเอง") carry only a plain "ขอ" / "บิลนี้",
+    # which _CHANGE_VERB_RE ("เปลี่ยน/แก้/ปรับ...") never covers, so
+    # they used to fall through to RAG. A verb/context marker is still
+    # REQUIRED though: a bare "รับสินค้าเองได้ไหมคะ" is a self-pickup
+    # FAQ ("is self-pickup possible?"), not a request to change THIS
+    # bill — only the change/ask context ("เปลี่ยน", "ขอ", "บิลนี้")
+    # makes it operational. The object words themselves ("รับเอง" /
+    # "ส่งเอกชน" / "เอกชน" / "flash" / "แฟลช") are unique to a
+    # carrier/self-pickup choice — no sibling kind mentions them.
+    ("change_carrier_or_selfpickup", _CARRIER_VERB_RE,
+     re.compile(r"รับเอง|มารับเอง|มารับสินค้า|รับสินค้าเอง|ไปรับเอง|รับของเอง"
+                r"|ส่งเอกชน|เป็นเอกชน|ขนส่งเอกชน|ขนส่งเป็นเอกชน|ส่ง\s*flash|เป็น\s*flash"
+                r"|\bflash\b|แฟลช|self[\s-]*pick", re.IGNORECASE),
      "แอดมินรบกวนขอเลขบิลขนส่งหน่อยนะคะ", "เลขบิลขนส่ง"),
     # CUSTOMER-CSW4-VAT-1 — object is now (?<![A-Za-z])vat(?![A-Za-z])
     # instead of \bvat\b: Python's \b sees a Thai letter as a word
@@ -151,7 +174,8 @@ _ACK_MARKER_RE = re.compile(
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีน"
     r"|คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า"
     r"|รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถ"
-    r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นทางรถหรือทางเรือคะ")
+    r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นทางรถหรือทางเรือคะ"
+    r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นรับเองหรือส่งเอกชนคะ")
 
 _FRAME_LOOKBACK = 10
 
@@ -185,6 +209,16 @@ def is_purchase_bill(token: str) -> bool:
 
 _WRONG_BILL_DOMAIN_PREFIX = (
     "เลขที่แจ้งมาเป็นบิลขนส่งค่ะ รายการนี้ต้องใช้เลขบิลสั่งซื้อ (PO/PA/POS/PE) นะคะ")
+
+# CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — the mirror: kinds whose
+# required bill is a SHIPMENT bill (CUS-S11's api_input_hint:
+# "shipment_bill_no ... FT,FE,SA,SP"). A purchase bill (PO/PA/POS/PE)
+# is a structurally valid identifier but the wrong domain and must not
+# satisfy the slot. combine_bills_charter keeps its own multi-bill
+# branch and is out of scope here.
+_SHIPMENT_BILL_KINDS = frozenset({"change_carrier_or_selfpickup"})
+_WRONG_SHIPMENT_BILL_PREFIX = (
+    "เลขที่แจ้งมาเป็นเลขบิลสั่งซื้อค่ะ รายการนี้ต้องใช้เลขบิลขนส่ง (FT/FE/SA/SP) นะคะ")
 _PHONE_RE = re.compile(r"(?<!\d)(0\d[\d\- ]{7,10}\d)(?!\d)")
 
 # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 — CUS-S03's own api_input_hint
@@ -221,6 +255,46 @@ def _extract_shipping_target_method(text: str) -> Optional[str]:
         return "road"
     if has_sea and not has_road:
         return "sea"
+    return None
+
+
+# CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — CUS-S11's api_input_hint is
+# "shipment_bill_no + new_carrier/type": change_carrier_or_selfpickup
+# needs BOTH a shipment bill AND a target — SELF PICKUP ("รับเอง") or
+# PRIVATE/EXTERNAL delivery ("ส่งเอกชน" / Flash). Same two-input shape
+# as change_shipping_method (CUS-S03). "เปลี่ยน...เป็น X" names the
+# decisive TARGET even when the FROM side is also mentioned
+# ("เปลี่ยนจากรับเองเป็นส่งเอกชน" -> private_delivery). A message naming
+# exactly one side with no "เป็น" marker is unambiguous ("ขอส่งเอกชน" ->
+# private_delivery); naming both without a "เป็น" marker, or neither, is
+# missing and must be asked for.
+_CARRIER_TARGET_AFTER_RE = re.compile(
+    r"เป็น\s*(?:ทาง|ส่ง|มา)?\s*(รับเอง|มารับเอง|มารับ|เอกชน|flash|แฟลช)", re.IGNORECASE)
+_CARRIER_SELF_RE = re.compile(r"รับเอง|มารับเอง|มารับสินค้า|รับสินค้าเอง|ไปรับเอง|self[\s-]*pick", re.IGNORECASE)
+_CARRIER_PRIVATE_RE = re.compile(
+    r"ส่งเอกชน|เป็นเอกชน|ขนส่งเอกชน|เอกชน|ส่ง\s*flash|เป็น\s*flash|\bflash\b|แฟลช", re.IGNORECASE)
+# a NEGATED private mention ("ไม่ต้องส่งเอกชนแล้ว ขอไปรับเอง" — an EXACT
+# CUS-S11 self-pickup opener) states what the customer NO LONGER wants,
+# not the target; it must not count as a private-delivery signal or the
+# sentence reads as naming both sides and resolves to nothing.
+_CARRIER_PRIVATE_NEG_RE = re.compile(
+    r"ไม่(?:ต้อง|เอา|ใช้|อยาก)?\s*(?:จะ)?\s*(?:ส่ง)?\s*(?:เอกชน|flash|แฟลช)", re.IGNORECASE)
+_CARRIER_TARGET_TH = {"self_pickup": "รับเอง", "private_delivery": "ส่งเอกชน"}
+_CARRIER_TARGET_ASK_PROMPT = "รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นรับเองหรือส่งเอกชนคะ"
+
+
+def _extract_carrier_target(text: str) -> Optional[str]:
+    t = text or ""
+    m = _CARRIER_TARGET_AFTER_RE.search(t)
+    if m:
+        g = m.group(1).lower()
+        return "self_pickup" if ("รับเอง" in g or "มารับ" in g) else "private_delivery"
+    has_self = bool(_CARRIER_SELF_RE.search(t))
+    has_priv = bool(_CARRIER_PRIVATE_RE.search(t)) and not _CARRIER_PRIVATE_NEG_RE.search(t)
+    if has_self and not has_priv:
+        return "self_pickup"
+    if has_priv and not has_self:
+        return "private_delivery"
     return None
 
 
@@ -262,6 +336,10 @@ class OperationalState:
     # own second required input ("road" | "sea"); every other kind
     # leaves this None and is completely unaffected.
     shipping_method: Optional[str] = None
+    # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — change_carrier_or_self
+    # pickup's own second required input ("self_pickup" | "private_
+    # delivery"); every other kind leaves this None and is unaffected.
+    carrier_target: Optional[str] = None
     # PHASE-1-PURCHASE-BILL-DOMAIN-VALIDATION-1 — set when a SHIPMENT bill
     # (FT/FE/SA/SP...) was supplied for a _PURCHASE_BILL_KINDS kind;
     # drives operational_ask_prompt to explain + re-ask, and keeps
@@ -278,6 +356,11 @@ class OperationalState:
             # the target method — the ONE kind here needing an AND,
             # not an OR, of its collected fields.
             return bool(self.bill and self.shipping_method)
+        if self.kind == "change_carrier_or_selfpickup":
+            # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — CUS-S11 likewise
+            # needs BOTH the shipment bill AND the target (self pickup /
+            # private delivery).
+            return bool(self.bill and self.carrier_target)
         return bool(self.bill or self.bills or self.free_text or self.phone)
 
 
@@ -305,6 +388,11 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
                 # wrong domain: never bind it, never hand off; flag it so
                 # operational_ask_prompt explains and re-asks.
                 into.wrong_domain_bill = _tok
+            elif into.kind in _SHIPMENT_BILL_KINDS and is_purchase_bill(_tok):
+                # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — the mirror
+                # direction: a purchase bill (PO/PA/POS/PE) is the wrong
+                # domain for a shipment-bill kind; flag, explain, re-ask.
+                into.wrong_domain_bill = _tok
             else:
                 into.bill = _tok
                 into.wrong_domain_bill = None
@@ -321,6 +409,17 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
         method = _extract_shipping_target_method(t)
         if method:
             into.shipping_method = method
+    if into.kind == "change_carrier_or_selfpickup":
+        # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — OVERWRITE (not
+        # setdefault) whenever THIS message decisively names a target, so
+        # an in-episode correction ("ขอรับเอง" -> "เปลี่ยนใจ ขอส่งเอกชน")
+        # lands on the latest one. In the accumulate-since-ack replay the
+        # turns are processed oldest-first, so the most recent decisive
+        # mention wins; a bare bill turn names no target and leaves an
+        # earlier one intact.
+        tgt = _extract_carrier_target(t)
+        if tgt:
+            into.carrier_target = tgt
     # for the verify-address / slip cases a free-text detail counts as the
     # required input once the customer replies with something substantive.
     if into.kind in ("verify_warehouse_address", "topup_not_credited") and not into.free_text:
@@ -406,6 +505,14 @@ def derive_operational_state(history: Optional[List[Dict]], current_message: str
                     _csm = next((k for k in _KINDS if k[0] == "change_shipping_method"), None)
                     if _csm:
                         open_kind = (_csm[0], _csm[3], _csm[4])
+                # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — same, for
+                # change_carrier_or_selfpickup's dynamic target-ask prompt
+                # (its static bill-ask ack IS in _KINDS and is recovered
+                # by the generic loop above).
+                elif c.strip() == _CARRIER_TARGET_ASK_PROMPT:
+                    _ccp = next((k for k in _KINDS if k[0] == "change_carrier_or_selfpickup"), None)
+                    if _ccp:
+                        open_kind = (_ccp[0], _ccp[3], _ccp[4])
         break
 
     if open_kind:
@@ -489,7 +596,15 @@ def operational_ask_prompt(state: OperationalState) -> str:
     # a standalone prompt would silently break the still-open
     # collection). Checked before every other prompt shape.
     if state.wrong_domain_bill and not state.bill:
-        return f"{_WRONG_BILL_DOMAIN_PREFIX}\n{state.ack}"
+        # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — the explanation points
+        # the customer at the domain THIS kind needs: purchase bill for
+        # _PURCHASE_BILL_KINDS, shipment bill for _SHIPMENT_BILL_KINDS.
+        _prefix = (
+            _WRONG_SHIPMENT_BILL_PREFIX
+            if state.kind in _SHIPMENT_BILL_KINDS
+            else _WRONG_BILL_DOMAIN_PREFIX
+        )
+        return f"{_prefix}\n{state.ack}"
     # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 -- once the bill is
     # already known but the target method is still missing (or vice
     # versa), re-showing state.ack in full would re-ask for the bill
@@ -502,6 +617,13 @@ def operational_ask_prompt(state: OperationalState) -> str:
             return _SHIPPING_METHOD_ASK_PROMPT
         if state.shipping_method and not state.bill:
             return _SHIPPING_BILL_ONLY_ASK_PROMPT
+    if state.kind == "change_carrier_or_selfpickup":
+        # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — ask ONLY for whatever
+        # is still missing. state.ack ("แอดมินรบกวนขอเลขบิลขนส่งหน่อยนะคะ")
+        # already asks for the bill, so it covers both "neither known"
+        # and "target known, bill missing".
+        if state.bill and not state.carrier_target:
+            return _CARRIER_TARGET_ASK_PROMPT
     return state.ack
 
 
@@ -513,6 +635,8 @@ def operational_handoff_summary(state: OperationalState) -> str:
         parts.append(f"เลขบิล/แทรค: {state.bill}")
     if state.shipping_method:
         parts.append(f"วิธีขนส่งที่ต้องการเปลี่ยนเป็น: {_SHIPPING_METHOD_TH[state.shipping_method]}")
+    if state.carrier_target:
+        parts.append(f"ขนส่งที่ต้องการเปลี่ยนเป็น: {_CARRIER_TARGET_TH[state.carrier_target]}")
     if state.phone:
         parts.append(f"เบอร์: {state.phone}")
     if state.free_text:
@@ -570,6 +694,19 @@ def operational_handoff_reply(state: OperationalState) -> str:
         return (
             f"รับเรื่องขอเปลี่ยนวิธีขนส่งเป็น{_SHIPPING_METHOD_TH[state.shipping_method]}แล้วค่ะ "
             "เดี๋ยวแอดมินตรวจสอบและดำเนินการเปลี่ยนให้นะคะ")
+    # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — CUS-S11 is a "Write API —
+    # เปลี่ยนขนส่ง" in the source, but no such write action is wired
+    # (live registry audit: only searchdatashipment / searchdata
+    # shipmentlist / requestshippingaddresschange exist). So it stays
+    # Human-CS-only, exactly like change_shipping_method: an honest
+    # "request received, admin/logistics will verify & process" reply
+    # that NAMES the target — never the source's literal completion
+    # wording ("...ให้เรียบร้อยค่ะ"), reserved for a real staff-confirmed
+    # result this platform cannot detect automatically.
+    if state.kind == "change_carrier_or_selfpickup" and state.carrier_target:
+        return (
+            f"รับเรื่องขอเปลี่ยนขนส่งเป็น{_CARRIER_TARGET_TH[state.carrier_target]}แล้วค่ะ "
+            "เดี๋ยวแอดมิน/ทีมขนส่งตรวจสอบและดำเนินการเปลี่ยนให้นะคะ")
     return _KIND_HANDOFF_REPLY.get(state.kind, OPERATIONAL_HANDOFF_REPLY)
 
 
@@ -585,4 +722,5 @@ def operational_handoff_reply(state: OperationalState) -> str:
 _HANDOFF_REPLY_RE = re.compile(
     re.escape(OPERATIONAL_HANDOFF_REPLY) + "|"
     + "|".join(re.escape(v) for v in _KIND_HANDOFF_REPLY.values())
-    + "|รับเรื่องขอเปลี่ยนวิธีขนส่งเป็น")
+    + "|รับเรื่องขอเปลี่ยนวิธีขนส่งเป็น"
+    + "|รับเรื่องขอเปลี่ยนขนส่งเป็น")
