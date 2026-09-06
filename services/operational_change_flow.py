@@ -156,6 +156,35 @@ _ACK_MARKER_RE = re.compile(
 _FRAME_LOOKBACK = 10
 
 _BILL_TOKEN_RE = re.compile(r"\b([A-Za-z]{2,4}\d{4,})\b")
+
+# PHASE-1-PURCHASE-BILL-DOMAIN-VALIDATION-1 — kinds whose required bill
+# is a PURCHASE ORDER (each one's own customer source template reads
+# "เลขบิลสั่งซื้อ PO,PA,POS,PE"). A shipment bill (FT/FE/SA/SP...) is a
+# structurally valid identifier but the WRONG domain for these and must
+# never satisfy the slot. Kinds that genuinely want a SHIPMENT bill
+# (change_carrier_or_selfpickup / combine_bills_charter) and duplicate_
+# bill (a China tracking number) are deliberately NOT listed and are
+# completely unaffected — FT/FE/SA/SP stays valid for them.
+_PURCHASE_BILL_KINDS = frozenset({
+    "modify_bill_qty", "change_shipping_method", "add_vat",
+    "missing_item_claim", "custom_production",
+})
+_PURCHASE_BILL_PREFIX_RE = re.compile(r"^(?:PO|PA|POS|PE)\d", re.IGNORECASE)
+_SHIPMENT_BILL_PREFIX_RE = re.compile(r"^(?:FT|FE|SA|SP)\d", re.IGNORECASE)
+
+
+def is_shipment_bill(token: str) -> bool:
+    """True for an FT/FE/SA/SP-prefixed bill token (a shipment bill)."""
+    return bool(_SHIPMENT_BILL_PREFIX_RE.match((token or "").strip()))
+
+
+def is_purchase_bill(token: str) -> bool:
+    """True for a PO/PA/POS/PE-prefixed bill token (a purchase order)."""
+    return bool(_PURCHASE_BILL_PREFIX_RE.match((token or "").strip()))
+
+
+_WRONG_BILL_DOMAIN_PREFIX = (
+    "เลขที่แจ้งมาเป็นบิลขนส่งค่ะ รายการนี้ต้องใช้เลขบิลสั่งซื้อ (PO/PA/POS/PE) นะคะ")
 _PHONE_RE = re.compile(r"(?<!\d)(0\d[\d\- ]{7,10}\d)(?!\d)")
 
 # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 — CUS-S03's own api_input_hint
@@ -233,6 +262,12 @@ class OperationalState:
     # own second required input ("road" | "sea"); every other kind
     # leaves this None and is completely unaffected.
     shipping_method: Optional[str] = None
+    # PHASE-1-PURCHASE-BILL-DOMAIN-VALIDATION-1 — set when a SHIPMENT bill
+    # (FT/FE/SA/SP...) was supplied for a _PURCHASE_BILL_KINDS kind;
+    # drives operational_ask_prompt to explain + re-ask, and keeps
+    # has_input() False so nothing is handed off. Cleared the moment a
+    # valid purchase bill arrives.
+    wrong_domain_bill: Optional[str] = None
 
     def as_dict(self) -> Dict:
         return {k: v for k, v in asdict(self).items() if v}
@@ -264,7 +299,15 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
     elif not into.bill:
         m = _BILL_TOKEN_RE.search(t)
         if m and _valid_id(m.group(1)) and not m.group(1).isdigit():
-            into.bill = m.group(1).upper()
+            _tok = m.group(1).upper()
+            if into.kind in _PURCHASE_BILL_KINDS and is_shipment_bill(_tok):
+                # PHASE-1-PURCHASE-BILL-DOMAIN-VALIDATION-1 — right shape,
+                # wrong domain: never bind it, never hand off; flag it so
+                # operational_ask_prompt explains and re-asks.
+                into.wrong_domain_bill = _tok
+            else:
+                into.bill = _tok
+                into.wrong_domain_bill = None
         elif into.kind == "duplicate_bill":
             # a CN tracking is typically an all-digit run
             mt = _CN_TRACKING_RE.search(t)
@@ -439,6 +482,14 @@ _KIND_TH = {
 
 
 def operational_ask_prompt(state: OperationalState) -> str:
+    # PHASE-1-PURCHASE-BILL-DOMAIN-VALIDATION-1 -- a shipment bill was
+    # given where a purchase bill is required: PREPEND the explanation to
+    # this kind's own ack (never a standalone prompt -- the ack text is
+    # what derive_operational_state's _ACK_MARKER_RE recovery keys on, so
+    # a standalone prompt would silently break the still-open
+    # collection). Checked before every other prompt shape.
+    if state.wrong_domain_bill and not state.bill:
+        return f"{_WRONG_BILL_DOMAIN_PREFIX}\n{state.ack}"
     # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 -- once the bill is
     # already known but the target method is still missing (or vice
     # versa), re-showing state.ack in full would re-ask for the bill
