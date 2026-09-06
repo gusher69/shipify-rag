@@ -259,6 +259,37 @@ class TestSelfVerificationFlow(_Base):
         self.assertEqual(b["cust_code"], "SP1008")
         self.assertEqual(b["status"], "verified")
 
+    def test_D17_no_reloop_after_failed_verification_escalation(self):
+        """D17 / SC2 — once the phone→email sequence has failed and
+        escalated to a human, a later private question must NOT restart
+        the sequence (no re-prompt for phone), must stay protected (no
+        private leak, no binding), and must give the neutral denial."""
+        uid = "U_vp_reloop"
+        r1, h = self._start(uid)
+        r2 = self.ask("0000000000", uid, history=h, erp_json=self.ON_FILE)
+        h += [{"role": "user", "content": "0000000000"},
+              {"role": "assistant", "content": self.reply(r2)}]
+        r3 = self.ask("nobody@example.com", uid, history=h, erp_json=self.ON_FILE)
+        self.assertEqual(r3["routing"]["type"], "HUMAN_HANDOFF")
+        h += [{"role": "user", "content": "nobody@example.com"},
+              {"role": "assistant", "content": self.reply(r3)}]
+
+        # same private request again — the loop case
+        r4 = self.ask("ข้อมูลลูกค้า SP1008", uid, history=h, erp_json=self.ON_FILE)
+        self.assertNotIn("เบอร์โทรที่ผูก", self.reply(r4), "re-looped: asked for phone again")
+        self.assertNotIn("อีเมลที่ผูก", self.reply(r4), "re-looped: asked for email again")
+        self.assert_no_private_leak(r4, "D17-reloop")
+        self.assertIsNone(self.binding.get_verified_binding(
+            tenant_id=TENANT, channel=CHANNEL, external_user_id=uid))
+        self.assertTrue(self.reply(r4).strip())
+
+        # a DIFFERENT private request, still no re-loop
+        h += [{"role": "user", "content": "ข้อมูลลูกค้า SP1008"},
+              {"role": "assistant", "content": self.reply(r4)}]
+        r5 = self.ask("เช็คพัสดุ FT318220260726001", uid, history=h, erp_json=self.ON_FILE)
+        self.assertNotIn("เบอร์โทรที่ผูก", self.reply(r5), "re-looped on a later different question")
+        self.assert_no_private_leak(r5, "D17-reloop-2")
+
 
 # ── CROSS-USER ISOLATION ───────────────────────────────────────────────
 class TestCrossUserIsolation(_Base):

@@ -5319,6 +5319,23 @@ class DecisionEngine:
                 return {"resolved": True}
             return {"resolved": False, "reply_text": _SELF_VERIFY_ASK_EMAIL_TEXT, "escalate": False}
 
+        # D17 / SC2 — the phone→email self-verification sequence escalates
+        # to a human on its FIRST failure. If that already ran to
+        # completion earlier in THIS conversation (the email question was
+        # asked AND the customer answered it), a later private question
+        # must NOT restart the whole sequence — the customer is already
+        # with CS. Fall through to the unchanged neutral denial instead of
+        # re-prompting. The two branches above still run first, so a reply
+        # that is genuinely mid-sequence (last_assistant is the phone or
+        # email question) is unaffected.
+        _hist = history or []
+        for _i, _t in enumerate(_hist):
+            if (_t.get("role") == "assistant"
+                    and (_t.get("content") or "").strip() == _SELF_VERIFY_ASK_EMAIL_TEXT
+                    and any(x.get("role") == "user" for x in _hist[_i + 1:])):
+                developer_trace["self_verification_already_escalated"] = True
+                return {"resolved": False}
+
         # First time hitting this denial for this CustCode this exchange.
         return {"resolved": False, "reply_text": _SELF_VERIFY_ASK_PHONE_TEXT, "escalate": False}
 
