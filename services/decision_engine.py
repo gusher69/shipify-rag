@@ -1609,6 +1609,17 @@ _PSI_OWNERSHIP_RE = re.compile(r"ผม|ฉัน|ดิฉัน|หนู|เ�
 # inquiry (the CS-approved reply asks for the order/purchase bill), vs a
 # parcel-in-transit question -> shipment domain.
 _SELLER_DISPATCH_RE = re.compile(r"ร้าน|ต้นทาง|ฝั่งร้าน|ร้านค้า|ร้านจีน|shop|เจ้าของร้าน", re.IGNORECASE)
+# PHASE-5 D10 / D13 — an INVOICE-issuance or a CANCELLATION request that
+# only carries an INCIDENTAL order identifier ("ขอใบกำกับของ PO12345",
+# "ขอยกเลิก PO12345") is NOT a "check my order status" request: there is
+# no invoice-fetch action and no executable CancelOrder, so the real
+# answer is the how-to / policy (RAG). These two markers gate the
+# diversion: fire it only when the message carries a cancellation ask (or
+# is INVOICE-family) AND no genuine order-status verb of its own.
+_CANCELLATION_REQUEST_RE = re.compile(r"ยกเลิก|ขอคืนเงิน|ยกเลิกบิล|ยกเลิกคำสั่งซื้อ|ยกเลิกออเดอร์")
+_ORDER_STATUS_VERB_RE = re.compile(
+    r"ติดตาม|เช็ก?สถานะ|เช็คสถานะ|ตรวจสอบสถานะ|ดูสถานะ|สถานะ(?:ล่าสุด|ตอนนี้|ปัจจุบัน)?"
+    r"|ร้านส่ง|ร้านจัดส่ง|ร้านยังไม่ส่ง|จัดส่งหรือยัง|ส่งของหรือยัง|ถึงไหน(?:แล้ว)?")
 # a duration / transit-time question is a PUBLIC FAQ, never a private
 # status inquiry.
 _TRANSIT_TIME_Q_RE = re.compile(r"กี่วัน|กี่ชั่วโมง|กี่ชม|ระยะเวลา|ใช้เวลา|นานไหม|นานแค่ไหน|กี่สัปดาห์|เท่าไหร่วัน")
@@ -4814,6 +4825,28 @@ class DecisionEngine:
                                            alert=_detect_alert(message, context))
                 return self._route_safe_fallback(message, history, context, developer_trace, start,
                                                   reason="no_matching_business_action")
+
+            # PHASE-5 D10 / D13 — a generic ERP order-status READ was
+            # selected purely because an INCIDENTAL order identifier is in
+            # the message ("ขอใบกำกับของ PO12345", "ขอยกเลิก PO12345").
+            # There is no invoice-fetch action and no executable
+            # CancelOrder, so this is NOT a status inquiry — divert to the
+            # how-to / policy answer (RAG). Scoped hard: only a
+            # fresh-search selection of an _ERP_READ_STATUS_ACTIONS action,
+            # only when the message is INVOICE-family or a cancellation
+            # ask, and only when it carries NO order-status verb of its
+            # own (so "ติดตามสถานะ PO12345" still reads the order).
+            if (selected.get("action_key") in _ERP_READ_STATUS_ACTIONS
+                    and developer_trace.get("selection_source") in ("fresh_search", None)
+                    and not _ORDER_STATUS_VERB_RE.search(message or "")
+                    and (getattr(semantic, "intent_family", None) == "INVOICE"
+                         or _CANCELLATION_REQUEST_RE.search(message or ""))):
+                developer_trace["phase5_incidental_identifier_diversion"] = {
+                    "from": selected.get("action_key"),
+                    "reason": "invoice_or_cancellation_request_with_incidental_order_id"}
+                return self._route_safe_fallback(
+                    message, history, context, developer_trace, start,
+                    reason="phase5_incidental_identifier_diversion_to_rag")
 
             # search_candidate_actions()/enabled_actions() returns bare
             # `business_actions` rows (no joined parameters table) — must
