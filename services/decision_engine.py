@@ -3755,7 +3755,25 @@ class DecisionEngine:
                     _charter_slot_value = bool(_extract_charter_fields(message).as_dict())
                     _charter_is_followup = getattr(semantic, "follow_up_op", "NONE") != "NONE"
                     _charter_is_same = getattr(semantic, "intent_family", None) == "CHARTER_TRUCK"
-                    if (not _charter_slot_value and not _charter_is_followup and not _charter_is_same
+                    # CUSTOMER-G19-SC1-FRESH-CHARTER-TRUCK-1 — a decisive
+                    # FRESH operational-change request on THIS message alone
+                    # (repack / duplicate_bill / verify_warehouse_address /
+                    # add_vat / …, AND combine_bills_charter — which reads
+                    # CHARTER_TRUCK to the semantic layer yet is a DIFFERENT
+                    # operational kind) always breaks a stale Fresh-Charter
+                    # collection, exactly as it breaks a stale operational
+                    # collection or a stale Business-Action continuation
+                    # (PHASE-1-STATE-PRECEDENCE-ROOT-FIX-1/2). It is NOT a
+                    # charter slot value, so this never touches a genuine
+                    # slot-answer turn, and a bare charter re-trigger
+                    # ("ขอเหมารถอีกที") does not classify as an operational
+                    # kind so it still CONTINUES the collection.
+                    _fresh_op_breaks_charter = (
+                        not _charter_slot_value
+                        and _derive_operational_state(
+                            None, message, interpretation=semantic) is not None)
+                    if _fresh_op_breaks_charter or (
+                            not _charter_slot_value and not _charter_is_followup and not _charter_is_same
                             and (_current_intent_breaks_pending_flow(
                                     semantic, message, flow_family="CHARTER_TRUCK")
                                  or private_state_inquiry is not None

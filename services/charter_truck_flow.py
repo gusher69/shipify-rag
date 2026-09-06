@@ -22,6 +22,11 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional
 
 from services.slot_filling_engine import _validate_generic_identifier as _valid_id
+# CUSTOMER-G19-SC1-FRESH-CHARTER-TRUCK-1 — reuse the ONE shipment/purchase
+# bill-prefix predicate (never a second copy): CUS-G19 requires a
+# SHIPMENT bill (FT/FE/SA/SP); a purchase bill (PO/PA/POS/PE) is the
+# wrong domain and must not fill the charter bill slot.
+from services.operational_change_flow import is_purchase_bill
 
 # The TC19 FAQ answer (CUSTOMER-RAG-2) and any charter missing-slot
 # prompt — either as the most recent assistant turn opens the collection.
@@ -75,12 +80,17 @@ def extract_charter_fields(message: str, into: Optional[CharterState] = None) ->
 
     if not st.bill:
         m = _BILL_MARKER_RE.search(t)
-        if m:
+        if m and not is_purchase_bill(m.group(1)):
             st.bill = m.group(1).upper()
         else:
             for tok in re.split(r"\s+", t):
                 tok = tok.strip(" .,:")
-                if tok and not tok.isdigit() and _valid_id(tok) and re.match(r"^[A-Za-z]{1,3}\d{6,}$", tok):
+                if (tok and not tok.isdigit() and _valid_id(tok)
+                        and re.match(r"^[A-Za-z]{1,3}\d{6,}$", tok)
+                        and not is_purchase_bill(tok)):
+                    # a purchase bill (PO/PA/POS/PE) is the wrong domain
+                    # for a charter shipment bill — leave the slot unset
+                    # so charter_missing_prompt re-asks for it.
                     st.bill = tok.upper()
                     break
 
