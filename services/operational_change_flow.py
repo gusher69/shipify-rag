@@ -408,6 +408,28 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
                     into.bills.append(tok_u)
                     if into.kind == "repack":
                         into.wrong_domain_bill = None
+    elif into.kind == "duplicate_bill":
+        # CUSTOMER-CSW13-DUPLICATE-BILL-1 — CUS-S13's api_input_hint is
+        # "tracking_cn": a China-warehouse tracking string. In this repo a
+        # CN tracking is a free-form alphanumeric token (canonical test
+        # value "testlineOnNut007"), OR an all-digit carrier run (9–16
+        # digits). It is NEITHER a purchase bill (PO/PA/POS/PE) NOR a
+        # shipment bill (FT/FE/SA/SP) — those are the wrong domain and
+        # must never be accepted as the CN tracking. (The prior code bound
+        # a bare PO/FT-shaped token here and recognised no alphanumeric
+        # tracking at all.) Case-preserving — a tracking handle is not a
+        # bill code, so it is never upper-cased.
+        if not into.bill:
+            for tok in re.split(r"[\s,;]+", t):
+                tok = tok.strip().strip(".,;:!?()[]{}\"'")
+                if not tok or not _valid_id(tok):
+                    continue
+                if is_purchase_bill(tok) or is_shipment_bill(tok):
+                    continue
+                if tok.isdigit() and not _CN_TRACKING_RE.fullmatch(tok):
+                    continue
+                into.bill = tok
+                break
     elif not into.bill:
         m = _BILL_TOKEN_RE.search(t)
         if m and _valid_id(m.group(1)) and not m.group(1).isdigit():
@@ -425,11 +447,6 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
             else:
                 into.bill = _tok
                 into.wrong_domain_bill = None
-        elif into.kind == "duplicate_bill":
-            # a CN tracking is typically an all-digit run
-            mt = _CN_TRACKING_RE.search(t)
-            if mt:
-                into.bill = mt.group(1)
     if not into.phone:
         m = _PHONE_RE.search(t)
         if m:
@@ -708,6 +725,15 @@ _KIND_HANDOFF_REPLY = {
     # ...ค่าขนส่งรวม ..บาท"). Never that completion wording here.
     "repack": (
         "รับเรื่องขอรีแพ็คแล้วค่ะ เดี๋ยวแอดมิน/ทีมโกดังไทยตรวจสอบและดำเนินการรีแพ็คให้นะคะ"),
+    # CUSTOMER-CSW13-DUPLICATE-BILL-1 — CUS-S13 is "Private ERP" in the
+    # source, but there is no wired corrective write action to remove a
+    # duplicate bill (staff check the CN tracking against the system and
+    # delete the extra bills). Stage B of the journey (A. ask CN
+    # tracking, B. tracking received -> forward to Human CS — THIS reply,
+    # C. real staff-confirmed result only -> the source's completion text
+    # "แทรคจีน xxx ลบบิลซ้ำทั้งหมดให้เรียบร้อยค่ะ"). Never that wording here.
+    "duplicate_bill": (
+        "รับเรื่องแจ้งบิลซ้ำแล้วค่ะ เดี๋ยวแอดมินตรวจสอบแทรคจีนกับบิลซ้ำในระบบและดำเนินการลบบิลซ้ำให้นะคะ"),
     # CUSTOMER-CSW4-VAT-1 — CUS-S04 is a "Write API — เพิ่ม VAT flag"
     # in the source, but no such action is wired (same as CSW3), and
     # the source's own stage-2 text is informational guidance with a
