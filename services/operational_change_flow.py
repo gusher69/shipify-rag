@@ -198,6 +198,29 @@ _KINDS = [
      "รับเรื่องขอรีแพ็คค่ะ แอดมินรบกวนขอเลขบิลขนส่ง (FT/FE/SA/SP) ที่ต้องการรีแพ็คมาได้เลยค่ะ "
      "หากมีหลายบิลส่งมาพร้อมกันได้เลยนะคะ",
      "เลขบิลขนส่งที่ต้องการรีแพ็ค"),
+    # CUSTOMER-CSW8-REVERSE-MAP-TO-PURCHASE-BILL-1 — CUS-S08 (Ai.xlsx
+    # sheet '2.tongchecknairabop' row 8): "which purchase bill does this
+    # shipment bill / CN tracking belong to?". api_input_hint
+    # "tracking_cn หรือ bill_no"; stage-1 CS reply "เเอดมินเช็คให้ค่ะว่า
+    # เป็นของบิลสั่งซื้อไหนนะคะ". CAPABILITY GATE (live registry audit):
+    # NEITHER searchdatashipment NOR searchdatatracking exposes an
+    # OrderCode / purchase-bill field in its response
+    # (business_action_response_mapping has only Code / Status /
+    # TrackingCH / TrackingTH / TotalSum) — so the shipment/tracking →
+    # purchase-bill reverse map is NOT SUPPORTED by any trusted action.
+    # A human does this lookup: recognise the intent, ask for the ONE
+    # identifier (shipment bill FT/FE/SA/SP OR CN tracking), hand to
+    # Human CS honestly — never dump shipment status as if it answered,
+    # never fabricate a PO. Subject marker required so a plain order
+    # question is untouched.
+    ("map_shipment_to_purchase_bill",
+     re.compile(r"บิลขนส่ง|แทรค|แทร็ก|tracking|เลขพัสดุ|(?<![ก-๙A-Za-z])(?:FT|FE|SA|SP)\d", re.IGNORECASE),
+     re.compile(r"บิลสั่งซื้อ(?:ไหน|อันไหน|เลขไหน|ใบไหน|อะไร|รหัสไหน)"
+                r"|(?:เป็นของ|อยู่(?:ใน)?|มาจาก)\s*บิลสั่งซื้อ"
+                r"|(?:เป็นของ|อยู่(?:ใน)?)\s*(?:po|order|ออเดอร์)", re.IGNORECASE),
+     "เเอดมินเช็คให้ค่ะว่าเป็นของบิลสั่งซื้อไหนนะคะ รบกวนแจ้งเลขบิลขนส่ง (FT/FE/SA/SP) "
+     "หรือเลขแทรคจีนมาให้ตรวจสอบด้วยนะคะ",
+     "เลขบิลขนส่ง (FT/FE/SA/SP) หรือเลขแทรคจีน"),
 ]
 
 # a delivery-ADDRESS change is a different case (CUS-S09) with its own
@@ -214,11 +237,19 @@ _ACK_MARKER_RE = re.compile(
     r"|รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถ"
     r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นทางรถหรือทางเรือคะ"
     r"|รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นรับเองหรือส่งเอกชนคะ"
-    r"|ที่ต้องการรีแพ็ค")
+    r"|ที่ต้องการรีแพ็ค"
+    r"|เเอดมินเช็คให้ค่ะว่าเป็นของบิลสั่งซื้อไหน")
 
 _FRAME_LOOKBACK = 10
 
 _BILL_TOKEN_RE = re.compile(r"\b([A-Za-z]{2,4}\d{4,})\b")
+
+# CUSTOMER-CSW8-REVERSE-MAP-TO-PURCHASE-BILL-1 — elliptical "another
+# bill/one/tracking" follow-up + a stable fragment of this kind's own
+# handoff reply, used only for the narrow post-handoff repeat recovery.
+_CSW8_REPEAT_RE = re.compile(
+    r"อีก\s*(?:บิล|อัน|เลข|แทรค|ตัว)|บิลอื่น|อันอื่น|แทรคอื่น|เลขอื่น|บิลถัดไป")
+_CSW8_HANDOFF_MARK = "เดี๋ยวแอดมินเช็คให้ว่าบิลขนส่ง/แทรคนี้เป็นของบิลสั่งซื้อไหน"
 
 # PHASE-1-PURCHASE-BILL-DOMAIN-VALIDATION-1 — kinds whose required bill
 # is a PURCHASE ORDER (each one's own customer source template reads
@@ -259,6 +290,11 @@ _WRONG_BILL_DOMAIN_PREFIX = (
 _SHIPMENT_BILL_KINDS = frozenset({"change_carrier_or_selfpickup", "repack"})
 _WRONG_SHIPMENT_BILL_PREFIX = (
     "เลขที่แจ้งมาเป็นเลขบิลสั่งซื้อค่ะ รายการนี้ต้องใช้เลขบิลขนส่ง (FT/FE/SA/SP) นะคะ")
+# CUSTOMER-CSW8-REVERSE-MAP-TO-PURCHASE-BILL-1 — the purchase bill is the
+# ANSWER the customer is asking for, so it is the wrong thing to give as
+# the INPUT identifier.
+_WRONG_INPUT_FOR_MAP_PREFIX = (
+    "เลขที่แจ้งมาเป็นเลขบิลสั่งซื้อค่ะ รายการนี้ต้องใช้เลขบิลขนส่ง (FT/FE/SA/SP) หรือเลขแทรคจีนนะคะ")
 _PHONE_RE = re.compile(r"(?<!\d)(0\d[\d\- ]{7,10}\d)(?!\d)")
 
 # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 — CUS-S03's own api_input_hint
@@ -470,6 +506,25 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
                     continue
                 into.bill = tok
                 break
+    elif into.kind == "map_shipment_to_purchase_bill":
+        # CUSTOMER-CSW8-REVERSE-MAP-TO-PURCHASE-BILL-1 — the INPUT is a
+        # SHIPMENT bill (FT/FE/SA/SP) OR a CN tracking (alphanumeric, or a
+        # 9–16 digit run). A purchase bill (PO/PA/POS/PE) is the OUTPUT,
+        # never the input — flag it so operational_ask_prompt explains +
+        # re-asks. Case-preserving for a tracking handle.
+        if not into.bill:
+            for tok in re.split(r"[\s,;]+", t):
+                tok = tok.strip().strip(".,;:!?()[]{}\"'")
+                if not tok or not _valid_id(tok):
+                    continue
+                if is_purchase_bill(tok):
+                    into.wrong_domain_bill = tok
+                    continue
+                if tok.isdigit() and not _CN_TRACKING_RE.fullmatch(tok):
+                    continue
+                into.bill = tok.upper() if is_shipment_bill(tok) else tok
+                into.wrong_domain_bill = None
+                break
     elif not into.bill:
         m = _BILL_TOKEN_RE.search(t)
         if m and _valid_id(m.group(1)) and not m.group(1).isdigit():
@@ -667,6 +722,21 @@ def derive_operational_state(history: Optional[List[Dict]], current_message: str
                 extract_operational_fields(t.get("content") or "", st)
         return st
 
+    # CUSTOMER-CSW8-REVERSE-MAP-TO-PURCHASE-BILL-1 — a bare "อีกบิลนึงล่ะ"
+    # elliptical repeat right after THIS kind's own handoff reply re-opens
+    # a FRESH collection (ask for the NEW identifier — never silently
+    # reuse the previous one). Tightly gated on the immediately-preceding
+    # assistant turn being that handoff reply, so it never fires after an
+    # unrelated flow.
+    if not open_kind and turns:
+        _last_a = next((x.get("content") or "" for x in reversed(turns)
+                        if x.get("role") == "assistant"), "")
+        if (_CSW8_HANDOFF_MARK in _last_a and _CSW8_REPEAT_RE.search(current_message or "")
+                and not classify_operational_request(current_message)):
+            _c8 = next((k for k in _KINDS if k[0] == "map_shipment_to_purchase_bill"), None)
+            if _c8:
+                return OperationalState(kind=_c8[0], ack=_c8[3], input_label=_c8[4])
+
     # 3. a fresh request in the current message.
     cls = classify_operational_request(current_message, interpretation)
     if not cls:
@@ -688,6 +758,7 @@ _KIND_TH = {
     "custom_production": "ขอสั่งผลิตสินค้าตามสเปค / สกรีนโลโก้",
     "combine_bills_charter": "ขอรวมบิลขนส่งที่เข้าไทยเป็นเหมารถ",
     "repack": "ขอรีแพ็ค / รวมแพ็คสินค้าใหม่ที่โกดังไทย",
+    "map_shipment_to_purchase_bill": "ขอเช็คว่าบิลขนส่ง/แทรคนี้เป็นของบิลสั่งซื้อไหน",
 }
 
 
@@ -702,11 +773,12 @@ def operational_ask_prompt(state: OperationalState) -> str:
         # CUSTOMER-CSW11-CHANGE-DELIVERY-METHOD-1 — the explanation points
         # the customer at the domain THIS kind needs: purchase bill for
         # _PURCHASE_BILL_KINDS, shipment bill for _SHIPMENT_BILL_KINDS.
-        _prefix = (
-            _WRONG_SHIPMENT_BILL_PREFIX
-            if state.kind in _SHIPMENT_BILL_KINDS
-            else _WRONG_BILL_DOMAIN_PREFIX
-        )
+        if state.kind == "map_shipment_to_purchase_bill":
+            _prefix = _WRONG_INPUT_FOR_MAP_PREFIX
+        elif state.kind in _SHIPMENT_BILL_KINDS:
+            _prefix = _WRONG_SHIPMENT_BILL_PREFIX
+        else:
+            _prefix = _WRONG_BILL_DOMAIN_PREFIX
         return f"{_prefix}\n{state.ack}"
     # CUSTOMER-CSW3-SHIPPING-METHOD-CHANGE-1 -- once the bill is
     # already known but the target method is still missing (or vice
@@ -808,6 +880,17 @@ _KIND_HANDOFF_REPLY = {
     # top-up and report back" — NEVER "ยอดเข้าแล้ว" / "เติมเงินสำเร็จแล้ว".
     "topup_not_credited": (
         "รับข้อมูลแล้วค่ะ เดี๋ยวแอดมินตรวจสอบยอดเติมเงินให้แล้วแจ้งผลให้นะคะ"),
+    # CUSTOMER-CSW8-REVERSE-MAP-TO-PURCHASE-BILL-1 — CUS-S08 is "Private
+    # ERP" in the source, but NEITHER searchdatashipment NOR
+    # searchdatatracking returns an OrderCode / purchase-bill field
+    # (business_action_response_mapping audit) — so the shipment/tracking
+    # -> purchase-bill reverse map is NOT SUPPORTED by any trusted
+    # action. Staff do this lookup (source stage-1: "เเอดมินเช็คให้ค่ะ
+    # ว่าเป็นของบิลสั่งซื้อไหนนะคะ"). Honest "received the identifier,
+    # admin will check which purchase bill it belongs to" — NEVER a
+    # fabricated "เป็นของบิลสั่งซื้อ POxxx".
+    "map_shipment_to_purchase_bill": (
+        "รับเรื่องแล้วค่ะ เดี๋ยวแอดมินเช็คให้ว่าบิลขนส่ง/แทรคนี้เป็นของบิลสั่งซื้อไหน แล้วแจ้งกลับนะคะ"),
     # CUSTOMER-CSW4-VAT-1 — CUS-S04 is a "Write API — เพิ่ม VAT flag"
     # in the source, but no such action is wired (same as CSW3), and
     # the source's own stage-2 text is informational guidance with a
