@@ -184,34 +184,76 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
 
 
 def _fmt_export_ts(ts: Optional[str]) -> str:
-    """ISO timestamp -> 'YYYY-MM-DD HH:MM' as a plain string (kept a string
-    so Excel never reinterprets it as a serial date in the wrong timezone).
-    Falls back to the raw value it was given."""
+    """Stored ISO timestamp (UTC) -> Thai local time, Buddhist year, as the
+    plain string 'D/M/YYYY HH:MM:SS' — the same rendering the /admin/line-users
+    detail panel shows (JS toLocaleString('th-TH')), so an exported value can
+    be cross-checked against the screen. Kept a string so Excel never
+    reinterprets it as a serial date. Falls back to the raw value."""
     if not ts:
         return ""
     try:
         import datetime as _dt
-        return _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+        dt = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_dt.timezone.utc)
+        th = dt.astimezone(_dt.timezone(_dt.timedelta(hours=7)))
+        return f"{th.day}/{th.month}/{th.year + 543} {th:%H:%M:%S}"
     except Exception:
         return str(ts)
 
 
-# Columns are exactly the ones the /admin/line-users table already shows
-# (plus Message Count, which is already on every list row via
-# user_profiles.message_count) — no new metric is computed here. Header
-# labels mix Thai/English to match the on-screen table.
+def _ts_or_dash(ts: Optional[str]) -> str:
+    return _fmt_export_ts(ts) or "—"
+
+
+def _dash(v) -> str:
+    s = "" if v is None else str(v).strip()
+    return s or "—"
+
+
+def _reasons_or_dash(v) -> str:
+    items = [str(x).strip() for x in (v or []) if str(x).strip()]
+    return " | ".join(items) if items else "—"
+
+
+# One row per user. Identity + the on-screen table fields, then the SAME
+# detail-panel data get_line_user_detail() returns — profile, customer-
+# binding, lead analysis, sentiment, and session summary — flattened into
+# columns. The conversation transcript / session message list is
+# deliberately NOT included. `u` is the list row, `d` is the detail dict
+# (or {} when a detail lookup returns nothing). No new metric is computed;
+# no SecretCode / password / token / credential / raw private payload.
 _EXPORT_COLUMNS = (
-    ("LINE Display Name", lambda u: u.get("display_name") or ""),
-    ("LINE User ID", lambda u: u.get("line_user_id") or ""),
-    ("Customer Code", lambda u: u.get("cust_code") or ""),
-    ("สถานะการยืนยัน", lambda u: u.get("status_label") or ""),
-    ("Lead Stage", lambda u: u.get("lead_stage") or ""),
-    ("Lead Score", lambda u: int(u.get("lead_score") or 0)),
-    ("Sentiment", lambda u: u.get("sentiment") or ""),
-    ("จำนวนข้อความ", lambda u: int(u.get("message_count") or 0)),
-    ("ใช้งานล่าสุด", lambda u: _fmt_export_ts(u.get("last_seen"))),
+    # ── identity ─────────────────────────────────────────────
+    ("LINE Display Name", lambda u, d: (d.get("profile") or {}).get("display_name") or u.get("display_name") or ""),
+    ("LINE User ID", lambda u, d: u.get("line_user_id") or ""),
+    # ── profile ──────────────────────────────────────────────
+    ("First Seen", lambda u, d: _ts_or_dash((d.get("profile") or {}).get("first_seen"))),
+    ("Last Seen", lambda u, d: _ts_or_dash((d.get("profile") or {}).get("last_seen") or u.get("last_seen"))),
+    ("Message Count", lambda u, d: int((d.get("profile") or {}).get("message_count") or u.get("message_count") or 0)),
+    ("Conversation Count", lambda u, d: int((d.get("profile") or {}).get("conversation_count") or 0)),
+    # ── customer binding (customer_channel_bindings — source of truth) ──
+    ("Customer Code", lambda u, d: _dash((d.get("binding") or {}).get("cust_code") if d else u.get("cust_code"))),
+    ("สถานะการยืนยัน", lambda u, d: (d.get("binding") or {}).get("status_label") or u.get("status_label") or ""),
+    ("Verification Method", lambda u, d: _dash((d.get("binding") or {}).get("verification_method"))),
+    ("Verified At", lambda u, d: _ts_or_dash((d.get("binding") or {}).get("verified_at"))),
+    # ── lead analysis ────────────────────────────────────────
+    ("Lead Stage", lambda u, d: (d.get("lead") or {}).get("stage") or u.get("lead_stage") or ""),
+    ("Lead Score", lambda u, d: int((d.get("lead") or {}).get("score") if d else u.get("lead_score") or 0)),
+    ("Lead Reasons", lambda u, d: _reasons_or_dash((d.get("lead") or {}).get("reasons"))),
+    ("Lead Updated At", lambda u, d: _ts_or_dash((d.get("lead") or {}).get("updated_at"))),
+    # ── sentiment ────────────────────────────────────────────
+    ("Sentiment", lambda u, d: (d.get("sentiment") or {}).get("status") or u.get("sentiment") or ""),
+    ("Sentiment Reasons", lambda u, d: _reasons_or_dash((d.get("sentiment") or {}).get("reasons"))),
+    ("Sentiment Updated At", lambda u, d: _ts_or_dash((d.get("sentiment") or {}).get("updated_at"))),
+    ("Sentiment Last Detected At", lambda u, d: _ts_or_dash((d.get("sentiment") or {}).get("last_detected_at"))),
+    ("Sentiment Last Alert At", lambda u, d: _ts_or_dash((d.get("sentiment") or {}).get("last_alert_at"))),
+    # ── session summary (no transcript) ──────────────────────
+    ("Current Session", lambda u, d: "Active" if (d.get("session") or {}).get("has_active") else "None"),
+    ("Last Interaction", lambda u, d: _ts_or_dash((d.get("session") or {}).get("last_interaction"))),
 )
-_EXPORT_COL_WIDTHS = (24, 36, 15, 16, 12, 11, 12, 12, 20)
+_EXPORT_COL_WIDTHS = (24, 36, 19, 19, 13, 15, 15, 16, 20, 19,
+                      12, 11, 40, 19, 12, 40, 19, 22, 22, 15, 19)
 
 
 def export_line_users_xlsx(search: Optional[str] = None, status: Optional[str] = None,
@@ -219,16 +261,21 @@ def export_line_users_xlsx(search: Optional[str] = None, status: Optional[str] =
                             sb=None) -> bytes:
     """Build an .xlsx (bytes) of the LINE-user directory, honouring the SAME
     search/status/lead/sentiment filters as the on-screen table. Reuses
-    list_line_users() verbatim — same query, same real-LINE provenance
+    list_line_users() for the row set and get_line_user_detail() for each
+    row's profile / binding / lead / sentiment / session detail — the same
+    read-only functions the page already calls, same real-LINE provenance
     rule, same verified-CustCode source of truth (customer_channel_bindings,
-    never user_profiles.cust_code). Read-only. No SecretCode / password /
-    token / credential / raw private payload is ever in a row here."""
+    never user_profiles.cust_code). The conversation transcript is NOT
+    read. No SecretCode / password / token / credential / raw private
+    payload is ever in a row here. One detail lookup per row; bounded by
+    the same _PROFILE_HARD_CAP as the viewer."""
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
     import io
 
+    client = _sb(sb)
     data = list_line_users(search=search, status=status, limit=_PROFILE_HARD_CAP,
-                           sb=sb, lead_stage=lead_stage, sentiment=sentiment)
+                           sb=client, lead_stage=lead_stage, sentiment=sentiment)
     users = data.get("users", [])
 
     wb = Workbook()
@@ -236,7 +283,11 @@ def export_line_users_xlsx(search: Optional[str] = None, status: Optional[str] =
     ws.title = "LINE Users"
     ws.append([label for label, _ in _EXPORT_COLUMNS])
     for u in users:
-        ws.append([getter(u) for _, getter in _EXPORT_COLUMNS])
+        try:
+            detail = get_line_user_detail(u.get("line_user_id") or "", sb=client) or {}
+        except Exception:
+            detail = {}          # a detail lookup must never break the export
+        ws.append([getter(u, detail) for _, getter in _EXPORT_COLUMNS])
     for idx, width in enumerate(_EXPORT_COL_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
     ws.freeze_panes = "A2"

@@ -285,10 +285,40 @@ class ExportReportXlsx(unittest.TestCase):
         cc_col = header.index("Customer Code")
         by_uid = {r[uid_col]: r for r in body}
         self.assertEqual(by_uid[_UA][cc_col], "FT5001")     # verified binding
-        self.assertIn(by_uid[_UB][cc_col], ("", None))      # unverified -> blank
-        self.assertIn(by_uid[_UC][cc_col], ("", None))      # revoked -> blank
+        self.assertEqual(by_uid[_UB][cc_col], "—")          # unverified -> dash
+        self.assertEqual(by_uid[_UC][cc_col], "—")          # revoked -> dash
         # the legacy user_profiles.cust_code ("TYPED9999") must never appear
         self.assertNotIn("TYPED9999", {r[cc_col] for r in body})
+
+    def test_detail_fields_are_included_per_user(self):
+        _, header, body = self._load()
+        for col in ("First Seen", "Last Seen", "Message Count", "Conversation Count",
+                    "Verification Method", "Verified At", "Lead Reasons", "Lead Updated At",
+                    "Sentiment Reasons", "Sentiment Last Detected At", "Sentiment Last Alert At",
+                    "Current Session", "Last Interaction"):
+            self.assertIn(col, header, msg=f"missing detail column: {col}")
+        r = {h: v for h, v in zip(header, next(x for x in body
+             if x[header.index("LINE User ID")] == _UA))}
+        self.assertEqual(r["Verification Method"], "staff_assisted")
+        self.assertEqual(r["Conversation Count"], 3)
+        self.assertNotEqual(r["Lead Reasons"], "—")                 # _UA has lead reasons
+        self.assertNotEqual(r["Sentiment Last Detected At"], "—")   # _UA has a detection ts
+        self.assertIn(r["Current Session"], ("Active", "None"))
+        self.assertNotEqual(r["Last Interaction"], "—")             # _UA has line sessions
+
+    def test_no_transcript_or_message_content_column(self):
+        _, header, _ = self._load()
+        joined = " ".join(h or "" for h in header).lower()
+        for banned in ("transcript", "message content", "conversation history",
+                       "messages", "session id", "turn"):
+            self.assertNotIn(banned, joined)
+        # the verbatim seeded transcript lines must not be anywhere in the sheet
+        import io
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(export_line_users_xlsx(sb=self.sb)))
+        allcells = " ".join(str(c) for row in wb.active.iter_rows(values_only=True) for c in row if c)
+        self.assertNotIn("น้ำหอมครับ", allcells)
+        self.assertNotIn("ขึ้นกับน้ำหนักค่ะ", allcells)
 
     def test_no_secret_columns(self):
         _, header, _ = self._load()
