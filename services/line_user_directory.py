@@ -183,6 +183,69 @@ def list_line_users(search: Optional[str] = None, status: Optional[str] = None,
     }
 
 
+def _fmt_export_ts(ts: Optional[str]) -> str:
+    """ISO timestamp -> 'YYYY-MM-DD HH:MM' as a plain string (kept a string
+    so Excel never reinterprets it as a serial date in the wrong timezone).
+    Falls back to the raw value it was given."""
+    if not ts:
+        return ""
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(ts)
+
+
+# Columns are exactly the ones the /admin/line-users table already shows
+# (plus Message Count, which is already on every list row via
+# user_profiles.message_count) — no new metric is computed here. Header
+# labels mix Thai/English to match the on-screen table.
+_EXPORT_COLUMNS = (
+    ("LINE Display Name", lambda u: u.get("display_name") or ""),
+    ("LINE User ID", lambda u: u.get("line_user_id") or ""),
+    ("Customer Code", lambda u: u.get("cust_code") or ""),
+    ("สถานะการยืนยัน", lambda u: u.get("status_label") or ""),
+    ("Lead Stage", lambda u: u.get("lead_stage") or ""),
+    ("Lead Score", lambda u: int(u.get("lead_score") or 0)),
+    ("Sentiment", lambda u: u.get("sentiment") or ""),
+    ("จำนวนข้อความ", lambda u: int(u.get("message_count") or 0)),
+    ("ใช้งานล่าสุด", lambda u: _fmt_export_ts(u.get("last_seen"))),
+)
+_EXPORT_COL_WIDTHS = (24, 36, 15, 16, 12, 11, 12, 12, 20)
+
+
+def export_line_users_xlsx(search: Optional[str] = None, status: Optional[str] = None,
+                            lead_stage: Optional[str] = None, sentiment: Optional[str] = None,
+                            sb=None) -> bytes:
+    """Build an .xlsx (bytes) of the LINE-user directory, honouring the SAME
+    search/status/lead/sentiment filters as the on-screen table. Reuses
+    list_line_users() verbatim — same query, same real-LINE provenance
+    rule, same verified-CustCode source of truth (customer_channel_bindings,
+    never user_profiles.cust_code). Read-only. No SecretCode / password /
+    token / credential / raw private payload is ever in a row here."""
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+    import io
+
+    data = list_line_users(search=search, status=status, limit=_PROFILE_HARD_CAP,
+                           sb=sb, lead_stage=lead_stage, sentiment=sentiment)
+    users = data.get("users", [])
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "LINE Users"
+    ws.append([label for label, _ in _EXPORT_COLUMNS])
+    for u in users:
+        ws.append([getter(u) for _, getter in _EXPORT_COLUMNS])
+    for idx, width in enumerate(_EXPORT_COL_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def get_line_user_detail(line_user_id: str, sb=None) -> Optional[Dict]:
     """Full durable profile + verified-binding status + newest LINE
     session summary for one user. Read-only. None if this is not a real

@@ -6596,6 +6596,28 @@ async def api_line_users(request: Request):
     return JSONResponse({"ok": True, **data})
 
 
+@app.get("/admin/api/line-users/export.xlsx")
+async def api_line_users_export(request: Request):
+    """"Export Report" on the LINE-user directory — an .xlsx of the SAME
+    rows the table is currently showing (same search/status/lead/sentiment
+    filters). Reuses services.line_user_directory.export_line_users_xlsx()
+    which itself reuses list_line_users(); no new query, metric or storage.
+    Admin-session auth, same as the page."""
+    if (r := auth(request)): return r
+    import io
+    from services.line_user_directory import export_line_users_xlsx
+    q = dict(request.query_params)
+    xlsx = export_line_users_xlsx(search=q.get("search") or None,
+                                   status=q.get("status") or None,
+                                   lead_stage=q.get("lead") or None,
+                                   sentiment=q.get("sentiment") or None)
+    filename = f"line-user-report-{datetime.datetime.now().strftime('%Y%m%d-%H%M')}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @app.get("/admin/api/line-users/{line_user_id}")
 async def api_line_user_detail(request: Request, line_user_id: str):
     if (r := auth(request)): return r

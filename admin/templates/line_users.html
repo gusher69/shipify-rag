@@ -124,6 +124,10 @@
       <option value="NEGATIVE">NEGATIVE</option>
     </select>
     <span class="lu-muted" id="lu-count" style="font-size:11.5px;align-self:center"></span>
+    <button class="lu-view" id="lu-export" onclick="luExport()"
+            style="margin-left:auto;align-self:center" title="ดาวน์โหลดรายงาน .xlsx ตามตัวกรองปัจจุบัน">
+      Export Report
+    </button>
   </div>
 
   <table class="lu-table">
@@ -220,6 +224,21 @@ async function luLoad(){
       <td class="lu-muted">${luFmt(u.last_seen)}</td>
       <td style="text-align:right"><button class="lu-view" onclick="luOpen('${luEsc(u.line_user_id)}')">ดูรายละเอียด</button></td>
     </tr>`).join('');
+}
+
+// "Export Report" — download an .xlsx of the SAME rows the table shows,
+// with the SAME filters. No new query path: hits the export endpoint with
+// the current toolbar values; the browser downloads it (Content-Disposition
+// attachment) without leaving the page.
+function luExport(){
+  const q = encodeURIComponent(document.getElementById('lu-search').value.trim());
+  const st = document.getElementById('lu-status').value;
+  const lead = document.getElementById('lu-lead').value;
+  const sent = document.getElementById('lu-sentiment').value;
+  const url = `/admin/api/line-users/export.xlsx?search=${q}&status=${st}&lead=${lead}&sentiment=${sent}`;
+  const a = document.createElement('a');
+  a.href = url; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 function luSentBadge(sentiment){

@@ -15,6 +15,7 @@ from tests.test_business_action_registry import _FakeSupabase
 from services.line_user_directory import (
     list_line_users, get_line_user_detail,
     list_user_sessions, get_user_session_messages,
+    export_line_users_xlsx,
 )
 
 # Real LINE userIds: 'U' + 32 lowercase hex.
@@ -234,6 +235,76 @@ class SearchAndFilter(unittest.TestCase):
 
     def test_no_result_is_empty_list(self):
         self.assertEqual(list_line_users(search="zzz-nobody", sb=self.sb)["users"], [])
+
+
+class ExportReportXlsx(unittest.TestCase):
+    """PHASE-4 — "Export Report" on /admin/line-users. export_line_users_xlsx()
+    must reuse list_line_users() verbatim: same rows, same filters, same
+    verified-CustCode source of truth, and never a secret column."""
+
+    def setUp(self):
+        self.sb = _seed(_FakeSupabase())
+
+    def _load(self, **kw):
+        import io
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(export_line_users_xlsx(sb=self.sb, **kw)))
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        return ws, rows[0], rows[1:]
+
+    def test_returns_valid_parseable_xlsx_with_header(self):
+        ws, header, body = self._load()
+        self.assertEqual(ws.title, "LINE Users")
+        self.assertEqual(header[0], "LINE Display Name")
+        self.assertIn("LINE User ID", header)
+        self.assertIn("Customer Code", header)
+        self.assertTrue(len(body) >= 3)          # _UA, _UB, _UC (real LINE users)
+
+    def test_only_real_line_users_exported(self):
+        _, header, body = self._load()
+        uid_col = header.index("LINE User ID")
+        ids = {r[uid_col] for r in body}
+        self.assertEqual(ids, {_UA, _UB, _UC})
+        self.assertNotIn(_SYN_PG, ids)
+        self.assertNotIn(_SYN_PROBE, ids)
+        self.assertNotIn(_UNSEEN, ids)
+
+    def test_thai_text_is_intact(self):
+        _, header, body = self._load()
+        name_col = header.index("LINE Display Name")
+        status_col = header.index("สถานะการยืนยัน")
+        names = {r[name_col] for r in body}
+        self.assertIn("สมชาย ใจดี", names)
+        self.assertIn("ยืนยันแล้ว", {r[status_col] for r in body})
+        self.assertIn("ยังไม่ยืนยัน", {r[status_col] for r in body})
+
+    def test_verified_custcode_from_binding_not_legacy_typed(self):
+        _, header, body = self._load()
+        uid_col = header.index("LINE User ID")
+        cc_col = header.index("Customer Code")
+        by_uid = {r[uid_col]: r for r in body}
+        self.assertEqual(by_uid[_UA][cc_col], "FT5001")     # verified binding
+        self.assertIn(by_uid[_UB][cc_col], ("", None))      # unverified -> blank
+        self.assertIn(by_uid[_UC][cc_col], ("", None))      # revoked -> blank
+        # the legacy user_profiles.cust_code ("TYPED9999") must never appear
+        self.assertNotIn("TYPED9999", {r[cc_col] for r in body})
+
+    def test_no_secret_columns(self):
+        _, header, _ = self._load()
+        joined = " ".join(h or "" for h in header).lower()
+        for banned in ("secret", "password", "token", "credential", "api_key", "apikey"):
+            self.assertNotIn(banned, joined)
+
+    def test_export_respects_search_filter(self):
+        _, header, body = self._load(search="anna")
+        name_col = header.index("LINE Display Name")
+        self.assertEqual([r[name_col] for r in body], ["Anna Wong"])
+
+    def test_export_respects_status_filter(self):
+        _, header, body = self._load(status="verified")
+        uid_col = header.index("LINE User ID")
+        self.assertEqual([r[uid_col] for r in body], [_UA])
 
 
 class QueryShapeNoNPlusOne(unittest.TestCase):
@@ -489,7 +560,7 @@ class RoutesAreReadOnlyAndAuthGuarded(unittest.TestCase):
 
     def test_only_get_methods_registered(self):
         routes = self._line_user_routes()
-        self.assertEqual(len(routes), 5)   # page + list + detail + sessions + transcript
+        self.assertEqual(len(routes), 6)   # page + list + export + detail + sessions + transcript
         for r in routes:
             self.assertEqual(set(r.methods) - {"HEAD", "OPTIONS"}, {"GET"},
                              msg=f"{r.path} exposes a non-GET method")
@@ -499,6 +570,7 @@ class RoutesAreReadOnlyAndAuthGuarded(unittest.TestCase):
         from admin.routes import app
         c = TestClient(app)
         for path in ("/admin/line-users", "/admin/api/line-users",
+                     "/admin/api/line-users/export.xlsx",
                      "/admin/api/line-users/Uwhoever",
                      "/admin/api/line-users/Uwhoever/sessions",
                      "/admin/api/line-users/Uwhoever/sessions/sess1"):
