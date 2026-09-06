@@ -3379,6 +3379,30 @@ class DecisionEngine:
                     "continuation->fresh_ADDRESS_CHANGE_request"
                 continuation_action = None
 
+            # PHASE-1-STATE-PRECEDENCE-ROOT-FIX-2 — a message that itself
+            # decisively OPENS an operational-change kind ("เพิ่ม VAT ให้
+            # หน่อย" -> add_vat, "แก้จำนวนสินค้าได้ไหม" -> modify_bill_qty,
+            # "เปลี่ยนจากเรือเป็นรถได้ไหม" -> change_shipping_method,
+            # "เคลมของไม่ครบ" -> missing_item_claim, "สั่งสกรีนโลโก้" ->
+            # custom_production) beats a stale, incomplete Business-Action
+            # continuation (real LINE: an incomplete
+            # requestshippingaddresschange collection swallowed a fresh
+            # "เพิ่ม VAT ให้หน่อย" and escalated to Human CS via
+            # max_retry_exceeded). CURRENT-message-only, deterministic:
+            # classify_operational_request already requires a decisive
+            # verb+object (or a self-describing object), so a bare CSW9
+            # slot answer ("FT318220260726001", "มานะ", "0899999999", an
+            # address block, "ยืนยัน") never matches and a genuine
+            # mid-collection turn is untouched. Overrides even a caller-
+            # supplied pending row. Address-change openers are handled by
+            # the CSW9-REAL-3 guard above (classify_operational_request
+            # returns None for anything matching _ADDRESS_CHANGE_RE).
+            if (continuation_action
+                    and _derive_operational_state(None, message, interpretation=semantic) is not None):
+                developer_trace["pending_flow_broken_by_current_intent"] = \
+                    "continuation->fresh_operational_request"
+                continuation_action = None
+
             # Generic Continuation Intent Guard (Confirmation/Collection
             # Continuation Correctness fix, 2026-08-24) — confirmed live:
             # once an action asks a follow-up question, _resolve_
