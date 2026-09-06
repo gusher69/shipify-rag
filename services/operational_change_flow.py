@@ -130,9 +130,19 @@ _KINDS = [
      re.compile(r"(?:ที่อยู่)?โกดัง(?:จีน|.{0,4}อีก)"),
      "แอดมินช่วยตรวจสอบความถูกต้องให้ค่ะ รบกวนส่งที่อยู่โกดังจีนที่กรอกไว้ในระบบมาให้ตรวจสอบหน่อยนะคะ",
      "ที่อยู่โกดังจีนที่กรอกไว้"),
+    # CUSTOMER-G18-TOPUP-NOT-CREDITED-1 — CUS-G18 (Ai.xlsx sheet
+    # '1.thameuangton' row 18): "topped up but the balance/credit hasn't
+    # appeared / still pending". Source stage-1 reply is exactly this
+    # ack ("แอดมินรบกวนขอสลิปหน่อยนะคะ"). The object regex is widened
+    # (not a keyword list — 4 bounded shape alternatives) to also cover
+    # "เครดิต...ไม่เข้า", "ยอด...ไม่ขึ้น", "เติมเงินไปแล้ว...", and the
+    # elided-"เงิน" fresh-episode phrasing "ยอดที่เติมแล้วไม่เข้า".
     ("topup_not_credited", None,
-     re.compile(r"ยอดเงินไม่เข้า|ยอดไม่เข้า|เงิน(?:ที่เติม)?[^\n]{0,10}(?:ยัง)?ไม่เข้า"
-                r"|เติมเงินแล้ว[^\n]{0,16}(?:ไม่เข้า|ยังไม่เข้า|รอตรวจสอบ|ยอดยังไม่ขึ้น)"),
+     re.compile(r"ยอดเงินไม่เข้า|ยอดไม่เข้า"
+                r"|(?:เงิน|เครดิต)(?:ที่เติม)?[^\n]{0,10}(?:ยัง)?ไม่เข้า"
+                r"|เติมเงิน(?:ไป)?แล้ว[^\n]{0,18}(?:ไม่เข้า|ยังไม่เข้า|รอตรวจสอบ"
+                r"|ยอด(?:ยัง)?ไม่(?:เข้า|ขึ้น)|เครดิต(?:ยัง)?ไม่เข้า)"
+                r"|ยอด[^\n]{0,12}เติม[^\n]{0,14}(?:ยัง)?ไม่เข้า"),
      "สวัสดีค่ะ แอดมินรบกวนขอสลิปการโอนเงินหน่อยนะคะ", "สลิปการโอนเงิน"),
     # CUSTOMER-RED-8 — CUS-G11 (Ai.xlsx sheet '1.thameuangton' row 11):
     # missing/incomplete item claim. Self-describing (no separate verb
@@ -404,6 +414,16 @@ _CN_TRACKING_RE = re.compile(r"(?<!\d)(\d{9,16})(?!\d)")
 _VERIFY_ADDR_INLINE_RE = re.compile(
     r"[一-鿿]|\d{5,}|\n|หมู่|ซอย|ตำบล|แขวง|อำเภอ|เขต|จังหวัด|รหัสไปรษณีย์")
 
+# CUSTOMER-G18-TOPUP-NOT-CREDITED-1 — "this trigger message ALSO carries
+# transfer evidence, not just the complaint": an explicit slip / bank /
+# reference mention, a multi-line block, or a 4+ digit run (a reference
+# number or a larger amount — a bare 2–3 digit amount is NOT enough, so a
+# plain "เติมเงิน 500 แล้วไม่เข้า" still gets the slip ask). NOT OCR, not
+# slip verification — just "more than the bare complaint".
+_TOPUP_INLINE_RE = re.compile(
+    r"สลิป|slip|โอนเข้า|เลขอ้างอิง|อ้างอิง|\bref\b|\d{4,}|\n|พร้อมเพย์|promptpay|ธนาคาร|เลขบัญชี",
+    re.IGNORECASE)
+
 
 def extract_operational_fields(message: str, into: OperationalState) -> OperationalState:
     t = message or ""
@@ -494,18 +514,19 @@ def extract_operational_fields(message: str, into: OperationalState) -> Operatio
             _c = classify_operational_request(stripped)
             if not _c:
                 into.free_text = stripped[:400]
-            elif (into.kind == "verify_warehouse_address"
-                  and _c.get("kind") == into.kind
-                  and _VERIFY_ADDR_INLINE_RE.search(stripped)):
-                # CUSTOMER-CSW15-VERIFY-CHINA-WAREHOUSE-ADDRESS-1 — the
-                # SAME message carries the check request AND the pasted
-                # address ("ใส่ที่อยู่โกดังจีนแบบนี้ถูกไหม <address>"): the
-                # whole thing still self-classifies as verify_warehouse_
-                # address, so the plain `not _c` gate above would miss it
-                # and re-ask. Capture it now when an address-strength
-                # signal is present (CJK chars / a 5+ digit run / a
-                # newline / a Thai address token) — NOT a general address
-                # parser, just "this is more than a bare question".
+            elif _c.get("kind") == into.kind and (
+                    (into.kind == "verify_warehouse_address"
+                     and _VERIFY_ADDR_INLINE_RE.search(stripped))
+                    or (into.kind == "topup_not_credited"
+                        and _TOPUP_INLINE_RE.search(stripped))):
+                # CUSTOMER-CSW15 / CUSTOMER-G18 — the SAME trigger message
+                # carries the request AND its evidence ("ใส่ที่อยู่โกดังจีน
+                # แบบนี้ถูกไหม <address>" / "เติมเงินไม่เข้า ... ref 123456"):
+                # the whole thing still self-classifies as this kind, so
+                # the plain `not _c` gate above would miss it and re-ask.
+                # Capture it now when an evidence-strength signal is
+                # present — NOT a general parser, just "this is more than
+                # the bare request".
                 into.free_text = stripped[:400]
     return into
 
@@ -779,6 +800,14 @@ _KIND_HANDOFF_REPLY = {
     # fabricated "ตรวจสอบแล้วถูกต้อง".
     "verify_warehouse_address": (
         "รับข้อมูลที่อยู่โกดังจีนแล้วค่ะ เดี๋ยวแอดมินตรวจสอบความถูกต้องแล้วแจ้งผลให้นะคะ"),
+    # CUSTOMER-G18-TOPUP-NOT-CREDITED-1 — CUS-G18 is "Private ERP" in the
+    # source, but the live registry has NO executable top-up
+    # verification/write action (G18 is listed in this module's docstring
+    # as a no-executable-action case). Staff check the slip against the
+    # payment system. Honest "we received it, admin will verify the
+    # top-up and report back" — NEVER "ยอดเข้าแล้ว" / "เติมเงินสำเร็จแล้ว".
+    "topup_not_credited": (
+        "รับข้อมูลแล้วค่ะ เดี๋ยวแอดมินตรวจสอบยอดเติมเงินให้แล้วแจ้งผลให้นะคะ"),
     # CUSTOMER-CSW4-VAT-1 — CUS-S04 is a "Write API — เพิ่ม VAT flag"
     # in the source, but no such action is wired (same as CSW3), and
     # the source's own stage-2 text is informational guidance with a
