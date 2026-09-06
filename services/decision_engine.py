@@ -1799,6 +1799,12 @@ _CURRENT_STATUS_QUESTION_RE = re.compile(
 # this never invents "arrived" for a status it doesn't recognize.
 _WAREHOUSE_ARRIVED_STATUS_RE = re.compile(
     r"รับเข้าที่จีน|รับเข้าโกดังจีน|ถึงโกดังจีน|เข้าโกดังจีน|ส่งออกจากจีน|อยู่ระหว่างนำส่ง|ถึงไทยแล้ว")
+# PHASE-5 D5 — statuses that EXPLICITLY state the shipment has not yet
+# reached the China warehouse. Only these justify "ยังไม่ถึงโกดังจีน" as a
+# fact; a status outside BOTH sets is genuinely undefined for this
+# question and must be reported verbatim, never auto-concluded.
+_WAREHOUSE_NOT_ARRIVED_STATUS_RE = re.compile(
+    r"ยังไม่.{0,6}(?:ถึง|เข้า|รับเข้า).{0,6}โกดัง|รอ.{0,6}(?:เข้า|รับเข้า)โกดัง|ก่อนเข้าโกดัง|ยังไม่ได้เข้าโกดัง")
 _STATUS_METHOD_ROAD_RE = re.compile(r"ทางรถ|โดยรถ|(?<![ก-๙])รถ(?![ก-๙])")
 _STATUS_METHOD_SEA_RE = re.compile(r"ทางเรือ|โดยเรือ|(?<![ก-๙])เรือ(?![ก-๙])")
 _ROAD_ETA_LINE = "หากจัดส่งทางรถปกติใช้เวลาประมาณ 7-10 วันนับจากเข้าโกดังจีนค่ะ"
@@ -1865,9 +1871,17 @@ def _compose_shipment_followup_reply(message: str, full_mapped, response_mapping
     if _WAREHOUSE_QUESTION_RE.search(t):
         if not status:
             return f"ยังไม่มีข้อมูลสถานะที่ยืนยันสำหรับบิล {bill} ในระบบค่ะ"
+        # NOT-arrived is checked first: "ยังไม่เข้าโกดังจีน" also matches the
+        # arrived pattern's "เข้าโกดังจีน" substring, and the explicit
+        # negation must win.
+        if _WAREHOUSE_NOT_ARRIVED_STATUS_RE.search(status):
+            return f"ยังไม่ถึงโกดังจีนค่ะ ตอนนี้บิล {bill} อยู่สถานะ{status}ค่ะ"
         if _WAREHOUSE_ARRIVED_STATUS_RE.search(status):
             return f"ถึงโกดังจีนแล้วค่ะ ตอนนี้บิล {bill} อยู่สถานะ{status}ค่ะ"
-        return f"ยังไม่ถึงโกดังจีนค่ะ ตอนนี้บิล {bill} อยู่สถานะ{status}ค่ะ"
+        # PHASE-5 D5 — a status in neither trusted set: report it, do NOT
+        # conclude "ยังไม่ถึงโกดังจีน" (over-commit on an undefined status).
+        return (f"ตอนนี้บิล {bill} อยู่สถานะ{status}ค่ะ "
+                f"ยังไม่สามารถยืนยันการรับเข้าโกดังจีนจากสถานะนี้ได้ค่ะ")
 
     if _PSI_THAI_TRACKING_OUTPUT_RE.search(t) and "จีน" not in t:
         tracking_th = (_shipment_mapped_value(full_mapped, response_mapping, "trackingth") or "").strip()
@@ -5695,6 +5709,31 @@ class DecisionEngine:
                     reply = _build_response(text=(
                         f"ไม่พบข้อมูลรายการสำหรับเลขที่ {_rec_id} ในระบบค่ะ "
                         "รบกวนตรวจสอบเลขที่บิลขนส่งหรือเลขแทร็กอีกครั้งแล้วแจ้งมาใหม่นะคะ"))
+                    return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
+                                           developer_trace=developer_trace, context=context, start=start, alert=alert)
+
+            # PHASE-5 D2 — a customer-scoped LIST ERP READ (e.g.
+            # searchdatashipmentlist for "วันนี้มีของเข้าไทยไหมคะ") that
+            # returned HTTP-OK with NO records must say so explicitly, not
+            # fall through to the generic write-ack "ดำเนินการเรียบร้อยค่ะ"
+            # (which implies an action succeeded) — and never "ระบบขัดข้อง"
+            # (a real failure took the status=="error" branch). Scoped to a
+            # list-shaped API/WEBHOOK read; a WRITE / notification ack is
+            # never list-shaped so it keeps the generic reply. There is no
+            # reliable per-record arrival DATE, so the wording stays a
+            # plain "no shipments for your account" — it never claims
+            # anything about "today".
+            if (selected.get("action_type") in ("API", "WEBHOOK")
+                    and _psi_is_list_shaped(selected)
+                    and selected.get("action_key") not in _ERP_READ_STATUS_ACTIONS):
+                _lm = result_payload.get("mapped_fields")
+                _list_empty = (not _lm) or (
+                    isinstance(_lm, dict) and all(v in (None, "", [], {}) for v in _lm.values()))
+                if _list_empty and not _detect_aggregation_request(message):
+                    developer_trace["erp_read_result"] = "list_valid_empty"
+                    reply = _build_response(text=(
+                        "ตอนนี้ยังไม่พบรายการขนส่งในระบบสำหรับบัญชีของคุณลูกค้าค่ะ "
+                        "หากเพิ่งทำรายการ อาจต้องรอระบบอัปเดตสักครู่นะคะ"))
                     return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
                                            developer_trace=developer_trace, context=context, start=start, alert=alert)
 

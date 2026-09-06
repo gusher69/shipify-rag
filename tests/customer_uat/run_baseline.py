@@ -99,7 +99,8 @@ _CASE_ACTION_FAMILY = {
     "CUS-S11": {"shipment"}, "CUS-S12": {"customer_data", "shipment"}, "CUS-S13": {"tracking", "shipment"},
     "CUS-S15": {"customer_data", "address_change"}, "CUS-S17": {"shipment", "tracking"},
     "CUS-S18": {"customer_data", "shipment"},
-    "CUS-P20": {"product_link"}, "CUS-G29": {"product_link"}, "CUS-S20": {"product_link"},
+    "CUS-P20": {"product_link"}, "CUS-G29": {"product_link"},
+    "CUS-S20a": {"product_link"}, "CUS-S20b": {"product_link"},
 }
 
 
@@ -290,7 +291,7 @@ def _score(case, sig):
         else:
             root = "RESPONSE_STYLE"
         # link-conversion family override
-        if case["case_id"] in ("CUS-G29", "CUS-S20", "CUS-P20"):
+        if case["case_id"] in ("CUS-G29", "CUS-S20a", "CUS-S20b", "CUS-P20"):
             root = "LINK_CONVERSION"
     d["_primary_root_class"] = root
     d["_failed"] = failed
@@ -734,7 +735,7 @@ def _write_report(results):
     P("| p8–10 TC11/12/16/17/18 | screenshot-only 'wrong answer, see file' — question text lives in the "
       "image, not transcribed | KB-accuracy family (CUS-F06–F11) | topic covered; individual "
       "screenshots UNRESOLVABLE — not fabricated |")
-    P("| p11–17 CSW1–18, CSW20 | account/system-check cases | CUS-S01–S18, CUS-S20 / CUS-P20 | covered |")
+    P("| p11–17 CSW1–18, CSW20 | account/system-check cases | CUS-S01–S18, CUS-S20a/b / CUS-P20 | covered |")
     P("| CSW19 | — | — | does not exist in `Ai.xlsx` sheet 2 (rows run 1–18 then 20); correctly absent |")
     P("")
     P("**PDF SCREENSHOT REQUIREMENT COVERAGE: COMPLETE** — every transcribable PDF/TC/CSW requirement maps "

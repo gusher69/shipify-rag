@@ -420,6 +420,14 @@ _ACT_SELF_DO = re.compile(r"เอง|ด้วยตัวเอง|ตัว�
 _ACT_CHARTER = re.compile(r"เหมา|เรียก|จ้าง|ใช้บริการเหมา|\bhire\b", re.IGNORECASE)
 _PICKUP_VERB = re.compile(r"รับของ|รับสินค้า|มารับ|ไปรับ|เข้ารับ|มาเอา|ไปเอา|รับเอง|รับพัสดุ", re.IGNORECASE)
 _SHIP_VERB = re.compile(r"ส่งได้|ส่งไหว|นำเข้า|เอาเข้า|ขนส่งได้|ส่งไป(?:ได้)?|ส่งเข้า(?:มา)?|ส่งมา(?:ไทย)?|เข้ามาได้|ฝากส่ง|ฝากนำเข้า", re.IGNORECASE)
+# PHASE-5 D15 / F05 — "สั่ง(ซื้อ) <goods> (จำนวนเยอะ) ได้ไหม" is the SAME
+# can-this-kind-of-goods-be-brought-in question as "นำเข้า <goods> ได้ไหม"
+# for prohibited-goods purposes (the customer-approved F05 answer is the
+# prohibited-goods answer). Used ONLY inside the PRODUCT_POLICY branch and
+# ONLY with a real goods noun extracted from AFTER the verb — never widens
+# the shared _SHIP_VERB. A leading "สั่ง"/"ซื้อ" alone is just an order
+# verb; the noun after it is what makes it a goods-policy question.
+_ORDER_GOODS_VERB = re.compile(r"^(?:อยาก|ขอ|จะ|ต้องการ)?\s*(?:สั่งซื้อ|สั่ง|ซื้อ)(?=\S{0,1}[ก-๙])", re.IGNORECASE)
 
 _ROLE_SELF = re.compile(r"ของผม|ของฉัน|ของดิฉัน|ของหนู|ของเรา|ของกระผม|บิลผม|บิลฉัน|ออเดอร์ผม|ออเดอร์ฉัน|พัสดุผม|พัสดุฉัน|บัญชีผม|บัญชีฉัน|เลขบิลผม|ผมสั่ง|ฉันสั่ง|ที่ผมสั่ง|ที่ฉันสั่ง", re.IGNORECASE)
 # a record-identifying private marker — excludes SELF_PICKUP (that stays a
@@ -584,11 +592,15 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
     if obj_cp:
         return "COUPON_USAGE", 0.5, ent
 
-    # PRODUCT POLICY — a can-I-ship / can-I-import move on some goods,
-    # without a cost / warehouse / coupon / invoice object.
-    if a_permit and v_ship and not (obj_cost or obj_wh or obj_cp or obj_inv):
-        # the product noun is the phrase BEFORE the ship / permit verb.
-        # A run-on Thai phrase ("กล่องพลาสติกนำเข้าได้ไหมครับ") has no
+    # PRODUCT POLICY — a can-I-ship / can-I-import / can-I-order move on
+    # some goods, without a cost / warehouse / coupon / invoice object.
+    # PHASE-5 D15 — "สั่ง(ซื้อ) <goods> (จำนวนเยอะ) ได้ไหม" counts too, but
+    # ONLY when a real product noun precedes the verb (so a bare "สั่งได้
+    # ไหม" / "ซื้อได้ไหม" with no goods still falls through).
+    _v_order_goods = bool(_ORDER_GOODS_VERB.search(t))
+    if a_permit and (v_ship or _v_order_goods) and not (obj_cost or obj_wh or obj_cp or obj_inv):
+        # the product noun is the phrase BEFORE the ship / order / permit
+        # verb. A run-on Thai phrase ("กล่องพลาสติกนำเข้าได้ไหมครับ") has no
         # spaces, so a bare split(" ")[0] would capture the WHOLE
         # sentence and echo it back downstream (REAL LINE regression).
         _cut = len(t)
@@ -598,9 +610,29 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
                 _cut = _mm.start()
         _noun = _bare_product_noun(t[:_cut]) or (
             re.split(r"\s+", t[:_cut].strip())[-1] if _cut else "")
-        if _noun and 2 <= len(_noun) <= 30 and _THAI_CHAR_RE.search(_noun):
-            ent["product"] = _noun
-        return "PRODUCT_POLICY", 0.7, ent
+        _noun_ok = bool(_noun and 2 <= len(_noun) <= 30 and _THAI_CHAR_RE.search(_noun))
+        # PHASE-5 D15 — Thai "VERB noun" order ("สั่งแบตเตอรี่...ได้ไหม"):
+        # the goods noun sits AFTER a leading order verb (never use the
+        # pre-verb text here — it is the verb itself). Take the span
+        # between the order verb and the permit marker, drop any quantity
+        # qualifier ("จำนวนเยอะ", "เยอะ ๆ", "หลายชิ้น", "มาก"), and require
+        # a genuine ≥3-char Thai noun — so a bare "สั่งได้ไหม" / "ซื้อได้ไหม"
+        # (no goods) still falls through to the rest of _compose.
+        _order_noun_ok = False
+        if _v_order_goods:
+            _ov = _ORDER_GOODS_VERB.search(t)
+            _pm = _ACT_PERMIT.search(t)
+            if _ov is not None and _pm is not None and _pm.start() > _ov.end():
+                _seg = t[_ov.end():_pm.start()]
+                _seg = re.sub(r"จำนวน\S*|เยอะ\S*|หลาย\S*|มาก\S*|ปริมาณ\S*|เท่าไหร่|ๆ|\s+", "", _seg).strip()
+                if 3 <= len(_seg) <= 30 and _THAI_CHAR_RE.search(_seg):
+                    _noun, _noun_ok, _order_noun_ok = _seg, True, True
+        # A shipping verb ("นำเข้า") is decisive on its own; an order verb
+        # counts only once a real goods noun was extracted from after it.
+        if v_ship or _order_noun_ok:
+            if _noun_ok:
+                ent["product"] = _noun
+            return "PRODUCT_POLICY", 0.7, ent
 
     # SHIPMENT STATUS — a parcel object (or a strong status phrasing)
     # asking about progress.
