@@ -914,5 +914,35 @@
       "final_class": "PASS",
       "note": "PASS in the real-setup Phase-6 pre-check AND in the headless degraded-LLM/mocked-ERP baseline."
     }
-  ]
+  ],
+  "canonical_full_regression": {
+    "command": "python -m unittest discover -s tests -v   (OPENAI_API_KEY=sk-invalid, offline)",
+    "at_sha": "e071707 / cf3a7e1 (identical runtime code)",
+    "ran": 3448,
+    "passed": 3400,
+    "failures": 11,
+    "errors": 36,
+    "expected_failures": 1,
+    "classification": {
+      "A_new_regressions_from_e071707": {
+        "count": 0,
+        "cases": []
+      },
+      "B_pre_existing_failures": {
+        "count": 11,
+        "modules": {
+          "test_business_action_hard_delete": 4,
+          "test_p0_01_new_action_no_stale_identifier": 3,
+          "test_real_line_replay_fixtures": 2,
+          "test_decision_engine.TestDynamicBusinessActionDrivenCollection": 2
+        },
+        "evidence": "All 11 reproduce in isolation AND on the pre-PHASE-6B baseline (434fc07). Match the known baseline set recorded before PHASE-6B."
+      },
+      "C_test_isolation_or_environment": {
+        "count": 36,
+        "detail": "All 36 errors are tests.test_webhook.* — test-ordering pollution. tests.test_webhook run in isolation: 68/68 OK. Also: many 'OpenAI embed AuthenticationError' lines in the log are the forced offline (sk-invalid) environment, not defects."
+      }
+    },
+    "expected_failure_detail": "tests.test_ai_auto_setup_registry — documented network test, marked expectedFailure in the suite."
+  }
 }
