@@ -420,5 +420,222 @@ class TestExistingFamiliesUnchanged(unittest.TestCase):
             self.assertEqual(interpret(m).intent_family, fam, m)
 
 
+# ═══════════════════ follow-up continuity (multi-turn) ═══════════════
+class TestFollowUpContinuity(_Engine):
+    """A running conversation must carry context forward turn to turn —
+    each message is not re-processed in isolation (Part-2 T04)."""
+
+    def test_help_then_discovery_then_import_is_one_journey(self):
+        h = []
+        r1 = self.say("มีเรื่องอยากสอบถามค่ะ", h)
+        self.assertIn(_HELP_HEAD, r1["reply"])
+        h += [_t("user", "มีเรื่องอยากสอบถามค่ะ"), _t("assistant", r1["reply"])]
+        r2 = self.say("ให้บริการอะไรบ้างคะ", h)
+        self.assertIn(_DISCOVERY_TAIL, r2["reply"])
+        h += [_t("user", "ให้บริการอะไรบ้างคะ"), _t("assistant", r2["reply"])]
+        r3 = self.say("อยากนำเข้าเครื่องซักผ้าอุตสาหกรรม", h)
+        self.assertIn("เครื่องซักผ้าอุตสาหกรรม", r3["reply"])
+        self.assertNotIn("ไม่มีข้อมูล", r3["reply"])
+
+    def test_import_ack_then_quantity_followup_continues_frame(self):
+        h = []
+        r1 = self.say("ต้องการนำเข้าอะไหล่รถยนต์", h)
+        self.assertIn("อะไหล่รถยนต์", r1["reply"])
+        h += [_t("user", "ต้องการนำเข้าอะไหล่รถยนต์"), _t("assistant", r1["reply"])]
+        r2 = self.say("ประมาณ 500 ชิ้น", h)
+        # a quantity follow-up stays in the import frame, not a new intent
+        self.assertNotIn("ไม่มีข้อมูล", r2["reply"])
+        self.assertNotIn(_CUSTCODE_ASK, r2["reply"])
+
+    def test_money_transfer_then_amount_detail_stays_in_flow(self):
+        h = []
+        r1 = self.say("อยากฝากโอนเงินให้ร้านจีน", h)
+        self.assertIn(_MONEY_HEAD, r1["reply"])
+        h += [_t("user", "อยากฝากโอนเงินให้ร้านจีน"), _t("assistant", r1["reply"])]
+        r2 = self.say("ประมาณ 8000 หยวน", h)
+        self.assertNotIn("ไม่มีข้อมูล", r2["reply"])
+
+    def test_bare_affirmation_only_continues_a_help_offer(self):
+        # "ครับ" after a help offer -> HELP; "ครับ" with no such offer is
+        # NOT hijacked into HELP.
+        r_yes = self.say("ครับ", [_t("user", "สวัสดี"),
+                                  _t("assistant", "สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ")])
+        self.assertIn(_HELP_HEAD, r_yes["reply"])
+        r_no = self.say("ครับ", [_t("user", "ค่าส่งกี่บาท"),
+                                 _t("assistant", "ทางรถ กก. ละ 35 บาทค่ะ")])
+        self.assertNotIn(_HELP_HEAD, r_no["reply"])
+
+
+# ═══════════════════ explicit topic switch mid-journey ══════════════
+class TestTopicSwitchMidJourney(_Engine):
+    def test_switch_from_discovery_to_calculator(self):
+        h = [_t("user", "มีบริการอะไรบ้าง"),
+             _t("assistant", "Shipify มีบริการฝากสั่ง ฝากนำเข้า ค่ะ " + _DISCOVERY_TAIL)]
+        r = self.say("ขอถามเรื่องคำนวณค่าส่งแทนค่ะ กล่อง 50x40x30 หนัก 10 กิโล ทางเรือ", h)
+        # the switch lands on the estimate flow (completed or asking a
+        # slot) — NOT still stuck on the discovery reply.
+        self.assertIn(r["src"], ("shipping_estimate_flow", None))
+        self.assertNotIn(_DISCOVERY_TAIL, r["reply"])
+        self.assertTrue(any(k in r["reply"] for k in ("ประเมิน", "บาท", "CBM", "น้ำหนัก")), r["reply"])
+
+    def test_switch_from_import_to_contact(self):
+        h = [_t("user", "ต้องการนำเข้าเครื่องจักร"),
+             _t("assistant", "รับทราบค่ะ (สินค้า เครื่องจักร) รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ")]
+        r = self.say("เปลี่ยนไปถามเรื่องช่องทางติดต่อดีกว่า", h)
+        self.assertIn(_CONTACT_MARK, r["reply"])
+        self.assertNotIn("จำนวนโดยประมาณ", r["reply"])
+
+    def test_switch_from_website_request_to_withdrawal(self):
+        h = [_t("user", "ขอลิงก์เว็บ Taobao"), _t("assistant", _WEBSITE_HEAD + " ...")]
+        r = self.say("ไม่เอาแล้ว ถามเรื่องถอนเงินขนส่ง", h)
+        self.assertNotIn(_WEBSITE_HEAD, r["reply"])
+
+    def test_switch_out_of_pending_shipment_to_help(self):
+        h = [_t("user", "เช็คบิลหน่อย"), _t("assistant", "กรุณาแจ้งเลขที่บิลขนส่งค่ะ")]
+        r = self.say("ไม่ถามเรื่องบิลแล้ว ขอความช่วยเหลือเรื่องอื่น", h)
+        self.assertNotIn("เลขที่บิลขนส่ง", r["reply"])
+
+
+# ═══════════════════ website-link vs product-link conversion ═════════
+class TestWebsiteVsConversionBoundary(_Engine):
+    def test_bare_platform_url_is_conversion_not_website(self):
+        self.assertEqual(interpret("https://detail.1688.com/offer/620011111111.html").intent_family,
+                         "LINK_CONVERSION")
+
+    def test_taobao_short_url_is_conversion(self):
+        self.assertEqual(interpret("https://e.tb.cn/h.abcXYZ").intent_family, "LINK_CONVERSION")
+
+    def test_convert_verb_with_platform_word_is_conversion(self):
+        self.assertEqual(interpret("แปลงลิงก์ 1688 อันนี้ให้หน่อย").intent_family, "LINK_CONVERSION")
+
+    def test_website_words_without_url_or_verb_are_website_request(self):
+        for m in ["ขอลิงก์หน้าเว็บ 1688 หน่อย", "อยากได้ url หน้าเว็บ Taobao",
+                  "ขอลิงก์เข้าเว็บไซต์ Tmall", "ขอลิงก์เว็บไว้เข้าไปเลือกของ"]:
+            self.assertEqual(interpret(m).intent_family, "WEBSITE_LINK_REQUEST", m)
+
+    def test_url_pasted_after_website_context_still_converts_not_errors(self):
+        # P2-B3 — the CustCode-400 error is fixed; a URL here converts.
+        h = [_t("user", "ขอลิงก์เว็บ Taobao"), _t("assistant", _WEBSITE_HEAD + " ...")]
+        r = self.say("https://item.taobao.com/item.htm?id=700000009999", h)
+        self.assertNotIn("ไม่สามารถดำเนินการได้", r["reply"])
+        self.assertNotIn("ระบบขัดข้อง", r["reply"])
+
+
+# ═══════════════════ calculator — units, generalized ════════════════
+class TestCalculatorUnitsGeneralized(_Engine):
+    def test_grams_alone_parsed_as_kg(self):
+        s = EstimateState()
+        extract_estimate_fields("40x30x20 ซม หนัก 2500 กรัม ทางรถ", s)
+        self.assertEqual(s.weight, 2.5)
+
+    def test_grams_correction_replaces_kg(self):
+        h = [_t("user", "54x12x43 หนัก 10 กิโล"),
+             _t("assistant", "รับทราบค่ะ น้ำหนัก 10 กก. ต้องการประเมินทางรถหรือทางเรือคะ")]
+        r = self.say("ไม่ใช่ 10 กิโล เอา 800 กรัม", h)
+        self.assertNotIn("10 กก", r["reply"].replace("810", ""))
+
+    def test_mm_mixed_with_explicit_cm_stays_consistent(self):
+        s = EstimateState()
+        extract_estimate_fields("300mm x 20cm x 100mm 5 กก ทางเรือ", s)
+        # all three folded to cm; a "20cm" among "mm" is not doubled
+        self.assertEqual(s.dim_unit, "cm")
+        for v in (s.length, s.width, s.height):
+            self.assertTrue(0 < v < 60, (s.length, s.width, s.height))
+
+    def test_metre_dims_folded_to_cm(self):
+        s = EstimateState()
+        extract_estimate_fields("1.2m x 0.8m x 0.6m 15kg ทางเรือ", s)
+        self.assertEqual((s.length, s.width, s.height), (120.0, 80.0, 60.0))
+        self.assertEqual(s.dim_unit, "cm")
+
+    def test_kg_to_gram_correction_within_thread(self):
+        h = [_t("user", "กล่อง 30x30x30 5 กิโล"),
+             _t("assistant", "รับทราบค่ะ ประเมินทางรถหรือทางเรือคะ")]
+        r = self.say("ขอแก้เป็น 3500 กรัม", h)
+        self.assertNotIn("ไม่มีข้อมูล", r["reply"])
+
+    def test_new_calc_cycle_does_not_carry_old_weight(self):
+        h = [_t("user", "54x12x43 หนัก 10 กิโล ทางเรือ"),
+             _t("assistant", "ประเมินเบื้องต้นสำหรับทางเรือ ประมาณ 350 บาทค่ะ")]
+        r = self.say("เริ่มใหม่ กล่อง 20x20x20", h)
+        self.assertIn("20x20x20", r["reply"])
+        self.assertNotIn("10 กก", r["reply"])
+
+
+# ═══════════════════ stale state / repeated-answer prevention ═══════
+class TestStaleStateAndRepeatGuard(_Engine):
+    def test_old_link_conversion_does_not_steal_a_fresh_help_turn(self):
+        h = [_t("user", "แปลงลิงก์ https://detail.1688.com/offer/611111111111.html"),
+             _t("assistant", "แอดมินแปลงลิงก์ให้เรียบร้อยค่ะ")]
+        r = self.say("ต้องการความช่วยเหลือ", h)
+        self.assertIn(_HELP_HEAD, r["reply"])
+
+    def test_repeated_contact_question_is_not_a_custcode_loop(self):
+        h = [_t("user", "ขอเบอร์ติดต่อ"), _t("assistant", "กรุณาแจ้งรหัสลูกค้าค่ะ"),
+             _t("user", "123456"), _t("assistant", "ขอบคุณค่ะ")]
+        r = self.say("แล้วติดต่อทางไหนได้อีก", h)
+        self.assertNotIn(_CUSTCODE_ASK, r["reply"])
+        self.assertIn(_CONTACT_MARK, r["reply"])
+
+    def test_reject_does_not_resend_identical_reply(self):
+        h = [_t("user", "ขอลิงก์เว็บ Tmall"), _t("assistant", _ASK_URL)]
+        r = self.say("ไม่ใช่ค่ะ ที่ถามคือลิงก์หน้าเว็บ", h)
+        self.assertNotEqual(r["reply"].strip(), _ASK_URL)
+
+    def test_completed_estimate_then_new_topic_does_not_recalc(self):
+        h = [_t("user", "คำนวณค่าส่ง 50x40x30 ซม 8 กก ทางรถ"),
+             _t("assistant", "ประเมินเบื้องต้นสำหรับทางรถ ประมาณ 350 บาทค่ะ")]
+        r = self.say("ขอถามเรื่องช่องทางติดต่อ", h)
+        self.assertNotIn("ประเมิน", r["reply"])
+        self.assertIn(_CONTACT_MARK, r["reply"])
+
+
+# ═══════════════════ public vs private routing boundary ════════════
+class TestPublicPrivateRoutingBoundary(_Engine):
+    def test_public_contact_email_website_never_asks_identity(self):
+        for m in ["ขออีเมลบริษัท", "ขอเว็บไซต์บริษัท", "ขอเบอร์โทรฝ่ายบริการลูกค้า",
+                  "ติดต่อแอดมินยังไง"]:
+            r = self.say(m)
+            for bad in (_CUSTCODE_ASK, "ยืนยันตัวตน", "เบอร์โทรที่ผูก"):
+                self.assertNotIn(bad, r["reply"], m)
+
+    def test_private_account_query_still_private(self):
+        # a self-record balance question must NOT be swept into CONTACT_INFO
+        self.assertNotEqual(interpret("ยอดเงินในบัญชีผมเหลือเท่าไหร่").intent_family, "CONTACT_INFO")
+        self.assertNotEqual(interpret("บิลผมส่งของหรือยัง").intent_family, "CONTACT_INFO")
+
+    def test_bogus_code_after_public_turn_does_not_start_verification(self):
+        h = [_t("user", "ขออีเมล และเว็บไซต์"),
+             _t("assistant", "ติดต่อ Shipify ได้ทาง LINE: @Shipify ...")]
+        r = self.say("123456", h)
+        self.assertNotIn("ยืนยันตัวตน", r["reply"])
+        self.assertNotIn("authorization", str(r).lower())
+
+    def test_contact_request_with_identifier_token_is_not_pre_rag_intercepted(self):
+        # carries a real record id -> not the public pre-RAG contact path
+        r = self.say("ขอเบอร์ผู้รับของบิล FT3182001")
+        self.assertNotEqual(r["src"], "phase6b_service_intent")
+
+
+# ═══════════════════ service discovery / next-best-action ═══════════
+class TestServiceDiscoveryNextBestAction(_Engine):
+    def test_help_reply_lists_service_options_as_a_question(self):
+        r = self.say("ช่วยหน่อยครับ")
+        self.assertIn("เช่น", r["reply"])
+        self.assertIn("คะ", r["reply"])
+
+    def test_discovery_reply_ends_with_a_next_step_question(self):
+        r = self.say("รับทำอะไรบ้าง")
+        self.assertIn(_DISCOVERY_TAIL, r["reply"])
+
+    def test_import_interest_reply_asks_for_a_detail(self):
+        r = self.say("สนใจนำเข้าเครื่องปรับอากาศ")
+        self.assertTrue(any(k in r["reply"] for k in ("จำนวน", "ปริมาณ", "น้ำหนัก", "ทางรถหรือทางเรือ")))
+
+    def test_money_transfer_reply_asks_for_amount_or_shop(self):
+        r = self.say("ฝากโอนเงินให้ร้านค้าจีนหน่อย")
+        self.assertTrue(any(k in r["reply"] for k in ("ยอดเงิน", "หยวน", "ร้าน", "ลิงก์สินค้า")))
+
+
 if __name__ == "__main__":
     unittest.main()
