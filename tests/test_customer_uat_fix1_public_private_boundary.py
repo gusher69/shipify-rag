@@ -107,10 +107,22 @@ class Test1_PublicShippingCalculationClarification(_Base):
         self.assertNotIn(_SELF_VERIFY_ASK_PHONE_TEXT, result["reply"]["text"])
         self.assertNotIn("เบอร์", result["reply"]["text"])  # no registered-phone ask at all
 
-    def test_coercion_marker_present_in_trace(self):
-        result, _ = self._run()
-        self.assertEqual((result.get("developer") or {}).get("turn_intent_coerced"),
-                          "public_clarification_continuity")
+    def test_bare_dims_triple_stays_public_and_asks_for_the_missing_input(self):
+        # CORE-CONVERSATION (2026-09): "54x12x43" is now recognised as a
+        # box-dimensions triple and handled by the dedicated shipping-cost
+        # ESTIMATE flow, which asks for the still-missing weight. The
+        # invariant this test protects — the turn stays PUBLIC, never
+        # touches ERP, never resurrects a stale record — is unchanged;
+        # only the internal mechanism moved from the RAG
+        # "public_clarification_continuity" coercion to the estimate flow.
+        result, mock_req = self._run()
+        dev = result.get("developer") or {}
+        self.assertNotEqual(result["routing"]["type"], "API")
+        self.assertIsNone(dev.get("selected_business_action"))
+        mock_req.assert_not_called()
+        self.assertIn(dev.get("selection_source"),
+                      ("shipping_estimate_flow", None))
+        self.assertNotIn(_SELF_VERIFY_ASK_PHONE_TEXT, result["reply"]["text"])
 
 
 # ── TEST 2 / 3 — ambiguous & service-availability public questions ───
@@ -376,7 +388,10 @@ class Fix12_PublicAnswerPoliteWordingDoesNotVetoContinuity(unittest.TestCase):
     def test_1_exact_real_failure_kruna_jaeng_stays_public(self):
         result, mock_req = self._decide("54x12x43", _PUBLIC_CALC_ASKS_WEIGHT_KRUNA)
         dev = result.get("developer") or {}
-        self.assertEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
+        # CORE-CONVERSATION (2026-09) — "54x12x43" is now a box-dimensions
+        # triple handled by the estimate flow. The invariants: never API,
+        # never a Business Action, never a stale-shipment resurrection,
+        # never a phone-verification ask, no generic identifier ambiguity.
         self.assertNotEqual(result["routing"]["type"], "API")
         self.assertIsNone(dev.get("selected_business_action"))
         self.assertNotEqual(dev.get("selection_source"), "conversation_reference")
@@ -387,8 +402,8 @@ class Fix12_PublicAnswerPoliteWordingDoesNotVetoContinuity(unittest.TestCase):
     def test_2_same_bug_class_with_rbkuan_jaeng_wording(self):
         result, mock_req = self._decide("54x12x43", _PUBLIC_CALC_ASKS_WEIGHT_RBKUAN)
         dev = result.get("developer") or {}
-        self.assertEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
         self.assertNotEqual(result["routing"]["type"], "API")
+        self.assertIsNone(dev.get("selected_business_action"))
         mock_req.assert_not_called()
         self.assertNotIn("FT318220260726001", result["reply"]["text"])
 
@@ -505,11 +520,14 @@ class Fix13_DecisionEngineRoutesCoercedPublicTurnToRag(unittest.TestCase):
             result = self.engine.decide(message, history=history, context=ctx)
         return result, mock_req
 
-    def test_1_real_failure_reaches_rag_pipeline_not_identifier_ambiguity(self):
+    def test_1_real_failure_is_not_identifier_ambiguity(self):
+        # CORE-CONVERSATION (2026-09) — "54x12x43" is a box-dimensions
+        # triple, now handled by the shipping-cost estimate flow (asks for
+        # the missing weight). The bug this test protects against — the
+        # turn being swallowed into a generic "which record?" identifier
+        # ambiguity or an ERP call — is still asserted directly.
         result, mock_req = self._decide("54x12x43")
         dev = result.get("developer") or {}
-        self.assertEqual(dev.get("turn_intent_coerced"), "public_clarification_continuity")
-        self.assertEqual(result["reply"]["text"], "RAG-PIPELINE-REACHED")   # shared RAG pipeline ran
         self.assertNotIn(_GENERIC_AMBIGUITY_MARKER, result["reply"]["text"])
         self.assertNotEqual(result["routing"]["type"], "API")
         self.assertIsNone(dev.get("selected_business_action"))
