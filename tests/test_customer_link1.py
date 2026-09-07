@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 from services.decision_engine import DecisionEngine
 from services.conversation_semantics import interpret
-from services.link_conversion_flow import classify_link_request, classify_platform
+from services.link_conversion_flow import classify_link_request, classify_platform, GUEST_CUSTCODE
 from tests.test_decision_engine import _fake_playground_result
 from tests.test_business_action_registry import reset_real_registry
 
@@ -110,7 +110,10 @@ class TestValidPlatformURLs(_E2E):
         self.assertIn(_CONVERTED_LINK, r["reply"])
         self.assertTrue(r["erp_called"])
         self.assertEqual(r["call_kwargs"]["data"]["URL"], _1688_URL)
-        self.assertNotIn("CustCode", r["call_kwargs"]["data"])
+        # PHASE-LINK-1688 — FastTrade requires a CustCode even for a public
+        # link, so an anonymous request sends the Shipify GUEST account
+        # code (never asks the user, never verifies).
+        self.assertEqual(r["call_kwargs"]["data"].get("CustCode"), GUEST_CUSTCODE)
 
     def test_taobao_full_url_converts(self):
         r = self._say(f"แปลงลิงก์ Taobao ให้หน่อย {_TAOBAO_URL}")
@@ -228,8 +231,12 @@ class TestIdentityBehavior(_E2E):
     def test_anonymous_customer_never_asked_for_custcode(self):
         r = self._say(f"แปลงลิงก์ {_1688_URL} ให้หน่อย", verified=False)
         self.assertTrue(r["erp_called"])
-        self.assertNotIn("CustCode", r["call_kwargs"]["data"])
+        # the customer is NEVER asked for a code and NEVER verified;
+        # internally the public GUEST account code is supplied so the
+        # FastTrade endpoint (which requires one) does not 400.
+        self.assertEqual(r["call_kwargs"]["data"].get("CustCode"), GUEST_CUSTCODE)
         self.assertNotIn("รหัสลูกค้า", r["reply"])
+        self.assertNotIn("ยืนยันตัวตน", r["reply"])
 
     def test_verified_customer_own_custcode_supplied_internally(self):
         r = self._say(f"แปลงลิงก์ {_1688_URL} ให้หน่อย", verified=True)

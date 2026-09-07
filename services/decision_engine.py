@@ -126,6 +126,11 @@ from services.link_conversion_flow import (
     reply_for_state as _link_reply_for_state,
     reply_for_success as _link_reply_for_success,
     is_link_conversion_signal as _is_link_conversion_signal,
+    normalize_supported_url as _link_normalize_url,
+    is_1688_short_url as _link_is_1688_short_url,
+    resolve_1688_short_url as _link_resolve_1688_short_url,
+    classify_platform as _link_classify_platform,
+    GUEST_CUSTCODE as _LINK_GUEST_CUSTCODE,
 )
 
 # CUSTOMER-RED-HOTFIX-2 — Purchase Withdrawal / Shipping Withdrawal.
@@ -5438,6 +5443,48 @@ class DecisionEngine:
                                        developer_trace=developer_trace, context=context, start=start, alert=alert)
             developer_trace["link_conversion_state"] = "VALID"
 
+            # PHASE-LINK-1688 — scoped ONLY to geturlproductdetail, still
+            # deterministic (no LLM), still PUBLIC (no CustCode ask, no
+            # verification). Two production gaps the mocked tests never
+            # exercised:
+            #  (a) the FastTrade endpoint REQUIRES a CustCode even for a
+            #      public/guest link — a request with none is HTTP 400
+            #      ("ไม่สามารถดำเนินการได้"). Use the verified/profile
+            #      CustCode when the customer has one, else the Shipify
+            #      guest account code.
+            #  (b) FastTrade does NOT follow 1688 QR/short redirects — it
+            #      400s them. Resolve the redirect here (SSRF-guarded,
+            #      *.1688.com only), then normalize, then hand the real
+            #      product URL to the SAME conversion path. If it does not
+            #      resolve to a supported 1688 product URL, give a useful
+            #      reply instead of executing.
+            _lc_cc = context.get("customer_context") or {}
+            _link_conv_custcode = (_lc_cc.get("cust_code") or _lc_cc.get("CustCode")
+                                    or _LINK_GUEST_CUSTCODE)
+            _link_conv_url_override = None
+            _lc_url = _link_req["url"]
+            if _link_is_1688_short_url(_lc_url):
+                _resolved = _link_resolve_1688_short_url(_lc_url)
+                _resolved = _link_normalize_url(_resolved) if _resolved else None
+                if (_resolved and _resolved != _lc_url
+                        and not _link_is_1688_short_url(_resolved)
+                        and _link_classify_platform(_resolved) == "1688"):
+                    developer_trace["link_conversion_short_url_resolved"] = {"from": _lc_url, "to": _resolved}
+                    _link_conv_url_override = _resolved
+                else:
+                    developer_trace["link_conversion_state"] = "SHORT_URL_UNRESOLVED"
+                    reply = _build_response(text=_link_reply_for_state("SHORT_URL_UNRESOLVED"))
+                    return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow,
+                                           developer_trace=developer_trace, context=context, start=start, alert=alert)
+            else:
+                _norm = _link_normalize_url(_lc_url)
+                if _norm != _lc_url:
+                    developer_trace["link_conversion_url_normalized"] = {"from": _lc_url, "to": _norm}
+                    _link_conv_url_override = _norm
+        else:
+            _link_conv_custcode = None
+            _link_conv_url_override = None
+
         if routing_type == "RAG":
             # Production Integration Sprint (2026-08-02), Phase 1 Step C —
             # the ONE production RAG execution path (services/
@@ -5498,10 +5545,22 @@ class DecisionEngine:
         else:
             system_values = _extract_system_values(message, history=history)
             system_values.update(_compose_notification_message_system_value(selected, collected_slots))
+            # PHASE-LINK-1688 — hand the resolved/normalized product URL
+            # (QR redirect followed, m.1688 mobile canonicalized) to the
+            # converter, and ensure a CustCode is present for this public
+            # action (guest fallback). Scoped to geturlproductdetail only.
+            _link_conv_customer_context = None
+            if selected.get("action_key") == "geturlproductdetail":
+                if _link_conv_url_override:
+                    for _k in ("url", "URL", "Url"):
+                        system_values[_k] = _link_conv_url_override
+                _link_conv_customer_context = {
+                    **(context.get("customer_context") or {}), "cust_code": _link_conv_custcode}
             exec_context = {
                 "question": message, "collected_slots": collected_slots, "workflow": workflow, "intent": intent,
                 "conversation_context": context.get("conversation_context") or {},
-                "customer_context": context.get("customer_context") or {},
+                "customer_context": _link_conv_customer_context
+                if _link_conv_customer_context is not None else (context.get("customer_context") or {}),
                 "current_user": context.get("current_user"), "developer_mode": bool(context.get("developer_mode")),
                 # Generic system-derived values ANY tool/action may read
                 # (e.g. a URL-handling tool, or a NOTIFICATION action's

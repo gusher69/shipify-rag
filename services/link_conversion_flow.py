@@ -29,7 +29,27 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
+import requests
+
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
+
+# PHASE-LINK-1688 — FastTrade's GetUrlProductDetail endpoint REQUIRES a
+# CustCode even to return a PUBLIC (guest) product link: a request with
+# none / an unknown one gets HTTP 400. Link Conversion is public
+# (CUS-P20: "must NOT require a customer code or identity verification"),
+# so a request from a customer with no verified/profile CustCode falls
+# back to this Shipify guest account code. Confirmed live: FT0000 is a
+# real Shipify guest account that this endpoint accepts and answers with
+# the guest product URL; arbitrary shape-valid codes are rejected as
+# "not found". The user is never asked and never verified.
+GUEST_CUSTCODE = "FT0000"
+
+# 1688 short / QR redirect hosts. FastTrade does NOT follow these itself
+# (it 400s them), so the redirect is resolved here first — SSRF-guarded —
+# and only a resolved *.1688.com product URL is ever handed onward.
+_1688_SHORT_HOSTS = ("qr.1688.com", "s.1688.com", "m.1688.com/s")
+_1688_HOST_SUFFIX = "1688.com"
+_MOBILE_OFFER_RE = re.compile(r"^https?://m\.1688\.com/offer/(\d{4,})\.html", re.IGNORECASE)
 
 # platform -> accepted hostname suffixes (a hostname matches if it EQUALS
 # one of these or ends with "." + one of these — ordinary subdomain
@@ -156,6 +176,74 @@ def classify_link_request(message: str, history: Optional[List[Dict]] = None) ->
     return {"state": "VALID", "url": url, "platform": platform}
 
 
+def normalize_supported_url(url: str) -> str:
+    """Canonicalize a supported-platform URL to the shape the existing
+    conversion path handles, dropping tracking / query noise. Currently:
+    a 1688 MOBILE offer URL (m.1688.com/offer/<ITEM_ID>.html?spm=...) is
+    rewritten to its desktop equivalent (detail.1688.com/offer/<ITEM_ID>.html)
+    — same numeric ITEM_ID, no invented format. Any other supported URL
+    is returned unchanged (FastTrade already accepts detail.1688 / Taobao
+    / Tmall directly)."""
+    m = _MOBILE_OFFER_RE.match(url or "")
+    if m:
+        return f"https://detail.1688.com/offer/{m.group(1)}.html"
+    return url
+
+
+def is_1688_short_url(url: str) -> bool:
+    """True for a 1688 QR / short-redirect URL that must be resolved to a
+    real product URL before the conversion call."""
+    host = _hostname(url) or ""
+    if not host.endswith("." + _1688_HOST_SUFFIX) and host != _1688_HOST_SUFFIX:
+        return False
+    if host in ("qr.1688.com", "s.1688.com"):
+        return True
+    # m.1688.com/s/... share links (not the /offer/<id>.html product form)
+    if host == "m.1688.com":
+        return bool(re.match(r"^https?://m\.1688\.com/s/", url or "", re.IGNORECASE)) \
+            and not _MOBILE_OFFER_RE.match(url or "")
+    return False
+
+
+def resolve_1688_short_url(url: str, *, max_hops: int = 3, timeout: float = 4.0) -> Optional[str]:
+    """Follow a 1688 short/QR redirect to its final URL. SSRF-hardened:
+    HTTPS only, every hop's host must be *.1688.com, at most `max_hops`
+    redirects, a short timeout, redirects followed manually (no body
+    fetched, no auto-redirect to an arbitrary host). Returns the final
+    URL string, or None on any failure / policy violation."""
+    current = url or ""
+    for _ in range(max_hops + 1):
+        if not current.lower().startswith("https://"):
+            return None
+        host = _hostname(current) or ""
+        if not (host == _1688_HOST_SUFFIX or host.endswith("." + _1688_HOST_SUFFIX)):
+            return None
+        try:
+            resp = requests.get(current, allow_redirects=False, timeout=timeout, stream=True,
+                                headers={"User-Agent": "Mozilla/5.0"})
+        except Exception:
+            return None
+        finally:
+            try:
+                resp.close()  # never read the body
+            except Exception:
+                pass
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("Location") or ""
+            if loc.startswith("/"):
+                loc = f"https://{host}{loc}"
+            if not loc.lower().startswith("https://"):
+                return None
+            nxt_host = _hostname(loc) or ""
+            if not (nxt_host == _1688_HOST_SUFFIX or nxt_host.endswith("." + _1688_HOST_SUFFIX)):
+                return None
+            current = loc
+            continue
+        # non-redirect response: this is the final URL
+        return current
+    return None
+
+
 # ── conversion-result truth typing (post-execution) ─────────────────
 # Never collapse an upstream failure/rejection into a success-looking
 # reply. The upstream contract for this endpoint is not otherwise
@@ -188,6 +276,7 @@ _REPLIES = {
                       "รบกวนส่งลิงก์สินค้าที่ถูกต้องอีกครั้งนะคะ",
     "MULTIPLE_URLS": "รบกวนส่งลิงก์สินค้าทีละ 1 ลิงก์นะคะ",
     "UNSUPPORTED_DOMAIN": "ขออภัยค่ะ ระบบแปลงลิงก์รองรับเฉพาะลิงก์จาก 1688, Taobao และ Tmall เท่านั้นค่ะ",
+    "SHORT_URL_UNRESOLVED": "ลิงก์นี้ยังไม่พบรหัสสินค้าค่ะ ลองส่งลิงก์หน้าสินค้า 1688 แบบเต็มมาอีกครั้งได้เลยค่ะ",
     "CONVERSION_NOT_FOUND_OR_REJECTED": "ขออภัยค่ะ ไม่สามารถแปลงลิงก์นี้ได้ "
                                         "รบกวนตรวจสอบลิงก์อีกครั้ง หรือส่งลิงก์สินค้าใหม่มาได้เลยค่ะ",
     "UPSTREAM_FAILURE": "ขออภัยค่ะ ระบบแปลงลิงก์ขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้งภายหลังนะคะ",

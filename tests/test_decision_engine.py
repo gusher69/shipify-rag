@@ -1908,7 +1908,11 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
         self.assertNotIn("รหัสลูกค้า", text)
         self.assertNotIn("{", text)
         sent = mock_req.call_args.kwargs.get("data") or {}
-        self.assertNotIn("CustCode", sent)
+        # PHASE-LINK-1688 — the customer is NEVER asked for a code; the
+        # public Shipify GUEST account code is supplied internally so the
+        # FastTrade endpoint (which requires one) does not 400.
+        from services.link_conversion_flow import GUEST_CUSTCODE
+        self.assertEqual(sent.get("CustCode"), GUEST_CUSTCODE)
 
     # B. Natural phrase + URL + CustCode already known via customer_context
     # (profile reuse) -> supplied automatically, still never asked.
@@ -2006,7 +2010,10 @@ class TestUrlConversionActionAndCrossActionIdentifierReuse(unittest.TestCase):
         self.assertEqual(result_b["routing"]["type"], "API")
         self.assertNotIn("รหัสลูกค้า", result_b["reply"]["text"])
         sent_b = mock_req_b.call_args.kwargs.get("data") or {}
-        self.assertNotIn("CustCode", sent_b)
+        # never A's code; the public GUEST code instead (PHASE-LINK-1688).
+        from services.link_conversion_flow import GUEST_CUSTCODE
+        self.assertNotEqual(sent_b.get("CustCode"), "SP1014")
+        self.assertEqual(sent_b.get("CustCode"), GUEST_CUSTCODE)
 
 
 class TestSemanticParameterInference(unittest.TestCase):
