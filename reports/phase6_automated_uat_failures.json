@@ -1,0 +1,137 @@
+{
+  "metadata": {
+    "timestamp": "2026-09-07T01:40:39.220714+00:00",
+    "git_sha": "958b0d4ffb37e611f4a8eadd8fe91a39ec282909",
+    "production_sha": "958b0d4ffb37e611f4a8eadd8fe91a39ec282909",
+    "environment": "headless backend pre-check — real DecisionEngine/registry/auth; mocked safe ERP HTTP; mocked RAG (OpenAI credit exhausted); no real LINE",
+    "total_cases": 69
+  },
+  "summary": {
+    "pass": 64,
+    "fail": 0,
+    "blocked": 0,
+    "needs_real_line": 5
+  },
+  "cases": [
+    {
+      "case_id": "CUS-G17",
+      "topic": "General / FAQ customer question (case 17)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ติดตามสถานะ สินค้า"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการค่ะ รบกวนระบุให้ชัดเจนขึ้นอีกนิดนะคะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "generic ambiguity prompt for 'ติดตามสถานะ สินค้า' (D8, routing edge — safe); confirm identifier-ask on real LINE",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F08",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "ใบกำกับค่าสินค้าออกได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "สวัสดีค่ะ ทางเราสามารถออกใบกำกับค่าสินค้า และใบเสร็จค่าขนส่งให้ได้นะคะ ไม่ทราบว่าสินค้าของลูกค้าเป็นอะไรคะ",
+      "actual_response": "สวัสดีค่ะ ทางเราสามารถออกใบกำกับค่าสินค้า และใบเสร็จค่าขนส่งให้ได้นะคะ ไม่ทราบว่าสินค้าของลูกค้าเป็นอะไรคะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "multi-turn invoice-eligibility loop closure over real channel turns (recorded 50% pass / 50% fail)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-SC2",
+      "topic": "Self-service identity verification loop: phone then email did not match; a fresh private question re-triggers phone verification and loops.",
+      "source_type": "screenshot/messageImage_1788321460773.jpg",
+      "input_messages": [
+        "สินค้าจะเข้าไทยตอนไหน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Private ERP needs a VERIFIED binding. If self-verification fails (phone + email mismatch) do NOT loop — hand to Human CS once. A new private question in the same conversation must not restart the phone-verification loop.",
+      "actual_response": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "private_state_inquiry",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "real self-service LINE verification / rebinding experience",
+      "external_blocker": "no trusted estimated_arrival_th field (case is really a verification-flow probe)",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-RL-p0_01_repeat_after_completed_cycle",
+      "topic": "REAL LINE session 6c9b9026 turn 614 (08:24 ICT) — repeat fresh request AFTER a completed genuine cycle. Sanitized. history = turns 574..613 (20 exchanges).",
+      "source_type": "tests/fixtures/real_line/p0_01_repeat_after_completed_cycle.json",
+      "input_messages": [
+        "ขอเช็กพัสดุเดียวครับ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "{\"selected_action\": \"searchdatashipment\", \"routing_type\": \"WORKFLOW\", \"shipment_code_present\": false, \"is_complete\": false, \"erp_called\": false, \"reply_contains\": [\"บิลขนส่ง\"]}",
+      "actual_response": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "multi-turn stale-identifier replay-cycle behaviour; not assertable single-turn headless",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": "committed test_real_line_replay_fixtures for this case fails (pre-existing, stale-cycle state) — verify on real LINE"
+    },
+    {
+      "case_id": "CUS-RL-p0_01_stale_cycle",
+      "topic": "REAL LINE session 6c9b9026 — P0-01 failure, sanitized",
+      "source_type": "tests/fixtures/real_line/p0_01_stale_cycle.json",
+      "input_messages": [
+        "ขอเช็กพัสดุเดียวครับ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "{\"selected_action\": \"searchdatashipment\", \"routing_type\": \"WORKFLOW\", \"shipment_code_present\": false, \"is_complete\": false, \"erp_called\": false, \"reply_contains\": [\"บิลขนส่ง\"]}",
+      "actual_response": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "multi-turn stale-identifier replay-cycle behaviour; not assertable single-turn headless",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": "committed test_real_line_replay_fixtures for this case fails (pre-existing, stale-cycle state) — verify on real LINE"
+    }
+  ]
+}

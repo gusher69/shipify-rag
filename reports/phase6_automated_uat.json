@@ -1,0 +1,1698 @@
+{
+  "metadata": {
+    "timestamp": "2026-09-07T01:40:39.220714+00:00",
+    "git_sha": "958b0d4ffb37e611f4a8eadd8fe91a39ec282909",
+    "production_sha": "958b0d4ffb37e611f4a8eadd8fe91a39ec282909",
+    "environment": "headless backend pre-check — real DecisionEngine/registry/auth; mocked safe ERP HTTP; mocked RAG (OpenAI credit exhausted); no real LINE",
+    "total_cases": 69
+  },
+  "summary": {
+    "pass": 64,
+    "fail": 0,
+    "blocked": 0,
+    "needs_real_line": 5
+  },
+  "cases": [
+    {
+      "case_id": "CUS-G01",
+      "topic": "General / FAQ customer question (case 1)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ขอที่อยู่โกดังหน่อย"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "มีโกดังไทย 2 ที่นะคะ\nพิกัดจุดรับสินค้าใหม่ อ่อนนุช 46 \nhttps://maps.app.goo.gl/yRz6MpZot1337b3w6?g_st=ic\nเบอร์เจ้าหน้าที่โกดัง  0642247205 (อยู่ในตลาด ปิงมาร์เช่ปาร์ค)\nสำหรับลูกค้าต้องการเข้ารับสาขานี้ สามารถเลือกเปลี่ยนมารับสินค้าได้ที่หน้าที่อยู่จัดส่งในระบบนะคะ\n---------\nโกดังรับสินค้านนทบุรีค่ะ\nเวลาทำการวันจันทร์-เสาร์ 09.00-18.00 น. (พักเที่ยง 12.00-13.00 น.)\n**หยุดวันอาทิตย์\n จุดรับสินค้า Location : https://maps.app.goo.gl/bkqFVxT2uTcUcjJh8\n**หากเรียกรถขนส่งต่างๆเข้ารับ ให้ระบุตำแหน่งนี้ 76 ซอยเจิรญเผ่า-สุขใย ตำบลบางม่วง บางใหญ่ นนทบุรี 11140 \n(หมายเหตุ ระบุ 76/19 ประตูสีน้ำเงิน โกดังแรก)\nเลี้ยวขวาเข้ามาในซอยขับตรงเข้ามาเรื่อยๆจะเจอโกดังค่ะ\nสอบถามเส้นทางได้ที่ เบอร์ 091-5050-775 นะคะ",
+      "resolved_intent": "AMBIGUOUS",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "TH/CN warehouse map + FT/SP step images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (TH/CN warehouse map + FT/SP step images not in repo)"
+    },
+    {
+      "case_id": "CUS-G02",
+      "topic": "General / FAQ customer question (case 2)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ขอที่อยู่โกดังจีน",
+        "ต้องการส่งของผ่านชิปปิ้ง ส่งไปที่อยู่ไหน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ คุณลูกค้าสามารถเข้าที่หน้าเว็บ ตรงเมนู ที่อยู่โกดังจีนได้เลยนะคะ จากนั้นคัดลอกที่อยู่ตามขั้นตอนในรูปส่งให้ร้านจีนได้เลยค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "CN warehouse SP/FT step images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (CN warehouse SP/FT step images not in repo)"
+    },
+    {
+      "case_id": "CUS-G03",
+      "topic": "General / FAQ customer question (case 3)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "สินค้าจะเข้าไทยตอนไหน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "private_state_inquiry",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no trusted estimated_arrival_th field in SearchDataShipment)",
+      "external_blocker": "no trusted estimated_arrival_th field in SearchDataShipment",
+      "asset_blocker": "5 shipment/ETA screenshots not in repo",
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G04",
+      "topic": "General / FAQ customer question (case 4)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ค่าขนส่งคิดยังไง คำนวนค่าส่งให้หน่อย"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "resolved_intent": "",
+      "workflow": "shipping_estimate_flow",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G05",
+      "topic": "General / FAQ customer question (case 5)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ออกใบกำกับได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ ทางเราสามารถออกใบกำกับค่าสินค้า และใบเสร็จค่าขนส่งให้ได้นะคะ ไม่ทราบว่าสินค้าของลูกค้าเป็นอะไรคะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G06",
+      "topic": "General / FAQ customer question (case 6)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "CBM คิวคืออะไร"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "คือปริมาตรของสินค้าค่ะ โดยคำนวณจาก ความยาว × ความกว้าง × ความสูง (หน่วยเซนติเมตร) แล้วหารด้วย 1,000,000 \nผลลัพธ์ที่ได้จะเป็นหน่วย คิว (CBM) \nใช้สำหรับคิดค่าขนส่งตามขนาดสินค้าค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "3 CBM diagram images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (3 CBM diagram images not in repo)"
+    },
+    {
+      "case_id": "CUS-G07",
+      "topic": "General / FAQ customer question (case 7)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "มีขั้นต่ำในการสั่งไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "ทางเราจะไม่มีขั้นต่ำในการฝากนำเข้าและฝากสั่งนะคะ \nคุณลูกค้าสามารถสั่งกี่ชิ้น หรือนำเข้าจำนวนเท่าไหร่ก็ได้เช่นกันค่ะ (กรณีขั่นต่ำจะขึ้นอยู่กับร้านค้าจีนบางร้านค่ะ)\nส่งลิงค์สินค้ามาให้เราช่วยดูก่อนได้นะคะ^^",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G08",
+      "topic": "General / FAQ customer question (case 8)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "สินค้าที่ห้ามนำเข้ามีอะไรบ้าง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ ทางเราจะไม่รับนำเข้าสินค้าผิดกฎหมายทุกชนิด รวมถึง สินค้าลิขสิทธิ์ สินค้าก๊อปปี้แบรนด์ต่างๆ\n ของกิน อาหาร ของเหลว เครื่องดื่ม เครื่องสำอาง สิ่งมีชีวิต และพืชทุกชนิด ยาเวชภัณฑ์ และของมีคม รวมทั้ง แบตเตอร์รี่ วัตถุไวไฟทั้งหมด",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G09",
+      "topic": "General / FAQ customer question (case 9)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "วิธีการชำระบิลสั่งซื้อ",
+        "ชำระค่าสินค้ายังไง",
+        "จ่ายบิลสั่งซื้อยังไง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "คลิกเข้าไปที่เลขบิล จะมีให้กดชำระยอด \nจากนั้นจะมี QR Code ให้แสกนจ่ายได้เลยนะคะ หากแสกนจ่ายเรียบร้อยแล้วกดยืนยันการชำระยอดใต้ QR Codeได้เลยค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "2 payment-step images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (2 payment-step images not in repo)"
+    },
+    {
+      "case_id": "CUS-G10",
+      "topic": "General / FAQ customer question (case 10)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "บิลขนส่งสามารถชำระได้เลยไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "ชำระค่าขนส่งได้เมื่อสินค้าเข้าไทยนะคะ เนื่องจากโกดังไทยจะเช็คขนาดเเละน้ำหนักตรวจสอบความถูกต้องให้อีกครั้งค่ะ\nเเละคุณลูกค้าจะได้รับ sms เเจ้งเตือนอีกครั้งค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G11",
+      "topic": "General / FAQ customer question (case 11)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ได้รับสินค้าไม่ครบ",
+        "เคลมสินค้ายังไงคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีนที่ติดข้างกล่อง กับวิดิโอตอนแกะสินค้า รวมทั้งรูปสินค้าทั้งหมดที่ได้รับมาให้แอดมินได้เลยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no claims WRITE API (POST /claims))",
+      "external_blocker": "no claims WRITE API (POST /claims)",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G12",
+      "topic": "General / FAQ customer question (case 12)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "สินค้าถึงโกดังหรือยัง",
+        "ได้รับสินค้าหรือยัง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "private_state_inquiry",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "routes PRIVATE (WORKFLOW), grounded reply, auth-gated, no leak",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G13",
+      "topic": "General / FAQ customer question (case 13)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ระยะเวลาการส่งจากร้านจีน -โกดังจีน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "โดยปกติจะใช้เวลาประมาณ 2–4 วันค่ะ \nทั้งนี้ขึ้นอยู่กับเวลาทำการของร้านค้าฝั่งจีนด้วยนะคะ \nหลังจากสินค้าเข้าถึงโกดังของเราแล้ว จะใช้เวลาประมาณ 1 วันในการนำสินค้าเข้าระบบและเตรียมส่งออกนะคะ",
+      "resolved_intent": "AMBIGUOUS",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G14",
+      "topic": "General / FAQ customer question (case 14)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ชำระบัตรเครดิตได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "ค่าสินค้าสามารถชำระผ่านบัตรเครดิตได้ค่ะ ขั้นต่ำ 500บาท/บิล เเละชำระผ่านบัตรเครดิตไม่สามารถออกใบกำกับได้นะคะ \n(ค่าบริการชาร์จเพิ่ม 3%นะคะ)",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G15",
+      "topic": "General / FAQ customer question (case 15)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ขอเบอร์ติดต่อ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "Shipify  ฝ่ายบริการลูกค้า : 02-026-6426\nFasttrade  Call: 02-026-6425",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G16",
+      "topic": "General / FAQ customer question (case 16)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ร้านส่งหรือยังคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "กรุณาแจ้งเลขที่คำสั่งซื้อค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "private_state_inquiry",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no shop_shipped_at field in SearchDataOrder)",
+      "external_blocker": "no shop_shipped_at field in SearchDataOrder",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G17",
+      "topic": "General / FAQ customer question (case 17)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ติดตามสถานะ สินค้า"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "พบบริการที่ตรงกับคำถามมากกว่าหนึ่งรายการค่ะ รบกวนระบุให้ชัดเจนขึ้นอีกนิดนะคะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "generic ambiguity prompt for 'ติดตามสถานะ สินค้า' (D8, routing edge — safe); confirm identifier-ask on real LINE",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G18",
+      "topic": "General / FAQ customer question (case 18)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ยอดเงินไม่เข้า",
+        "เติมเงินแล้วรอตรวจสอบ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ แอดมินรบกวนขอสลิปการโอนเงินหน่อยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "honest Human-CS / no-confirmed-data fallback for a case whose full capability needs an absent API (no wallet-transactions READ API; inbound slip image not ingested)",
+      "external_blocker": "no wallet-transactions READ API; inbound slip image not ingested",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G19",
+      "topic": "General / FAQ customer question (case 19)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "เรียกรถให้ได้ไหม",
+        "เหมารถให้ได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "รบกวนแจ้งเลขบิลขนส่ง และ โลเคชั่นปลายทาง และ ชื่อผู้รับ และ เบอร์โทรผู้รับเพิ่มเติมด้วยนะคะ",
+      "resolved_intent": "",
+      "workflow": "charter_truck_collection",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "2 charter-truck images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (2 charter-truck images not in repo)"
+    },
+    {
+      "case_id": "CUS-G20",
+      "topic": "General / FAQ customer question (case 20)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ขนส่งเอกชนมีอะไรบ้าง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ เรามีขนส่งเอกชนให้เลือกตามนี้ค่ะ Nim ,EMS ,J&T และ FLASH ค่ะ อยากให้เราช่วยประเมินค่าขนส่งที่สุดที่สุดให้ด้วยไหมคะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "4 private-carrier rate-table images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (4 private-carrier rate-table images not in repo)"
+    },
+    {
+      "case_id": "CUS-G21",
+      "topic": "General / FAQ customer question (case 21)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ยกเลิกบิลสั่งซื้อได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ หากยังไม่ได้ชำระจะสามารถยกเลิกก่อนได้ค่ะ กรณีที่ชำระแล้ว แอดมินขอสอบถามร้านก่อนนะคะว่าจัดส่งสินค้าให้แล้วหรือยังค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "honest Human-CS / no-confirmed-data fallback for a case whose full capability needs an absent API (no executable CancelOrder + payment_status eligibility action)",
+      "external_blocker": "no executable CancelOrder + payment_status eligibility action",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G22",
+      "topic": "General / FAQ customer question (case 22)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "เรทเท่าไหร่คะ",
+        "เรทนำเข้าเท่าไหร่",
+        "เรทฝากสั่งเท่าไหร่"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ เรทนำเข้าและฝากสั่งกับทางเรานะคะ\n\nเรทฝากสั่ง 5.11 บาทต่อหยวน\n\nเรททางรถ 35บาท/กิโลกรัม ปริมาตร 6900บาท/คิวค่ะ ระยะเวลา 7-10วัน (ช่วงนี้เผื่อเวลาจากเดิมอีก 3-5 วัน เนื่องจาก \nด่านเวียดนามยังตรวจสอบเข้มอยู่นะคะ) นับจากวันที่สินค้าถึงโกดังจีนนะคะ\n\nเรททางเรือ 19บาท/กิโลกรัม ปริมาตร 4500บาท/คิวค่ะ ระยะเวลา 14-20วัน นับจากวันที่สินค้าถึงโกดังจีนนะคะ^^",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "1 rate image not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (1 rate image not in repo)"
+    },
+    {
+      "case_id": "CUS-G23",
+      "topic": "General / FAQ customer question (case 23)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "คูปองใช้ไม่หมด คืนได้ไหมคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "คูปองส่วนลดไม่สามารถคืนได้นะคะ 1บิล ใช้ได้ 1คูปอง หากใช้ไม่หมดคูปองจะถูกตัดเลยค่ะ ไม่สามารถคืนเงินคืนคูปองได้นะคะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-G24",
+      "topic": "General / FAQ customer question (case 24)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "มีบริการอะไรบ้าง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "มีบริการฝากสั่ง , ฝากนำเข้า และฝากโอน เดิม จ่ายค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "1 services image not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (1 services image not in repo)"
+    },
+    {
+      "case_id": "CUS-G25",
+      "topic": "General / FAQ customer question (case 25)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ฝากสั่งกับฝากนำเข้าต่างกันอย่างไง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "ฝากสั่งทางเราจะดำเนินการให้ทุกขั้นตอนเลยค่ะ \n1. ช่วยหาร้าน\n2. ต่อรองราคา (สอบถามรายละเอียดสินค้า)\n3. ออกใบกำกับภาษีได้\n4. ดูแลหลังการขาย\nกรณีได้รับสินค้าไม่ครบร้านส่งผิดหรือสินค้าเสียหาย ช่วยพิมพ์กับร้านให้ได้ค่ะ\n\nฝากนำเข้า\nลูกค้าดำเนินการสั่งกับร้านด้วยตัวเองค่ะ",
+      "resolved_intent": "AMBIGUOUS",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "2 ฝากสั่ง/ฝากนำเข้า images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (2 ฝากสั่ง/ฝากนำเข้า images not in repo)"
+    },
+    {
+      "case_id": "CUS-G26",
+      "topic": "General / FAQ customer question (case 26)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ชำระบิลขนส่งยังไง",
+        "ชำระค่านำเข้ายังไง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ คุณลูกค้าสามารถเติมเงิน +กดชำระในบิลมาตามขั้นตอนในรูปที่แอดมินส่งให้ได้เลยนะคะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "3 payment images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (3 payment images not in repo)"
+    },
+    {
+      "case_id": "CUS-G27",
+      "topic": "General / FAQ customer question (case 27)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "สนใจฝากสั่งสินค้าค่าใช้จ่ายคิดยังไง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ ค่าใช้จ่ายจะแบ่งออกเป็น 2 รอบนะคะ\n1.ค่าสินค้า+ค่าส่งร้านจีน (ที่จะต้องชำระรอบแรกก่อน) นะคะ\n2.ค่านำเข้าจากจีนมาไทย+ค่าส่งเอกชนในไทย (ชำระได้อีกครั้งต่อเมื่อสินค้าถึงไทย) นะคะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "2 cost-structure images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (2 cost-structure images not in repo)"
+    },
+    {
+      "case_id": "CUS-G28",
+      "topic": "General / FAQ customer question (case 28)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "มีบริการตีลังไม้ไหม",
+        "ตีลังได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "สวัสดีค่ะ ทางเรามีบริการตีลังไม้ให้นะคะ คุณลูกค้าสามารถเปิดบิลและกดเลือกตีลังไม้มาได้เลยค่ะ เงื่อนไขการตีลังตามรูปภาพที่แอดมินส่งให้เลยนะคะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG; media/image delivery deferred to real LINE (asset binaries absent)",
+      "external_blocker": null,
+      "asset_blocker": "2 wood-crating images not in repo",
+      "notes": "text answer routes RAG; media delivery unverifiable (2 wood-crating images not in repo)"
+    },
+    {
+      "case_id": "CUS-G29",
+      "topic": "General / FAQ customer question (case 29)",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ช่วยแปลงลิงก์ให้หน่อยค่ะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Answer with the CS-approved standard reply and complete the loop; ask the one genuinely-missing detail if the canned answer requires it. Do NOT fall back to 'no information'.",
+      "actual_response": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "resolved_intent": "",
+      "workflow": "",
+      "action_or_api": "geturlproductdetail",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "link-conversion intent handled (ack / converted-link path)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S01",
+      "topic": "Account / system-check case CSW1",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "สินค้าจะเข้าไทยตอนไหนคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no (PO/PA/POS/PE)), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "private_state_inquiry",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no trusted estimated_arrival_th field)",
+      "external_blocker": "no trusted estimated_arrival_th field",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S02",
+      "topic": "Account / system-check case CSW2",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ต้องการแก้จำนวนสินค้าในบิล"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no + item_id + new_qty), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "แอดมินขอเลขบิลสั่งซื้อของรายการนี้หน่อยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no qty-modify WRITE API)",
+      "external_blocker": "no qty-modify WRITE API",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S03",
+      "topic": "Account / system-check case CSW3",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "สามารถเปลี่ยนเป็นจัดส่งทางรถ",
+        "ทางเรือได้ไหมคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no + shipping_type (road/sea)), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "แอดมินรบกวนขอเลขบิลหน่อยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no shipping-method-change WRITE API)",
+      "external_blocker": "no shipping-method-change WRITE API",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S04",
+      "topic": "Account / system-check case CSW4",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ลืมเลือก VAT ไปค่ะ",
+        "ต้องการVATด้วยค่ะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no + vat_flag (true/false)), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ VAT มาให้แอดมินได้เลยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no add-VAT WRITE API)",
+      "external_blocker": "no add-VAT WRITE API",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S05",
+      "topic": "Account / system-check case CSW5",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ถอนเงินสั่งซื้อยังไง",
+        "เงินที่ร้านคืนมา จะถอนยังไง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (customer_id), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "คุณลูกค้าเข้าหน้าแอปหรือหน้าเว็บ จะมีเมนู รายการเติมเงินนะคะ\nจากนั้นเลือกปุ่มเครดิตสั่งซื้อนะคะ\nขวามือจะมีปุ่มถอนเงินสีเหลือง คุณลูกค้ากดถอนและกรอกข้อมูลเลขบัญชีมาได้เลยค่ะ\nระยะเวลาในการถอนประมาณ 3-5 วัน นับจากวันที่แจ้งถอนมานะคะ",
+      "resolved_intent": "",
+      "workflow": "purchase_withdrawal_kb",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "routes PRIVATE (WORKFLOW), grounded reply, auth-gated, no leak",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S06",
+      "topic": "Account / system-check case CSW6",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ต้องการสั่งผลิตตามสเปค",
+        "สั่งสกรีนโลโก้ได้ไหมคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no + spec + logo + qty), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และแจ้งสเปคสินค้า จำนวน สีกับโลโก้มาให้แอดได้เลยค่ะ แอดจะประสานงานกับทางร้านให้นะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S07",
+      "topic": "Account / system-check case CSW7",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "โหลดใบกำกับยังไง",
+        "ขอใบกำกับค่าสินค้าหน่อย"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "สามารถดาวน์โหลดใบกำกับค่าสินค้า (VAT) ได้จากหน้าเว็บไซต์ Shipify โดยทำตามขั้นตอนนี้นะคะ\n\n1. เข้าสู่ระบบที่ www.shipify.co.th  \n2. ไปที่เมนู \"รายการสั่งซื้อ\"  \n3. กดเลือกที่เมนู \"สรุปบัญชี\" (ปุ่มสีเทาซ้ายมือ)  \n4. เลือกปุ่ม \"สรุปรายการสั่งซื้อ\"  \n5. หากเจ้าหน้าที่ออกใบกำกับให้เรียบร้อยแล้ว จะมีปุ่ม \"ดาวน์โหลดใบเสร็จ\" หรือ \"ดาวน์โหลดใบกำกับ\" ด้านขวามือสุด ให้กดดาวน์โหลดไฟล์ได้เลยค่ะ\n---\nบิล PO,PA,POS,PE หากสินค้ามีการชำระบิลขนส่งเรียบร้อย จะสามารถดาวน์โหลดเอกสารใบกำกับค่าสินค้าได้ตามขั้นตอนที่แอดมินแจ้งเลยค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "honest Human-CS / no-confirmed-data fallback for a case whose full capability needs an absent API (no invoice PDF/URL fetch API)",
+      "external_blocker": "no invoice PDF/URL fetch API",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S08",
+      "topic": "Account / system-check case CSW8",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "บิลขนส่งนี้ หรือแทรคนี้เป็นของบิลสั่งซื้อไหน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (tracking_cn หรือ bill_no), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "เเอดมินเช็คให้ค่ะว่าเป็นของบิลสั่งซื้อไหนนะคะ รบกวนแจ้งเลขบิลขนส่ง (FT/FE/SA/SP) หรือเลขแทรคจีนมาให้ตรวจสอบด้วยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no shipment/tracking -> purchase-bill reverse-map field)",
+      "external_blocker": "no shipment/tracking -> purchase-bill reverse-map field",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S09",
+      "topic": "Account / system-check case CSW9",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "บิลขนส่ง FTxxx ต้องการเปลี่ยนที่อยู่จัดส่ง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (shipment_bill_no (FT/FE/SA/SP) + new_address), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "กรุณาแจ้งเลขที่บิล/Shipmentค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "routes PRIVATE (WORKFLOW), grounded reply, auth-gated, no leak",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S10",
+      "topic": "Account / system-check case CSW10",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "รีเเพ็คค่ะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (shipment_bill_no_list), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "รับเรื่องขอรีแพ็คค่ะ แอดมินรบกวนขอเลขบิลขนส่ง (FT/FE/SA/SP) ที่ต้องการรีแพ็คมาได้เลยค่ะ หากมีหลายบิลส่งมาพร้อมกันได้เลยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S11",
+      "topic": "Account / system-check case CSW11",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "บิลขนส่ง FT ต้องการเปลี่ยนเป็นรับเอง",
+        "หรือเปลี่ยนส่งเอกชน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (shipment_bill_no + new_carrier/type), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "แอดมินรบกวนขอเลขบิลขนส่งหน่อยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no carrier/self-pickup-change WRITE API)",
+      "external_blocker": "no carrier/self-pickup-change WRITE API",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S12",
+      "topic": "Account / system-check case CSW12",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ถอนเงินขนส่งยังไงคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (customer_id หรือ shipment_bill_no), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "คุณลูกค้าสามารถเข้าที่เมนู ประวัติการชำระเงินขนส่ง และขวามือจะมีปุ่ม ถอนเงินจากระบบ นะคะ สามารถกดถอนเข้ามาได้เลยค่ะ",
+      "resolved_intent": "",
+      "workflow": "shipping_withdrawal_kb",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "routes PRIVATE (WORKFLOW), grounded reply, auth-gated, no leak",
+      "external_blocker": null,
+      "asset_blocker": "SP withdrawal-form image not in repo",
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S13",
+      "topic": "Account / system-check case CSW13",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "บิลซ้ำค่ะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (tracking_cn), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "แอดมินเช็คบิลซ้ำและลบบิลให้นะคะ รบกวนขอเลขแทรคจีนหน่อยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "stage-1 identifier ask for a case whose full capability needs an absent API (no duplicate-bill delete API)",
+      "external_blocker": "no duplicate-bill delete API",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S14",
+      "topic": "Account / system-check case CSW14",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ใช้คูปองยังไง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (-), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "คูปองสามารถใช้ลดค่านำเข้าเเละค่าส่งในไทยได้ค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S15",
+      "topic": "Account / system-check case CSW15",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ใส่ที่อยู่โกดังจีนถูกไหมคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (customer_warehouse_address + customer_id), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "แอดมินช่วยตรวจสอบความถูกต้องให้ค่ะ รบกวนส่งที่อยู่โกดังจีนที่กรอกไว้ในระบบมาให้ตรวจสอบหน่อยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "honest Human-CS / no-confirmed-data fallback for a case whose full capability needs an absent API (no CN warehouse-address validate API)",
+      "external_blocker": "no CN warehouse-address validate API",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S16",
+      "topic": "Account / system-check case CSW16",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "รวมบิลเหมารถค่ะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (shipment_bill_no_list), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "ได้ค่ะ รบกวนแจ้งเลขบิลขนส่งที่ต้องการรวมเหมารถมาได้เลยค่ะ หากมีหลายบิลสามารถส่งมาพร้อมกันได้เลยนะคะ",
+      "resolved_intent": "",
+      "workflow": "operational_change_collection",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "routes PRIVATE (WORKFLOW), grounded reply, auth-gated, no leak",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S17",
+      "topic": "Account / system-check case CSW17",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ขอแทรคไทยค่ะ (กรณีลูกค้าไม่เข้ามาเช็คในระบบเอง)"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (shipment_bill_no), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "กรุณาแจ้งเลขที่บิลขนส่งค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "private_state_inquiry",
+      "action_or_api": "",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "routes PRIVATE (WORKFLOW), grounded reply, auth-gated, no leak",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S18",
+      "topic": "Account / system-check case CSW18",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "วันนี้มีของเข้าไทยไหมคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (customer_id), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "ตอนนี้ยังไม่พบรายการขนส่งในระบบสำหรับบัญชีของคุณลูกค้าค่ะ หากเพิ่งทำรายการ อาจต้องรอระบบอัปเดตสักครู่นะคะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "searchdatashipmentlist",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "honest Human-CS / no-confirmed-data fallback for a case whose full capability needs an absent API (no per-record DateArrivedTH for a real 'today' filter)",
+      "external_blocker": "no per-record DateArrivedTH for a real 'today' filter",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S20a",
+      "topic": "Account / system-check case CSW20",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ตัวอย่างแปลงลิงก์"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no / customer_id / tracking), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "resolved_intent": "",
+      "workflow": "",
+      "action_or_api": "geturlproductdetail",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "link-conversion intent handled (ack / converted-link path)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-S20b",
+      "topic": "Account / system-check case CSW20",
+      "source_type": "Ai.xlsx",
+      "input_messages": [
+        "ช่วยแปลงลิงก์ให้หน่อยค่ะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Open with the CS reply, collect the required identifier (bill_no / customer_id / tracking), then return the ERP data OR hand to Human CS using the step-2 template. Never answer 'no information' before asking for the bill / tracking / customer code.",
+      "actual_response": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "resolved_intent": "",
+      "workflow": "",
+      "action_or_api": "geturlproductdetail",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "link-conversion intent handled (ack / converted-link path)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F01",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "ครีมอาบน้ำนำเข้าได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "ครีมอาบน้ำ จัดเป็นประเภทของเหลว ซื้งตอนนี้ไม่สามารถนำเข้าของเหลวได้นะคะ\n\nคุณลูกค้ามีสินค้าประเภทอื่นที่ต้องการนำเข้าเพิ่มไหมคะ",
+      "actual_response": "ครีมอาบน้ำ จัดเป็นประเภทของเหลว ซื้งตอนนี้ไม่สามารถนำเข้าของเหลวได้นะคะ\n\nคุณลูกค้ามีสินค้าประเภทอื่นที่ต้องการนำเข้าเพิ่มไหมคะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F02",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "ทางรถกับทางเรือระยะเวลากี่วัน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "ตอบเค่ 1 คำถาม ไม่ตอบทางเรือด้วย",
+      "actual_response": "ตอบเค่ 1 คำถาม ไม่ตอบทางเรือด้วย",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F03",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "แล้วเรทนำเข้าเท่าไหร่คะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "เรททางรถ: 35 บาท/กิโลกรัม หรือ 6900 บาท/คิว ระยะเวลา 7-10 วัน นับจากวันที่สินค้าถึงโกดังจีน\n\n เรททางเรือ: 19 บาท/กิโลกรัม หรือ 4500 บาท/คิว ระยะเวลา 14-20 วัน นับจากวันที่สินค้าถึงโกดังจีนค่ะ",
+      "actual_response": "เรททางรถ: 35 บาท/กิโลกรัม หรือ 6900 บาท/คิว ระยะเวลา 7-10 วัน นับจากวันที่สินค้าถึงโกดังจีน\n\n เรททางเรือ: 19 บาท/กิโลกรัม หรือ 4500 บาท/คิว ระยะเวลา 14-20 วัน นับจากวันที่สินค้าถึงโกดังจีนค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F04",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "ฝากสั่งน้ำหอมได้ไหมคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "สินค้าที่เป็นของเหลวจะไม่สามารถนำเข้าได้นะคะ เนื่องจาก ค่อนข้างที่จะเลี่ยงรั่วซึมและเสียหายระหว่างขนส่งได้ค่ะ",
+      "actual_response": "สินค้าที่เป็นของเหลวจะไม่สามารถนำเข้าได้นะคะ เนื่องจาก ค่อนข้างที่จะเลี่ยงรั่วซึมและเสียหายระหว่างขนส่งได้ค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F05",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "เราสามารถสั่งแบตเตอรี่จำนวนเยอะได้ไหมคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "ทางเราจะไม่รับนำเข้าสินค้าผิดกฎหมายทุกชนิด รวมถึงสินค้าลิขสิทธิ์ สินค้าก๊อปปี้แบรนด์ต่างๆ ของกิน อาหาร ของเหลว เครื่องดื่ม เครื่องสำอาง สิ่งมีชีวิต และพืชทุกชนิด ยาเวชภัณฑ์ และของมีคม รวมทั้งแบตเตอร์รี่ วัตถุไวไฟทั้งหมดค่ะ",
+      "actual_response": "ทางเราจะไม่รับนำเข้าสินค้าผิดกฎหมายทุกชนิด รวมถึงสินค้าลิขสิทธิ์ สินค้าก๊อปปี้แบรนด์ต่างๆ ของกิน อาหาร ของเหลว เครื่องดื่ม เครื่องสำอาง สิ่งมีชีวิต และพืชทุกชนิด ยาเวชภัณฑ์ และของมีคม รวมทั้งแบตเตอร์รี่ วัตถุไวไฟทั้งหมดค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": "Phase-5 D15 fix: 'สั่ง...จำนวนเยอะ' now classifies PRODUCT_POLICY"
+    },
+    {
+      "case_id": "CUS-F06",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "โกดังอ่อนนุชเปิดทุกวันหรอคะ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "โกดังอ่อนนุชเปิด จ-ศ เวลา 9:00-18:00 หยุดทุกวัน ส-อา ค่ะ",
+      "actual_response": "โกดังอ่อนนุชเปิด จ-ศ เวลา 9:00-18:00 หยุดทุกวัน ส-อา ค่ะ",
+      "resolved_intent": "AMBIGUOUS",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F07",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "มีขนส่งทางเครื่องบินไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "ทางเรามีขนส่งทางรถเเละทางเรือนะคะ ในส่วนของทางเครื่องบินตอนนี้ยังไม่มีให้บริการนะคะ คุณลูกค้าต้องการขนส่งสินค้าประเภทไหนคะ",
+      "actual_response": "ทางเรามีขนส่งทางรถเเละทางเรือนะคะ ในส่วนของทางเครื่องบินตอนนี้ยังไม่มีให้บริการนะคะ คุณลูกค้าต้องการขนส่งสินค้าประเภทไหนคะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F08",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "ใบกำกับค่าสินค้าออกได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "สวัสดีค่ะ ทางเราสามารถออกใบกำกับค่าสินค้า และใบเสร็จค่าขนส่งให้ได้นะคะ ไม่ทราบว่าสินค้าของลูกค้าเป็นอะไรคะ",
+      "actual_response": "สวัสดีค่ะ ทางเราสามารถออกใบกำกับค่าสินค้า และใบเสร็จค่าขนส่งให้ได้นะคะ ไม่ทราบว่าสินค้าของลูกค้าเป็นอะไรคะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "multi-turn invoice-eligibility loop closure over real channel turns (recorded 50% pass / 50% fail)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F09",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "จัดส่งสินค้าถึงหน้าบ้านเลยไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "ใช่ค่ะ บริการจัดส่งสินค้าถึงหน้าบ้านเลยนะคะ คุณลูกค้าสามารถเลือกขนส่งที่ถูกสุดหรือตามที่ต้องการได้ค่ะ",
+      "actual_response": "ใช่ค่ะ บริการจัดส่งสินค้าถึงหน้าบ้านเลยนะคะ คุณลูกค้าสามารถเลือกขนส่งที่ถูกสุดหรือตามที่ต้องการได้ค่ะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F10",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "โหลดใบกำกับยังไง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "สามารถดาวน์โหลดใบกำกับค่าสินค้า (VAT) ได้จากหน้าเว็บไซต์ Shipify โดยทำตามขั้นตอนนี้นะคะ\n\n1. เข้าสู่ระบบที่ www.shipify.co.th  \n2. ไปที่เมนู \"รายการสั่งซื้อ\"  \n3. กดเลือกที่เมนู \"สรุปบัญชี\" (ปุ่มสีเทาซ้ายมือ)  \n4. เลือกปุ่ม \"สรุปรายการสั่งซื้อ\"  \n5. หากเจ้าหน้าที่ออกใบกำกับให้เรียบร้อยแล้ว จะมีปุ่ม \"ดาวน์โหลดใบเสร็จ\" หรือ \"ดาวน์โหลดใบกำกับ\" ด้านขวามือสุด ให้กดดาวน์โหลดไฟล์ได้เลยค่ะ",
+      "actual_response": "สามารถดาวน์โหลดใบกำกับค่าสินค้า (VAT) ได้จากหน้าเว็บไซต์ Shipify โดยทำตามขั้นตอนนี้นะคะ\n\n1. เข้าสู่ระบบที่ www.shipify.co.th  \n2. ไปที่เมนู \"รายการสั่งซื้อ\"  \n3. กดเลือกที่เมนู \"สรุปบัญชี\" (ปุ่มสีเทาซ้ายมือ)  \n4. เลือกปุ่ม \"สรุปรายการสั่งซื้อ\"  \n5. หากเจ้าหน้าที่ออกใบกำกับให้เรียบร้อยแล้ว จะมีปุ่ม \"ดาวน์โหลดใบเสร็จ\" หรือ \"ดาวน์โหลดใบกำกับ\" ด้านขวามือสุด ให้กดดาวน์โหลดไฟล์ได้เลยค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-F11",
+      "topic": "Real UAT failure / observation (2/9/2025 test set)",
+      "source_type": "panha_tee_jer_nai_kan_tob (1).xlsx",
+      "input_messages": [
+        "ตีลังไม้ได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "สวัสดีค่ะ ทางเรามีบริการตีลังไม้ให้นะคะ คุณลูกค้าสามารถเปิดบิลและกดเลือกตีลังไม้มาได้เลยค่ะ เงื่อนไขการตีลังตามรูปภาพที่แอดมินส่งให้เลยนะคะ",
+      "actual_response": "สวัสดีค่ะ ทางเรามีบริการตีลังไม้ให้นะคะ คุณลูกค้าสามารถเปิดบิลและกดเลือกตีลังไม้มาได้เลยค่ะ เงื่อนไขการตีลังตามรูปภาพที่แอดมินส่งให้เลยนะคะ",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-SC1",
+      "topic": "Ask whether the charter-truck service exists (public service question).",
+      "source_type": "screenshot/messageImage_1788318551530.jpg",
+      "input_messages": [
+        "มีบริการเหมารถไหมคะ",
+        "เรียกรถให้ได้ไหม",
+        "เหมารถให้ได้ไหม"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Confirm the charter-truck service exists (Ai.xlsx 1.thameuangton #19 / TC19), then collect bill_no + destination + receiver + phone and hand to Human CS. Must NOT reply 'no confirmed information about charter-truck service'.",
+      "actual_response": "[RAG-ANSWER: representative — live retrieval unavailable this run]",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-SC2",
+      "topic": "Self-service identity verification loop: phone then email did not match; a fresh private question re-triggers phone verification and loops.",
+      "source_type": "screenshot/messageImage_1788321460773.jpg",
+      "input_messages": [
+        "สินค้าจะเข้าไทยตอนไหน"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Private ERP needs a VERIFIED binding. If self-verification fails (phone + email mismatch) do NOT loop — hand to Human CS once. A new private question in the same conversation must not restart the phone-verification loop.",
+      "actual_response": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "private_state_inquiry",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "real self-service LINE verification / rebinding experience",
+      "external_blocker": "no trusted estimated_arrival_th field (case is really a verification-flow probe)",
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-SC3",
+      "topic": "Dimensions supplied for a PUBLIC shipping-cost estimate (previous bot turn asked for weight and size).",
+      "source_type": "screenshot/messageImage_1788321878908.jpg",
+      "input_messages": [
+        "54x12x43",
+        "54 x 12 x 43",
+        "54*12*43",
+        "54×12×43"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Treat as dimensions for the public shipping-cost flow; ask only for the still-missing task input (weight / unit). MUST NOT ask for the registered phone / customer code / identity verification.",
+      "actual_response": "[RAG-ANSWER: representative — live retrieval unavailable this run]",
+      "resolved_intent": "SHIPIFY_INFORMATION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "bare-dimensions input asks the expected clarifying question",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-P07",
+      "topic": "Shipping-cost calculation request; two sub-cases (member vs non-member).",
+      "source_type": "kase_tee_tong_kae.pdf",
+      "input_messages": [
+        "คิดค่านำเข้าให้หน่อย",
+        "คำนวนค่าขนส่ง"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "If the full calc is not available, at minimum send the self-serve calculator link https://www.shipify.co.th/Rate . Do NOT ask for a membership number for a general rate question — only ask for identity when it is genuinely personal / wallet data.",
+      "actual_response": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "resolved_intent": "",
+      "workflow": "shipping_estimate_flow",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-P06",
+      "topic": "Company question with no trusted answer; must hand to Human CS with a soft holding reply.",
+      "source_type": "kase_tee_tong_kae.pdf",
+      "input_messages": [
+        "(company fact genuinely not in KB)"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Reply in the 'let me check further for you' style AND actually send a Human CS handoff (there IS a CS LINE group to route to). Not a bare 'no confirmed information'.",
+      "actual_response": "ขอเช็กข้อมูลเพิ่มเติมให้ก่อนนะคะ เดี๋ยวให้เจ้าหน้าที่ตรวจสอบและแจ้งกลับค่ะ",
+      "resolved_intent": "AMBIGUOUS",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "routes RAG/GENERAL as expected (live retrieval content unverifiable this run — OpenAI credit exhausted)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-P20",
+      "topic": "Product-link conversion (1688 / Taobao / Tmall).",
+      "source_type": "kase_tee_tong_kae.pdf",
+      "input_messages": [
+        "ช่วยแปลงลิงก์ให้หน่อยค่ะ",
+        "แปลงลิงก์ Taobao ให้หน่อย",
+        "https://detail.1688.com/offer/899413226668.html"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "Actually convert a supported-platform link to a https://www.shipify.co.th/PageProductDetail/... link. Link conversion is NOT an internal-data check — it must NOT require a customer code or identity verification.",
+      "actual_response": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "resolved_intent": "",
+      "workflow": "",
+      "action_or_api": "geturlproductdetail",
+      "auth_state": "unverified",
+      "status": "PASS",
+      "reason": "link-conversion intent handled (ack / converted-link path)",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-RL-genuine_continuation",
+      "topic": "REAL LINE P0-01 step 2 — sanitized. NOTE: the replay harness has no customer_channel_bindings row, so the Authorization Gate stops before the real ERP HTTP call; a genuine continuation is proven here by is_complete + routing=API + ShipmentCode captured (the engine reached execution).",
+      "source_type": "tests/fixtures/real_line/genuine_continuation.json",
+      "input_messages": [
+        "FT318220260726001"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "verified(test-binding)",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "{\"selected_action\": \"searchdatashipment\", \"routing_type\": \"API\", \"shipment_code_present\": true, \"is_complete\": true, \"erp_called\": false}",
+      "actual_response": "เลขที่บิลขนส่ง: FT318220260726001\nสถานะบิลขนส่ง: ระหว่างขนส่งมาไทย\nTracking จีน: 775002\nยอดรวมบิลขนส่ง: 0 ค่ะ",
+      "resolved_intent": "AMBIGUOUS",
+      "workflow": "fresh_search",
+      "action_or_api": "searchdatashipment",
+      "auth_state": "verified(test-binding)",
+      "status": "PASS",
+      "reason": "routes PRIVATE (API), grounded reply, auth-gated, no leak",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": ""
+    },
+    {
+      "case_id": "CUS-RL-p0_01_repeat_after_completed_cycle",
+      "topic": "REAL LINE session 6c9b9026 turn 614 (08:24 ICT) — repeat fresh request AFTER a completed genuine cycle. Sanitized. history = turns 574..613 (20 exchanges).",
+      "source_type": "tests/fixtures/real_line/p0_01_repeat_after_completed_cycle.json",
+      "input_messages": [
+        "ขอเช็กพัสดุเดียวครับ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "{\"selected_action\": \"searchdatashipment\", \"routing_type\": \"WORKFLOW\", \"shipment_code_present\": false, \"is_complete\": false, \"erp_called\": false, \"reply_contains\": [\"บิลขนส่ง\"]}",
+      "actual_response": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "multi-turn stale-identifier replay-cycle behaviour; not assertable single-turn headless",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": "committed test_real_line_replay_fixtures for this case fails (pre-existing, stale-cycle state) — verify on real LINE"
+    },
+    {
+      "case_id": "CUS-RL-p0_01_stale_cycle",
+      "topic": "REAL LINE session 6c9b9026 — P0-01 failure, sanitized",
+      "source_type": "tests/fixtures/real_line/p0_01_stale_cycle.json",
+      "input_messages": [
+        "ขอเช็กพัสดุเดียวครับ"
+      ],
+      "test_values": {
+        "cust_code": "FT3182",
+        "auth": "unverified",
+        "erp_payload_kind": "safe-mock"
+      },
+      "expected_behavior": "{\"selected_action\": \"searchdatashipment\", \"routing_type\": \"WORKFLOW\", \"shipment_code_present\": false, \"is_complete\": false, \"erp_called\": false, \"reply_contains\": [\"บิลขนส่ง\"]}",
+      "actual_response": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "resolved_intent": "PRIVATE_ACTION",
+      "workflow": "fresh_search",
+      "action_or_api": "",
+      "auth_state": "unverified",
+      "status": "NEEDS_REAL_LINE",
+      "reason": "multi-turn stale-identifier replay-cycle behaviour; not assertable single-turn headless",
+      "external_blocker": null,
+      "asset_blocker": null,
+      "notes": "committed test_real_line_replay_fixtures for this case fails (pre-existing, stale-cycle state) — verify on real LINE"
+    }
+  ]
+}
