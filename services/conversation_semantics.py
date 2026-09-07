@@ -551,7 +551,20 @@ _ACT_PERMIT = re.compile(r"ได้ไหม|ได้มั้ย|ได้ม
 # an explicit CALCULATE / ESTIMATE verb — distinct from a bare "how much"
 # price question (that stays a rate FAQ, per CUSTOMER-CALC-1).
 _ACT_CALC_VERB = re.compile(r"คำนวณ|คำนวน|ประเมิน|ช่วยคิด|คิดค่า|คิดราคา|ตีราคา|estimate|calculate|quote", re.IGNORECASE)
-_PRICE_Q_RE = re.compile(r"เท่าไหร่|เท่าไร|กี่บาท|ราคาเท่า|ราวๆ\s*กี่", re.IGNORECASE)
+_PRICE_Q_RE = re.compile(r"เท่าไหร่|เท่าไร|กี่บาท|ราคาเท่า|ราวๆ\s*กี่|แพงไหม|แพงมั้ย|แพงรึเปล่า|แพงไหมคะ|ราคาสูงไหม", re.IGNORECASE)
+
+# PHASE-6B-REAL — a DIMENSIONS TRIPLE: three x/×/*-separated numbers, each
+# with an optional glued unit (mm/cm/m/นิ้ว/มม/ซม). With or without a
+# weight or a transport method, this is structurally a shipping-cost
+# CALCULATOR input and nothing else. Recognised deterministically so a
+# stale conversation context can never let the gated LLM reclassify it —
+# real LINE: "520mm x 220mm x 110mm ส่งทางเรือ หนัก 2 กิโล" sent right
+# after a link conversion was read as LINK_CONVERSION and dead-ended in
+# SAFE_FALLBACK instead of computing ~57 บาท.
+_DIMS_TRIPLE_RE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:มม\.?|mm|ซม\.?|cm|เซน\S*|ม\.?|m|นิ้ว|inch(?:es)?)?\s*[x×*]\s*"
+    r"\d+(?:\.\d+)?\s*(?:มม\.?|mm|ซม\.?|cm|เซน\S*|ม\.?|m|นิ้ว|inch(?:es)?)?\s*[x×*]\s*"
+    r"\d+(?:\.\d+)?", re.IGNORECASE)
 # a description of a SPECIFIC parcel — turns a price question into a
 # calculation request.
 _PARCEL_DESC_RE = re.compile(
@@ -756,11 +769,30 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
     # (CUSTOMER-CALC-1).
     if a_calc and (obj_cost or obj_parcel or has_measure or a_price_q or a_parcel_desc):
         return "SHIPPING_ESTIMATE", 0.85, ent
+    # PHASE-6B-REAL — a bare dimensions triple (optionally with a weight /
+    # method) is a calculator input, deterministically, so a stale
+    # link-conversion / import-frame context can never let the LLM
+    # reclassify it. Excludes a tax-document / coupon message (those keep
+    # their own family). A real https?:// URL still wins LINK_CONVERSION
+    # above.
+    if _DIMS_TRIPLE_RE.search(t) and not obj_inv and not obj_cp and not obj_tk:
+        return "SHIPPING_ESTIMATE", 0.85, ent
     if a_est_composite:
         return "SHIPPING_ESTIMATE", 0.8, ent
     if a_price_q and a_parcel_desc and (v_ship or obj_cost or re.search(r"ส่งมา|มาไทย|ส่งของ", t)):
         return "SHIPPING_ESTIMATE", 0.75, ent
     if obj_cost and (has_measure or m):
+        return "SHIPPING_ESTIMATE", 0.7, ent
+    # PHASE-6B-REAL (D) — a shipping-cost object + an EVALUATIVE price
+    # question ("แพงไหม" / "แพงมั้ย" / "คิดราคายังไง"), with or without a
+    # named item, is a shipping-cost intent. Route it to the estimate
+    # flow (which explains it needs weight + dimensions and asks for
+    # them) rather than letting a history-poisoned GENERAL read dead-end
+    # in an "unsupported company fact" Human-CS handoff. A BARE
+    # how-much rate question ("ค่านำเข้าเท่าไหร่", only "เท่าไหร่"/"กี่บาท")
+    # is deliberately NOT included — it stays a rate FAQ (CUSTOMER-CALC-1).
+    if obj_cost and re.search(r"แพงไหม|แพงมั้ย|แพงรึเปล่า|แพงมั๊ย|แพงมาก(?:ไหม|มั้ย)?|ราคาสูงไหม|แพงหรือเปล่า",
+                              t, re.IGNORECASE):
         return "SHIPPING_ESTIMATE", 0.7, ent
 
     # INVOICE — a tax-document object with an issue / permit / how-to move.

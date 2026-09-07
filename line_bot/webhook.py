@@ -645,7 +645,25 @@ def _handle_message_via_decision_engine(event: MessageEvent):
             most_recent = pending_service.get_most_recent(tenant_id=tenant_id, channel=channel,
                                                             conversation_key=user_id)
             if most_recent and most_recent.get("status") == "expired":
-                result = _expired_result()
+                # PHASE-6B-REAL — only when the customer plausibly just
+                # answered THAT confirmation: (a) it expired recently
+                # (not hours ago), and (b) this "ใช่ค่ะ" is not simply
+                # accepting a fresh greeting / help offer. Real LINE:
+                # a 7-hour-old expired row made "ใช่ค่ะ" (right after
+                # "มีอะไรให้ช่วยไหมคะ?") answer "คำขอก่อนหน้าหมดเวลา…".
+                import datetime as _dt
+                from services.pending_confirmation_service import _parse_ts as _pts
+                _exp = _pts(most_recent.get("expires_at"))
+                _fresh = bool(_exp and (_dt.datetime.now(_dt.timezone.utc) - _exp)
+                              < _dt.timedelta(minutes=10))
+                _accepting_help = False
+                try:
+                    from services.service_intent_flow import is_help_affirmation as _iha
+                    _accepting_help = _iha(question, recent_history)
+                except Exception:
+                    pass
+                if _fresh and not _accepting_help:
+                    result = _expired_result()
         if result is None:
             result = engine.decide(question, history=recent_history, context=decide_context)
 

@@ -104,17 +104,38 @@ def shipping_withdrawal_reply(sb, customer_context: Optional[Dict]) -> str:
     return fetch_kb_answer(sb, f"SHIPPING_WITHDRAWAL_{brand}") or _KB_MISSING_REPLY
 
 
+# stable signatures of the two per-brand shipping-withdrawal answers, so
+# a "the customer is still in the SP/FT withdrawal exchange" test does
+# not depend on the exact KB wording (the tone engine may reformat it).
+_SP_ANSWER_SIG_RE = re.compile(r"แบบฟอร์มรูปภาพ|สำเนาบัตรประชาชน")
+_FT_ANSWER_SIG_RE = re.compile(r"ประวัติการชำระเงินขนส่ง|ถอนเงินจากระบบ")
+
+
+def _in_shipping_withdrawal_exchange(text: str) -> bool:
+    t = text or ""
+    return bool(ASK_BRAND_REPLY in t or _SP_ANSWER_SIG_RE.search(t) or _FT_ANSWER_SIG_RE.search(t))
+
+
 def shipping_withdrawal_pending_brand_reply(
         sb, history: Optional[List[Dict]], message: str) -> Optional[str]:
-    """CUSTOMER-CSW12-SHIPPING-WITHDRAWAL-SP-1 — when the IMMEDIATELY
-    preceding assistant turn was the SP-or-FT question and THIS message
-    is just that brand token, return the brand's KB answer (the source's
-    "ถามกลับเรื่องโค้ดไปก่อนแล้วค่อยตอบให้ตรงตามโค้ด" second step). The
-    bare "SP" / "FT" reply never carries a SHIPPING_WITHDRAWAL family on
-    its own, so without this it fell through to generic RAG. Returns None
-    (caller continues normal routing) unless BOTH conditions hold."""
+    """CUSTOMER-CSW12-SHIPPING-WITHDRAWAL-SP-1 / PHASE-6B-REAL — when the
+    customer is inside the SP-or-FT shipping-withdrawal exchange and THIS
+    message is just a brand token / brand-prefixed CustCode, return that
+    brand's KB answer.
+
+    "Inside the exchange" now means the immediately-preceding assistant
+    turn is EITHER the SP-or-FT question OR one of the two per-brand
+    answers we just gave — so a SECOND brand token ("SP1008" answered,
+    then "FT1325") is understood as switching / asking the other brand,
+    not an unknown lookup (real LINE: "FT1325" -> "ยังไม่มีข้อมูลเกี่ยวกับ
+    FT1325"). Still tight: the message as a whole must be just the brand
+    token, and the last assistant turn must itself be part of the
+    exchange (a since-changed topic falls through). Returns None
+    otherwise."""
     h = history or []
-    if not h or h[-1].get("role") != "assistant" or ASK_BRAND_REPLY not in (h[-1].get("content") or ""):
+    if not h or h[-1].get("role") != "assistant":
+        return None
+    if not _in_shipping_withdrawal_exchange(h[-1].get("content") or ""):
         return None
     m = _BRAND_ANSWER_RE.match(message or "")
     if not m:

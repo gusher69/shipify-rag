@@ -637,5 +637,86 @@ class TestServiceDiscoveryNextBestAction(_Engine):
         self.assertTrue(any(k in r["reply"] for k in ("ยอดเงิน", "หยวน", "ร้าน", "ลิงก์สินค้า")))
 
 
+# ═══════════════ real LINE session 04769238 — regressions found on prod ═══
+class TestRealLineSession04769238(_Engine):
+    """Replays the shape of the real LINE session the product owner
+    flagged ("ตอบมั่วเลย"). Three defects the headless single-turn probes
+    missed:
+      A  a bare dims-triple sent AFTER a completed link conversion was
+         read as LINK_CONVERSION (LLM poisoned by history) -> SAFE_FALLBACK
+         instead of computing the estimate.
+      B  a SECOND brand token ("SP1008" answered, then "FT1325") fell to
+         "ยังไม่มีข้อมูลเกี่ยวกับ FT1325" instead of the FT answer.
+      C  "ใช่ค่ะ" after a greeting -> "คำขอก่อนหน้าหมดเวลายืนยันแล้ว"
+         (webhook expired-confirmation branch on a stale row).
+    """
+
+    _LINK_HISTORY = [
+        _t("user", "แปลงลิงก์ให้หน่อยค่ะ https://m.1688.com/offer/860351622421.html?ptow=x"),
+        _t("assistant", "แอดมินแปลงลิงก์ให้เรียบร้อยค่ะ คุณลูกค้าเปิดบิลเข้ามาได้เลยนะคะ\n"
+                        "https://fasttrade.in.th/PageProductDetailGuest/1688/860351622421/home/guest/index"),
+    ]
+
+    # ── A ──
+    def test_A_bare_dims_after_link_conversion_is_estimate_not_link(self):
+        self.assertEqual(
+            interpret("520mm x 220mm x 110mm ส่งทางเรือ หนัก 2 กิโล", self._LINK_HISTORY).intent_family,
+            "SHIPPING_ESTIMATE")
+        r = self.say("520mm x 220mm x 110mm ส่งทางเรือ หนัก 2 กิโล", self._LINK_HISTORY)
+        self.assertEqual(r["src"], "shipping_estimate_flow")
+        self.assertNotIn("ไม่พบคำตอบที่ชัดเจน", r["reply"])
+        self.assertNotIn("56628", r["reply"])
+
+    def test_A_dims_triple_recognised_deterministically_any_unit(self):
+        from services.conversation_semantics import _compose
+        for m in ["520mm x 220mm x 110mm", "52cm x 22cm x 11cm", "0.5m x 0.4m x 0.3m",
+                  "54x12x43", "300มม x 200มม x 100มม", "52 x 24 x 12 cm หนัก 1 โล",
+                  "กล่อง 40x30x20 หนัก 8 กก ทางเรือ"]:
+            self.assertEqual(_compose(m)[0], "SHIPPING_ESTIMATE", m)
+
+    def test_A_dims_triple_does_not_hijack_invoice_or_coupon(self):
+        from services.conversation_semantics import _compose
+        self.assertNotEqual(_compose("ขอใบกำกับภาษี 2 ใบ")[0], "SHIPPING_ESTIMATE")
+        self.assertNotEqual(_compose("คูปอง 3 x 2 ใบ")[0], "SHIPPING_ESTIMATE")
+
+    # ── B ──
+    def test_B_second_brand_token_after_first_answer(self):
+        from services import withdrawal_flow as wf
+        sp_ans = "คุณลูกค้าสามารถกรอกข้อมูลรายละเอียดในแบบฟอร์มรูปภาพที่แอดมินส่งให้ และส่งเอกสารสำเนาบัตรประชาชนมาให้แอดมินได้เลยค่ะ"
+        h = [_t("user", "ถอนเงินขนส่งยังไง"), _t("assistant", wf.ASK_BRAND_REPLY),
+             _t("user", "SP1008"), _t("assistant", sp_ans)]
+        with patch.object(wf, "fetch_kb_answer", side_effect=lambda sb, tag: f"<{tag}>"):
+            self.assertEqual(wf.shipping_withdrawal_pending_brand_reply(None, h, "FT1325"),
+                             "<SHIPPING_WITHDRAWAL_FT>")
+            # and again SP works right after
+            h2 = h + [_t("user", "FT1325"), _t("assistant", "<SHIPPING_WITHDRAWAL_FT>")]
+            # last assistant is now the FT answer signature? use the real FT sig
+        ft_ans = "คุณลูกค้าสามารถเข้าที่เมนู ประวัติการชำระเงินขนส่ง และขวามือจะมีปุ่ม ถอนเงินจากระบบ นะคะ"
+        h3 = h + [_t("user", "FT1325"), _t("assistant", ft_ans)]
+        with patch.object(wf, "fetch_kb_answer", side_effect=lambda sb, tag: f"<{tag}>"):
+            self.assertEqual(wf.shipping_withdrawal_pending_brand_reply(None, h3, "SP1008"),
+                             "<SHIPPING_WITHDRAWAL_SP>")
+
+    def test_B_brand_token_without_withdrawal_context_is_ignored(self):
+        from services import withdrawal_flow as wf
+        h = [_t("user", "สวัสดี"), _t("assistant", "สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ")]
+        self.assertIsNone(wf.shipping_withdrawal_pending_brand_reply(None, h, "FT1325"))
+
+    # ── C ──
+    def test_C_help_affirmation_after_greeting(self):
+        from services.service_intent_flow import is_help_affirmation
+        h = [_t("user", "สวัสดีค่"), _t("assistant", "สวัสดีค่ะ! มีอะไรให้ช่วยไหมคะ? 😊")]
+        self.assertTrue(is_help_affirmation("ใช่ค่ะ", h))
+        r = self.say("ใช่ค่ะ", h)
+        self.assertIn(_HELP_HEAD, r["reply"])
+        self.assertNotIn("หมดเวลายืนยัน", r["reply"])
+
+    def test_C_confirm_word_not_a_help_affirmation_without_offer(self):
+        from services.service_intent_flow import is_help_affirmation
+        h = [_t("user", "ยืนยันการส่ง SendLineNotiCS"),
+             _t("assistant", "ยืนยันการดำเนินการ 'SendLineNotiCS' ไหมคะ")]
+        self.assertFalse(is_help_affirmation("ยืนยัน", h))
+
+
 if __name__ == "__main__":
     unittest.main()
