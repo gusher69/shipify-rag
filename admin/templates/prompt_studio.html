@@ -30,7 +30,6 @@
 .ps-badge-default{background:rgba(251,191,36,.15);color:#fbbf24}
 .ps-badge-inactive{background:rgba(255,255,255,.06);color:rgba(232,237,245,.4)}
 .ps-tone-tag{font-size:9px;padding:1px 7px;border-radius:10px;background:rgba(167,139,250,.12);color:#c4b5fd}
-.ps-base-rules{margin-bottom:16px;padding:10px 12px;border:1px solid rgba(34,197,94,.25);border-radius:10px;background:rgba(34,197,94,.05)}
 
 .ps-form-grp{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
 .ps-lbl{font-size:11px;color:rgba(232,237,245,.5)}
@@ -190,12 +189,9 @@ var _currentVersions = [];
 var _selectedTones = [];     // chip selection state for the open editor
 var _isCreatingNew = false;  // true only while the blank "New Prompt" form is intentionally open
 
-// Platform-standard "Base Conversation Rules" — fixed, read-only, the
-// SAME text services/prompt_builder.py actually injects into every built
-// prompt (this is display-only; the source of truth lives there, not
-// here). Automatically shown for every prompt, new or existing, without
-// ever being stored per-prompt or editable from this screen.
-var BASE_CONVERSATION_RULES = {{ base_conversation_rules|tojson }};
+// PROMPT-STUDIO-BASE-RULES-CLEANUP — the platform "Base Conversation
+// Rules" are injected automatically at runtime (services/prompt_builder.py)
+// and are no longer displayed in this screen, so no client copy is kept.
 
 // Fixed tone vocabulary (Requirement 3) — order shown in the UI.
 var TONES = ['Professional', 'Friendly', 'Warm', 'Concise', 'Detailed', 'Helpful',
@@ -418,19 +414,11 @@ function renderEditor(p, versions){
         ? '<button class="ps-btn" onclick="openVersionModal()">Version History (' + versions.length + ')</button>' : '') +
     '</div>' +
     '<div id="ps-preview-container"></div>' +
-    '<details class="ps-base-rules" open>' +
-      '<summary style="cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:600;color:#e8edf5">' +
-        '<span style="color:#22c55e">&#9989;</span> Base Conversation Rules' +
-        '<span style="font-weight:400;font-size:11px;color:rgba(232,237,245,.5)">Platform Standard (Automatically Included)</span>' +
-      '</summary>' +
-      '<div style="font-size:11px;color:rgba(232,237,245,.4);margin:6px 0 8px">' +
-        'Read-only &mdash; applied automatically to every Prompt, before Tone Guidance and your System Prompt. Cannot be edited here.' +
-      '</div>' +
-      '<pre style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;line-height:1.6;color:rgba(232,237,245,.75);' +
-        'background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px;margin:0">' +
-        esc(BASE_CONVERSATION_RULES) +
-      '</pre>' +
-    '</details>' +
+    // PROMPT-STUDIO-BASE-RULES-CLEANUP — the platform "Base Conversation
+    // Rules" card is intentionally NOT rendered here. The rules are still
+    // composed automatically at runtime (services/prompt_builder.py,
+    // before Tone Guidance and the System Prompt) — they are simply no
+    // longer surfaced in this editor.
     '<div class="ps-form-grp"><label class="ps-lbl">Name</label>' +
       '<input class="ps-input" id="ps-f-name" value="' + esc(p.name) + '" placeholder="e.g. Warm &amp; Helpful Support"></div>' +
     '<div class="ps-form-grp"><label class="ps-lbl">Description</label>' +

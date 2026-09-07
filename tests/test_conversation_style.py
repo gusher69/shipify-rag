@@ -39,16 +39,22 @@ class TestBaseConversationRulesAlwaysInjected(unittest.TestCase):
         self.assertIn(BASE_CONVERSATION_RULES, built1.messages[0]["content"])
         self.assertIn(BASE_CONVERSATION_RULES, built2.messages[0]["content"])
 
-    def test_contains_greet_once_and_no_unconditional_support_line_rules(self):
-        self.assertIn("กล่าวสวัสดีลูกค้าเฉพาะข้อความแรกของบทสนทนาเท่านั้น", BASE_CONVERSATION_RULES)
-        self.assertIn("ห้ามกล่าวสวัสดีซ้ำ", BASE_CONVERSATION_RULES)
-        self.assertIn("ห้ามปิดท้ายทุกข้อความด้วย", BASE_CONVERSATION_RULES)
+    def test_contains_core_conversation_invariant_sections(self):
+        # PROMPT-STUDIO-BASE-RULES-CLEANUP — trimmed to Core Conversation
+        # Invariants. Assert the section headings + the load-bearing rules.
+        for heading in ("## Core Conversation Rules", "### Conversation Context",
+                        "### Intent & Data Source", "### Business Truth",
+                        "### Public & Private Information", "### Fallback",
+                        "### Response Safety"):
+            self.assertIn(heading, BASE_CONVERSATION_RULES)
 
     def test_contains_context_priority_and_no_guessing_rules(self):
-        self.assertIn("ห้ามใช้คำตอบเก่าของ AI มาเป็นข้อมูลอ้างอิง", BASE_CONVERSATION_RULES)
-        self.assertIn("คำถามล่าสุดของลูกค้าต้องมีความสำคัญสูงสุดเสมอ", BASE_CONVERSATION_RULES)
+        self.assertIn("ห้ามใช้คำตอบเก่าของ AI เป็นแหล่งข้อมูลอ้างอิง", BASE_CONVERSATION_RULES)
+        self.assertIn("ให้ความสำคัญกับข้อความล่าสุดของลูกค้าสูงสุด", BASE_CONVERSATION_RULES)
         self.assertIn("ห้ามเดา", BASE_CONVERSATION_RULES)
-        self.assertIn("ห้ามสร้างข้อมูลขึ้นเอง", BASE_CONVERSATION_RULES)
+        self.assertIn("ห้ามสร้างข้อมูล", BASE_CONVERSATION_RULES)
+        self.assertIn("KB_NOT_FOUND ไม่ได้หมายความว่าบทสนทนาต้องจบ", BASE_CONVERSATION_RULES)
+        self.assertIn("ห้ามให้ workflow หรือข้อมูลเก่าที่จบไปแล้วกลับมาควบคุมคำถามใหม่", BASE_CONVERSATION_RULES)
 
 
 class TestPromptAssemblyOrder(unittest.TestCase):

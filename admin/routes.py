@@ -3211,13 +3211,11 @@ async def preview(request: Request):
 async def prompt_studio_page(request: Request):
     if (r := auth(request)): return r
     from services.prompt_studio_service import CHANNELS
-    from services.prompt_builder import BASE_CONVERSATION_RULES
-    # Read-only, platform-standard text — services/prompt_builder.py is
-    # the single source of truth (it's what actually gets injected into
-    # every built prompt); the template only ever displays it, never
-    # edits or re-derives it.
-    return render("prompt_studio.html", {"request": request, "active": "prompt-studio", "channels": CHANNELS,
-                                          "base_conversation_rules": BASE_CONVERSATION_RULES})
+    # PROMPT-STUDIO-BASE-RULES-CLEANUP — the platform Base Conversation
+    # Rules are still injected automatically at runtime (services/
+    # prompt_builder.py, before Tone Guidance and the System Prompt); the
+    # editor no longer displays them, so they are not passed to the page.
+    return render("prompt_studio.html", {"request": request, "active": "prompt-studio", "channels": CHANNELS})
 
 
 @app.get("/admin/api/ai/prompts")
