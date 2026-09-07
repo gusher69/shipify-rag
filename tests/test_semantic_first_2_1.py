@@ -265,10 +265,15 @@ class TestInvoiceDocumentFamily(unittest.TestCase):
 
 class TestPublicInfoFamilySet(unittest.TestCase):
     def test_membership(self):
+        # PHASE-6B added the public company-contact / website request and
+        # the "supplier ships to your warehouse" journey — all PUBLIC,
+        # never an identity-gated ERP lookup.
         self.assertEqual(
             PUBLIC_INFO_FAMILIES,
             frozenset({"PICKUP_LOCATION", "SELF_PICKUP", "COUPON_USAGE",
-                       "PRODUCT_POLICY", "CHARTER_TRUCK", "INVOICE"}))
+                       "PRODUCT_POLICY", "CHARTER_TRUCK", "INVOICE",
+                       "CONTACT_INFO", "WEBSITE_LINK_REQUEST",
+                       "WAREHOUSE_INBOUND_JOURNEY"}))
 
     def test_private_families_are_not_in_the_set(self):
         for fam in ("SHIPMENT_STATUS", "MY_COUPONS", "ADDRESS_CHANGE"):

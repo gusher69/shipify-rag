@@ -63,10 +63,18 @@ _WEIGHT_WITH_UNIT_RE = re.compile(r"(\d+\.?\d*)\s*(กก\.?|kg|กิโล(?:�
 # mm checked before cm/m — "มม." shares no substring with the others, and
 # `\bm\b(?!m)` already excludes "mm" from matching the meter pattern, but
 # checking mm first keeps unit precedence obvious.
-_MM_UNIT_RE = re.compile(r"\bmm\b|มม\.?|มิลลิเมตร|millimeter", re.IGNORECASE)
-_CM_UNIT_RE = re.compile(r"\bcm\b|ซม\.?|เซนติเมตร|centimeter", re.IGNORECASE)
-_INCH_UNIT_RE = re.compile(r"นิ้ว|\binch(?:es)?\b", re.IGNORECASE)
-_METER_UNIT_RE = re.compile(r"(?<![a-zA-Z])\bm\b(?!m)|เมตร(?!ริก)", re.IGNORECASE)
+# PHASE-6B P2-1 — the customer (and Chinese sellers) glue the unit to the
+# number: "520mm x 220mm x 110mm". "\bmm\b" needs a word boundary BEFORE
+# "mm", which a preceding digit does not provide, so the unit went
+# undetected and mm was computed as cm. Allow a digit (or space/start)
+# before the token; still block a LETTER on either side so it never
+# matches inside a word.
+_MM_UNIT_RE = re.compile(r"(?<![a-zA-Z])mm(?![a-zA-Z])|มม\.?|มิลลิเมตร|millimet(?:er|re)", re.IGNORECASE)
+_CM_UNIT_RE = re.compile(r"(?<![a-zA-Z])cm(?![a-zA-Z])|ซม\.?|ซ\.ม\.?|เซนติเมตร|centimet(?:er|re)", re.IGNORECASE)
+_INCH_UNIT_RE = re.compile(r"นิ้ว|(?<![a-zA-Z])inch(?:es)?(?![a-zA-Z])", re.IGNORECASE)
+# meters: the Thai word, OR a lone "m" attached to / right after a number
+# ("110m", "0.5 m") — never a bare "m" elsewhere, and never "mm".
+_METER_UNIT_RE = re.compile(r"เมตร(?!ริก)|(?<=\d)\s?m(?![a-zA-Zม0-9])", re.IGNORECASE)
 _BARE_NUMBER_RE = re.compile(r"\d+\.?\d*")
 _DIM_GROUP_SPLIT_RE = re.compile(r"[x×*]|,|\s+", re.IGNORECASE)
 

@@ -241,10 +241,16 @@ class TestCalculatorLifecycle(_Engine):
         self.assertIn("40x30x20", r["reply"])
         self.assertNotIn("5 กก", r["reply"])           # weight not carried over
 
-    def test_unit_preserved_metres(self):
+    def test_metres_are_canonicalised_to_cm(self):
+        # PHASE-6B P2-1 — Shipify computes and displays in cm; a metre
+        # input is folded to cm (0.5 m -> 50 cm), never shown as raw
+        # "0.5x0.4x0.3". (Supersedes the earlier "preserve the entered
+        # unit" expectation — the Part-2 acceptance source requires unit
+        # canonicalisation so mm/m never reach the CBM formula unconverted.)
         r = self.say("คำนวณค่าส่ง กล่อง 0.5x0.4x0.3 เมตร หนัก 8 กิโล")
-        self.assertIn(" m", r["reply"])
-        self.assertNotIn("cm", r["reply"])
+        self.assertIn("50x40x30", r["reply"])
+        self.assertIn("cm", r["reply"])
+        self.assertNotIn("0.5x0.4x0.3", r["reply"])
 
     def test_unit_preserved_cm(self):
         r = self.say("คำนวณค่าส่ง 50 40 30 ซม 8 กก")

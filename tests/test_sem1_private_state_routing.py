@@ -152,12 +152,23 @@ class TestPrivateStateRouting(unittest.TestCase):
             self.assertNotIn("ไม่มีข้อมูลยืนยัน", reply)
 
     def test_public_question_still_reaches_rag_and_no_identity_prompt(self):
-        for m in ["คูปองใช้ยังไง", "ค่าขนส่งคิดยังไง", "ขอเบอร์ติดต่อ"]:
+        for m in ["คูปองใช้ยังไง", "ค่าขนส่งคิดยังไง"]:
             res, rag = self._route(m)
             self.assertEqual(res["routing"]["type"], "RAG", m)
             reply = (res.get("reply") or {}).get("text") or ""
             for bad in ("ยืนยันตัวตน", "เบอร์โทรที่ผูก", "รหัสลูกค้า"):
                 self.assertNotIn(bad, reply, m)
+
+    def test_public_contact_request_answered_without_identity_prompt(self):
+        # PHASE-6B — "ขอเบอร์ติดต่อ" is a PUBLIC company-contact request:
+        # answered deterministically (pre-RAG GENERAL) with grounded
+        # contact info, never an ERP/identity lookup.
+        res, rag = self._route("ขอเบอร์ติดต่อ")
+        self.assertIn(res["routing"]["type"], ("RAG", "GENERAL"))
+        self.assertNotEqual(res["routing"]["type"], "WORKFLOW")
+        reply = (res.get("reply") or {}).get("text") or ""
+        for bad in ("ยืนยันตัวตน", "เบอร์โทรที่ผูก", "รหัสลูกค้า"):
+            self.assertNotIn(bad, reply)
 
     def _sel(self, res):
         dev = res["developer"] or {}

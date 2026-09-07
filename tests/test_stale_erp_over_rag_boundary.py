@@ -84,12 +84,16 @@ class TestStaleErpOverRagBoundary(unittest.TestCase):
     # ── A/B/C: informational turns must NOT resurrect getdatacustomer ──
     def test_A_contact_request_with_stale_erp_context_stays_rag(self):
         result, mock_req = self._decide("ขอเบอร์ติดต่อ")
+        # PHASE-6B — a public contact request is now recognised as
+        # CONTACT_INFO and answered by the pre-RAG service-intent layer
+        # (GENERAL), BEFORE any Business-Action / conversation-reference
+        # search runs. The invariant is unchanged: no ERP HTTP call, no
+        # identity-gated action, stale ERP context never resurrected.
         self.assertNotEqual(result["routing"]["type"], "API")
         mock_req.assert_not_called()
         dev = result.get("developer") or {}
         self.assertNotEqual(dev.get("selection_source"), "conversation_reference")
-        self.assertEqual(dev.get("stale_identity_gated_action_suppressed"),
-                          "conversation_reference/informational_turn")
+        self.assertNotEqual(dev.get("selection_source"), "fresh_search")
 
     def test_B_static_coupon_howto_with_stale_erp_context_stays_rag(self):
         result, mock_req = self._decide("ใช้คูปองยังไง")

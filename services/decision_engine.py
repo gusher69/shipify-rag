@@ -84,6 +84,18 @@ from services.conversation_semantics import (
     PUBLIC_INFO_FAMILIES as _PUBLIC_INFO_FAMILIES,
     _compose as _compose_intent_family,
 )
+# PHASE-6B — pre-RAG conversational / service-intent layer (help /
+# service-discovery / money-transfer / website-link / public-contact /
+# warehouse-inbound journey), plus the repeated-answer loop guard. KB
+# retrieval no longer owns whether one of these journeys can continue.
+from services.service_intent_flow import (
+    SERVICE_INTENT_FAMILIES as _SERVICE_INTENT_FAMILIES,
+    reply_for_family as _service_intent_reply,
+    is_repeat_of_last_assistant as _is_repeat_of_last_assistant,
+    is_help_affirmation as _is_help_affirmation,
+    CLARIFY_REPLY as _SERVICE_CLARIFY_REPLY,
+    HELP_REPLY as _SERVICE_HELP_REPLY,
+)
 # CUSTOMER-RAG-2.1 — charter-truck (เหมารถ / TC19) multi-turn slot
 # collection (deterministic, history-derived — no LLM, no pending table).
 from services.charter_truck_flow import (
@@ -2908,6 +2920,19 @@ def _current_intent_breaks_pending_flow(semantic, message, *, flow_family=None,
     # continue — those refine the SAME flow.
     if op == "TOPIC_CHANGE":
         return True
+    # PHASE-6B — an explicit REJECT of the previous answer, or a decisive
+    # PUBLIC company-information turn (contact / website / warehouse-inbound
+    # / policy / how-to), is never a slot value for a pending collection —
+    # it breaks the flow so the turn is re-evaluated fresh (fixes the
+    # reported "asks for CustCode again -> loop").
+    if getattr(semantic, "conversation_act", "NONE") == "REJECT" and op != "CORRECTION":
+        return True
+    # a decisive NEW PHASE-6B public-info turn (public contact / website
+    # link / warehouse-inbound journey) is never a slot value and never a
+    # same-domain elaboration of any pending collection — it breaks it so
+    # the turn is answered fresh (fixes the "asks CustCode again" loop).
+    if fam in ("CONTACT_INFO", "WEBSITE_LINK_REQUEST", "WAREHOUSE_INBOUND_JOURNEY") and conf >= 0.6:
+        return True
     if op != "NONE":
         return False
     if fam not in (families or _ACTIONABLE_INTENT_FAMILIES) or conf < 0.55:
@@ -3779,7 +3804,17 @@ class DecisionEngine:
                 _link_pending_ask = _link_reply_for_state("MISSING_URL")
                 _last_asst_turn = next((h.get("content") or "" for h in reversed(history or [])
                                         if h.get("role") == "assistant"), "")
-                _link_was_pending = _last_asst_turn.strip() == (_link_pending_ask or "").strip()
+                # PHASE-6B — a pending "send me the link" ask does NOT own
+                # a turn that is itself a WEBSITE-link request / another
+                # pre-RAG service intent, or an explicit REJECT of that
+                # very prompt ("ไม่ค่ะ ขอลิงก์ที่จะเข้าไปดูของ", "คุณไม่
+                # เข้าใจลูกค้า"). Without this the clarification was fed
+                # back into the URL classifier as MISSING_URL and the
+                # same prompt was resent — the reported 3× loop.
+                _link_was_pending = (
+                    _last_asst_turn.strip() == (_link_pending_ask or "").strip()
+                    and semantic.intent_family not in _SERVICE_INTENT_FAMILIES
+                    and getattr(semantic, "conversation_act", "NONE") != "REJECT")
                 if semantic.intent_family == "LINK_CONVERSION" or (
                         _link_was_pending
                         and private_state_inquiry is None
@@ -4114,6 +4149,113 @@ class DecisionEngine:
                             developer_trace=developer_trace, context=context, start=start,
                             alert=_detect_alert(message, context))
                     # UNKNOWN -> fall through to ordinary routing, unchanged.
+
+                # PHASE-6B — pre-RAG conversational / service-intent layer.
+                # Runs AFTER every pending-workflow / continuation /
+                # estimate / withdrawal / operational resolution has had
+                # its turn (each returns above when it owns the message),
+                # and BEFORE Business-Action candidate search + RAG. Fixes
+                # the customer-reported root cause that a help / service-
+                # discovery / money-transfer / website-link / public-
+                # contact / warehouse-inbound turn fell straight to
+                # KB_NOT_FOUND. Recognition is the ONE central
+                # interpreter's (semantic.intent_family /
+                # .conversation_act) — never re-classified here.
+                _svc_fam = getattr(semantic, "intent_family", "UNKNOWN")
+                _svc_act = getattr(semantic, "conversation_act", "NONE")
+                _svc_conf = float(getattr(semantic, "confidence", 0.0) or 0.0)
+                _svc_ent = dict(getattr(semantic, "entities", {}) or {})
+                _msg_has_identifier = any(
+                    _validate_generic_identifier(tok) and not tok.isdigit()
+                    for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
+
+                # (a) the customer REJECTED / clarified the previous answer
+                # ("ไม่ใช่อันนี้", "ไม่ได้ถามแบบนั้น", "คุณไม่เข้าใจ",
+                # "หมายถึง…"). Re-evaluate THIS message; NEVER resend the
+                # same reply (the reported 3× repeated-answer loop). A
+                # calculator value correction ("ไม่ใช่ 10 กิโล เอา 5") is
+                # NOT this — the estimate flow already owns it above, and
+                # follow_up_op == CORRECTION excludes it here.
+                if (_svc_act == "REJECT" and history
+                        and getattr(semantic, "follow_up_op", "NONE") != "CORRECTION"
+                        and not private_state_inquiry and not _msg_has_identifier):
+                    _rj_reply = _service_intent_reply(
+                        _svc_fam, sb=self.registry._sb, entities=_svc_ent) \
+                        if _svc_fam in _SERVICE_INTENT_FAMILIES else None
+                    if _rj_reply is None:
+                        _rj_reply = _SERVICE_CLARIFY_REPLY
+                    if not _is_repeat_of_last_assistant(history, _rj_reply):
+                        developer_trace["selection_source"] = "phase6b_reject_reevaluate"
+                        developer_trace["conversation_act"] = "REJECT"
+                        return self._finalize(
+                            reply=_build_response(text=_rj_reply),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    # would repeat -> fall through to a fresh route.
+
+                # (a2) T01 — a bare affirmation right after the assistant
+                # OFFERED help ("มีอะไรให้ช่วยไหมคะ" -> "ใช่ครับ") is the
+                # customer accepting the offer: open the conversation,
+                # never a KB lookup.
+                if (_svc_fam not in _SERVICE_INTENT_FAMILIES
+                        and not private_state_inquiry and not _msg_has_identifier
+                        and _is_help_affirmation(message, history)):
+                    developer_trace["selection_source"] = "phase6b_help_affirmation"
+                    return self._finalize(
+                        reply=_build_response(text=_SERVICE_HELP_REPLY),
+                        routing_type="GENERAL", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+
+                # (b) a decisive pre-RAG service-intent family -> its
+                # deterministic reply (help / discovery / money-transfer /
+                # website link / public contact / warehouse-inbound
+                # honest fallback). WAREHOUSE_INBOUND_JOURNEY additionally
+                # escalates to Human CS (no KB chunk exists for it today).
+                # A FRESH IMPORT_INTEREST that names a SPECIFIC product
+                # ("ต้องการนำเข้าเครื่องจักร") is handled here so it reaches
+                # discovery instead of a RAG KB_NOT_FOUND dead-end
+                # (T03/T04/T07). A GENERIC "สนใจนำเข้าสินค้า" (no product
+                # noun) is left to RAG — the ฝากนำเข้า process content
+                # answers it well — and an in-frame follow-up keeps its
+                # SEM-GEN-1 path above.
+                _svc_pre_rag = _svc_fam in _SERVICE_INTENT_FAMILIES or (
+                    _svc_fam == "IMPORT_INTEREST"
+                    and getattr(semantic, "follow_up_op", "NONE") == "NONE"
+                    and _svc_ent.get("product")
+                    # a message that ALSO carries its own question
+                    # ("...ห้ามนำเข้าอะไรบ้าง") has concrete content for
+                    # RAG to answer — do not short-circuit it to a
+                    # discovery ack.
+                    and not re.search(r"ไหม|มั้ย|หรือเปล่า|รึเปล่า|อะไรบ้าง|อะไรบาง|ยังไง|อย่างไร|เท่าไหร่|กี่\S|\?",
+                                      message or "")
+                    and _derive_active_frame(history) is None)
+                if (_svc_pre_rag and _svc_conf >= 0.6
+                        and not private_state_inquiry and not _msg_has_identifier):
+                    _svc_reply = _service_intent_reply(
+                        _svc_fam, sb=self.registry._sb, entities=_svc_ent,
+                        product=_svc_ent.get("product"))
+                    if _svc_reply:
+                        developer_trace["selection_source"] = "phase6b_service_intent"
+                        developer_trace["service_intent_family"] = _svc_fam
+                        if _svc_fam == "WAREHOUSE_INBOUND_JOURNEY":
+                            return self._finalize(
+                                reply=_build_response(text=_svc_reply),
+                                routing_type="HUMAN_HANDOFF", workflow=workflow_hint,
+                                developer_trace=developer_trace, context=context, start=start,
+                                alert=_detect_alert(message, context),
+                                handoff_payload={
+                                    "reason": "warehouse_inbound_journey_kb_gap",
+                                    "summary": "ลูกค้าถามเรื่องการส่งของเข้าคลังจีน ("
+                                               + str(_svc_ent.get("wh_kind") or "general")
+                                               + ") ซึ่งยังไม่มีข้อมูลใน KB",
+                                    "details": {"question": message}})
+                        return self._finalize(
+                            reply=_build_response(text=_svc_reply),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
 
                 # Root Change 1 (Final Systemic Routing Fix, 2026-08-28) —
                 # classify the message's informational-vs-private-action

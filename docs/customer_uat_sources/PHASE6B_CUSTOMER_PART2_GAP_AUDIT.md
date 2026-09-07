@@ -142,3 +142,31 @@ Transcript (image1): `สวัสดีครับ` → `มีอะไรใ
 **KB content gaps to hand back to the customer (not inventable):** whose‑parcel identification mechanism (customer code / marking / warehouse‑address format), pre‑arrival warehouse‑notification requirement, arrival‑notification / contact‑back policy.
 
 **External dependencies:** none new. (The `EXTERNAL_API_DEPENDENCY` set from Phase 2 is unchanged.)
+
+---
+
+## Resolution (PHASE‑6B implementation)
+
+| Item | Fix landed | Where |
+|---|---|---|
+| P2-1 mm→cm | mm/cm/m unit regexes fixed (`\bmm\b` needed a boundary a digit doesn't give); every dimension canonicalised to **cm** at capture (`mm ÷10`, `m ×100`, `inch ×2.54`) before the CBM formula, prompt, corrections and new cycles | `rag/slot_filling_flow.py`, `services/shipping_estimate_flow.py` |
+| P2-2 link conversion | already fixed (`5d9fbee`); protected by `TestConversationB.test_real_product_url_still_converts` / `test_explicit_convert_verb_still_conversion` | — |
+| P2-3 SP/FT withdrawal | `_BRAND_ANSWER_RE` now accepts a brand‑PREFIXED CustCode reply (`SP1008`, `FT1324`); brand derived from the prefix, authorises nothing | `services/withdrawal_flow.py` |
+| P2-4 T01 | bare affirmation after an assistant help‑offer → `HELP_INTENT` (pre‑RAG), never a KB lookup | `service_intent_flow.is_help_affirmation` + DE branch |
+| P2-4 T02 | `SERVICE_DISCOVERY` → describe + Next‑Best‑Action question | `conversation_semantics`, `service_intent_flow.SERVICE_DISCOVERY_REPLY` |
+| P2-4 T03/T04/T07 | circular‑import bug fixed (deterministic `IMPORT_INTEREST` recognition was dead in production); fresh `IMPORT_INTEREST` answered pre‑RAG with a discovery ack that re‑states the frame | `conversation_semantics._import_recognizers`, DE branch |
+| P2-4 T05 | `งั้นโอนเงินให้ร้านที่จีน` → `MONEY_TRANSFER_INTEREST` (deterministic, before the withdrawal block) → money‑transfer discovery, NOT a withdrawal how‑to | `conversation_semantics._MONEY_TRANSFER_RE`, `service_intent_flow` |
+| P2-4 T06 | every service‑intent reply ends with the next‑useful question | `service_intent_flow` replies |
+| Page‑5 help | `HELP_INTENT` → the doc's verbatim "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ …" | `service_intent_flow.HELP_REPLY` |
+| P2-B1 broad import | `SERVICE_DISCOVERY` catches "การนำเข้าส่งออก" → discovery reply, not "no data" | `conversation_semantics._SERVICE_DISCOVERY_RE` |
+| P2-B2 website vs conversion + loop | `WEBSITE_LINK_REQUEST` split (checked before the link‑conversion signal; guarded by "no real URL / no แปลงลิงก์ verb"); a pending "send the link" prompt no longer swallows a website request or a REJECT; `conversation_act = REJECT` + repeated‑answer guard re‑evaluate instead of resending | `conversation_semantics`, `service_intent_flow`, DE link‑pending guard + REJECT branch |
+| P2-B3 URL in website context | the CustCode‑400 error is already fixed (`5d9fbee`), so a platform URL now converts instead of erroring; a pending website turn no longer forces the conversion | DE `_link_was_pending` guard |
+| P2-B4/B5/B6 warehouse journey | `WAREHOUSE_INBOUND_JOURNEY` family → honest "ยังไม่มีข้อมูลยืนยันในระบบ … ติดต่อเจ้าหน้าที่" + `HUMAN_HANDOFF`; never the warehouse‑address FAQ, never MOQ, never `SendLineNotiCS` | `conversation_semantics`, `service_intent_flow.WAREHOUSE_INBOUND_FALLBACK`, DE branch |
+| P2-B7 contact channels | `CONTACT_INFO` → deterministic KB fetch of the contact chunk (direct content lookup, not vector similarity) with a chunk‑sourced fallback | `service_intent_flow.fetch_contact_kb_answer` |
+| P2-B8 email/website → CustCode | `CONTACT_INFO` is a `PUBLIC_INFO` family → pre‑RAG branch answers it before any Business‑Action search; identity‑gated actions never enter the pool | `conversation_semantics.PUBLIC_INFO_FAMILIES`, DE branch |
+| P2-B9 `123456` verify | consequence of B8 — gone; a public turn now never starts a verification flow | — |
+| P2-B10 contact re‑ask loop | `CONTACT_INFO` / `REJECT` now break a pending identity‑gated collection (`_current_intent_breaks_pending_flow`) | `services/decision_engine.py` |
+
+**Still handed back to the customer as KB‑authoring tasks** (flagged, not invented): whose‑parcel identification mechanism, pre‑arrival warehouse‑notification requirement, arrival contact‑back policy. Until those chunks exist the bot gives the honest fallback + Human CS.
+
+**Phrase‑specific customer patches: 0.** Every fix is a compositional family / dialogue‑act / unit‑canonicalisation change with paraphrase coverage in `tests/test_customer_part2_conversations.py`.

@@ -70,17 +70,41 @@ _METHOD_WORD_RE = re.compile(r"ทางรถ|ทางเรือ|ทาง�
 # import / product interest reused from the FIX-2.3 recognizer so the
 # frame opens on exactly the turns FIX-2.3 already treats as import
 # interest — no second definition.
-try:  # pragma: no cover - import guard
-    from services.playground_orchestrator import (
-        _is_product_import_interest as _is_import_interest,
-        _product_interest_noun as _import_noun,
-    )
-except Exception:  # pragma: no cover
-    def _is_import_interest(_q: str) -> bool:
-        return False
+#
+# PHASE-6B — this MUST be a lazy import. `services.playground_orchestrator`
+# imports `PUBLIC_INFO_FAMILIES` from THIS module at its own load time, so
+# a module-level `from services.playground_orchestrator import …` here is
+# circular: when conversation_semantics is imported first (the normal
+# order — decision_engine imports it before playground_orchestrator) the
+# import raised ImportError and silently fell back to a stub that always
+# returned False, killing deterministic IMPORT_INTEREST recognition in
+# production (Part-2 T03/T04). Resolving the recognizers on first CALL —
+# by which time playground_orchestrator has finished loading — fixes that
+# without touching either module's public surface.
+_IMPORT_RECOGNIZERS: Dict[str, object] = {}
 
-    def _import_noun(_q: str):
-        return None
+
+def _import_recognizers():
+    if not _IMPORT_RECOGNIZERS:
+        try:  # pragma: no cover - import guard
+            from services.playground_orchestrator import (
+                _is_product_import_interest as _p,
+                _product_interest_noun as _n,
+            )
+            _IMPORT_RECOGNIZERS["is"] = _p
+            _IMPORT_RECOGNIZERS["noun"] = _n
+        except Exception:  # pragma: no cover
+            _IMPORT_RECOGNIZERS["is"] = lambda _q: False
+            _IMPORT_RECOGNIZERS["noun"] = lambda _q: None
+    return _IMPORT_RECOGNIZERS
+
+
+def _is_import_interest(q: str) -> bool:
+    return bool(_import_recognizers()["is"](q or ""))
+
+
+def _import_noun(q: str):
+    return _import_recognizers()["noun"](q or "")
 
 # a turn that clearly leaves the import frame (the customer is now asking
 # about something unrelated). Used only to EXPIRE a stale frame, never to
@@ -354,11 +378,26 @@ INTENT_FAMILIES = (
     "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "CHARTER_TRUCK",
     "SHIPPING_ESTIMATE", "ADDRESS_CHANGE", "IMPORT_INTEREST",
     "LINK_CONVERSION", "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL",
+    # PHASE-6B — pre-RAG conversational / service-intent families. These
+    # are NEVER a knowledge-base fact question, so a "KB has no chunk"
+    # result must never end the journey for one (customer "แก้ไขเคส
+    # Shipify Part 2", Acceptance Criteria: KB_NOT_FOUND ≠ conversation
+    # cannot continue).
+    "HELP_INTENT", "SERVICE_DISCOVERY", "MONEY_TRANSFER_INTEREST",
+    "WEBSITE_LINK_REQUEST", "CONTACT_INFO", "WAREHOUSE_INBOUND_JOURNEY",
     "GENERAL", "UNKNOWN",
 )
 
 FOLLOWUP_OPS = ("CORRECTION", "COMPARISON", "TOPIC_CHANGE", "CONTINUE",
                 "SET_VALUE", "NONE")
+
+# PHASE-6B — a conversation ACT the CURRENT message performs on the
+# dialogue itself, orthogonal to its intent family. REJECT covers the
+# customer rejecting / correcting / clarifying the assistant's previous
+# answer ("ไม่ใช่อันนี้", "ไม่ได้ถามแบบนั้น", "คุณไม่เข้าใจ", "หมายถึง…").
+# The Decision Engine uses it to re-evaluate the turn and BREAK a
+# repeated-answer loop instead of resending the same reply.
+CONVERSATION_ACTS = ("NONE", "REJECT")
 
 
 @dataclass
@@ -370,6 +409,7 @@ class Interpretation:
     follow_up_op: str = "NONE"
     confidence: float = 0.0
     source: str = "none"          # structural | deterministic | llm | degraded
+    conversation_act: str = "NONE"  # NONE | REJECT  (PHASE-6B)
 
     def as_dict(self) -> Dict:
         d = asdict(self)
@@ -397,6 +437,109 @@ _OBJ_ADDRESS = re.compile(r"ที่อยู่จัดส่ง|ที่อ
 _WITHDRAWAL_VERB_RE = re.compile(r"ถอนเงิน|จะถอนยังไง|จะถอนมายังไง|ถอนได้ไหม|ถอนยังไง", re.IGNORECASE)
 _PURCHASE_WITHDRAWAL_OBJ_RE = re.compile(r"สั่งซื้อ|ร้าน.{0,6}คืน|เครดิตสั่งซื้อ", re.IGNORECASE)
 _SHIPPING_WITHDRAWAL_OBJ_RE = re.compile(r"ขนส่ง", re.IGNORECASE)
+
+# ── PHASE-6B pre-RAG conversational / service-intent markers ──────────
+# Compositional & anchored, never a bare keyword scan. They fire only
+# when the deterministic tier found NO other actionable family, so an
+# ordinary "ใช้คูปองยังไง" / "บิลผมถึงไหน" is untouched.
+#
+# HELP_INTENT — a generic "I need help / want to ask something" with no
+# concrete subject yet. Must be OPENED (ask what they need), never sent
+# to KB_NOT_FOUND.
+_HELP_INTENT_RE = re.compile(
+    r"^\s*(?:อยากได้|ต้องการ|ขอ|อยาก)?\s*(?:ความ)?ช่วยเหลือ(?:หน่อย|ด้วย|ที)?\s*(?:ครับ|ค่ะ|คะ|ด้วย|หน่อย)?\s*$"
+    r"|ขอความช่วยเหลือ|ต้องการความช่วยเหลือ|อยากได้ความช่วยเหลือ"
+    r"|^\s*ช่วย(?:หน่อย|ที|ด้วย)\S*\s*$"
+    r"|สอบถามหน่อย|สอบถามหน่อยครับ|สอบถามหน่อยค่ะ|อยากสอบถาม|รบกวนสอบถาม|มีเรื่องอยากสอบถาม"
+    r"|มีเรื่อง(?:อยาก|จะ)?(?:ถาม|สอบถาม|ปรึกษา)|มีคำถาม(?:อยาก|จะ)?ถาม|มีอะไร(?:อยาก|จะ)?ถาม"
+    r"|ปรึกษาหน่อย|มีอะไรให้ช่วย(?:ไหม|มั้ย)?",
+    re.IGNORECASE)
+
+# SERVICE_DISCOVERY — "what do you offer" / broad "import-export" topic /
+# generic "interested in using the service".
+_SERVICE_DISCOVERY_RE = re.compile(
+    r"มีบริการอะไร|บริการอะไรบ้าง|ให้บริการอะไร|รับทำอะไรบ้าง|ทำอะไรได้บ้าง|บริการมีอะไร"
+    r"|มีบริการไหนบ้าง|ช่วยอะไรได้บ้าง|บริการของ\S{0,10}มีอะไร"
+    r"|สนใจใช้บริการ|อยากใช้บริการ|สนใจบริการ"
+    r"|การนำเข้าส่งออก|นำเข้าส่งออก|นำเข้า-ส่งออก|นำเข้าและส่งออก|import\s*[/-]?\s*export",
+    re.IGNORECASE)
+
+# MONEY_TRANSFER_INTEREST — wants to SEND / pay money to a China shop
+# (the OPPOSITE direction of a withdrawal). "ฝากโอน" is Shipify's own
+# name for this service. Never matches "ถอนเงิน".
+_MONEY_TRANSFER_RE = re.compile(
+    r"โอนเงิน(?:ให้|ไป(?:ให้)?|ไปที่|ไปยัง)?\s*(?:ร้าน|โรงงาน|เจ้าของร้าน|ผู้ขาย|ร้านค้า|supplier|ซัพพลายเออร์)"
+    r"|โอน(?:เงิน)?(?:ให้)?ร้าน(?:ค้า)?(?:ที่)?จีน"
+    r"|ฝากโอน(?:เงิน)?"
+    r"|จ่ายเงินให้ร้าน(?:ค้า)?(?:ที่)?จีน|ชำระเงินให้ร้าน(?:ค้า)?(?:ที่)?จีน"
+    r"|โอนเงินไป(?:ที่)?จีน|โอนหยวน(?:ให้)?(?:ร้าน)?|เติมเงินร้านจีน|โอนค่าสินค้าให้ร้าน",
+    re.IGNORECASE)
+
+# WEBSITE_LINK_REQUEST — the customer wants a platform's WEBSITE /
+# homepage / browse URL, NOT a product-link conversion. Decisive
+# difference: no actual https?:// URL present and no explicit "แปลงลิงก์"
+# verb (either of those is always a conversion, handled elsewhere).
+_WEBSITE_LINK_RE = re.compile(
+    r"ลิงก์(?:เว็บ(?:ไซต์)?|หน้าเว็บ|เข้าเว็บ|หน้าหลัก|หน้าแรก)"
+    r"|(?:ขอ|เอา|มี|ส่ง|อยากได้|ต้องการ|ขอดู)\s*(?:ลิงก์|ลิงค์|link|url)\s*(?:ของ\s*)?(?:เว็บ|เว็บไซต์|หน้าเว็บ)"
+    r"|ลิงก์(?:ที่จะ)?(?:เข้าไป)?(?:ดู|เลือก|ช้อป|เปิด)(?:ของ|สินค้า|เว็บ)?"
+    r"|ขอ(?:ที่อยู่)?เว็บไซต์(?:ของ)?\s*(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์|อาลีบาบา)?"
+    r"|(?:เว็บไซต์|เว็บ|url)(?:ของ)?\s*(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์)(?![ก-๙\w])"
+    r"|ลิงก์\s*(?:เว็บ\s*)?(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์)\s*(?:และ|กับ|,|/)",
+    re.IGNORECASE)
+
+# CONTACT_INFO — a PUBLIC company contact request (channels / phone /
+# email / LINE / company website / company address). Never an
+# identity-gated ERP lookup.
+_CONTACT_INFO_RE = re.compile(
+    r"ติดต่อ(?:ได้)?(?:ทาง|ช่องทาง|ยัง)?ไหน|ช่องทาง(?:การ)?ติดต่อ|ติดต่อ\S{0,6}ช่องทางไหน"
+    r"|ติดต่อ\s*(?:shipify|บริษัท|แอดมิน|เจ้าหน้าที่|ฝ่าย\S{0,10})?\s*(?:ยังไง|อย่างไร|ทางไหน|ช่องทางไหน)"
+    r"|ขอ\s*(?:เบอร์(?:โทร)?|โทรศัพท์|อีเมล|อีเมล์|เมล|e-?mail|ไลน์|line\s*id|line|เว็บไซต์บริษัท|ที่อยู่บริษัท|แฟนเพจ|เพจ|ช่องทางติดต่อ)"
+    r"|เบอร์(?:โทร)?(?:ติดต่อ|บริษัท|แอดมิน|ฝ่าย\S{0,10})|อีเมล(?:ติดต่อ|บริษัท|ของบริษัท)",
+    re.IGNORECASE)
+
+# WAREHOUSE_INBOUND_JOURNEY — the "my supplier will ship to your China
+# warehouse" journey (identification of whose parcel it is / pre-arrival
+# notification requirement / arrival contact-back). KB has no chunk for
+# any of these today, so the honest answer is "no confirmed info + Human
+# CS" — NOT a nearby FAQ (warehouse address, MOQ) and NOT a notification
+# ACTION.
+_WAREHOUSE_INBOUND_JOURNEY_RE = re.compile(
+    r"(?:ร้าน|โรงงาน|ผู้ขาย|ซัพพลายเออร์|supplier)\S{0,18}ส่ง(?:ของ|สินค้า|พัสดุ)?\S{0,14}(?:ไป|เข้า|มา)?(?:ที่)?(?:คลัง|โกดัง|warehouse)"
+    r"|ส่ง(?:ของ|สินค้า|พัสดุ)?\S{0,10}(?:ไป|เข้า)(?:ที่)?(?:คลัง|โกดัง)(?:จีน|ไทย)?"
+    r"|มีของ\S{0,10}(?:จะ)?(?:ไป|เข้า)?ส่ง(?:ที่)?(?:คลัง|โกดัง)"
+    r"|(?:ของ|พัสดุ|สินค้า)\S{0,8}(?:จะ|ไป)?ถึง(?:ที่)?(?:คลัง|โกดัง)"
+    r"|จะมีของ\S{0,10}(?:ไป|เข้า)(?:ส่ง)?(?:ที่)?(?:คลัง|โกดัง)",
+    re.IGNORECASE)
+_WH_WHOSE_PARCEL_RE = re.compile(
+    r"รู้ได้(?:ยัง)?ไง|รู้ได้อย่างไร|ระบุ(?:ได้)?(?:ยังไง|อย่างไร)?|เป็นของใคร|ของใคร"
+    r"|ลูกค้าคนไหน|เป็นลูกค้าคนไหน|แยก(?:ของ)?(?:ยังไง|ออกยังไง)|ของลูกค้าคนไหน|เป็นพัสดุของใคร",
+    re.IGNORECASE)
+_WH_PRE_NOTIFY_RE = re.compile(
+    r"ต้องแจ้ง|ต้องบอก|แจ้งอะไร(?:ไหม|บ้าง|มั้ย)?|ต้องลงทะเบียน|ต้องแจ้งล่วงหน้า|แจ้งล่วงหน้า"
+    r"|ต้องทำอะไร(?:ก่อน)?(?:ไหม)?\S{0,6}(?:ส่ง|มีของ)",
+    re.IGNORECASE)
+_WH_ARRIVAL_CONTACT_RE = re.compile(
+    r"(?:ถึง|มาถึง|ของถึง|ส่งถึง|ถึงคลัง|ถึงโกดัง)[^\n]{0,24}?(?:ติดต่อกลับ|แจ้งกลับ|ติดต่อผม|แจ้งผม|"
+    r"ติดต่อ\S{0,4}(?:ไหม|มั้ย|หรือเปล่า|รึเปล่า)|แจ้ง\S{0,4}(?:ไหม|มั้ย|หรือเปล่า|รึเปล่า)|บอก\S{0,4}(?:ไหม|มั้ย))"
+    r"|(?:ติดต่อกลับ|แจ้งกลับ)[^\n]{0,10}?(?:ไหม|มั้ย|หรือเปล่า)"
+    r"|(?:ติดต่อ|แจ้ง|บอก)(?:กลับ)?[^\n]{0,10}?(?:ไหม|มั้ย|หรือเปล่า)[^\n]{0,12}?(?:ของ|พัสดุ)?\s*ถึง"
+    r"|จะรู้(?:ได้)?(?:ยัง)?ไง[^\n]{0,10}?(?:ว่า)?(?:ของ|พัสดุ)?\s*ถึง",
+    re.IGNORECASE)
+
+# REJECT act — the customer pushes back on / clarifies the previous
+# answer. Deliberately broad on MEANING but anchored so it does not fire
+# on an ordinary "ไม่" answer to a yes/no question that is itself the
+# task (a REJECT only matters when there IS a previous assistant answer —
+# the Decision Engine gates on that).
+_REJECT_ACT_RE = re.compile(
+    r"^\s*ไม่ใช่(?:อันนี้|แบบนี้|แบบนั้น|อันนั้น|ค่ะ|ครับ|คับ|สิ|เลย|นะ|น่ะ)?\s*(?:[,\.]|\s|$|ขอ|เอา|หมายถึง|ที่|จะ)"
+    r"|^\s*ไม่(?:ค่ะ|ค่า|ครับ|คับ|นะ)\b"
+    r"|ไม่ได้(?:ถาม|หมายความ|จะถาม|อยากถาม|ต้องการ)\s*(?:แบบ|อย่าง|อัน)?(?:นั้น|นี้|งั้น)?"
+    r"|(?:คุณ|เอไอ|ai|บอท|ระบบ)?\s*(?:เข้าใจผิด|ไม่เข้าใจ(?:ลูกค้า|คำถาม|ที่ถาม|ที่พิมพ์)?|ฟังไม่เข้าใจ|ตอบไม่ตรง(?:คำถาม)?|ไม่ตรงคำถาม|ตอบผิด|ผิดประเด็น|คนละเรื่อง|ตอบไม่ตรงที่ถาม)"
+    r"|หมายถึง(?:ว่า)?\s*\S"
+    r"|ที่(?:ถาม|หมายถึง|จะถาม)(?:ก็)?คือ",
+    re.IGNORECASE)
 
 # ACTION — what they want DONE.
 _ACT_LOCATE = re.compile(r"ที่ไหน|ตรงไหน|อยู่ไหน|ที่ใด|ที่ตั้ง|แผนที่|พิกัด|เส้นทางไป|ไปยังไง|แถวไหน|ย่านไหน|โซนไหน|เขตไหน|อยู่แถว|\bwhere\b", re.IGNORECASE)
@@ -468,6 +611,12 @@ def _structural_kind(t: str) -> Optional[str]:
     return None
 
 
+def _conversation_act(t: str) -> str:
+    """PHASE-6B — the dialogue act the CURRENT message performs, separate
+    from its intent family. Only REJECT is modelled for now."""
+    return "REJECT" if _REJECT_ACT_RE.search(t or "") else "NONE"
+
+
 def _followup_op(t: str) -> str:
     if _CORR_RE.search(t):
         return "CORRECTION"
@@ -515,6 +664,17 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
     if m:
         ent["method"] = m
 
+    # PHASE-6B — WEBSITE_LINK_REQUEST vs PRODUCT_LINK_CONVERSION. "ขอลิงก์
+    # เว็บ Taobao และ Tmall" / "ขอลิงก์ที่จะเข้าไปดูของ" asks for the
+    # platform's HOMEPAGE / browse URL, not "convert my product link".
+    # Checked BEFORE the link-conversion signal (which fires on
+    # "ลิงก์" + a platform word). Decisive guard: no actual https?:// URL
+    # in the message and no explicit "แปลงลิงก์" verb — either of those
+    # is always a genuine conversion and falls through untouched.
+    if (_WEBSITE_LINK_RE.search(t) and "http" not in t.lower()
+            and not re.search(r"แปลง\S{0,6}(?:ลิงก์|ลิงค์|link)", t, re.IGNORECASE)):
+        return "WEBSITE_LINK_REQUEST", 0.8, ent
+
     # LINK CONVERSION (CUSTOMER-LINK-1) — an explicit conversion verb, or
     # an actual https?:// URL anywhere in the message, is itself decisive
     # (checked first: a link-conversion ask naming a warehouse/coupon/
@@ -541,6 +701,45 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
             return "SHIPPING_WITHDRAWAL", 0.85, ent
         if _PURCHASE_WITHDRAWAL_OBJ_RE.search(t):
             return "PURCHASE_WITHDRAWAL", 0.85, ent
+
+    # PHASE-6B — MONEY_TRANSFER_INTEREST: wants to SEND / pay money to a
+    # China shop ("ฝากโอน", "โอนเงินให้ร้านที่จีน"). Opposite direction
+    # from a withdrawal (checked after, so "ถอนเงิน" never lands here) —
+    # this must NOT be routed to a withdrawal how-to (T05).
+    if _MONEY_TRANSFER_RE.search(t):
+        return "MONEY_TRANSFER_INTEREST", 0.8, ent
+
+    # PHASE-6B — CONTACT_INFO: a PUBLIC company contact request. Decisive
+    # on its own so it can never be pulled into an identity-gated ERP /
+    # customer lookup ("ขออีเมล และเว็บไซต์" must NOT ask for a CustCode).
+    if _CONTACT_INFO_RE.search(t):
+        return "CONTACT_INFO", 0.8, ent
+
+    # PHASE-6B — WAREHOUSE_INBOUND_JOURNEY: "my supplier will ship to your
+    # China warehouse — how do you know it is mine / do I notify first /
+    # will you contact me on arrival". Checked before PICKUP_LOCATION so a
+    # "โกดัง" + where-ish phrasing does not answer the warehouse-ADDRESS
+    # FAQ instead. Sub-kind kept in entities for the honest-fallback
+    # reply.
+    _wh_inbound = bool(_WAREHOUSE_INBOUND_JOURNEY_RE.search(t))
+    if _wh_inbound or (
+            (obj_wh or v_ship) and (_WH_WHOSE_PARCEL_RE.search(t) or _WH_PRE_NOTIFY_RE.search(t)
+                                    or _WH_ARRIVAL_CONTACT_RE.search(t))):
+        if _WH_WHOSE_PARCEL_RE.search(t):
+            ent["wh_kind"] = "whose_parcel"
+        elif _WH_ARRIVAL_CONTACT_RE.search(t):
+            ent["wh_kind"] = "arrival_contact"
+        elif _WH_PRE_NOTIFY_RE.search(t):
+            ent["wh_kind"] = "pre_notify"
+        if ent.get("wh_kind"):
+            return "WAREHOUSE_INBOUND_JOURNEY", 0.78, ent
+    # a bare "will you contact me back once it arrives" — no parcel
+    # identifier, no status verb of its own — is the arrival-contact
+    # question in this journey even with no "โกดัง"/"ร้านส่ง" wording.
+    if (_WH_ARRIVAL_CONTACT_RE.search(t) and not _PRIV_RECORD_RE.search(t)
+            and not obj_parcel and not _MEASURE_RE.search(t)):
+        ent["wh_kind"] = "arrival_contact"
+        return "WAREHOUSE_INBOUND_JOURNEY", 0.7, ent
 
     # CHARTER TRUCK — a charter-truck object is itself decisive (a hire /
     # request move is implied by naming it).
@@ -654,6 +853,22 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
             ent["product"] = p
         return "IMPORT_INTEREST", 0.7, ent
 
+    # PHASE-6B — SERVICE_DISCOVERY: "what services do you offer" / a broad
+    # "import-export" topic / "interested in using the service". Checked
+    # after every specific family so a concrete request is never
+    # swallowed. Answered by a pre-RAG discovery reply, never
+    # KB_NOT_FOUND.
+    if _SERVICE_DISCOVERY_RE.search(t):
+        return "SERVICE_DISCOVERY", 0.72, ent
+
+    # PHASE-6B — HELP_INTENT: a generic "I need help / want to ask
+    # something" with NO concrete subject yet, and no recognised object.
+    # The conversation must be OPENED (ask what they need), not routed to
+    # KB_NOT_FOUND.
+    if _HELP_INTENT_RE.search(t) and not (
+            obj_inv or obj_wh or obj_cp or obj_tk or obj_cost or obj_parcel or obj_addr):
+        return "HELP_INTENT", 0.7, ent
+
     # a recognised OBJECT but no actionable move -> a general FAQ turn
     # (keeps it OUT of the LLM-disambiguation tier and lets the ordinary
     # RAG / regex path answer it).
@@ -680,8 +895,18 @@ _FAMILY_SYS_PROMPT = (
     "the delivery address/recipient; PURCHASE_WITHDRAWAL=withdraw money from "
     "a purchase-order credit/refund wallet; SHIPPING_WITHDRAWAL=withdraw "
     "money from a shipping-payment wallet; IMPORT_INTEREST=wants to import "
-    "some product (early sales interest); GENERAL=any other FAQ; "
-    "UNKNOWN=cannot tell.\n"
+    "some product (early sales interest); "
+    "HELP_INTENT=a generic 'I need help / want to ask something' with no "
+    "concrete subject yet; SERVICE_DISCOVERY='what services do you offer' / "
+    "a broad import-export topic / 'interested in using the service'; "
+    "MONEY_TRANSFER_INTEREST=wants to SEND / pay money to a China shop "
+    "(ฝากโอน — opposite of a withdrawal); WEBSITE_LINK_REQUEST=wants a "
+    "platform's website / homepage / browse URL, NOT a product-link "
+    "conversion; CONTACT_INFO=a public company contact request (channels / "
+    "phone / email / LINE / company website); WAREHOUSE_INBOUND_JOURNEY=my "
+    "supplier will ship to your China warehouse — how do you know it is "
+    "mine / must I notify first / will you contact me on arrival; "
+    "GENERAL=any other FAQ; UNKNOWN=cannot tell.\n"
     "is_private=true only when it refers to the customer's OWN specific "
     "record/account. Classify MEANING ONLY — never a policy verdict, an "
     "eligibility answer, or personal data."
@@ -915,7 +1140,8 @@ def interpret(message: str, history: Optional[List[Dict]] = None,
             fam, conf = "IMPORT_INTEREST", max(conf, 0.55)
 
     return Interpretation(intent_family=fam, entities=ent, is_private=is_priv,
-                          follow_up_op=op, confidence=round(conf, 2), source=source)
+                          follow_up_op=op, confidence=round(conf, 2), source=source,
+                          conversation_act=_conversation_act(t))
 
 
 # family -> the existing rag/query_understanding.py actionable_intent
@@ -936,6 +1162,14 @@ FAMILY_TO_ACTIONABLE_INTENT = {
     "PURCHASE_WITHDRAWAL": None,
     "SHIPPING_WITHDRAWAL": None,
     "IMPORT_INTEREST": None,
+    # PHASE-6B pre-RAG families — handled by their own Decision-Engine
+    # branch BEFORE RAG, so they never force a RAG actionable intent.
+    "HELP_INTENT": None,
+    "SERVICE_DISCOVERY": None,
+    "MONEY_TRANSFER_INTEREST": None,
+    "WEBSITE_LINK_REQUEST": None,
+    "CONTACT_INFO": None,
+    "WAREHOUSE_INBOUND_JOURNEY": None,
     "GENERAL": None,
     "UNKNOWN": None,
 }
@@ -954,4 +1188,9 @@ FAMILY_TO_ACTIONABLE_INTENT = {
 PUBLIC_INFO_FAMILIES = frozenset({
     "PICKUP_LOCATION", "SELF_PICKUP", "COUPON_USAGE",
     "PRODUCT_POLICY", "CHARTER_TRUCK", "INVOICE",
+    # PHASE-6B — a public company-contact / website request and the
+    # "supplier ships to your warehouse" journey are PUBLIC: they must
+    # never be offered an identity-gated ERP / customer-data action
+    # ("ขออีเมล และเว็บไซต์" must not ask for a CustCode).
+    "CONTACT_INFO", "WEBSITE_LINK_REQUEST", "WAREHOUSE_INBOUND_JOURNEY",
 })

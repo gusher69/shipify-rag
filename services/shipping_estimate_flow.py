@@ -237,6 +237,19 @@ def extract_estimate_fields(message: str, into: Optional[EstimateState] = None) 
     clean = _COUNT_PHRASE_RE.sub(" ", clean)
 
     parsed = parse_dimension_input(clean)
+    # PHASE-6B P2-1 — canonicalize every dimension to CENTIMETRES at
+    # capture time (mm ÷10, m ×100, inch ×2.54). Chinese sellers give mm;
+    # Shipify computes and displays in cm. Doing it here (not only inside
+    # compute_estimate) keeps the stored state, the missing-slot prompt,
+    # corrections and new cycles all consistently in cm.
+    _pu = (parsed.get("dimension_unit") or "").lower()
+    if _pu in ("mm", "m", "inch") and parsed.get("dimension_values"):
+        _f = {"mm": 0.1, "m": 100.0, "inch": 2.54}[_pu]
+        parsed["dimension_values"] = [round(v * _f, 4) for v in parsed["dimension_values"]]
+        for _k in ("length", "width", "height"):
+            if parsed.get(_k) is not None:
+                parsed[_k] = round(parsed[_k] * _f, 4)
+        parsed["dimension_unit"] = "cm"
     if weight_here is not None:
         parsed["weight"] = weight_here
         parsed["weight_unit"] = "kg"

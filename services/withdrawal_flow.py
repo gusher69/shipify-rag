@@ -38,12 +38,17 @@ from typing import Dict, List, Optional
 _BRAND_PREFIX_RE = re.compile(r"^([A-Za-z]+)")
 _KNOWN_BRANDS = ("SP", "FT")
 
-# CUSTOMER-CSW12-SHIPPING-WITHDRAWAL-SP-1 — a bare brand reply to the
-# SP-or-FT question ("SP", "FT ค่ะ", "แบรนด์ SP", "เอสพี"). Deliberately
-# tight (the whole message IS just the brand token) so it never fires on
-# an unrelated "SP…"-prefixed bill or a topic switch.
+# CUSTOMER-CSW12-SHIPPING-WITHDRAWAL-SP-1 / PHASE-6B P2-3 — a reply to the
+# SP-or-FT question. Accepts a bare brand token ("SP", "FT ค่ะ", "แบรนด์
+# SP", "เอสพี") OR a brand-PREFIXED CustCode ("SP1008", "FT1324", "โค้ด
+# FT1324") — the natural way a customer answers "which brand / code?".
+# The brand comes from the prefix; this only selects a PUBLIC KB answer,
+# it authorizes nothing. Still tight (the whole message is just the
+# brand / code) so it never fires on a topic switch. Only consulted when
+# the immediately-preceding assistant turn was the SP-or-FT ask.
 _BRAND_ANSWER_RE = re.compile(
-    r"^\s*(?:แบรนด์\s*|เป็น\s*|ของ\s*|โค้ด\s*)?(SP|FT|เอสพี|เอฟที)\s*"
+    r"^\s*(?:แบรนด์\s*|เป็น\s*|ของ\s*|โค้ด\s*|รหัส\s*)?"
+    r"(SP|FT|เอสพี|เอฟที)\d{0,7}\s*"
     r"(?:ค่ะ|ค่า|คะ|ครับ|คับ|จ้า|จ้ะ|นะคะ|นะครับ)?\s*$",
     re.IGNORECASE)
 _TH_BRAND = {"เอสพี": "SP", "เอฟที": "FT"}
