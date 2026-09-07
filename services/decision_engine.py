@@ -2885,7 +2885,20 @@ def _current_intent_breaks_pending_flow(semantic, message, *, flow_family=None,
     fam = getattr(semantic, "intent_family", "UNKNOWN")
     op = getattr(semantic, "follow_up_op", "NONE")
     conf = float(getattr(semantic, "confidence", 0.0) or 0.0)
-    if fam == flow_family or op != "NONE":
+    if fam == flow_family:
+        return False
+    # CORE-CONVERSATION — an EXPLICIT topic switch ("ขอถามเรื่อง…แทน",
+    # "เปลี่ยนไปถาม…", "ไม่เอาแล้ว ถาม…", "งั้น…ดีกว่า" — the deterministic
+    # _TOPIC_RE only, no phrase list here) always breaks the pending flow:
+    # the customer explicitly moved on, even if the NEW subject could not
+    # be classified (degraded LLM -> GENERAL/UNKNOWN). Previously ANY
+    # follow_up_op != "NONE" was read as "continue this flow", so a stated
+    # switch was swallowed as another failed slot answer. CORRECTION /
+    # COMPARISON / CONTINUE / SET_VALUE / CONFIRMATION still continue —
+    # those refine the SAME flow.
+    if op == "TOPIC_CHANGE":
+        return True
+    if op != "NONE":
         return False
     if fam not in (families or _ACTIONABLE_INTENT_FAMILIES) or conf < 0.55:
         return False

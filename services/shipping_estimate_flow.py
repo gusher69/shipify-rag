@@ -98,6 +98,10 @@ _COUNT_PHRASE_RE = re.compile(
     r"\d+\s*(?:ชิ้น|กล่อง|อัน|ใบ|ลัง|pcs?|box(?:es)?)|สินค้า\s*\d+|จำนวน\s*\d+", re.IGNORECASE)
 # weight — extends rag/slot_filling_flow's own pattern with bare "โล".
 _WEIGHT_RE = re.compile(r"(\d+\.?\d*)\s*(?:กิโลกรัม|กิโล|กก\.?|kg|โล)", re.IGNORECASE)
+# CORE-CONVERSATION — weight given in GRAMS ("5000 กรัม", "800g") is
+# converted to kg (÷1000). Checked only after the kg-family pattern
+# above, so "5 kg" is never mis-read here.
+_WEIGHT_G_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:กรัม|grams?|(?<![กa-z])g(?![a-z]))", re.IGNORECASE)
 _PER_BOX_RE = re.compile(r"กล่องละ|ต่อกล่อง|ชิ้นละ|อันละ|per\s*box", re.IGNORECASE)
 _TOTAL_WEIGHT_RE = re.compile(r"น้ำหนักรวม|รวมน้ำหนัก|น้ำหนักทั้งหมด|total\s*weight", re.IGNORECASE)
 # a hard non-calculator subject in the immediately-preceding user turn
@@ -187,7 +191,8 @@ def _method_of(text: str) -> Optional[str]:
 def _has_calc_signal(text: str) -> bool:
     p = parse_dimension_input(text or "")
     return bool(_CALC_VERB_RE.search(text or "") or _CALC_TOPIC_RE.search(text or "")
-                or _method_of(text or "") or p["weight"] is not None or len(p["dimension_values"]) >= 2)
+                or _method_of(text or "") or p["weight"] is not None or len(p["dimension_values"]) >= 2
+                or _WEIGHT_G_RE.search(text or "") is not None)
 
 
 def extract_estimate_fields(message: str, into: Optional[EstimateState] = None) -> EstimateState:
@@ -217,14 +222,18 @@ def extract_estimate_fields(message: str, into: Optional[EstimateState] = None) 
     # into the dimension numbers.
     clean = t
     weight_here = None
-    wms = list(_WEIGHT_RE.finditer(clean))
-    if wms:
-        # a "ไม่ใช่ 2 กิโล เป็น 3 กิโล" correction states two values —
-        # the LAST is the corrected one (SEM-GEN correction semantics).
-        wm = wms[-1]
-        weight_here = float(wm.group(1))
-        for w in reversed(wms):
-            clean = clean[:w.start()] + " " + clean[w.end():]
+    # Collect every weight mention — kg-family AND grams — with its
+    # position and kg value. "ไม่ใช่ 2 กิโล เป็น 3 กิโล" / "ไม่ใช่ 10 กิโล
+    # เอา 5500 กรัม" state two values; the LAST-STATED one wins (SEM-GEN
+    # correction semantics), whatever unit it is in.
+    wcands = [(m.start(), m.end(), float(m.group(1))) for m in _WEIGHT_RE.finditer(clean)]
+    wcands += [(m.start(), m.end(), float(m.group(1)) / 1000.0)
+               for m in _WEIGHT_G_RE.finditer(clean)]
+    if wcands:
+        wcands.sort(key=lambda c: c[0])
+        weight_here = wcands[-1][2]
+        for s, e, _v in sorted(wcands, key=lambda c: c[0], reverse=True):
+            clean = clean[:s] + " " + clean[e:]
     clean = _COUNT_PHRASE_RE.sub(" ", clean)
 
     parsed = parse_dimension_input(clean)
@@ -243,15 +252,36 @@ def extract_estimate_fields(message: str, into: Optional[EstimateState] = None) 
     return st
 
 
+# CORE-CONVERSATION — a message that is (essentially) JUST a box-
+# dimensions triple ("54x12x43", "กล่อง 50x40x30", "50 × 40 × 30 ซม"). The
+# x/×/* separator between three sane box-size numbers is itself the "here
+# are my box sizes, work out shipping" signal — no calc verb needed. A
+# Thai/Gregorian date uses "-" / "/" (never x), a code is letter-prefixed
+# with no separator, and a longer sentence fails the anchors — so none of
+# those trigger it.
+_BARE_DIMS_TRIPLE_RE = re.compile(
+    r"^(?:กล่อง|ขนาด|box)?\s*"
+    r"\d{1,3}(?:\.\d+)?\s*[x×*]\s*\d{1,3}(?:\.\d+)?\s*[x×*]\s*\d{1,3}(?:\.\d+)?"
+    r"\s*(?:ซม\.?|ซ\.ม\.?|cm|มม\.?|mm|นิ้ว|เมตร|เมตร\.?|m)?\s*(?:ครับ|ค่ะ|คะ|นะคะ|นะ)?\s*$",
+    re.IGNORECASE)
+
+
+def is_bare_dims_triple(message: str) -> bool:
+    return bool(_BARE_DIMS_TRIPLE_RE.match((message or "").strip()))
+
+
 def opens_estimate_flow(message: str, state: EstimateState) -> bool:
     """A turn opens the flow when it explicitly asks for a calculation,
-    names a shipping-cost topic together with a concrete input, OR
-    already supplies enough structured values to compute (weight + >=2
-    dims, or a method + weight/dims). A bare "เรทเท่าไหร่" / "ค่านำเข้า
-    เท่าไหร่" (no value, no calc verb) stays a rate FAQ."""
+    names a shipping-cost topic together with a concrete input, is
+    essentially just a box-dimensions triple, OR already supplies enough
+    structured values to compute (weight + >=2 dims, or a method +
+    weight/dims). A bare "เรทเท่าไหร่" / "ค่านำเข้าเท่าไหร่" (no value, no
+    calc verb) stays a rate FAQ."""
     t = (message or "").strip()
     if _OTHER_BUSINESS_INTENT_RE.search(t):
         return False
+    if is_bare_dims_triple(t):
+        return True
     has_value = state.weight is not None or state._dims_present() >= 2
     if has_value and (_CALC_VERB_RE.search(t) or _CALC_TOPIC_RE.search(t)
                       or state.method is not None or state.complete()):
@@ -278,7 +308,7 @@ def _is_explicit_new_request(text: str, interpretation: Optional[object] = None)
     op = getattr(interpretation, "follow_up_op", "NONE") if interpretation is not None else "NONE"
     p = parse_dimension_input(t)
     has_value = (p["weight"] is not None or len(p["dimension_values"]) >= 2
-                 or _WEIGHT_RE.search(t) is not None)
+                 or _WEIGHT_RE.search(t) is not None or _WEIGHT_G_RE.search(t) is not None)
     # CALCULATOR-REGRESSION-2 — a BARE route/method answer ("เอารถครับ",
     # "รถ", "เรือค่ะ") is a CONTINUATION value, never a fresh calculation
     # — even though the widened SEMANTIC-FIRST-2 LLM gate now labels it
@@ -356,7 +386,7 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str,
     is_route = _method_of(cur_msg) is not None
     parsed_cur = parse_dimension_input(cur_msg)
     is_value = (parsed_cur["weight"] is not None or bool(parsed_cur["dimension_values"])
-                or _WEIGHT_RE.search(cur_msg) is not None)
+                or _WEIGHT_RE.search(cur_msg) is not None or _WEIGHT_G_RE.search(cur_msg) is not None)
     is_unit_only_correction = bool(_dimension_unit(cur_msg)) and _UNIT_CORRECTION_RE.search(cur_msg)
     is_corr = (bool(_CORRECTION_RE.search(cur_msg)) or _op in ("CORRECTION", "COMPARISON")
                or bool(is_unit_only_correction) or bool(_RECALC_RE.search(cur_msg)))
