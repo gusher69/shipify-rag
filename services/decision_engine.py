@@ -2258,15 +2258,12 @@ _ROUTING_TYPES = ("RAG", "GENERAL", "API", "TOOL", "WORKFLOW", "NOTIFICATION", "
 
 _URL_RE = re.compile(r"https?://\S+")
 
-# CUSTOMER-CSW9-REAL-2 — confirmed real-LINE misspellings of operational
-# verbs that otherwise silently miss both the semantic ADDRESS_CHANGE
-# family and the keyword action search (routing the turn to RAG / a
-# stale shipment lookup instead of CSW9). Exact literal substitutions
-# only, applied once at the top of decide(); add an entry per confirmed
-# typo, never a fuzzy rule.
-_OPERATIONAL_TYPO_FIXES = {
-    "เปเลี่ยน": "เปลี่ยน",
-}
+# CUSTOMER-CSW9-REAL-2 / PHASE-6D — real-LINE operational-verb
+# misspellings are now handled by the shared safe Thai chat-typo
+# normalizer (services/thai_text_normalizer.py::_CHAT_FORMS), invoked
+# once at the top of decide(). This literal ("เปเลี่ยน" -> "เปลี่ยน") was
+# folded into that map. Kept here only as the historical anchor for the
+# CSW9 root cause; not read anywhere.
 
 
 def _extract_system_values(message: str, history: Optional[List[Dict]] = None) -> Dict:
@@ -3112,17 +3109,34 @@ class DecisionEngine:
         developer_trace: Dict = {}
 
         try:
-            # CUSTOMER-CSW9-REAL-2 — narrow, deterministic typo
-            # normalization applied ONCE here so every downstream consumer
-            # (semantic interpreter, keyword action search, operational
-            # classifier) sees the corrected form — never a per-flow or
-            # final-response patch. Scoped to a tiny map of confirmed
-            # operational-verb misspellings seen on real LINE; extend by
-            # adding an entry, never by loosening it into fuzzy matching.
-            for _typo, _fix in _OPERATIONAL_TYPO_FIXES.items():
-                if _typo in message:
-                    message = message.replace(_typo, _fix)
-                    developer_trace["typo_normalized"] = {_typo: _fix}
+            # PHASE-6D — safe Thai chat-typo normalization applied ONCE
+            # here so every downstream consumer (semantic interpreter,
+            # keyword action search, operational classifier, pre-RAG
+            # flows, RAG query seed) sees the typo-tolerant form. The RAW
+            # message stays authoritative for identifiers / URLs / numbers
+            # / amounts / dimensions — the normalizer freezes every such
+            # structured token verbatim and reverts the whole result on
+            # any Semantic Invariant Guard violation. Supersedes the
+            # former 1-entry _OPERATIONAL_TYPO_FIXES map (folded into
+            # services/thai_text_normalizer.py::_CHAT_FORMS).
+            try:
+                from services.thai_text_normalizer import normalize_message as _normalize_message
+                _norm = _normalize_message(message)
+                # RAW stays authoritative for audit / ERP / identifiers —
+                # kept verbatim in context for any downstream consumer.
+                context.setdefault("raw_user_message", _norm.raw)
+                if _norm.changed:
+                    developer_trace["typo_normalized"] = {
+                        "from": _norm.raw, "to": _norm.normalized,
+                        "corrections": _norm.corrections,
+                        "protected_tokens": _norm.protected_tokens,
+                        "confidence": _norm.confidence,
+                    }
+                    message = _norm.normalized
+                elif _norm.rejected:
+                    developer_trace["typo_normalization_rejected"] = _norm.rejection_reason
+            except Exception as _e:
+                developer_trace["typo_normalization_error"] = str(_e)
 
             # 1-2. read message + history are inputs; 3. conversation state
             # is recomputed from `history` (no separate persistence layer
