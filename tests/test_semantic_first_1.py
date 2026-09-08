@@ -93,7 +93,12 @@ class TestStructuralInputsSkipSemantics(unittest.TestCase):
                         ("54x12x43", "dims"), ("2 3 4", "numeric")]:
             it = interpret(m, [])
             self.assertEqual(it.source, "structural", f"{m!r} should be structural")
-            self.assertEqual(it.intent_family, "UNKNOWN")
+            # OWNER-REAL-LINE-FIX-03 — a bare well-formed URL is now a
+            # decisive LINK_CONVERSION turn (the deterministic link
+            # classifier then decides VALID / platform-home / incomplete /
+            # UNSUPPORTED_DOMAIN); every other structural kind stays UNKNOWN.
+            self.assertEqual(it.intent_family,
+                             "LINK_CONVERSION" if kind == "url" else "UNKNOWN")
 
     def test_greetings_and_confirmations_are_unknown_not_llm(self):
         for m in ("สวัสดีครับ", "ขอบคุณค่ะ", "ยืนยัน", "โอเคครับ", "ครับผม"):

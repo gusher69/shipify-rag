@@ -1128,17 +1128,23 @@ def interpret(message: str, history: Optional[List[Dict]] = None,
             # CUSTOMER-LINK-1 — a bare pasted URL (the WHOLE message, no
             # surrounding text) is exactly CUS-S20's own worked example
             # ("just paste the link"). Still fully deterministic/
-            # structural (no LLM): a supported-platform hostname is a
-            # decisive LINK_CONVERSION signal even with zero framing
-            # text; an unsupported-domain bare URL stays UNKNOWN here —
-            # the fresh Business-Action candidate search's own
-            # unsupported-domain handling covers that case instead of
-            # this generic structural fast-path guessing at intent.
+            # structural (no LLM). OWNER-REAL-LINE-FIX-03 — ANY bare
+            # well-formed URL is a link-conversion turn; the deterministic
+            # link classifier (services/link_conversion_flow.py) decides
+            # the sub-state (VALID / platform home / incomplete / an
+            # UNSUPPORTED domain). Routing it here as LINK_CONVERSION is
+            # what lets an unsupported bare URL (e.g. a google.com link)
+            # reach the natural "not supported for conversion" reply
+            # instead of falling through to a RAG no-info / Human CS
+            # handoff. This is a BARE-URL-only fast path — a URL embedded
+            # in a sentence, or a "ขอลิงก์เว็บ Taobao" text request, never
+            # matches _STRUCT_URL_RE and keeps its normal _compose path.
             req = _classify_link_request(t)
+            _lc_ent = {"url": req.get("url") or t}
             if req.get("platform"):
-                return Interpretation(intent_family="LINK_CONVERSION",
-                                      entities={"url": req["url"], "platform": req["platform"]},
-                                      follow_up_op="NONE", confidence=0.9, source="structural")
+                _lc_ent["platform"] = req["platform"]
+            return Interpretation(intent_family="LINK_CONVERSION", entities=_lc_ent,
+                                  follow_up_op="NONE", confidence=0.9, source="structural")
         return Interpretation(intent_family="UNKNOWN", entities=ent,
                               follow_up_op="NONE", confidence=0.0, source="structural")
 

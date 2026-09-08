@@ -331,8 +331,8 @@ _REPLIES = {
     "MALFORMED_URL": _INCOMPLETE_REPLY,
     "INCOMPLETE_PRODUCT_LINK": _INCOMPLETE_REPLY,
     "MULTIPLE_URLS": "รบกวนส่งลิงก์สินค้าทีละ 1 ลิงก์นะคะ",
-    "UNSUPPORTED_DOMAIN": ("ตอนนี้การแปลงลิงก์รองรับเฉพาะลิงก์สินค้าจาก 1688, Taobao และ Tmall ค่ะ "
-                           "ถ้ามีลิงก์หน้าสินค้าจากเว็บเหล่านี้ ส่งมาได้เลยนะคะ"),
+    "UNSUPPORTED_DOMAIN": ("ลิงก์นี้ยังไม่รองรับการแปลงค่ะ 😊 ตอนนี้แปลงลิงก์สินค้าจาก 1688, Taobao "
+                           "และ Tmall ได้ค่ะ ถ้ามีลิงก์หน้าสินค้าจากเว็บเหล่านี้ ส่งมาได้เลยนะคะ"),
     "SHORT_URL_UNRESOLVED": "ลิงก์นี้ยังไม่พบรหัสสินค้าค่ะ ลองส่งลิงก์หน้าสินค้า 1688 แบบเต็มมาอีกครั้งได้เลยค่ะ",
     "CONVERSION_NOT_FOUND_OR_REJECTED": _API_FAILED_REPLY,
     "UPSTREAM_FAILURE": _API_FAILED_REPLY,
