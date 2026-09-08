@@ -119,7 +119,11 @@ def is_link_conversion_signal(message: str) -> bool:
         return True
     if _URL_RE.search(t):
         return True
-    if _LINK_WORD_RE.search(t) and _PLATFORM_OR_SHIPIFY_WORD_RE.search(t):
+    # a NEGATED link mention ("ยังไม่มีลิงก์", "ไม่มี link", "ยังไม่ได้ลิงก์")
+    # next to a platform name is the OPPOSITE of a conversion request —
+    # the customer is saying they have no link yet (OWNER-REAL-LINE-FIX-01).
+    _link_negated = re.search(r"(?:ยัง)?ไม่(?:มี|ได้|เจอ|พบ)\S{0,4}(?:ลิงก์|ลิงค์|link)", t, re.IGNORECASE)
+    if _LINK_WORD_RE.search(t) and _PLATFORM_OR_SHIPIFY_WORD_RE.search(t) and not _link_negated:
         return True
     if LINK_CONVERSION_VERB_RE.search(t) is None and _BARE_DOMAIN_RE.search(t) and (
             re.search(r"/", t)):

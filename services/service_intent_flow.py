@@ -154,9 +154,13 @@ def import_interest_reply(product: Optional[str]) -> str:
     from services.conversation_semantics import Frame, frame_ack_reply
     if product:
         return frame_ack_reply(Frame(product=product), changed="none")
+    # OWNER-REAL-LINE-FIX-01 — a broad "อยากสั่งของจากจีน" must NOT assume
+    # the customer already has a product link. Offer BOTH paths in one
+    # coherent reply: send a link if they have one, otherwise say what
+    # they want and discovery continues. No auth, no Human CS claim.
     return (
-        "รับทราบค่ะ สนใจนำเข้าสินค้ากับ Shipify นะคะ 😊 "
-        "รบกวนแจ้งสินค้าที่ต้องการนำเข้า ปริมาณโดยประมาณ และต้องการส่งทางรถหรือทางเรือคะ"
+        "ได้ค่ะ 😊 ถ้ามีลิงก์สินค้าที่สนใจจาก Taobao, 1688 หรือ Tmall ส่งมาได้เลยนะคะ "
+        "ถ้ายังไม่มีลิงก์ บอกคร่าว ๆ ได้เลยว่าอยากสั่งสินค้าอะไร เดี๋ยวช่วยแนะนำขั้นตอนต่อให้ค่ะ"
     )
 
 

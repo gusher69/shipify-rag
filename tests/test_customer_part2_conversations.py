@@ -52,7 +52,9 @@ _DISCOVERY_TAIL = "สนใจบริการไหนเป็นพิเ�
 _MONEY_HEAD = "บริการฝากโอนเงินให้ร้านค้าจีน"
 _WEBSITE_HEAD = "ลิงก์เว็บไซต์หลักของแต่ละแพลตฟอร์ม"
 _CONTACT_MARK = "@Shipify"
-_WH_FALLBACK_MARK = "ยังไม่มีข้อมูลยืนยันในระบบ"
+# PHASE-6E reworded WAREHOUSE_INBOUND_FALLBACK to a natural no-info line
+# (dropped the internal-flavoured "ในระบบ"); it still opens with this.
+_WH_FALLBACK_MARK = "ยังไม่มีข้อมูลที่ยืนยันได้"
 _CUSTCODE_ASK = "กรุณาแจ้งรหัสลูกค้า"
 
 

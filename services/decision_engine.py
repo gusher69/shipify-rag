@@ -4264,16 +4264,43 @@ class DecisionEngine:
                 # noun) is left to RAG — the ฝากนำเข้า process content
                 # answers it well — and an in-frame follow-up keeps its
                 # SEM-GEN-1 path above.
+                # A broad "want to order/import goods FROM CHINA (or from
+                # 1688/Taobao/Tmall)" with no product noun is a proxy-buy
+                # interest that must get the two-path discovery ack (send a
+                # link, or say what you want) — NOT a premature link-only
+                # RAG answer (OWNER-REAL-LINE-FIX-01). A bare
+                # "สนใจนำเข้าสินค้าครับ" (no จีน / no platform) still goes to
+                # RAG, whose ฝากนำเข้า process content answers it well.
+                _no_rag_question = not re.search(
+                    r"ไหม|มั้ย|หรือเปล่า|รึเปล่า|อะไรบ้าง|อะไรบาง|ยังไง|อย่างไร|เท่าไหร่|กี่\S|\?", message or "")
+                _broad_china_buy = bool(re.search(
+                    r"(?:อยาก|สนใจ|จะ|ต้องการ|กำลัง)?\s*(?:สั่ง|ซื้อ|หาซื้อ|ช้อป|นำเข้า)\s*"
+                    r"(?:ของ|สินค้า|สิ่งของ|อะไร)?\s*(?:จาก)?\s*"
+                    r"(?:(?:ประเทศ)?จีน|1688|เถาเป่า|taobao|tmall|ทีมอลล์|อาลีบาบา)",
+                    message or "", re.IGNORECASE)) and _no_rag_question \
+                    and "http" not in (message or "").lower() \
+                    and getattr(semantic, "follow_up_op", "NONE") == "NONE" \
+                    and _derive_active_frame(history) is None
+                # broad proxy-buy interest: serve the two-path discovery
+                # ack even when the interpreter could only reach UNKNOWN /
+                # GENERAL / low confidence (a degraded LLM read of
+                # "อยากซื้อของจาก 1688 แต่ยังไม่มีลิงก์").
+                if (_broad_china_buy and _svc_act != "REJECT"
+                        and not private_state_inquiry and not _msg_has_identifier):
+                    from services.service_intent_flow import import_interest_reply as _imp_reply
+                    developer_trace["selection_source"] = "phase6b_service_intent"
+                    developer_trace["service_intent_family"] = "IMPORT_INTEREST"
+                    return self._finalize(
+                        reply=_build_response(text=_imp_reply(_svc_ent.get("product"))),
+                        routing_type="GENERAL", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+
                 _svc_pre_rag = _svc_fam in _SERVICE_INTENT_FAMILIES or (
                     _svc_fam == "IMPORT_INTEREST"
                     and getattr(semantic, "follow_up_op", "NONE") == "NONE"
                     and _svc_ent.get("product")
-                    # a message that ALSO carries its own question
-                    # ("...ห้ามนำเข้าอะไรบ้าง") has concrete content for
-                    # RAG to answer — do not short-circuit it to a
-                    # discovery ack.
-                    and not re.search(r"ไหม|มั้ย|หรือเปล่า|รึเปล่า|อะไรบ้าง|อะไรบาง|ยังไง|อย่างไร|เท่าไหร่|กี่\S|\?",
-                                      message or "")
+                    and _no_rag_question
                     and _derive_active_frame(history) is None)
                 if (_svc_pre_rag and _svc_conf >= 0.6 and _svc_act != "REJECT"
                         and not private_state_inquiry and not _msg_has_identifier):

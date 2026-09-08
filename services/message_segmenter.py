@@ -118,7 +118,18 @@ def _group_by_section_header(answer: str) -> List[str]:
 # deliberately small, conservative marker-word list rather than guessing
 # at clause boundaries generically.
 _CONTRAST_MARKERS = ["ส่วน", "สำหรับ", "อีกกรณี", "แต่"]
-_NEXT_STEP_MARKERS = ["หาก", "สามารถ", "รบกวน", "แจ้ง"]
+# "สามารถ" ("can/able to") and "แจ้ง" ("inform") were removed: both are
+# ordinary MID-SENTENCE verbs ("คุณสามารถวางลิงก์...", "รบกวนแจ้ง...") — a
+# marker split before either one severs a subject from its predicate and
+# produced fragments like a lone "...คุณ" bubble (OWNER-REAL-LINE-FIX-01).
+# The sentence-boundary guard in _find_prose_boundaries is the general
+# defence; this list stays to genuinely clause-initial words only.
+_NEXT_STEP_MARKERS = ["หาก", "รบกวน"]
+
+# a prose split may only land where the text BEFORE it actually ends a
+# sentence — i.e. it closes with a Thai polite particle or sentence
+# punctuation. Anything else is mid-sentence and is skipped.
+_SENTENCE_END_RE = re.compile(r"(?:ค่ะ|คะ|ค่า|ครับ|คับ|นะคะ|นะครับ|จ้ะ|จ้า|นะ|ค่ะๆ|[.!?…])\s*$")
 # A boundary this close to the previous one (or to the very start/end of
 # the text) would produce a near-empty fragment that can't "make sense
 # independently" on its own — merged away instead of kept as its own bubble.
@@ -179,7 +190,14 @@ def _find_prose_boundaries(answer: str) -> List[int]:
     fragment couldn't "make sense independently" as its own bubble."""
     protected = _protected_spans_for_text(answer)
     raw_positions = []
+    # CONTRAST markers ("ส่วน", "สำหรับ", …) legitimately split a compound
+    # "A ส่วน B" sentence at its own midpoint, so they do NOT require a
+    # preceding sentence end. NEXT-STEP markers ("หาก", "รบกวน") are
+    # clause-initial: only accept one when the text before it actually
+    # closes a sentence (a polite particle / punctuation) — otherwise the
+    # split lands mid-sentence (OWNER-REAL-LINE-FIX-01, the "...คุณ" bubble).
     for marker in _CONTRAST_MARKERS + _NEXT_STEP_MARKERS:
+        needs_sentence_end = marker in _NEXT_STEP_MARKERS
         start = 0
         while True:
             idx = answer.find(marker, start)
@@ -189,7 +207,9 @@ def _find_prose_boundaries(answer: str) -> List[int]:
             # marker — splitting there would separate "ไม่" from the verb
             # it negates, changing what the fragment means on its own.
             preceding = answer[max(0, idx - 3):idx]
-            if not (any(s <= idx < e for s, e in protected) or preceding.endswith("ไม่")):
+            in_protected = any(s <= idx < e for s, e in protected)
+            at_sentence_end = (not needs_sentence_end) or bool(_SENTENCE_END_RE.search(answer[:idx]))
+            if not (in_protected or preceding.endswith("ไม่")) and at_sentence_end:
                 raw_positions.append(idx)
             start = idx + len(marker)
 
