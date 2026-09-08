@@ -177,7 +177,52 @@ def classify_link_request(message: str, history: Optional[List[Dict]] = None) ->
     platform = classify_platform(url)
     if not platform:
         return {"state": "UNSUPPORTED_DOMAIN", "url": url, "platform": None}
+    # OWNER-REAL-LINE-FIX-02 — a supported hostname with no product-detail
+    # path is the platform HOME / a non-product page, not a valid link.
+    kind = _product_url_kind(url, platform)
+    if kind == "HOME":
+        return {"state": "PLATFORM_HOME_OR_NON_PRODUCT", "url": url, "platform": platform}
+    if kind == "INCOMPLETE":
+        return {"state": "INCOMPLETE_PRODUCT_LINK", "url": url, "platform": platform}
     return {"state": "VALID", "url": url, "platform": platform}
+
+
+# OWNER-REAL-LINE-FIX-02 — a supported-platform hostname alone is NOT a
+# product link. Distinguish a real product-detail URL from the platform
+# home / a non-product page, and from a product URL missing its id.
+_1688_OFFER_RE = re.compile(r"/offer/(\d{4,})\.html?(?:[?#].*)?$", re.IGNORECASE)
+_1688_OFFER_PREFIX_RE = re.compile(r"/offer/", re.IGNORECASE)
+_ITEM_HTM_RE = re.compile(r"/(?:item|i)\.html?", re.IGNORECASE)
+_ID_IN_QUERY_RE = re.compile(r"[?&](?:id|itemId)=(\d{4,})", re.IGNORECASE)
+_TB_SHORT_HOSTS = ("tb.cn", "e.tb.cn", "s.tb.cn", "m.tb.cn")
+
+
+def _path_and_query(url: str) -> str:
+    m = re.match(r"^https?://[^/\s]+(/[^\s]*)?$", url or "", re.IGNORECASE)
+    return (m.group(1) or "") if m else ""
+
+
+def _product_url_kind(url: str, platform: Optional[str]) -> str:
+    """PRODUCT | HOME | INCOMPLETE — deterministic, per platform.
+    A short / QR link is always a PRODUCT candidate (it is resolved
+    downstream before the conversion call)."""
+    host = _hostname(url) or ""
+    pq = _path_and_query(url)
+    if is_1688_short_url(url):
+        return "PRODUCT"
+    if platform == "1688":
+        if _1688_OFFER_RE.search(pq):
+            return "PRODUCT"
+        if _1688_OFFER_PREFIX_RE.search(pq):
+            return "INCOMPLETE"          # "/offer/" but no numeric id + .html
+        return "HOME"                    # bare host, "/", "/page/...", etc.
+    if platform in ("taobao", "tmall"):
+        if host in _TB_SHORT_HOSTS or host.endswith(".tb.cn"):
+            return "PRODUCT"
+        if _ITEM_HTM_RE.search(pq):
+            return "PRODUCT" if _ID_IN_QUERY_RE.search(pq) else "INCOMPLETE"
+        return "HOME"
+    return "HOME"
 
 
 def normalize_supported_url(url: str) -> str:
@@ -273,23 +318,46 @@ def classify_conversion_result(*, executor_error: bool, mapped_fields: Optional[
     return {"state": "CONVERSION_NOT_FOUND_OR_REJECTED", "link": None}
 
 
-# ── customer-facing replies (fixed, source-grounded wording) ────────
+# ── customer-facing replies — natural, system-owned (PHASE-6E style) ──
+# OWNER-REAL-LINE-FIX-02: an invalid/incomplete link is a specific,
+# actionable problem — never phrased as a temporary system outage, never
+# a fake staff hand-off.
+_INCOMPLETE_REPLY = ("ลิงก์นี้ดูเหมือนจะไม่ครบค่ะ รบกวนคัดลอกลิงก์หน้าสินค้าเต็ม ๆ "
+                     "แล้วส่งมาอีกครั้งนะคะ เดี๋ยวช่วยแปลงให้ค่ะ")
+_API_FAILED_REPLY = ("ลิงก์ดูถูกต้องแล้วค่ะ แต่ตอนนี้ยังแปลงไม่สำเร็จ "
+                     "ลองส่งลิงก์อีกครั้งได้เลยนะคะ")
 _REPLIES = {
     "MISSING_URL": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
-    "MALFORMED_URL": "ลิงก์ที่ส่งมาดูเหมือนจะไม่ถูกต้องหรือไม่สมบูรณ์ค่ะ "
-                      "รบกวนส่งลิงก์สินค้าที่ถูกต้องอีกครั้งนะคะ",
+    "MALFORMED_URL": _INCOMPLETE_REPLY,
+    "INCOMPLETE_PRODUCT_LINK": _INCOMPLETE_REPLY,
     "MULTIPLE_URLS": "รบกวนส่งลิงก์สินค้าทีละ 1 ลิงก์นะคะ",
-    "UNSUPPORTED_DOMAIN": "ขออภัยค่ะ ระบบแปลงลิงก์รองรับเฉพาะลิงก์จาก 1688, Taobao และ Tmall เท่านั้นค่ะ",
+    "UNSUPPORTED_DOMAIN": ("ตอนนี้การแปลงลิงก์รองรับเฉพาะลิงก์สินค้าจาก 1688, Taobao และ Tmall ค่ะ "
+                           "ถ้ามีลิงก์หน้าสินค้าจากเว็บเหล่านี้ ส่งมาได้เลยนะคะ"),
     "SHORT_URL_UNRESOLVED": "ลิงก์นี้ยังไม่พบรหัสสินค้าค่ะ ลองส่งลิงก์หน้าสินค้า 1688 แบบเต็มมาอีกครั้งได้เลยค่ะ",
-    "CONVERSION_NOT_FOUND_OR_REJECTED": "ขออภัยค่ะ ไม่สามารถแปลงลิงก์นี้ได้ "
-                                        "รบกวนตรวจสอบลิงก์อีกครั้ง หรือส่งลิงก์สินค้าใหม่มาได้เลยค่ะ",
-    "UPSTREAM_FAILURE": "ขออภัยค่ะ ระบบแปลงลิงก์ขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้งภายหลังนะคะ",
+    "CONVERSION_NOT_FOUND_OR_REJECTED": _API_FAILED_REPLY,
+    "UPSTREAM_FAILURE": _API_FAILED_REPLY,
+}
+
+# platform-aware guidance for a platform HOME / non-product URL.
+_PLATFORM_HOME_REPLY = {
+    "1688": ("ลิงก์นี้ยังเป็นหน้าเว็บหลักของ 1688 ค่ะ 😊 รบกวนส่งลิงก์หน้าสินค้าเต็ม ๆ มาได้เลย "
+             "เช่นลิงก์ที่มี /offer/...html เดี๋ยวช่วยแปลงให้ค่ะ"),
+    "taobao": ("ลิงก์นี้ยังเป็นหน้าเว็บหลักของ Taobao ค่ะ 😊 รบกวนเปิดหน้าสินค้าที่ต้องการ "
+               "แล้วคัดลอกลิงก์จากแถบที่อยู่มาส่งอีกครั้งนะคะ เดี๋ยวช่วยแปลงให้ค่ะ"),
+    "tmall": ("ลิงก์นี้ยังเป็นหน้าเว็บหลักของ Tmall ค่ะ 😊 รบกวนเปิดหน้าสินค้าที่ต้องการ "
+              "แล้วคัดลอกลิงก์จากแถบที่อยู่มาส่งอีกครั้งนะคะ เดี๋ยวช่วยแปลงให้ค่ะ"),
 }
 
 
-def reply_for_state(state: str) -> Optional[str]:
+def reply_for_state(state: str, platform: Optional[str] = None) -> Optional[str]:
+    if state == "PLATFORM_HOME_OR_NON_PRODUCT":
+        return _PLATFORM_HOME_REPLY.get((platform or "").lower(), _PLATFORM_HOME_REPLY["1688"])
     return _REPLIES.get(state)
 
 
 def reply_for_success(link: str) -> str:
-    return f"แอดมินแปลงลิงก์ให้เรียบร้อยค่ะ คุณลูกค้าเปิดบิลเข้ามาได้เลยนะคะ\n{link}"
+    # OWNER-REAL-LINE-FIX-02 — system-owned wording; NO "แอดมินแปลง",
+    # no fake Human CS. The converted URL is appended verbatim, unchanged.
+    return ("แปลงลิงก์ให้เรียบร้อยแล้วค่ะ 😊\n"
+            "เปิดลิงก์ด้านล่างเพื่อดูสินค้าและเปิดบิลได้เลยนะคะ\n"
+            f"{link}")

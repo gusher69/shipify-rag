@@ -5668,7 +5668,8 @@ class DecisionEngine:
                 # above — there, this action correctly did NOT engage.
                 developer_trace["selected_business_action"] = "geturlproductdetail"
                 developer_trace["link_conversion_state"] = _link_req["state"]
-                reply = _build_response(text=_link_reply_for_state(_link_req["state"]))
+                reply = _build_response(text=_link_reply_for_state(
+                    _link_req["state"], _link_req.get("platform")))
                 return self._finalize(reply=reply, routing_type="WORKFLOW", workflow=workflow,
                                        developer_trace=developer_trace, context=context, start=start, alert=alert)
             developer_trace["link_conversion_state"] = "VALID"
@@ -5840,7 +5841,15 @@ class DecisionEngine:
                                    developer_trace=developer_trace, context=context, start=start, alert=alert)
 
         if status == "error":
-            reply = _build_response(text="ขอโทษด้วยค่ะ ไม่สามารถดำเนินการได้ในขณะนี้ รบกวนลองใหม่อีกครั้งนะคะ")
+            # OWNER-REAL-LINE-FIX-02 — for a structurally-valid link whose
+            # conversion API failed, give the specific "link looks fine,
+            # couldn't convert right now" wording, not the generic outage
+            # line (and never a fake staff hand-off).
+            if selected.get("action_key") == "geturlproductdetail":
+                _err_text = _link_reply_for_state("UPSTREAM_FAILURE")
+            else:
+                _err_text = "ขอโทษด้วยค่ะ ไม่สามารถดำเนินการได้ในขณะนี้ รบกวนลองใหม่อีกครั้งนะคะ"
+            reply = _build_response(text=_err_text)
             return self._finalize(reply=reply, routing_type=routing_type, workflow=workflow,
                                    developer_trace=developer_trace, context=context, start=start,
                                    alert=alert, error=exec_result.get("error"))

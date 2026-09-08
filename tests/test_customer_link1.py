@@ -97,7 +97,9 @@ class TestCUSP20AndRelated(_E2E):
              {"role": "assistant", "content": _MISSING_URL_REPLY}]
         r = self._say(_1688_URL, history=h)
         self.assertEqual(r["routing"], "API")
-        self.assertIn("แปลงลิงก์ให้เรียบร้อยค่ะ", r["reply"])
+        # OWNER-REAL-LINE-FIX-02 — system-owned success wording (no "แอดมิน")
+        self.assertIn("แปลงลิงก์ให้เรียบร้อย", r["reply"])
+        self.assertNotIn("แอดมิน", r["reply"])
         self.assertIn(_CONVERTED_LINK, r["reply"])
 
 
@@ -163,7 +165,10 @@ class TestMalformedURL(_E2E):
         r = self._say("ช่วยแปลงลิงก์ 1688.com/abc ให้หน่อย")
         self.assertEqual(r["routing"], "WORKFLOW")
         self.assertNotEqual(r["reply"], _MISSING_URL_REPLY)
-        self.assertIn("ไม่ถูกต้อง", r["reply"])
+        # OWNER-REAL-LINE-FIX-02 — honest, actionable, not a system outage
+        self.assertIn("ไม่ครบ", r["reply"])
+        self.assertNotIn("ขัดข้อง", r["reply"])
+        self.assertNotIn("แอดมิน", r["reply"])
         self.assertFalse(r["erp_called"])
         self.assertIsNone(r["handoff"])
 
@@ -209,8 +214,13 @@ class TestConversionResultTruth(_E2E):
         # never reached for THIS specific shape of failure, only for a
         # response that came back (200 or otherwise) with no usable Link.
         r = self._say(f"แปลงลิงก์ {_1688_URL} ให้หน่อย", exec_side_effect=Exception("connection reset"))
-        self.assertNotIn("เรียบร้อยค่ะ", r["reply"])
-        self.assertNotIn("สำเร็จ", r["reply"])
+        # never phrased as a completed conversion (OWNER-REAL-LINE-FIX-02
+        # reply is "ลิงก์ดูถูกต้องแล้วค่ะ แต่ตอนนี้ยังแปลงไม่สำเร็จ …" — an
+        # explicit not-done statement, no success prefix, no fake staff)
+        self.assertNotIn("เรียบร้อย", r["reply"])
+        self.assertNotIn("แปลงลิงก์ให้เรียบร้อย", r["reply"])
+        self.assertIn("ยังแปลงไม่สำเร็จ", r["reply"])
+        self.assertNotIn("แอดมิน", r["reply"])
         self.assertEqual(r["link_state"], "VALID")   # pre-execution gate passed; executor itself failed
 
     def test_conversion_not_found_is_never_fake_success(self):
