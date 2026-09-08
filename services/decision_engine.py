@@ -2351,8 +2351,12 @@ def _extract_reply_attachments(chunks: List[Dict]) -> "tuple[List[str], List[Dic
 
 
 def _safe_fallback_response(reason: str) -> Dict:
+    # PHASE-6E — natural no-information wording. No staff-referral clause:
+    # this path is NOT a handoff (routing_type stays SAFE_FALLBACK), and
+    # the conversation is kept open so the customer can continue.
     return {
-        "text": "ขอโทษด้วยค่ะ ตอนนี้ยังไม่พบคำตอบที่ชัดเจนสำหรับคำถามนี้ รบกวนสอบถามเจ้าหน้าที่เพิ่มเติมนะคะ",
+        "text": "เรื่องนี้ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ค่ะ ถ้ามีรายละเอียดเพิ่มเติม "
+                "หรืออยากให้ช่วยเรื่องอื่น บอกได้เลยนะคะ",
         "message_parts": None, "buttons": [], "quick_replies": [], "images": [], "files": [],
     }, reason
 

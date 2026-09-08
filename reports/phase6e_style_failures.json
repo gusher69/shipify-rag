@@ -1,0 +1,591 @@
+{
+  "count": 24,
+  "cases": [
+    {
+      "case_id": "help-1",
+      "family": "greeting_help",
+      "turns": [
+        "ขอสอบถามหน่อยค่ะ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "HELP_INTENT",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "help-2",
+      "family": "greeting_help",
+      "turns": [
+        "มีอะไรให้ช่วยไหมคะ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "HELP_INTENT",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "help-affirm",
+      "family": "greeting_help",
+      "turns": [
+        "[assistant] สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ",
+        "ครับ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_help_affirmation",
+      "intent_family": "UNKNOWN",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "disc-1",
+      "family": "service_discovery",
+      "turns": [
+        "ที่นี่มีบริการอะไรบ้าง"
+      ],
+      "reply": "Shipify เป็นผู้ช่วยสั่งซื้อและนำเข้าสินค้าจากจีนแบบครบวงจรค่ะ มีบริการฝากสั่งซื้อสินค้าจากจีน ฝากนำเข้า ฝากโอนเงินให้ร้านค้าจีน ช่วยประสานงานกับร้าน/โรงงานจีน และจัดส่งถึงปลายทางในไทย\n\nสนใจบริการไหนเป็นพิเศษคะ หรือถ้ามีสินค้าที่อยากนำเข้าอยู่แล้ว แจ้งรายละเอียดสินค้าและปริมาณมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "SERVICE_DISCOVERY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=287 sents=7",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "calc-slot-method-left",
+      "family": "calculator",
+      "turns": [
+        "ช่วยคำนวณค่าส่ง",
+        "กล่อง 40x30x20 หนัก 5 กิโล"
+      ],
+      "reply": "รับทราบค่ะ (น้ำหนัก 5 กก. • ขนาด 40x30x20 ซม.) ต้องการประเมินทางรถหรือทางเรือคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "ga-1",
+      "family": "general_assistance",
+      "turns": [
+        "ของแตกง่ายควรแพ็กยังไงดี"
+      ],
+      "reply": "การแพ็กของที่แตกง่ายให้ปลอดภัยมีขั้นตอนดังนี้ค่ะ:\n\n1. **ใช้วัสดุกันกระแทก**: เช่น บับเบิ้ลกันกระแทก หรือโฟม เพื่อห่อหุ้มสินค้าทั้งหมด\n2. **กล่องที่เหมาะสม**: เลือกกล่องที่มีขนาดพอดีกับสินค้า ไม่ใหญ่หรือเล็กเกินไป เพื่อป้องกันการเคลื่อนไหวภายใน\n3. **เติมช่องว่าง**: ใช้วัสดุเช่น กระดาษย่น หรือโฟมเม็ด เพื่อเติมช่องว่างในกล่อง\n4. **ปิดกล่องให้แน่น**: ใช้เทปกาวปิดกล่องให้แน่นหนา โดยเฉพาะบริเวณรอยต่อ\n5. **ติดป้ายเตือน**: ติดป้าย \"ระวังแตก\" หรือ \"Fragile\" บนกล่องเพื่อให้ผู้ขนส่งระมัดระวัง\n\nการทำตามขั้น",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=566 sents=11"
+      ]
+    },
+    {
+      "case_id": "ga-2",
+      "family": "general_assistance",
+      "turns": [
+        "จานเซรามิกส่งไกลๆ ห่อแบบไหนถึงจะปลอดภัย"
+      ],
+      "reply": "การห่อจานเซรามิกเพื่อส่งไกลๆ ควรให้ความสำคัญกับการป้องกันการกระแทกและการแตกหัก โดยทั่วไปแล้วสามารถทำได้ดังนี้:\n\n1. **ห่อด้วยบับเบิ้ล**: ใช้แผ่นบับเบิ้ลห่อรอบจานหลายๆ ชั้น เพื่อป้องกันการกระแทก\n\n2. **ใช้กระดาษหนังสือพิมพ์หรือกระดาษห่อ**: วางกระดาษระหว่างจานแต่ละใบเพื่อป้องกันการเสียดสี\n\n3. **เลือกกล่องที่แข็งแรง**: ใช้กล่องกระดาษแข็งที่มีขนาดพอดี ไม่ใหญ่เกินไป เพื่อป้องกันการเคลื่อนที่ภายในกล่อง\n\n4. **เติมช่องว่าง**: ใช้โฟม หรือวัสดุกันกระแทกอื่นๆ เติมช่องว่างในกล่องเพื่อไม่ให้จานเคลื่อนที่\n\n5. *",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=671 sents=8"
+      ]
+    },
+    {
+      "case_id": "ga-3",
+      "family": "general_assistance",
+      "turns": [
+        "พวกของบอบบางแพ็กกันกระแทกยังไง"
+      ],
+      "reply": "โดยทั่วไปแล้ว การแพ็กของบอบบางเพื่อป้องกันการกระแทกสามารถทำได้ดังนี้ค่ะ:\n\n1. **ใช้วัสดุกันกระแทก**: เช่น บับเบิ้ลแรป โฟม หรือแผ่นกันกระแทก เพื่อห่อหุ้มสินค้าก่อนใส่กล่อง\n\n2. **เลือกกล่องที่เหมาะสม**: ใช้กล่องที่มีขนาดพอดีกับสินค้า ไม่ควรใหญ่เกินไปเพราะอาจทำให้สินค้าเคลื่อนที่ภายในกล่องได้\n\n3. **เติมช่องว่าง**: หากมีกล่องที่ใหญ่กว่าสินค้า ควรเติมช่องว่างด้วยวัสดุกันกระแทกเพิ่มเติม เช่น กระดาษยับ หรือโฟมเม็ด\n\n4. **ปิดผนึกให้แน่นหนา**: ใช้เทปกาวปิดกล่องให้แน่นหนา เพื่อป้องกันการเปิดระหว่างการขนส่ง\n",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=572 sents=10"
+      ]
+    },
+    {
+      "case_id": "topic-switch",
+      "family": "topic_switch",
+      "turns": [
+        "[user] ขอแปลงลิงก์",
+        "[assistant] ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+        "ไม่เอาแล้ว ขอถามค่าตีลังไม้แทน"
+      ],
+      "reply": "ค่าตีลังไม้จะอยู่ที่ 2,000 บาทต่อ 1 คิวบิกเมตร (CBM) โดยมีขั้นต่ำที่ 150 บาทค่ะ ตัวอย่างเช่น สินค้าที่มีขนาด 0.5 คิว ค่าตีลังไม้จะอยู่ที่ 1,000 บาท แนะนำให้ตรวจสอบเรทล่าสุดกับเจ้าหน้าที่ก่อนเปิดบิล เพราะราคาอาจมีการเปลี่ยนแปลงได้ค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "LINK_CONVERSION",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=232 sents=7"
+      ]
+    },
+    {
+      "case_id": "link-1",
+      "family": "link_conversion",
+      "turns": [
+        "ช่วยแปลงลิงก์ให้หน่อย"
+      ],
+      "reply": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": null,
+      "intent_family": "LINK_CONVERSION",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "ga-more-p0",
+      "family": "general_assistance",
+      "turns": [
+        "ส่งของมีคมควรแพ็กยังไง"
+      ],
+      "reply": "การแพ็กของมีคมให้ปลอดภัยและป้องกันความเสียหายสามารถทำได้ตามขั้นตอนเหล่านี้ค่ะ:\n\n1. **ห่อหุ้มของมีคม**: ใช้วัสดุที่แข็งแรง เช่น กระดาษแข็ง หรือพลาสติกแข็ง ห่อหุ้มบริเวณที่มีคม เพื่อป้องกันไม่ให้ทะลุออกมาจากกล่อง\n\n2. **ใช้วัสดุกันกระแทก**: ใส่วัสดุกันกระแทก เช่น ฟองน้ำ หรือบับเบิ้ลแรป รอบๆ ของมีคม เพื่อป้องกันการกระแทกและการเคลื่อนที่ภายในกล่อง\n\n3. **เลือกกล่องที่แข็งแรง**: ใช้กล่องที่มีความแข็งแรงและขนาดพอดีกับของที่ต้องการส่ง เพื่อป้องกันการเคลื่อนที่ภายในกล่อง\n\n4. **ปิดผนึกกล่องอย่างแน่นหนา**: ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=744 sents=10"
+      ]
+    },
+    {
+      "case_id": "ga-more-p6",
+      "family": "general_assistance",
+      "turns": [
+        "ผ้าเป็นม้วนพันกันกระแทกยังไง"
+      ],
+      "reply": "การพันผ้าเป็นม้วนเพื่อป้องกันการกระแทกสามารถทำได้ตามขั้นตอนดังนี้ค่ะ:\n\n1. **เลือกผ้าที่เหมาะสม**: ใช้ผ้าที่มีความหนาและนุ่ม เช่น ผ้าห่มหรือผ้าขนหนู เพื่อช่วยลดแรงกระแทก\n\n2. **วางสิ่งของที่ต้องการป้องกัน**: วางสิ่งของไว้บนผ้า โดยเว้นระยะห่างจากขอบผ้าให้พอเหมาะ\n\n3. **พันผ้าให้แน่น**: เริ่มพันผ้าจากด้านหนึ่งไปยังอีกด้านหนึ่ง โดยให้ผ้าคลุมสิ่งของทั้งหมด พันให้แน่นเพื่อให้ผ้าช่วยยึดสิ่งของให้อยู่กับที่\n\n4. **ผูกหรือยึดผ้า**: ใช้เชือกหรือสายรัดยางยืดผูกหรือยึดผ้าให้แน่น เพื่อป้องกันไม่ให้ผ้าคลายตัว\n\n5",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=658 sents=9"
+      ]
+    },
+    {
+      "case_id": "ga-more-p7",
+      "family": "general_assistance",
+      "turns": [
+        "ของเหลวส่งได้ไหมโดยทั่วไป"
+      ],
+      "reply": "โดยทั่วไปแล้ว การส่งของเหลวมีข้อจำกัดบางอย่างที่ต้องพิจารณา เช่น\n\n1. **ประเภทของเหลว**: ของเหลวบางประเภท เช่น สารเคมีอันตรายหรือของเหลวไวไฟ อาจถูกห้ามส่งหรือจำเป็นต้องมีการบรรจุและการจัดส่งพิเศษ\n2. **การบรรจุ**: ของเหลวต้องบรรจุในภาชนะที่ปิดสนิทและมีความแข็งแรงเพียงพอเพื่อป้องกันการรั่วไหล\n3. **กฎระเบียบของผู้ให้บริการขนส่ง**: แต่ละบริษัทขนส่งอาจมีกฎระเบียบเฉพาะเกี่ยวกับการส่งของเหลว เช่น ข้อจำกัดด้านปริมาณหรือประเภทของเหลวที่รับส่ง\n\nดังนั้น ควรตรวจสอบกับผู้ให้บริการขนส่งที่คุณเลือกใช้เพื่อทราบร",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=543 sents=8"
+      ]
+    },
+    {
+      "case_id": "nofact-more-p1",
+      "family": "business_unavailable",
+      "turns": [
+        "มีประกันพัสดุสูญหายไหม ราคาเท่าไหร่"
+      ],
+      "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ",
+      "routing": "HUMAN_HANDOFF",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": false
+      },
+      "notes": [
+        "KB miss dead-ended without keeping the conversation open"
+      ]
+    },
+    {
+      "case_id": "disc-more-p0",
+      "family": "service_discovery",
+      "turns": [
+        "อยากนำเข้าเสื้อผ้ามาขายเริ่มยังไง"
+      ],
+      "reply": "หากคุณต้องการฝากนำเข้าเสื้อผ้ามาขาย สามารถทำตามขั้นตอนเหล่านี้ได้ค่ะ:\n\n1. **สั่งซื้อสินค้า**: คุณสามารถสั่งซื้อเสื้อผ้าจากร้านจีนที่คุณต้องการได้ด้วยตัวเอง\n2. **คัดลอกที่อยู่โกดังจีน**: เข้าไปที่หน้าเว็บของ Shipify แล้วคัดลอกที่อยู่โกดังจีนเพื่อนำไปให้ร้านจีน\n3. **จัดส่งสินค้าไปโกดังจีน**: ร้านจีนจะจัดส่งสินค้าไปยังโกดังจีน ซึ่งโดยปกติจะใช้เวลาประมาณ 2–4 วัน ขึ้นอยู่กับร้าน\n4. **นำสินค้าเข้าระบบและเตรียมส่งออก**: เมื่อสินค้าถึงโกดังจีน จะใช้เวลาประมาณ 1 วันในการนำสินค้าเข้าระบบ\n5. **ขนส่งจากจีนม",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=932 sents=14",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-more-p1",
+      "family": "service_discovery",
+      "turns": [
+        "รับส่งของจากจีนมาไทยไหม"
+      ],
+      "reply": "ใช่ค่ะ เรามีบริการจัดส่งสินค้าจากจีนมาไทย โดยลูกค้าสามารถเลือกใช้บริการฝากนำเข้าหรือฝากสั่งกับ Shipify ได้ตามความต้องการค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-more-p2",
+      "family": "service_discovery",
+      "turns": [
+        "มีบริการฝากสั่งของไหมคะ"
+      ],
+      "reply": "Shipify เป็นผู้ช่วยสั่งซื้อและนำเข้าสินค้าจากจีนแบบครบวงจรค่ะ มีบริการฝากสั่งซื้อสินค้าจากจีน ฝากนำเข้า ฝากโอนเงินให้ร้านค้าจีน ช่วยประสานงานกับร้าน/โรงงานจีน และจัดส่งถึงปลายทางในไทย\n\nสนใจบริการไหนเป็นพิเศษคะ หรือถ้ามีสินค้าที่อยากนำเข้าอยู่แล้ว แจ้งรายละเอียดสินค้าและปริมาณมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "SERVICE_DISCOVERY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=287 sents=7",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-more-p3",
+      "family": "service_discovery",
+      "turns": [
+        "อยากเริ่มนำเข้าของจากจีน ต้องทำอะไรบ้าง"
+      ],
+      "reply": "หากคุณต้องการเริ่มนำเข้าสินค้าจากจีน สามารถทำตามขั้นตอนหลักดังนี้ค่ะ:\n\n1. สั่งสินค้ากับร้านจีนด้วยตัวเอง\n2. คัดลอกที่อยู่โกดังจีนจากหน้าเว็บ Shipify และส่งให้ร้านจีน\n3. ร้านจีนจะจัดส่งสินค้าไปยังโกดังจีน โดยปกติใช้เวลาประมาณ 2–4 วัน ขึ้นอยู่กับร้าน\n4. เมื่อสินค้าถึงโกดังจีน จะใช้เวลาประมาณ 1 วันในการนำสินค้าเข้าระบบและเตรียมส่งออก\n5. ขนส่งจากจีนมาไทย: ทางรถประมาณ 7–10 วัน หรือทางเรือประมาณ 14–20 วัน\n6. เมื่อสินค้าเข้าไทย โกดังจะตรวจขนาดและน้ำหนักอีกครั้ง แล้วจึงสามารถชำระบิลขนส่งได้\n7. หลังจากนั",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=689 sents=18",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "greet-more-p2",
+      "family": "greeting_help",
+      "turns": [
+        "ทักมาสอบถามหน่อยค่ะ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "HELP_INTENT",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p0",
+      "family": "general_assistance",
+      "turns": [
+        "รูปภาพติดกรอบส่งยังไงไม่ให้แตก"
+      ],
+      "reply": "การส่งรูปภาพที่มีกรอบเพื่อป้องกันไม่ให้แตก ควรทำตามขั้นตอนดังนี้:\n\n1. **ห่อหุ้มรูปภาพ**: ใช้กระดาษฟองอากาศหรือวัสดุกันกระแทกห่อหุ้มรูปภาพให้ทั่วถึง เพื่อป้องกันการกระแทก\n\n2. **ใช้กล่องที่แข็งแรง**: เลือกกล่องที่มีขนาดพอดีกับรูปภาพและมีความแข็งแรงพอที่จะรองรับน้ำหนักและแรงกระแทก\n\n3. **เสริมความแข็งแรง**: ใส่วัสดุกันกระแทกเพิ่มเติมในกล่อง เช่น โฟม หรือกระดาษย่น เพื่อให้รูปภาพไม่ขยับภายในกล่อง\n\n4. **ปิดผนึกกล่องให้แน่นหนา**: ใช้เทปกาวปิดผนึกกล่องให้แน่นหนา เพื่อป้องกันการเปิดระหว่างการขนส่ง\n\n5. **ต",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=677 sents=9"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p2",
+      "family": "general_assistance",
+      "turns": [
+        "แพ็กของให้ประหยัดพื้นที่ทำยังไง"
+      ],
+      "reply": "การแพ็กของให้ประหยัดพื้นที่สามารถทำได้ด้วยวิธีต่อไปนี้ค่ะ:\n\n1. **เลือกกล่องขนาดพอดี**: ใช้กล่องที่มีขนาดพอดีกับสินค้าที่จะส่ง เพื่อไม่ให้มีพื้นที่ว่างมากเกินไป\n\n2. **จัดเรียงอย่างมีประสิทธิภาพ**: วางสินค้าที่มีขนาดใหญ่และหนักไว้ด้านล่าง และสินค้าที่เบาไว้ด้านบน\n\n3. **ใช้วัสดุกันกระแทกที่บางแต่มีประสิทธิภาพ**: เช่น แผ่นฟองน้ำหรือกระดาษห่อ เพื่อป้องกันการกระแทกโดยไม่เพิ่มน้ำหนักหรือใช้พื้นที่มาก\n\n4. **ถอดประกอบสินค้าถ้าเป็นไปได้**: หากสินค้าสามารถถอดประกอบได้ ให้ถอดเพื่อประหยัดพื้นที่\n\n5. **ใช้ถุง",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=717 sents=10"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p4",
+      "family": "general_assistance",
+      "turns": [
+        "ส่งอาหารแห้งไปต่างประเทศได้ไหมโดยทั่วไป"
+      ],
+      "reply": "โดยทั่วไปแล้ว การส่งอาหารแห้งไปต่างประเทศอาจมีข้อจำกัดและกฎระเบียบที่แตกต่างกันไปในแต่ละประเทศค่ะ บางประเทศอาจมีข้อห้ามหรือข้อกำหนดเฉพาะเกี่ยวกับการนำเข้าอาหารแห้ง ดังนั้นควรตรวจสอบกฎระเบียบของประเทศปลายทางก่อนส่งเสมอค่ะ\n\nสำหรับ Shipify เอง ทางเราจะไม่รับนำเข้าสินค้าประเภทของกิน อาหาร รวมถึงอาหารแห้งค่ะ หากต้องการข้อมูลเพิ่มเติมเกี่ยวกับการส่งสินค้าไปต่างประเทศ แนะนำให้ติดต่อบริษัทขนส่งหรือหน่วยงานที่เกี่ยวข้องเพื่อขอคำแนะนำเพิ่มเติมค่ะ\n\nมีสินค้าอย่างอื่นที่ต้องการให้ช่วยเช็กไหมคะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=485 sents=8"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p5",
+      "family": "general_assistance",
+      "turns": [
+        "ของมือสองแพ็กยังไงให้ดูเรียบร้อย"
+      ],
+      "reply": "การแพ็กของมือสองให้ดูเรียบร้อยและน่าสนใจสามารถทำได้ตามขั้นตอนต่อไปนี้ค่ะ:\n\n1. **ทำความสะอาดสินค้า**: ตรวจสอบและทำความสะอาดสินค้าก่อนแพ็ก เพื่อให้สินค้าดูใหม่และน่าซื้อ\n\n2. **เลือกบรรจุภัณฑ์ที่เหมาะสม**: ใช้กล่องหรือซองที่มีขนาดพอดีกับสินค้า เพื่อป้องกันการเคลื่อนไหวและความเสียหายระหว่างการขนส่ง\n\n3. **ใช้วัสดุกันกระแทก**: ใส่วัสดุกันกระแทก เช่น บับเบิ้ลแรป หรือกระดาษย่น เพื่อป้องกันการกระแทก\n\n4. **ติดฉลากให้ชัดเจน**: เขียนที่อยู่ผู้รับและผู้ส่งให้ชัดเจน รวมถึงติดฉลาก \"ของเปราะบาง\" หากจำเป็น\n\n5. *",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=684 sents=12"
+      ]
+    },
+    {
+      "case_id": "nofact-more2-p1",
+      "family": "business_unavailable",
+      "turns": [
+        "ค่าปรับถ้ายกเลิกออเดอร์เท่าไหร่"
+      ],
+      "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ",
+      "routing": "HUMAN_HANDOFF",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": false
+      },
+      "notes": [
+        "KB miss dead-ended without keeping the conversation open"
+      ]
+    }
+  ]
+}

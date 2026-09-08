@@ -84,9 +84,8 @@ WEBSITE_LINK_REPLY = (
 # notification requirement / arrival contact-back). Never a nearby FAQ,
 # never a notification action.
 WAREHOUSE_INBOUND_FALLBACK = (
-    "เรื่องนี้ยังไม่มีข้อมูลยืนยันในระบบค่ะ รบกวนติดต่อเจ้าหน้าที่เพื่อขอรายละเอียดที่ถูกต้อง "
-    "ทาง LINE: @Shipify หรือฝ่ายบริการลูกค้า 02-026-6426 นะคะ "
-    "เดี๋ยวแอดมินช่วยตรวจสอบและติดต่อกลับค่ะ"
+    "เรื่องนี้ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ค่ะ เดี๋ยวส่งต่อให้เจ้าหน้าที่ช่วยตรวจสอบ"
+    "และติดต่อกลับนะคะ หรือทักมาที่ LINE: @Shipify / โทร 02-026-6426 ได้เลยค่ะ"
 )
 
 # last-resort contact reply — only used when the KB contact chunk cannot

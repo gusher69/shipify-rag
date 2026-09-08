@@ -1128,7 +1128,9 @@ class TestFallbackAndUnknownIntent(unittest.TestCase):
                    side_effect=Exception("no network in test")):
             result = self.engine.decide("อยากรู้ดวงวันนี้", history=[])
         self.assertEqual(result["routing"]["type"], "SAFE_FALLBACK")
-        self.assertIn("ขอโทษ", result["reply"]["text"])
+        # PHASE-6E — the safe-fallback reply is a natural no-information
+        # line now (no stacked apology), still a real customer-safe reply.
+        self.assertIn("ยังไม่มีข้อมูล", result["reply"]["text"])
 
     def test_rag_no_grounded_answer_falls_back(self):
         _seed_action(self.reg, key="kb2", action_type="RAG", keywords=["ทดสอบเฉพาะ"])

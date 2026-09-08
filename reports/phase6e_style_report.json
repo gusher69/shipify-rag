@@ -1,0 +1,2380 @@
+{
+  "summary": {
+    "generated": "2026-09-08T17:44:59",
+    "mode": "live",
+    "elapsed_seconds": 445.0,
+    "STYLE_CASES_total": 103,
+    "STYLE_CASES_pass": 79,
+    "STYLE_CASES_fail": 24,
+    "PASS_RATE": 0.767,
+    "FAIL_HARD": 0,
+    "FAIL_SOFT": 24,
+    "ERROR": 0,
+    "INTERNAL_TERMINOLOGY_LEAK": 0,
+    "FAKE_ACTION_OR_HANDOFF": 0,
+    "REPEATED_KNOWN_SLOT": 0,
+    "PRIVATE_DATA_LEAK": 0,
+    "axis_pass_rates": {
+      "CONCISENESS": "84/103",
+      "CONTEXT_CONTINUITY": "103/103",
+      "KEEP_OPEN": "8/10",
+      "NATURALNESS": "103/103",
+      "NEXT_ACTION_QUALITY": "96/103",
+      "NO_INTERNAL_LANGUAGE": "103/103",
+      "NO_PRIVATE_LEAK": "3/3",
+      "NO_REPEATED_SLOT": "103/103",
+      "POLITE_GATE": "3/3",
+      "TRUTH_PRESERVED": "103/103"
+    }
+  },
+  "cases": [
+    {
+      "case_id": "greet-1",
+      "family": "greeting_help",
+      "turns": [
+        "สวัสดีค่ะ"
+      ],
+      "reply": "สวัสดีค่ะ! มีอะไรให้ช่วยเหลือหรือสอบถามเพิ่มเติมไหมคะ? 😊",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "help-1",
+      "family": "greeting_help",
+      "turns": [
+        "ขอสอบถามหน่อยค่ะ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "HELP_INTENT",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "help-2",
+      "family": "greeting_help",
+      "turns": [
+        "มีอะไรให้ช่วยไหมคะ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "HELP_INTENT",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "help-affirm",
+      "family": "greeting_help",
+      "turns": [
+        "[assistant] สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ",
+        "ครับ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_help_affirmation",
+      "intent_family": "UNKNOWN",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "disc-1",
+      "family": "service_discovery",
+      "turns": [
+        "ที่นี่มีบริการอะไรบ้าง"
+      ],
+      "reply": "Shipify เป็นผู้ช่วยสั่งซื้อและนำเข้าสินค้าจากจีนแบบครบวงจรค่ะ มีบริการฝากสั่งซื้อสินค้าจากจีน ฝากนำเข้า ฝากโอนเงินให้ร้านค้าจีน ช่วยประสานงานกับร้าน/โรงงานจีน และจัดส่งถึงปลายทางในไทย\n\nสนใจบริการไหนเป็นพิเศษคะ หรือถ้ามีสินค้าที่อยากนำเข้าอยู่แล้ว แจ้งรายละเอียดสินค้าและปริมาณมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "SERVICE_DISCOVERY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=287 sents=7",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-2",
+      "family": "service_discovery",
+      "turns": [
+        "สนใจใช้บริการนำเข้า"
+      ],
+      "reply": "รับทราบค่ะ (สินค้า ใช้บริการ) รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nba-import-1",
+      "family": "service_discovery",
+      "turns": [
+        "อยากนำเข้าเครื่องจักร"
+      ],
+      "reply": "รับทราบค่ะ (สินค้า เครื่องจักร) รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nba-import-2",
+      "family": "service_discovery",
+      "turns": [
+        "อยากสั่งของจากจีนมาขาย"
+      ],
+      "reply": "รับทราบค่ะ (สินค้า มาขาย) รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-disc-1",
+      "family": "calculator",
+      "turns": [
+        "ค่าส่งแพงไหมถ้าสั่งชั้นวางของ"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-slot-1",
+      "family": "calculator",
+      "turns": [
+        "ช่วยคำนวณค่าส่งให้หน่อย"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-slot-weight-given",
+      "family": "calculator",
+      "turns": [
+        "ช่วยคำนวณค่าส่ง",
+        "40x30x20 ทางเรือ",
+        "หนัก 5 กิโล"
+      ],
+      "reply": "ประเมินเบื้องต้นสำหรับทางเรือประมาณ 108.00 บาทค่ะ โดยคิดจากปริมาตร 0.024 CBM (108 บาท) ซึ่งมีค่ามากกว่าการคิดตามน้ำหนัก (95 บาท) (เป็นการประเมินเบื้องต้นจากข้อมูลที่แจ้งมา ค่าจริงจะคิดจากการวัดขนาดและน้ำหนักที่โกดังอีกครั้งค่ะ)",
+      "routing": "GENERAL",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-slot-method-left",
+      "family": "calculator",
+      "turns": [
+        "ช่วยคำนวณค่าส่ง",
+        "กล่อง 40x30x20 หนัก 5 กิโล"
+      ],
+      "reply": "รับทราบค่ะ (น้ำหนัก 5 กก. • ขนาด 40x30x20 ซม.) ต้องการประเมินทางรถหรือทางเรือคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "ga-1",
+      "family": "general_assistance",
+      "turns": [
+        "ของแตกง่ายควรแพ็กยังไงดี"
+      ],
+      "reply": "การแพ็กของที่แตกง่ายให้ปลอดภัยมีขั้นตอนดังนี้ค่ะ:\n\n1. **ใช้วัสดุกันกระแทก**: เช่น บับเบิ้ลกันกระแทก หรือโฟม เพื่อห่อหุ้มสินค้าทั้งหมด\n2. **กล่องที่เหมาะสม**: เลือกกล่องที่มีขนาดพอดีกับสินค้า ไม่ใหญ่หรือเล็กเกินไป เพื่อป้องกันการเคลื่อนไหวภายใน\n3. **เติมช่องว่าง**: ใช้วัสดุเช่น กระดาษย่น หรือโฟมเม็ด เพื่อเติมช่องว่างในกล่อง\n4. **ปิดกล่องให้แน่น**: ใช้เทปกาวปิดกล่องให้แน่นหนา โดยเฉพาะบริเวณรอยต่อ\n5. **ติดป้ายเตือน**: ติดป้าย \"ระวังแตก\" หรือ \"Fragile\" บนกล่องเพื่อให้ผู้ขนส่งระมัดระวัง\n\nการทำตามขั้น",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=566 sents=11"
+      ]
+    },
+    {
+      "case_id": "ga-2",
+      "family": "general_assistance",
+      "turns": [
+        "จานเซรามิกส่งไกลๆ ห่อแบบไหนถึงจะปลอดภัย"
+      ],
+      "reply": "การห่อจานเซรามิกเพื่อส่งไกลๆ ควรให้ความสำคัญกับการป้องกันการกระแทกและการแตกหัก โดยทั่วไปแล้วสามารถทำได้ดังนี้:\n\n1. **ห่อด้วยบับเบิ้ล**: ใช้แผ่นบับเบิ้ลห่อรอบจานหลายๆ ชั้น เพื่อป้องกันการกระแทก\n\n2. **ใช้กระดาษหนังสือพิมพ์หรือกระดาษห่อ**: วางกระดาษระหว่างจานแต่ละใบเพื่อป้องกันการเสียดสี\n\n3. **เลือกกล่องที่แข็งแรง**: ใช้กล่องกระดาษแข็งที่มีขนาดพอดี ไม่ใหญ่เกินไป เพื่อป้องกันการเคลื่อนที่ภายในกล่อง\n\n4. **เติมช่องว่าง**: ใช้โฟม หรือวัสดุกันกระแทกอื่นๆ เติมช่องว่างในกล่องเพื่อไม่ให้จานเคลื่อนที่\n\n5. *",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=671 sents=8"
+      ]
+    },
+    {
+      "case_id": "ga-3",
+      "family": "general_assistance",
+      "turns": [
+        "พวกของบอบบางแพ็กกันกระแทกยังไง"
+      ],
+      "reply": "โดยทั่วไปแล้ว การแพ็กของบอบบางเพื่อป้องกันการกระแทกสามารถทำได้ดังนี้ค่ะ:\n\n1. **ใช้วัสดุกันกระแทก**: เช่น บับเบิ้ลแรป โฟม หรือแผ่นกันกระแทก เพื่อห่อหุ้มสินค้าก่อนใส่กล่อง\n\n2. **เลือกกล่องที่เหมาะสม**: ใช้กล่องที่มีขนาดพอดีกับสินค้า ไม่ควรใหญ่เกินไปเพราะอาจทำให้สินค้าเคลื่อนที่ภายในกล่องได้\n\n3. **เติมช่องว่าง**: หากมีกล่องที่ใหญ่กว่าสินค้า ควรเติมช่องว่างด้วยวัสดุกันกระแทกเพิ่มเติม เช่น กระดาษยับ หรือโฟมเม็ด\n\n4. **ปิดผนึกให้แน่นหนา**: ใช้เทปกาวปิดกล่องให้แน่นหนา เพื่อป้องกันการเปิดระหว่างการขนส่ง\n",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=572 sents=10"
+      ]
+    },
+    {
+      "case_id": "ga-4",
+      "family": "general_assistance",
+      "turns": [
+        "ของหนักๆ ควรใส่กล่องแบบไหน"
+      ],
+      "reply": "สำหรับของหนักๆ ควรเลือกใช้กล่องที่มีความแข็งแรงและทนทาน เช่น กล่องกระดาษลูกฟูกที่มีความหนาและมีชั้นหลายชั้น เพื่อรองรับน้ำหนักได้ดี นอกจากนี้ ควรใช้วัสดุกันกระแทกภายในกล่อง เช่น โฟม หรือบับเบิ้ลแรป เพื่อป้องกันการกระแทกและการเคลื่อนที่ของสินค้าในระหว่างการขนส่งค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "mix-1",
+      "family": "mixed",
+      "turns": [
+        "ของแก้วควรแพ็กยังไง แล้ว Shipify คิดค่าห่อเพิ่มไหม"
+      ],
+      "reply": "สำหรับการแพ็กของแก้ว ควรให้ร้านห่อกันกระแทกหรือตีลังไม้ก่อนส่งค่ะ เพื่อป้องกันความเสียหายระหว่างการขนส่ง\n\nส่วนเรื่องค่าห่อเพิ่มเติม Shipify ไม่มีข้อมูลยืนยันในระบบว่ามีการคิดค่าห่อเพิ่มสำหรับของแก้วหรือไม่ค่ะ แนะนำให้สอบถามรายละเอียดเพิ่มเติมกับเจ้าหน้าที่ของ Shipify โดยตรงเพื่อความชัดเจนค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "mix-2",
+      "family": "mixed",
+      "turns": [
+        "กระเบื้องแตกง่ายไหม แล้วบริษัทมีตีลังไม้ให้หรือเปล่า"
+      ],
+      "reply": "กระเบื้องถือว่าเป็นสินค้าที่แตกหักง่ายค่ะ ดังนั้นควรให้ร้านห่อกันกระแทกหรือตีลังไม้ก่อนส่งเพื่อป้องกันความเสียหาย และทางบริษัทมีบริการตีลังไม้ให้ด้วยนะคะ คุณลูกค้าสามารถเปิดบิลและกดเลือกตีลังไม้ได้ตามเงื่อนไขที่บริษัทกำหนดค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-1",
+      "family": "business_unavailable",
+      "turns": [
+        "Shipify มีนโยบายรีไซเคิลกล่องยังไง"
+      ],
+      "reply": "หากต้องการข้อมูลเพิ่มเติมเกี่ยวกับบริการหรือเงื่อนไขอื่น ๆ สามารถติดต่อ Shipify ได้ทาง LINE: @Shipify หรือโทร 02-026-6426 ค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-2",
+      "family": "business_unavailable",
+      "turns": [
+        "ค่าห่อกันกระแทกกี่บาท"
+      ],
+      "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันเกี่ยวกับค่าห่อกันกระแทกค่ะ ถ้าต้องการทราบรายละเอียดเพิ่มเติมเกี่ยวกับค่าบริการหรือสินค้า แนะนำให้ติดต่อฝ่ายบริการลูกค้าหรือทีมขายของบริษัทโดยตรงนะคะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-3",
+      "family": "business_unavailable",
+      "turns": [
+        "บริษัทรับประกันของเสียหายระหว่างขนส่งไหม"
+      ],
+      "reply": "สวัสดีค่ะ คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีนที่ติดข้างกล่อง กับวิดิโอตอนแกะสินค้า รวมทั้งรูปสินค้าทั้งหมดที่ได้รับมาให้แอดมินได้เลยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "operational_change_collection",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-ok",
+      "family": "followup",
+      "turns": [
+        "[assistant] ทางเรือคิด 19 บาท/กิโลกรัม หรือ 4,500 บาท/CBM ค่ะ",
+        "โอเคค่ะ"
+      ],
+      "reply": "ถ้ามีคำถามเพิ่มเติมหรืออยากให้ช่วยเหลือเรื่องอื่น ๆ สามารถบอกได้เลยนะคะ 😊",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-what-next",
+      "family": "followup",
+      "turns": [
+        "[assistant] รับทราบค่ะ (ขนาด 40x30x20) ต้องการประเมินทางรถหรือทางเรือคะ",
+        "แล้วไงต่อ"
+      ],
+      "reply": "ขอโทษค่ะ ไม่ทราบว่าคุณต้องการข้อมูลเพิ่มเติมเกี่ยวกับอะไรคะ? ถ้าคุณมีคำถามหรือเรื่องที่ต้องการให้ช่วยเหลือ สามารถบอกได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-sea",
+      "family": "followup",
+      "turns": [
+        "[assistant] ทางรถคิด 35 บาท/กิโลกรัม หรือ 6,900 บาท/CBM ค่ะ",
+        "แล้วทางเรือล่ะ"
+      ],
+      "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "private_state_inquiry",
+      "intent_family": "SHIPMENT_STATUS",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "corr-brand",
+      "family": "correction",
+      "turns": [
+        "[assistant] รบกวนแจ้งด้วยนะคะว่าเป็นแบรนด์ SP หรือ FT คะ",
+        "[user] SP1008",
+        "[assistant] สำหรับแบรนด์ SP ต้องเตรียมแบบฟอร์มรูปภาพและสำเนาบัตรประชาชนค่ะ",
+        "เอฟทีค่ะ"
+      ],
+      "reply": "คุณลูกค้าสามารถเข้าที่เมนู ประวัติการชำระเงินขนส่ง และขวามือจะมีปุ่ม ถอนเงินจากระบบ นะคะ สามารถกดถอนเข้ามาได้เลยค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_withdrawal_kb",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "rej-1",
+      "family": "rejection",
+      "turns": [
+        "[assistant] ลิงก์เว็บไซต์หลักของแต่ละแพลตฟอร์มค่ะ • Taobao: https://www.taobao.com",
+        "ไม่ใช่ค่ะ หมายถึงลิงก์ที่จะเข้าไปดูของ"
+      ],
+      "reply": "ลิงก์เว็บไซต์หลักของแต่ละแพลตฟอร์มค่ะ\n• Taobao: https://www.taobao.com\n• Tmall: https://www.tmall.com\n• 1688: https://www.1688.com\n\nถ้าต้องการให้ช่วยแปลงลิงก์สินค้าเป็นหน้าภาษาไทยของ Shipify ส่งลิงก์สินค้ามาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_reject_reevaluate",
+      "intent_family": "WEBSITE_LINK_REQUEST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "topic-switch",
+      "family": "topic_switch",
+      "turns": [
+        "[user] ขอแปลงลิงก์",
+        "[assistant] ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+        "ไม่เอาแล้ว ขอถามค่าตีลังไม้แทน"
+      ],
+      "reply": "ค่าตีลังไม้จะอยู่ที่ 2,000 บาทต่อ 1 คิวบิกเมตร (CBM) โดยมีขั้นต่ำที่ 150 บาทค่ะ ตัวอย่างเช่น สินค้าที่มีขนาด 0.5 คิว ค่าตีลังไม้จะอยู่ที่ 1,000 บาท แนะนำให้ตรวจสอบเรทล่าสุดกับเจ้าหน้าที่ก่อนเปิดบิล เพราะราคาอาจมีการเปลี่ยนแปลงได้ค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "LINK_CONVERSION",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=232 sents=7"
+      ]
+    },
+    {
+      "case_id": "typo-calc",
+      "family": "typo",
+      "turns": [
+        "คำนวนค่าส่งให้หนอย"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "typo-contact",
+      "family": "typo",
+      "turns": [
+        "ขอเบอติดต่อ"
+      ],
+      "reply": "ติดต่อได้ทาง LINE: @Shipify, ฝ่ายบริการลูกค้า 02-026-6426, ฝ่ายพัฒนาธุรกิจ 080-289-3956, อีเมล info@shipify.co.th และ Facebook “Shipify ผู้ช่วยสั่งสินค้าจากโรงงานจีน” ค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "CONTACT_INFO",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "typo-link",
+      "family": "typo",
+      "turns": [
+        "ช่วยแปลงลิ้ง"
+      ],
+      "reply": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": null,
+      "intent_family": "LINK_CONVERSION",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "priv-1",
+      "family": "private",
+      "turns": [
+        "เช็คสถานะพัสดุของผมหน่อย"
+      ],
+      "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "private_state_inquiry",
+      "intent_family": "SHIPMENT_STATUS",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "POLITE_GATE": true,
+        "NO_PRIVATE_LEAK": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "priv-2",
+      "family": "private",
+      "turns": [
+        "บิลล่าสุดของผมจ่ายไปหรือยัง"
+      ],
+      "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ",
+      "routing": "HUMAN_HANDOFF",
+      "selection_source": "fresh_search",
+      "intent_family": "INVOICE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "POLITE_GATE": true,
+        "NO_PRIVATE_LEAK": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "link-1",
+      "family": "link_conversion",
+      "turns": [
+        "ช่วยแปลงลิงก์ให้หน่อย"
+      ],
+      "reply": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": null,
+      "intent_family": "LINK_CONVERSION",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "link-2",
+      "family": "link_conversion",
+      "turns": [
+        "แปลงลิงก์นี้ https://item.taobao.com/item.htm?id=12345678"
+      ],
+      "reply": "ขออภัยค่ะ ไม่สามารถแปลงลิงก์นี้ได้ รบกวนตรวจสอบลิงก์อีกครั้ง หรือส่งลิงก์สินค้าใหม่มาได้เลยค่ะ",
+      "routing": "API",
+      "selection_source": null,
+      "intent_family": "LINK_CONVERSION",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "wd-1",
+      "family": "withdrawal",
+      "turns": [
+        "ถอนเงินขนส่งยังไงคะ"
+      ],
+      "reply": "เรื่องนี้คำตอบจะแตกต่างกันไปตามแบรนด์ค่ะ รบกวนแจ้งด้วยนะคะว่าเป็นแบรนด์ SP หรือ FT คะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_withdrawal_kb",
+      "intent_family": "SHIPPING_WITHDRAWAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "wd-2",
+      "family": "withdrawal",
+      "turns": [
+        "[assistant] รบกวนแจ้งด้วยนะคะว่าเป็นแบรนด์ SP หรือ FT คะ",
+        "FT ค่ะ"
+      ],
+      "reply": "ขอโทษค่ะ ไม่ทราบว่าคุณต้องการข้อมูลเกี่ยวกับอะไรในหัวข้อ FT คะ? ถ้าสามารถอธิบายเพิ่มเติมได้ จะช่วยให้ตอบคำถามได้ตรงจุดมากขึ้นค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "inv-1",
+      "family": "invoice",
+      "turns": [
+        "ขอใบกำกับภาษีได้ไหมคะ"
+      ],
+      "reply": "ทางเราสามารถออกใบกำกับค่าสินค้าและใบเสร็จค่าขนส่งให้ได้ค่ะ ตามเงื่อนไขของบิลและวิธีชำระเงิน หากต้องการใบกำกับภาษี รบกวนแจ้งข้อมูลผู้เสียภาษีและเลขบิลให้เจ้าหน้าที่ตรวจสอบเงื่อนไขก่อนชำระเงินนะคะ ทั้งนี้ การชำระค่าสินค้าด้วยบัตรเครดิตจะไม่สามารถออกใบกำกับได้ตามข้อมูลปัจจุบันค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "INVOICE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "wh-1",
+      "family": "warehouse",
+      "turns": [
+        "ให้โรงงานส่งของไปโกดังจีนของคุณต้องทำยังไง"
+      ],
+      "reply": "เรื่องนี้ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ค่ะ เดี๋ยวส่งต่อให้เจ้าหน้าที่ช่วยตรวจสอบและติดต่อกลับนะคะ หรือทักมาที่ LINE: @Shipify / โทร 02-026-6426 ได้เลยค่ะ",
+      "routing": "HUMAN_HANDOFF",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "WAREHOUSE_INBOUND_JOURNEY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "trk-1",
+      "family": "tracking",
+      "turns": [
+        "ของที่สั่งไปถึงไหนแล้ว"
+      ],
+      "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "private_state_inquiry",
+      "intent_family": "SHIPMENT_STATUS",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "POLITE_GATE": true,
+        "NO_PRIVATE_LEAK": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "contact-1",
+      "family": "contact",
+      "turns": [
+        "ขอเบอร์ติดต่อหน่อยค่ะ"
+      ],
+      "reply": "ติดต่อได้ทาง LINE: @Shipify, ฝ่ายบริการลูกค้า 02-026-6426, ฝ่ายพัฒนาธุรกิจ 080-289-3956, อีเมล info@shipify.co.th และ Facebook “Shipify ผู้ช่วยสั่งสินค้าจากโรงงานจีน” ค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "CONTACT_INFO",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "contact-2",
+      "family": "contact",
+      "turns": [
+        "มีไลน์บริษัทไหมคะ"
+      ],
+      "reply": "ติดต่อได้ทาง LINE: @Shipify, ฝ่ายบริการลูกค้า 02-026-6426, ฝ่ายพัฒนาธุรกิจ 080-289-3956, อีเมล info@shipify.co.th และ Facebook “Shipify ผู้ช่วยสั่งสินค้าจากโรงงานจีน” ค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "CONTACT_INFO",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more-p0",
+      "family": "general_assistance",
+      "turns": [
+        "ส่งของมีคมควรแพ็กยังไง"
+      ],
+      "reply": "การแพ็กของมีคมให้ปลอดภัยและป้องกันความเสียหายสามารถทำได้ตามขั้นตอนเหล่านี้ค่ะ:\n\n1. **ห่อหุ้มของมีคม**: ใช้วัสดุที่แข็งแรง เช่น กระดาษแข็ง หรือพลาสติกแข็ง ห่อหุ้มบริเวณที่มีคม เพื่อป้องกันไม่ให้ทะลุออกมาจากกล่อง\n\n2. **ใช้วัสดุกันกระแทก**: ใส่วัสดุกันกระแทก เช่น ฟองน้ำ หรือบับเบิ้ลแรป รอบๆ ของมีคม เพื่อป้องกันการกระแทกและการเคลื่อนที่ภายในกล่อง\n\n3. **เลือกกล่องที่แข็งแรง**: ใช้กล่องที่มีความแข็งแรงและขนาดพอดีกับของที่ต้องการส่ง เพื่อป้องกันการเคลื่อนที่ภายในกล่อง\n\n4. **ปิดผนึกกล่องอย่างแน่นหนา**: ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=744 sents=10"
+      ]
+    },
+    {
+      "case_id": "ga-more-p1",
+      "family": "general_assistance",
+      "turns": [
+        "ขวดแก้วหลายใบแพ็กรวมกันได้ไหม"
+      ],
+      "reply": "การแพ็คขวดแก้วหลายใบรวมกันสามารถทำได้ แต่ควรระมัดระวังเป็นพิเศษค่ะ ควรห่อกันกระแทกแต่ละใบแยกกันก่อน แล้วจึงแพ็คลงกล่องที่มีวัสดุกันกระแทกเพิ่มเติม เช่น ฟองน้ำหรือกระดาษ เพื่อป้องกันการแตกหักระหว่างการขนส่งค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more-p2",
+      "family": "general_assistance",
+      "turns": [
+        "ของอิเล็กทรอนิกส์ต้องกันชื้นไหม"
+      ],
+      "reply": "โดยทั่วไปแล้ว ของผิดอิเล็กทรอนิกส์ควรจะกันชื้นเพื่อป้องกันความเสียหายที่อาจเกิดจากความชื้น เช่น การเกิดสนิมหรือการทำงานผิดปกติของวงจรไฟฟ้า การใช้วัสดุกันชื้น เช่น ซิลิกาเจล หรือบรรจุในบรรจุภัณฑ์ที่ป้องกันความชื้น จะช่วยรักษาสภาพของสินค้าได้ดีขึ้นค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more-p3",
+      "family": "general_assistance",
+      "turns": [
+        "กระเป๋าหนังส่งทางเรือจะเสียหายไหม"
+      ],
+      "reply": "การจัดส่งสินค้าทางเรือมีความเสี่ยงที่สินค้าจะเสียหายได้ เนื่องจากการขนส่งทางเรืออาจเจอสภาพอากาศที่ไม่แน่นอนและการเคลื่อนย้ายที่อาจกระทบกระเทือนสินค้าได้ค่ะ อย่างไรก็ตาม การบรรจุหีบห่อที่ดีและการเลือกใช้บริการขนส่งที่มีมาตรฐานสามารถช่วยลดความเสี่ยงนี้ได้ค่ะ หากคุณมีข้อกังวลเกี่ยวกับการจัดส่งสินค้าของคุณ แนะนำให้ปรึกษากับผู้ให้บริการขนส่งเพื่อหาวิธีการป้องกันที่เหมาะสมค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more-p4",
+      "family": "general_assistance",
+      "turns": [
+        "ของชิ้นใหญ่แต่เบา คิดค่าส่งยังไงโดยทั่วไป"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more-p5",
+      "family": "general_assistance",
+      "turns": [
+        "พวกเฟอร์นิเจอร์ไม้ต้องตีลังไหม"
+      ],
+      "reply": "รับทราบค่ะ เป็นเฟอร์นิเจอร์ไม้นะคะ 😊 หากต้องการนำเข้ากับ Shipify มีบริการขนส่งทั้งทางรถและทางเรือค่ะ\n\nสนใจส่งทางรถหรือทางเรือคะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more-p6",
+      "family": "general_assistance",
+      "turns": [
+        "ผ้าเป็นม้วนพันกันกระแทกยังไง"
+      ],
+      "reply": "การพันผ้าเป็นม้วนเพื่อป้องกันการกระแทกสามารถทำได้ตามขั้นตอนดังนี้ค่ะ:\n\n1. **เลือกผ้าที่เหมาะสม**: ใช้ผ้าที่มีความหนาและนุ่ม เช่น ผ้าห่มหรือผ้าขนหนู เพื่อช่วยลดแรงกระแทก\n\n2. **วางสิ่งของที่ต้องการป้องกัน**: วางสิ่งของไว้บนผ้า โดยเว้นระยะห่างจากขอบผ้าให้พอเหมาะ\n\n3. **พันผ้าให้แน่น**: เริ่มพันผ้าจากด้านหนึ่งไปยังอีกด้านหนึ่ง โดยให้ผ้าคลุมสิ่งของทั้งหมด พันให้แน่นเพื่อให้ผ้าช่วยยึดสิ่งของให้อยู่กับที่\n\n4. **ผูกหรือยึดผ้า**: ใช้เชือกหรือสายรัดยางยืดผูกหรือยึดผ้าให้แน่น เพื่อป้องกันไม่ให้ผ้าคลายตัว\n\n5",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=658 sents=9"
+      ]
+    },
+    {
+      "case_id": "ga-more-p7",
+      "family": "general_assistance",
+      "turns": [
+        "ของเหลวส่งได้ไหมโดยทั่วไป"
+      ],
+      "reply": "โดยทั่วไปแล้ว การส่งของเหลวมีข้อจำกัดบางอย่างที่ต้องพิจารณา เช่น\n\n1. **ประเภทของเหลว**: ของเหลวบางประเภท เช่น สารเคมีอันตรายหรือของเหลวไวไฟ อาจถูกห้ามส่งหรือจำเป็นต้องมีการบรรจุและการจัดส่งพิเศษ\n2. **การบรรจุ**: ของเหลวต้องบรรจุในภาชนะที่ปิดสนิทและมีความแข็งแรงเพียงพอเพื่อป้องกันการรั่วไหล\n3. **กฎระเบียบของผู้ให้บริการขนส่ง**: แต่ละบริษัทขนส่งอาจมีกฎระเบียบเฉพาะเกี่ยวกับการส่งของเหลว เช่น ข้อจำกัดด้านปริมาณหรือประเภทของเหลวที่รับส่ง\n\nดังนั้น ควรตรวจสอบกับผู้ให้บริการขนส่งที่คุณเลือกใช้เพื่อทราบร",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=543 sents=8"
+      ]
+    },
+    {
+      "case_id": "nofact-more-p0",
+      "family": "business_unavailable",
+      "turns": [
+        "Shipify คิดค่าเก็บของที่โกดังวันละเท่าไหร่"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-more-p1",
+      "family": "business_unavailable",
+      "turns": [
+        "มีประกันพัสดุสูญหายไหม ราคาเท่าไหร่"
+      ],
+      "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ",
+      "routing": "HUMAN_HANDOFF",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": false
+      },
+      "notes": [
+        "KB miss dead-ended without keeping the conversation open"
+      ]
+    },
+    {
+      "case_id": "nofact-more-p2",
+      "family": "business_unavailable",
+      "turns": [
+        "ค่าธรรมเนียมโอนเงินไปจีนกี่เปอร์เซ็นต์"
+      ],
+      "reply": "Shipify มีบริการฝากโอนเงินให้ร้านค้าจีนค่ะ 😊 รบกวนแจ้งรายละเอียดที่ต้องการโอน เช่น ยอดเงิน (ระบุเป็นหยวนหรือบาท) และข้อมูลร้านค้า/ลิงก์สินค้าปลายทาง เพื่อให้เจ้าหน้าที่ดำเนินการต่อให้ค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "MONEY_TRANSFER_INTEREST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-more-p3",
+      "family": "business_unavailable",
+      "turns": [
+        "ส่งด่วนพิเศษมีไหม กี่วันถึง"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-more-p4",
+      "family": "business_unavailable",
+      "turns": [
+        "คิดค่าแพ็กใส่ลังไม้ใบละเท่าไหร่"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "disc-more-p0",
+      "family": "service_discovery",
+      "turns": [
+        "อยากนำเข้าเสื้อผ้ามาขายเริ่มยังไง"
+      ],
+      "reply": "หากคุณต้องการฝากนำเข้าเสื้อผ้ามาขาย สามารถทำตามขั้นตอนเหล่านี้ได้ค่ะ:\n\n1. **สั่งซื้อสินค้า**: คุณสามารถสั่งซื้อเสื้อผ้าจากร้านจีนที่คุณต้องการได้ด้วยตัวเอง\n2. **คัดลอกที่อยู่โกดังจีน**: เข้าไปที่หน้าเว็บของ Shipify แล้วคัดลอกที่อยู่โกดังจีนเพื่อนำไปให้ร้านจีน\n3. **จัดส่งสินค้าไปโกดังจีน**: ร้านจีนจะจัดส่งสินค้าไปยังโกดังจีน ซึ่งโดยปกติจะใช้เวลาประมาณ 2–4 วัน ขึ้นอยู่กับร้าน\n4. **นำสินค้าเข้าระบบและเตรียมส่งออก**: เมื่อสินค้าถึงโกดังจีน จะใช้เวลาประมาณ 1 วันในการนำสินค้าเข้าระบบ\n5. **ขนส่งจากจีนม",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=932 sents=14",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-more-p1",
+      "family": "service_discovery",
+      "turns": [
+        "รับส่งของจากจีนมาไทยไหม"
+      ],
+      "reply": "ใช่ค่ะ เรามีบริการจัดส่งสินค้าจากจีนมาไทย โดยลูกค้าสามารถเลือกใช้บริการฝากนำเข้าหรือฝากสั่งกับ Shipify ได้ตามความต้องการค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-more-p2",
+      "family": "service_discovery",
+      "turns": [
+        "มีบริการฝากสั่งของไหมคะ"
+      ],
+      "reply": "Shipify เป็นผู้ช่วยสั่งซื้อและนำเข้าสินค้าจากจีนแบบครบวงจรค่ะ มีบริการฝากสั่งซื้อสินค้าจากจีน ฝากนำเข้า ฝากโอนเงินให้ร้านค้าจีน ช่วยประสานงานกับร้าน/โรงงานจีน และจัดส่งถึงปลายทางในไทย\n\nสนใจบริการไหนเป็นพิเศษคะ หรือถ้ามีสินค้าที่อยากนำเข้าอยู่แล้ว แจ้งรายละเอียดสินค้าและปริมาณมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "SERVICE_DISCOVERY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=287 sents=7",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-more-p3",
+      "family": "service_discovery",
+      "turns": [
+        "อยากเริ่มนำเข้าของจากจีน ต้องทำอะไรบ้าง"
+      ],
+      "reply": "หากคุณต้องการเริ่มนำเข้าสินค้าจากจีน สามารถทำตามขั้นตอนหลักดังนี้ค่ะ:\n\n1. สั่งสินค้ากับร้านจีนด้วยตัวเอง\n2. คัดลอกที่อยู่โกดังจีนจากหน้าเว็บ Shipify และส่งให้ร้านจีน\n3. ร้านจีนจะจัดส่งสินค้าไปยังโกดังจีน โดยปกติใช้เวลาประมาณ 2–4 วัน ขึ้นอยู่กับร้าน\n4. เมื่อสินค้าถึงโกดังจีน จะใช้เวลาประมาณ 1 วันในการนำสินค้าเข้าระบบและเตรียมส่งออก\n5. ขนส่งจากจีนมาไทย: ทางรถประมาณ 7–10 วัน หรือทางเรือประมาณ 14–20 วัน\n6. เมื่อสินค้าเข้าไทย โกดังจะตรวจขนาดและน้ำหนักอีกครั้ง แล้วจึงสามารถชำระบิลขนส่งได้\n7. หลังจากนั",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": false,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=689 sents=18",
+        "no next question where one was expected"
+      ]
+    },
+    {
+      "case_id": "disc-more-p4",
+      "family": "service_discovery",
+      "turns": [
+        "สนใจส่งของทางเรือ มีขั้นต่ำไหม"
+      ],
+      "reply": "การส่งของทางเรือกับ Shipify ไม่มีขั้นต่ำในการฝากนำเข้าหรือฝากสั่งค่ะ คุณสามารถส่งของจำนวนเท่าไหร่ก็ได้ อย่างไรก็ตาม จำนวนขั้นต่ำของสินค้าอาจขึ้นอยู่กับ MOQ ของร้านค้าหรือโรงงานจีนแต่ละแห่งค่ะ ถ้ามีลิงค์สินค้าหรือรายละเอียดเพิ่มเติม ส่งมาให้เราช่วยตรวจสอบได้นะคะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "IMPORT_INTEREST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-more-p0",
+      "family": "calculator",
+      "turns": [
+        "อยากรู้ค่าส่งกล่องนึง"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-more-p1",
+      "family": "calculator",
+      "turns": [
+        "ประเมินค่าขนส่งให้หน่อย"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-more-p2",
+      "family": "calculator",
+      "turns": [
+        "ส่งของ 10 กิโลไปไทยกี่บาท"
+      ],
+      "reply": "รับทราบค่ะ (น้ำหนัก 10 กก.) ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-more-p3",
+      "family": "calculator",
+      "turns": [
+        "คิดค่าส่งทางเรือให้หน่อยค่ะ"
+      ],
+      "reply": "รับทราบค่ะ (ทางเรือ) ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "calc-more-p4",
+      "family": "calculator",
+      "turns": [
+        "ค่าส่งโต๊ะทำงานประมาณเท่าไหร่"
+      ],
+      "reply": "ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้งน้ำหนักสินค้า และ ขนาดสินค้า (กว้าง x ยาว x สูง) และ วิธีขนส่ง (ทางรถ / ทางเรือ)เพิ่มเติมด้วยนะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_estimate_flow",
+      "intent_family": "SHIPPING_ESTIMATE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more-p0",
+      "family": "followup",
+      "turns": [
+        "อันนี้ล่ะ"
+      ],
+      "reply": "ขออภัยค่ะ ไม่แน่ใจว่าหมายถึงข้อมูลส่วนไหน รบกวนระบุเพิ่มเติม เช่น สถานะสินค้า คูปอง หรือยอด Wallet ค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": null,
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more-p1",
+      "family": "followup",
+      "turns": [
+        "แบบนี้ได้ไหม"
+      ],
+      "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "clarification_referentless_underspecified",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more-p2",
+      "family": "followup",
+      "turns": [
+        "โอเค"
+      ],
+      "reply": "ถ้ามีอะไรให้ช่วยเพิ่มเติม บอกได้เลยนะคะ 😊",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more-p3",
+      "family": "followup",
+      "turns": [
+        "ได้ค่ะ"
+      ],
+      "reply": "มีอะไรให้ช่วยเพิ่มเติมไหมคะ? 😊",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more-p4",
+      "family": "followup",
+      "turns": [
+        "แล้วอันไหนถูกกว่า"
+      ],
+      "reply": "กรุณาแจ้งรหัสลูกค้าค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "contact-more-p0",
+      "family": "contact",
+      "turns": [
+        "ขอไลน์แอดมิน"
+      ],
+      "reply": "ติดต่อได้ทาง LINE: @Shipify, ฝ่ายบริการลูกค้า 02-026-6426, ฝ่ายพัฒนาธุรกิจ 080-289-3956, อีเมล info@shipify.co.th และ Facebook “Shipify ผู้ช่วยสั่งสินค้าจากโรงงานจีน” ค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "CONTACT_INFO",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "contact-more-p1",
+      "family": "contact",
+      "turns": [
+        "อีเมลบริษัทคืออะไร"
+      ],
+      "reply": "ติดต่อได้ทาง LINE: @Shipify, ฝ่ายบริการลูกค้า 02-026-6426, ฝ่ายพัฒนาธุรกิจ 080-289-3956, อีเมล info@shipify.co.th และ Facebook “Shipify ผู้ช่วยสั่งสินค้าจากโรงงานจีน” ค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "CONTACT_INFO",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "contact-more-p2",
+      "family": "contact",
+      "turns": [
+        "โทรหาได้ที่เบอร์ไหน"
+      ],
+      "reply": "ติดต่อได้ทาง LINE: @Shipify, ฝ่ายบริการลูกค้า 02-026-6426, ฝ่ายพัฒนาธุรกิจ 080-289-3956, อีเมล info@shipify.co.th และ Facebook “Shipify ผู้ช่วยสั่งสินค้าจากโรงงานจีน” ค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "CONTACT_INFO",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "contact-more-p3",
+      "family": "contact",
+      "turns": [
+        "เพจเฟซบุ๊กชื่ออะไร"
+      ],
+      "reply": "ลิงก์เว็บไซต์หลักของแต่ละแพลตฟอร์มค่ะ\n• Taobao: https://www.taobao.com\n• Tmall: https://www.tmall.com\n• 1688: https://www.1688.com\n\nถ้าต้องการให้ช่วยแปลงลิงก์สินค้าเป็นหน้าภาษาไทยของ Shipify ส่งลิงก์สินค้ามาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "WEBSITE_LINK_REQUEST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "link-more-p0",
+      "family": "link_conversion",
+      "turns": [
+        "แปลงลิงก์ Taobao ให้หน่อย"
+      ],
+      "reply": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": null,
+      "intent_family": "LINK_CONVERSION",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "link-more-p1",
+      "family": "link_conversion",
+      "turns": [
+        "เอาลิงก์นี้ไปเปิดบิล"
+      ],
+      "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ",
+      "routing": "HUMAN_HANDOFF",
+      "selection_source": "fresh_search",
+      "intent_family": "INVOICE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "link-more-p2",
+      "family": "link_conversion",
+      "turns": [
+        "ช่วยเปลี่ยนลิงก์เป็นภาษาไทย"
+      ],
+      "reply": "เรื่องนี้ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ค่ะ ถ้ามีรายละเอียดเพิ่มเติม หรืออยากให้ช่วยเรื่องอื่น บอกได้เลยนะคะ",
+      "routing": "SAFE_FALLBACK",
+      "selection_source": null,
+      "intent_family": "LINK_CONVERSION",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "link-more-p3",
+      "family": "link_conversion",
+      "turns": [
+        "ส่งลิงก์ 1688 มาแปลงได้ไหม"
+      ],
+      "reply": "ได้ค่ะ ส่งลิงก์สินค้าที่ต้องการแปลงมาได้เลยค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": null,
+      "intent_family": "LINK_CONVERSION",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "wd-more-p0",
+      "family": "withdrawal",
+      "turns": [
+        "อยากถอนเครดิตค่าขนส่ง"
+      ],
+      "reply": "เรื่องนี้คำตอบจะแตกต่างกันไปตามแบรนด์ค่ะ รบกวนแจ้งด้วยนะคะว่าเป็นแบรนด์ SP หรือ FT คะ",
+      "routing": "WORKFLOW",
+      "selection_source": "shipping_withdrawal_kb",
+      "intent_family": "SHIPPING_WITHDRAWAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "wd-more-p1",
+      "family": "withdrawal",
+      "turns": [
+        "ถอนเงินค่าสั่งซื้อทำยังไง"
+      ],
+      "reply": "คุณลูกค้าเข้าหน้าแอปหรือหน้าเว็บ จะมีเมนู รายการเติมเงินนะคะ\nจากนั้นเลือกปุ่มเครดิตสั่งซื้อนะคะ\nขวามือจะมีปุ่มถอนเงินสีเหลือง คุณลูกค้ากดถอนและกรอกข้อมูลเลขบัญชีมาได้เลยค่ะ\nระยะเวลาในการถอนประมาณ 3-5 วัน นับจากวันที่แจ้งถอนมานะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "purchase_withdrawal_kb",
+      "intent_family": "PURCHASE_WITHDRAWAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "wd-more-p2",
+      "family": "withdrawal",
+      "turns": [
+        "เงินในระบบถอนออกมายังไง"
+      ],
+      "reply": "คุณลูกค้าเข้าหน้าแอปหรือหน้าเว็บ จะมีเมนู รายการเติมเงินนะคะ\nจากนั้นเลือกปุ่มเครดิตสั่งซื้อนะคะ\nขวามือจะมีปุ่มถอนเงินสีเหลือง คุณลูกค้ากดถอนและกรอกข้อมูลเลขบัญชีมาได้เลยค่ะ\nระยะเวลาในการถอนประมาณ 3-5 วัน นับจากวันที่แจ้งถอนมานะคะ",
+      "routing": "WORKFLOW",
+      "selection_source": "purchase_withdrawal_kb",
+      "intent_family": "PURCHASE_WITHDRAWAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "web-more-p0",
+      "family": "website_link",
+      "turns": [
+        "ขอลิงก์เว็บ 1688"
+      ],
+      "reply": "ลิงก์เว็บไซต์หลักของแต่ละแพลตฟอร์มค่ะ\n• Taobao: https://www.taobao.com\n• Tmall: https://www.tmall.com\n• 1688: https://www.1688.com\n\nถ้าต้องการให้ช่วยแปลงลิงก์สินค้าเป็นหน้าภาษาไทยของ Shipify ส่งลิงก์สินค้ามาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "WEBSITE_LINK_REQUEST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "web-more-p1",
+      "family": "website_link",
+      "turns": [
+        "เข้าเว็บ Taobao ยังไง"
+      ],
+      "reply": "ลิงก์เว็บไซต์หลักของแต่ละแพลตฟอร์มค่ะ\n• Taobao: https://www.taobao.com\n• Tmall: https://www.tmall.com\n• 1688: https://www.1688.com\n\nถ้าต้องการให้ช่วยแปลงลิงก์สินค้าเป็นหน้าภาษาไทยของ Shipify ส่งลิงก์สินค้ามาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "WEBSITE_LINK_REQUEST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "web-more-p2",
+      "family": "website_link",
+      "turns": [
+        "เว็บ Tmall คือลิงก์อะไร"
+      ],
+      "reply": "ลิงก์เว็บไซต์หลักของแต่ละแพลตฟอร์มค่ะ\n• Taobao: https://www.taobao.com\n• Tmall: https://www.tmall.com\n• 1688: https://www.1688.com\n\nถ้าต้องการให้ช่วยแปลงลิงก์สินค้าเป็นหน้าภาษาไทยของ Shipify ส่งลิงก์สินค้ามาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "WEBSITE_LINK_REQUEST",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "invwh-more-p0",
+      "family": "invoice_warehouse",
+      "turns": [
+        "โหลดใบกำกับภาษียังไง"
+      ],
+      "reply": "รบกวนแจ้งเลขใบกำกับภาษี หรือเลขใบสั่งซื้อค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "fresh_search",
+      "intent_family": "INVOICE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "invwh-more-p1",
+      "family": "invoice_warehouse",
+      "turns": [
+        "โกดังอ่อนนุชเปิดกี่โมง"
+      ],
+      "reply": "โกดังอ่อนนุชเปิดทำการวันจันทร์-ศุกร์ เวลา 9:00-18:00 น. ค่ะ หยุดทุกวันเสาร์-อาทิตย์นะคะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PICKUP_LOCATION",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "invwh-more-p2",
+      "family": "invoice_warehouse",
+      "turns": [
+        "ที่อยู่โกดังจีนขอหน่อย"
+      ],
+      "reply": "สวัสดีค่ะ สำหรับที่อยู่โกดังจีน คุณลูกค้าสามารถเข้าไปที่หน้าเว็บของเรา แล้วเลือกเมนู \"ที่อยู่โกดังจีน\" เพื่อคัดลอกที่อยู่และส่งให้ร้านจีนได้เลยค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PICKUP_LOCATION",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "greet-more-p0",
+      "family": "greeting_help",
+      "turns": [
+        "หวัดดีค่ะ"
+      ],
+      "reply": "สวัสดีค่ะ! มีอะไรให้ช่วยเหลือไหมคะ? 😊",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "greet-more-p1",
+      "family": "greeting_help",
+      "turns": [
+        "สวัสดีตอนเช้าครับ"
+      ],
+      "reply": "สวัสดีครับ! มีอะไรให้ช่วยเหลือเกี่ยวกับการนำเข้าหรือเปล่าครับ? 😊",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "greet-more-p2",
+      "family": "greeting_help",
+      "turns": [
+        "ทักมาสอบถามหน่อยค่ะ"
+      ],
+      "reply": "ได้ค่ะ ต้องการให้ช่วยเรื่องไหนคะ เช่น สั่งซื้อสินค้าจากจีน นำเข้าสินค้า โอนเงินให้ร้านค้าจีน เช็กค่าขนส่ง หรือต้องการสอบถามเรื่องอื่น แจ้งมาได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "phase6b_service_intent",
+      "intent_family": "HELP_INTENT",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=149 sents=7"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p0",
+      "family": "general_assistance",
+      "turns": [
+        "รูปภาพติดกรอบส่งยังไงไม่ให้แตก"
+      ],
+      "reply": "การส่งรูปภาพที่มีกรอบเพื่อป้องกันไม่ให้แตก ควรทำตามขั้นตอนดังนี้:\n\n1. **ห่อหุ้มรูปภาพ**: ใช้กระดาษฟองอากาศหรือวัสดุกันกระแทกห่อหุ้มรูปภาพให้ทั่วถึง เพื่อป้องกันการกระแทก\n\n2. **ใช้กล่องที่แข็งแรง**: เลือกกล่องที่มีขนาดพอดีกับรูปภาพและมีความแข็งแรงพอที่จะรองรับน้ำหนักและแรงกระแทก\n\n3. **เสริมความแข็งแรง**: ใส่วัสดุกันกระแทกเพิ่มเติมในกล่อง เช่น โฟม หรือกระดาษย่น เพื่อให้รูปภาพไม่ขยับภายในกล่อง\n\n4. **ปิดผนึกกล่องให้แน่นหนา**: ใช้เทปกาวปิดผนึกกล่องให้แน่นหนา เพื่อป้องกันการเปิดระหว่างการขนส่ง\n\n5. **ต",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=677 sents=9"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p1",
+      "family": "general_assistance",
+      "turns": [
+        "ของที่กลัวความร้อนควรส่งทางไหน"
+      ],
+      "reply": "สำหรับการส่งของที่กลัวความร้อน คุณอาจพิจารณาใช้บริการขนส่งที่มีการควบคุมอุณหภูมิหรือบริการที่มีการจัดส่งรวดเร็วเพื่อลดเวลาที่พัสดุอยู่ในสภาพแวดล้อมที่อาจมีความร้อนสูง อย่างไรก็ตาม ข้อมูลเฉพาะเกี่ยวกับบริการขนส่งที่มีการควบคุมอุณหภูมิไม่ได้ระบุไว้ในข้อมูลที่มีอยู่ตอนนี้ค่ะ\n\nแนะนำให้ตรวจสอบกับผู้ให้บริการขนส่งโดยตรงเพื่อสอบถามเกี่ยวกับบริการที่เหมาะสมกับสินค้าของคุณค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more2-p2",
+      "family": "general_assistance",
+      "turns": [
+        "แพ็กของให้ประหยัดพื้นที่ทำยังไง"
+      ],
+      "reply": "การแพ็กของให้ประหยัดพื้นที่สามารถทำได้ด้วยวิธีต่อไปนี้ค่ะ:\n\n1. **เลือกกล่องขนาดพอดี**: ใช้กล่องที่มีขนาดพอดีกับสินค้าที่จะส่ง เพื่อไม่ให้มีพื้นที่ว่างมากเกินไป\n\n2. **จัดเรียงอย่างมีประสิทธิภาพ**: วางสินค้าที่มีขนาดใหญ่และหนักไว้ด้านล่าง และสินค้าที่เบาไว้ด้านบน\n\n3. **ใช้วัสดุกันกระแทกที่บางแต่มีประสิทธิภาพ**: เช่น แผ่นฟองน้ำหรือกระดาษห่อ เพื่อป้องกันการกระแทกโดยไม่เพิ่มน้ำหนักหรือใช้พื้นที่มาก\n\n4. **ถอดประกอบสินค้าถ้าเป็นไปได้**: หากสินค้าสามารถถอดประกอบได้ ให้ถอดเพื่อประหยัดพื้นที่\n\n5. **ใช้ถุง",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=717 sents=10"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p3",
+      "family": "general_assistance",
+      "turns": [
+        "กล่องกระดาษกับลังไม้ต่างกันยังไง"
+      ],
+      "reply": "รับทราบค่ะ เป็นกล่องกระดาษนะคะ 😊 หากต้องการนำเข้ากับ Shipify มีบริการขนส่งทั้งทางรถและทางเรือค่ะ\n\nสนใจส่งทางรถหรือทางเรือคะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "ga-more2-p4",
+      "family": "general_assistance",
+      "turns": [
+        "ส่งอาหารแห้งไปต่างประเทศได้ไหมโดยทั่วไป"
+      ],
+      "reply": "โดยทั่วไปแล้ว การส่งอาหารแห้งไปต่างประเทศอาจมีข้อจำกัดและกฎระเบียบที่แตกต่างกันไปในแต่ละประเทศค่ะ บางประเทศอาจมีข้อห้ามหรือข้อกำหนดเฉพาะเกี่ยวกับการนำเข้าอาหารแห้ง ดังนั้นควรตรวจสอบกฎระเบียบของประเทศปลายทางก่อนส่งเสมอค่ะ\n\nสำหรับ Shipify เอง ทางเราจะไม่รับนำเข้าสินค้าประเภทของกิน อาหาร รวมถึงอาหารแห้งค่ะ หากต้องการข้อมูลเพิ่มเติมเกี่ยวกับการส่งสินค้าไปต่างประเทศ แนะนำให้ติดต่อบริษัทขนส่งหรือหน่วยงานที่เกี่ยวข้องเพื่อขอคำแนะนำเพิ่มเติมค่ะ\n\nมีสินค้าอย่างอื่นที่ต้องการให้ช่วยเช็กไหมคะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=485 sents=8"
+      ]
+    },
+    {
+      "case_id": "ga-more2-p5",
+      "family": "general_assistance",
+      "turns": [
+        "ของมือสองแพ็กยังไงให้ดูเรียบร้อย"
+      ],
+      "reply": "การแพ็กของมือสองให้ดูเรียบร้อยและน่าสนใจสามารถทำได้ตามขั้นตอนต่อไปนี้ค่ะ:\n\n1. **ทำความสะอาดสินค้า**: ตรวจสอบและทำความสะอาดสินค้าก่อนแพ็ก เพื่อให้สินค้าดูใหม่และน่าซื้อ\n\n2. **เลือกบรรจุภัณฑ์ที่เหมาะสม**: ใช้กล่องหรือซองที่มีขนาดพอดีกับสินค้า เพื่อป้องกันการเคลื่อนไหวและความเสียหายระหว่างการขนส่ง\n\n3. **ใช้วัสดุกันกระแทก**: ใส่วัสดุกันกระแทก เช่น บับเบิ้ลแรป หรือกระดาษย่น เพื่อป้องกันการกระแทก\n\n4. **ติดฉลากให้ชัดเจน**: เขียนที่อยู่ผู้รับและผู้ส่งให้ชัดเจน รวมถึงติดฉลาก \"ของเปราะบาง\" หากจำเป็น\n\n5. *",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": false,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": [
+        "len=684 sents=12"
+      ]
+    },
+    {
+      "case_id": "fu-more2-p0",
+      "family": "followup",
+      "turns": [
+        "เปลี่ยนเป็น FT"
+      ],
+      "reply": "ขออภัยค่ะ ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้เกี่ยวกับการเปลี่ยนเป็น FT ค่ะ หากมีรายละเอียดเพิ่มเติมหรือคำถามอื่น ๆ สามารถสอบถามได้เลยนะคะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "ADDRESS_CHANGE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more2-p1",
+      "family": "followup",
+      "turns": [
+        "ไม่ใช่"
+      ],
+      "reply": "ขอโทษค่ะ ไม่ทราบว่าคุณต้องการข้อมูลหรือความช่วยเหลือในเรื่องใดคะ ถ้ามีคำถามเพิ่มเติมหรือรายละเอียดอื่น ๆ ที่ต้องการให้ช่วยเหลือ สามารถแจ้งได้เลยค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "UNKNOWN",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more2-p2",
+      "family": "followup",
+      "turns": [
+        "ไม่เอาแล้ว"
+      ],
+      "reply": "ถ้าคุณต้องการยกเลิกหรือเปลี่ยนแปลงอะไร สามารถบอกได้เลยค่ะว่าต้องการทำอะไรเพิ่มเติม หรือถ้ามีคำถามอื่น ๆ ก็ถามได้เลยนะคะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more2-p3",
+      "family": "followup",
+      "turns": [
+        "อันนี้ได้ไหม"
+      ],
+      "reply": "รบกวนขอรายละเอียดเพิ่มเติมสักนิดนะคะ ว่าสนใจเรื่องอะไรเป็นพิเศษ จะได้ช่วยตอบได้ตรงจุดค่ะ",
+      "routing": "WORKFLOW",
+      "selection_source": "clarification_referentless_underspecified",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "fu-more2-p4",
+      "family": "followup",
+      "turns": [
+        "แล้วถ้าหนักกว่านี้ล่ะ"
+      ],
+      "reply": "ขอโทษค่ะ ไม่แน่ใจว่าคุณหมายถึงอะไรที่หนักกว่านี้ ถ้าหมายถึงน้ำหนักของพัสดุหรือสินค้าที่ต้องการส่ง สามารถให้รายละเอียดเพิ่มเติมได้ไหมคะ เช่น น้ำหนักปัจจุบันหรือประเภทของสินค้าที่ต้องการส่ง เพื่อให้สามารถให้คำแนะนำได้ตรงจุดมากขึ้นค่ะ",
+      "routing": "GENERAL",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-more2-p0",
+      "family": "business_unavailable",
+      "turns": [
+        "มีโปรลดค่าส่งช่วงนี้ไหม"
+      ],
+      "reply": "ถ้าต้องการข้อมูลเพิ่มเติมเกี่ยวกับโปรโมชั่นหรือข้อเสนอพิเศษ แนะนำให้ตรวจสอบกับทาง Shipify โดยตรงหรือผ่านช่องทางการติดต่อที่สะดวกนะคะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "COUPON_USAGE",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    },
+    {
+      "case_id": "nofact-more2-p1",
+      "family": "business_unavailable",
+      "turns": [
+        "ค่าปรับถ้ายกเลิกออเดอร์เท่าไหร่"
+      ],
+      "reply": "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องนี้ค่ะ",
+      "routing": "HUMAN_HANDOFF",
+      "selection_source": "fresh_search",
+      "intent_family": "GENERAL",
+      "status": "FAIL_SOFT",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": false
+      },
+      "notes": [
+        "KB miss dead-ended without keeping the conversation open"
+      ]
+    },
+    {
+      "case_id": "nofact-more2-p2",
+      "family": "business_unavailable",
+      "turns": [
+        "ส่งของไปประเทศอื่นนอกจากไทยได้ไหม"
+      ],
+      "reply": "หากคุณสนใจบริการนี้ แนะนำให้ติดต่อเจ้าหน้าที่ของ Shipify เพื่อสอบถามรายละเอียดเพิ่มเติมค่ะ",
+      "routing": "RAG",
+      "selection_source": "fresh_search",
+      "intent_family": "PRODUCT_POLICY",
+      "status": "PASS",
+      "axes": {
+        "NO_INTERNAL_LANGUAGE": true,
+        "NATURALNESS": true,
+        "CONCISENESS": true,
+        "CONTEXT_CONTINUITY": true,
+        "NO_REPEATED_SLOT": true,
+        "NEXT_ACTION_QUALITY": true,
+        "TRUTH_PRESERVED": true,
+        "KEEP_OPEN": true
+      },
+      "notes": []
+    }
+  ]
+}
