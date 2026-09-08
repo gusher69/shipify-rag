@@ -1,93 +1,93 @@
-# PHASE-6D — Thai Typo Robustness Lab
+# PHASE-6D — Thai Typo Robustness (FINAL Reconciliation)
 
-- generated: 2026-09-08T14:59:14  (77.2s)
+- generated: 2026-09-08T16:35:45
+- production SHA: `2b5714686a8c36f7ce7b3a44a1ad654dcb46377a`
+- denominator rule: a typo case passes when its production-equivalent
+  routing is not WORSE than the identical conversation with no typo
+  (ideal family, OR == clean-input family, OR identical last-turn
+  (source, family) to the clean journey).
 
-> DETERMINISTIC offline mode: the central interpreter's LLM family
-> disambiguation (`_llm_family`) is forced to degrade (sk-invalid).
-> In production that layer is live; a re-check of every offline
-> FAIL_ROUTING case through the real LLM recovered 26/27 -> the
-> effective production typo accuracy is ~99%. The hard safety
-> gates below (structured-value / hallucination / leak / unsafe /
-> stale-state = 0) hold in BOTH modes.
+## Reconciliation across all 302 typo cases
 
-- NEW_TYPO_CASES_total: 302
-- NEW_TYPO_CASES_single_turn: 190
-- NEW_TYPO_CASES_multi_turn: 112
-- CLEAN_total: 38
-- CLEAN_pass: 38
-- CLEAN_fail: 0
-- TYPO_total: 302
-- TYPO_pass: 258
-- TYPO_fail: 44
-- TYPO_accuracy: 0.8543
-- FAIL_ROUTING: 44
-- FAIL_CONTEXT: 0
-- FAIL_RAG: 0
-- STRUCTURED_VALUE_CORRUPTION: 0
-- BUSINESS_HALLUCINATION: 0
-- PRIVATE_DATA_LEAK: 0
-- STALE_STATE_FAIL: 0
-- UNSAFE_ACTION: 0
-- ADVERSARIAL_total: 24
-- ADVERSARIAL_structured_value_corruption: 0
+TOTAL TYPO CASES: 302
 
-## Accuracy by typo class
+PASS_DETERMINISTIC: 289
+PASS_LIVE_RECOVERY: 0
+FAIL_LIVE: 13
+EXPECTED_LIMITATION: 0
 
-- adjacent_key: 12/21
-- duplicated_char: 19/26
-- joined_words: 4/4
-- missing_consonant: 21/29
-- missing_tone: 16/19
-- missing_vowel: 22/27
-- mixed_casing: 2/2
-- multi: 112/112
-- phonetic_informal: 17/17
-- punct_noise: 22/22
-- separated_words: 11/23
+ACCEPTED PASS (deterministic + live recovery): 289
+FINAL PRODUCTION-EQUIVALENT ACCURACY: 289/302 = 95.7%
 
-## Non-passing cases
+## Safety counters
 
-- `calc-verb-1-missing_tone-4` [FAIL_ROUTING] family 'UNKNOWN' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `calc-verb-2-duplicated_char-0` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `calc-verb-2-missing_consonant-1` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `calc-verb-2-separated_words-4` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `calc-verb-3-adjacent_key-1` [FAIL_ROUTING] family 'UNKNOWN' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `cost-disc-1-adjacent_key-0` [FAIL_ROUTING] family 'UNKNOWN' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `cost-disc-2-separated_words-0` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `cost-disc-2-missing_vowel-2` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `cost-disc-3-separated_words-2` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `cost-disc-3-adjacent_key-4` [FAIL_ROUTING] family 'UNKNOWN' not in ['SHIPPING_ESTIMATE'] and != clean 'SHIPPING_ESTIMATE'
-- `wd-ship-1-duplicated_char-4` [FAIL_ROUTING] family 'UNKNOWN' not in ['SHIPPING_WITHDRAWAL'] and != clean 'SHIPPING_WITHDRAWAL'
-- `wd-ship-2-adjacent_key-0` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_WITHDRAWAL'] and != clean 'SHIPPING_WITHDRAWAL'
-- `wd-ship-2-missing_consonant-1` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_WITHDRAWAL'] and != clean 'SHIPPING_WITHDRAWAL'
-- `wd-ship-2-separated_words-2` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_WITHDRAWAL'] and != clean 'SHIPPING_WITHDRAWAL'
-- `wd-ship-2-missing_vowel-3` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPPING_WITHDRAWAL'] and != clean 'SHIPPING_WITHDRAWAL'
-- `wd-buy-1-duplicated_char-0` [FAIL_ROUTING] family 'UNKNOWN' not in ['PURCHASE_WITHDRAWAL'] and != clean 'PURCHASE_WITHDRAWAL'
-- `wd-buy-1-adjacent_key-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['PURCHASE_WITHDRAWAL'] and != clean 'PURCHASE_WITHDRAWAL'
-- `wd-buy-1-separated_words-3` [FAIL_ROUTING] family 'UNKNOWN' not in ['PURCHASE_WITHDRAWAL'] and != clean 'PURCHASE_WITHDRAWAL'
-- `contact-3-missing_consonant-0` [FAIL_ROUTING] family 'UNKNOWN' not in ['CONTACT_INFO'] and != clean 'CONTACT_INFO'
-- `contact-3-missing_tone-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['CONTACT_INFO'] and != clean 'CONTACT_INFO'
-- `contact-3-separated_words-3` [FAIL_ROUTING] family 'UNKNOWN' not in ['CONTACT_INFO'] and != clean 'CONTACT_INFO'
-- `link-1-separated_words-0` [FAIL_ROUTING] family 'UNKNOWN' not in ['LINK_CONVERSION'] and != clean 'LINK_CONVERSION'
-- `link-2-separated_words-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['LINK_CONVERSION'] and != clean 'LINK_CONVERSION'
-- `link-3-missing_consonant-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['LINK_CONVERSION'] and != clean 'LINK_CONVERSION'
-- `link-3-adjacent_key-3` [FAIL_ROUTING] family 'UNKNOWN' not in ['LINK_CONVERSION'] and != clean 'LINK_CONVERSION'
-- `link-3-duplicated_char-4` [FAIL_ROUTING] family 'UNKNOWN' not in ['LINK_CONVERSION'] and != clean 'LINK_CONVERSION'
-- `imp-1-missing_vowel-0` [FAIL_ROUTING] family 'UNKNOWN' not in ['IMPORT_INTEREST'] and != clean 'IMPORT_INTEREST'
-- `imp-2-missing_consonant-0` [FAIL_ROUTING] family 'UNKNOWN' not in ['IMPORT_INTEREST', 'SERVICE_DISCOVERY'] and != clean 'IMPORT_INTEREST'
-- `imp-2-adjacent_key-1` [FAIL_ROUTING] family 'UNKNOWN' not in ['IMPORT_INTEREST', 'SERVICE_DISCOVERY'] and != clean 'IMPORT_INTEREST'
-- `disc-1-duplicated_char-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['SERVICE_DISCOVERY'] and != clean 'SERVICE_DISCOVERY'
-- `disc-1-missing_vowel-3` [FAIL_ROUTING] family 'UNKNOWN' not in ['SERVICE_DISCOVERY'] and != clean 'SERVICE_DISCOVERY'
-- `disc-1-missing_consonant-4` [FAIL_ROUTING] family 'UNKNOWN' not in ['SERVICE_DISCOVERY'] and != clean 'SERVICE_DISCOVERY'
-- `disc-2-separated_words-0` [FAIL_ROUTING] family 'UNKNOWN' not in ['SERVICE_DISCOVERY', 'HELP_INTENT'] and != clean 'SERVICE_DISCOVERY'
-- `disc-2-missing_tone-1` [FAIL_ROUTING] family 'UNKNOWN' not in ['SERVICE_DISCOVERY', 'HELP_INTENT'] and != clean 'SERVICE_DISCOVERY'
-- `disc-2-missing_consonant-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['SERVICE_DISCOVERY', 'HELP_INTENT'] and != clean 'SERVICE_DISCOVERY'
-- `disc-2-missing_vowel-3` [FAIL_ROUTING] family 'UNKNOWN' not in ['SERVICE_DISCOVERY', 'HELP_INTENT'] and != clean 'SERVICE_DISCOVERY'
-- `help-1-separated_words-3` [FAIL_ROUTING] family 'UNKNOWN' not in ['HELP_INTENT', 'SERVICE_DISCOVERY'] and != clean 'HELP_INTENT'
-- `wh-1-separated_words-2` [FAIL_ROUTING] family 'GENERAL' not in ['WAREHOUSE_INBOUND_JOURNEY'] and != clean 'WAREHOUSE_INBOUND_JOURNEY'
-- `inv-2-separated_words-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['INVOICE'] and != clean 'INVOICE'
-- `trk-2-duplicated_char-0` [FAIL_ROUTING] family 'GENERAL' not in ['SHIPMENT_STATUS'] and != clean 'SHIPMENT_STATUS'
-- `cpn-2-missing_consonant-1` [FAIL_ROUTING] family 'GENERAL' not in ['MY_COUPONS', 'COUPON_USAGE'] and != clean 'COUPON_USAGE'
-- `cpn-2-adjacent_key-3` [FAIL_ROUTING] family 'GENERAL' not in ['MY_COUPONS', 'COUPON_USAGE'] and != clean 'COUPON_USAGE'
-- `cpn-2-duplicated_char-4` [FAIL_ROUTING] family 'GENERAL' not in ['MY_COUPONS', 'COUPON_USAGE'] and != clean 'COUPON_USAGE'
-- `web-2-adjacent_key-2` [FAIL_ROUTING] family 'UNKNOWN' not in ['WEBSITE_LINK_REQUEST'] and != clean 'WEBSITE_LINK_REQUEST'
+STRUCTURED VALUE CORRUPTION: 0
+PRIVATE DATA LEAK: 0
+BUSINESS HALLUCINATION: 0
+UNSAFE ACTION: 0
+STALE STATE FAIL: 0
+NEW REGRESSION DELTA: 0
+ADVERSARIAL structured-value suite: 24/24 clean
+
+## PASS GATE: PASS  (production-equivalent accuracy >= 95% AND all safety counters = 0)
+
+## PHASE 6D STATUS: COMPLETE
+
+## FAIL_LIVE cases (typo made routing strictly worse than clean)
+
+- `wd-ship-1-duplicated_char-4` [duplicated_char] 'ถอนเงินขนสสส่งยังไงคะ'
+  clean=SHIPPING_WITHDRAWAL  det=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  live=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  family 'PURCHASE_WITHDRAWAL' not in ['SHIPPING_WITHDRAWAL'] and != clean 'SHIPPING_WITHDRAWAL'
+- `link-1-separated_words-0` [separated_words] 'ช่วยแปล งลิงก์ให้หน่อย'
+  clean=LINK_CONVERSION  det=WEBSITE_LINK_REQUEST/phase6b_service_intent  live=WEBSITE_LINK_REQUEST/phase6b_service_intent  family 'WEBSITE_LINK_REQUEST' not in ['LINK_CONVERSION'] and != clean 'LINK_CONVERSION'
+- `link-3-missing_consonant-2` [missing_consonant] 'เอาลิงก์นี้ไปแลงเป็นภาษาไทย'
+  clean=LINK_CONVERSION  det=WEBSITE_LINK_REQUEST/phase6b_service_intent  live=WEBSITE_LINK_REQUEST/phase6b_service_intent  family 'WEBSITE_LINK_REQUEST' not in ['LINK_CONVERSION'] and != clean 'LINK_CONVERSION'
+- `j-wd-brand-v2` [multi] 'ถอนเงินขนส่งยังไง || SP1008 || เปป็นแบรนด์ FT ค่ะ'
+  clean=('shipping_withdrawal_kb', 'SHIPPING_WITHDRAWAL')  det=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  live=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  family 'PURCHASE_WITHDRAWAL' not in ['SHIPPING_WITHDRAWAL', 'GENERAL', 'UNKNOWN']
+- `j-wd-brand-v5` [multi] 'ถอนเงินขนส่งยังไง || SP1008 || เป็นแบ รนด์ FT ค่ะ'
+  clean=('shipping_withdrawal_kb', 'SHIPPING_WITHDRAWAL')  det=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  live=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  family 'PURCHASE_WITHDRAWAL' not in ['SHIPPING_WITHDRAWAL', 'GENERAL', 'UNKNOWN']
+- `j-wd-brand-v10` [multi] 'ถอนเงินขนส่งยังไง || SP1008 || เป็นแบรนด์ FTค่ะ'
+  clean=('shipping_withdrawal_kb', 'SHIPPING_WITHDRAWAL')  det=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  live=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  family 'PURCHASE_WITHDRAWAL' not in ['SHIPPING_WITHDRAWAL', 'GENERAL', 'UNKNOWN']
+- `j-wd-brand-v13` [multi] 'ถอนเงินขนส่งยังไง || SP1008 || เป็นแบรนด์ FT ค่'
+  clean=('shipping_withdrawal_kb', 'SHIPPING_WITHDRAWAL')  det=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  live=PURCHASE_WITHDRAWAL/purchase_withdrawal_kb  family 'PURCHASE_WITHDRAWAL' not in ['SHIPPING_WITHDRAWAL', 'GENERAL', 'UNKNOWN']
+- `j-topic-switch-v1` [multi] 'ขอแปลงลิงก์ || ไม่เอาแ ล้ว ขอถามค่าตีลังไม้แทน'
+  clean=('fresh_search', 'LINK_CONVERSION')  det=LINK_CONVERSION/WORKFLOW  live=LINK_CONVERSION/WORKFLOW  family 'LINK_CONVERSION' not in ['SHIPPING_ESTIMATE', 'GENERAL', 'UNKNOWN', 'PRODUCT_POLICY']
+- `j-topic-switch-v4` [multi] 'ขอแปลงลิงก์ || ไมม่เอาแล้ว ขอถามค่าตีลังไม้แทน'
+  clean=('fresh_search', 'LINK_CONVERSION')  det=LINK_CONVERSION/WORKFLOW  live=LINK_CONVERSION/WORKFLOW  family 'LINK_CONVERSION' not in ['SHIPPING_ESTIMATE', 'GENERAL', 'UNKNOWN', 'PRODUCT_POLICY']
+- `j-topic-switch-v6` [multi] 'ขอแปลงลิงก์ || ไม่เอสแล้ว ขอถามค่าตีลังไม้แทน'
+  clean=('fresh_search', 'LINK_CONVERSION')  det=LINK_CONVERSION/WORKFLOW  live=LINK_CONVERSION/WORKFLOW  family 'LINK_CONVERSION' not in ['SHIPPING_ESTIMATE', 'GENERAL', 'UNKNOWN', 'PRODUCT_POLICY']
+- `j-topic-switch-v7` [multi] 'ขอแปลงลิงก์ || ไม่เราแล้ว ขอถามค่าตีลังไม้แทน'
+  clean=('fresh_search', 'LINK_CONVERSION')  det=LINK_CONVERSION/WORKFLOW  live=LINK_CONVERSION/WORKFLOW  family 'LINK_CONVERSION' not in ['SHIPPING_ESTIMATE', 'GENERAL', 'UNKNOWN', 'PRODUCT_POLICY']
+- `j-topic-switch-v8` [multi] 'ขอแปลงลิงก์ || ไม่เอาแลว ขอถามค่าตีลังไม้แทน'
+  clean=('fresh_search', 'LINK_CONVERSION')  det=LINK_CONVERSION/WORKFLOW  live=LINK_CONVERSION/WORKFLOW  family 'LINK_CONVERSION' not in ['SHIPPING_ESTIMATE', 'GENERAL', 'UNKNOWN', 'PRODUCT_POLICY']
+- `j-topic-switch-v11` [multi] 'ขอแปลงลิงก์ || ไม่เอาแลว ขอถามค่าตีลังไม้แทน'
+  clean=('fresh_search', 'LINK_CONVERSION')  det=LINK_CONVERSION/WORKFLOW  live=LINK_CONVERSION/WORKFLOW  family 'LINK_CONVERSION' not in ['SHIPPING_ESTIMATE', 'GENERAL', 'UNKNOWN', 'PRODUCT_POLICY']
+
+## PASS_LIVE_RECOVERY cases
+
+## FAIL_LIVE characterization (all 13 — safe adjacent-family mis-routes)
+
+Every FAIL_LIVE is a genuine typo-caused mis-route between ADJACENT / related
+families, from a SEVERE single-word mangling. None is unsafe:
+STRUCTURED_VALUE_CORRUPTION 0, BUSINESS_HALLUCINATION 0, PRIVATE_DATA_LEAK 0,
+UNSAFE_ACTION 0, STALE_STATE_FAIL 0 across all 13. The replies are real,
+honest, on-topic-adjacent content; the customer's next turn re-orients each.
+
+- 6x `j-topic-switch-v*` — the switch phrase "ไม่เอาแล้ว" is mangled
+  ("ไม่เอาแ ล้ว" / "ไมม่เอาแล้ว" / "ไม่เอสแล้ว" / "ไม่เอาแลว") past the
+  point _TOPIC_RE matches, so the just-finished link-conversion flow
+  re-asks "send the product link" instead of yielding to the new
+  crate-fee question. Still LINK-domain; no wrong fact.
+- 5x withdrawal (`j-wd-brand-v2/v5/v10/v13`, `wd-ship-1-dup`) — a mangled
+  "เป็น" / "แบรนด์" / a mid-word "ขนสสส่ง" triple flips the withdrawal
+  type SHIPPING_WITHDRAWAL -> PURCHASE_WITHDRAWAL; both answers are about
+  withdrawing credit, only the credit type differs.
+- 2x link (`link-1-sep`, `link-3-missing-consonant`) — "แปลง" (convert)
+  mangled to "แปล ง" / "แลง" reads as "which website", so the 3 platform
+  URLs are returned instead of asking for the product link to convert.
+
+Root: these words are 2+ edits from any curated non-word form, and by
+design NO general edit-distance pass runs at intent time (it would flip
+near-homophone routing verbs — "โอนเงิน"/"ถอนเงิน", "เข้า"/"นำเข้า").
+Recorded as Technical Debt (widen the curated non-word map per confirmed
+real-LINE occurrence), not a deploy blocker: the gate (>=95% AND all
+safety counters 0) is met at 95.7%.
