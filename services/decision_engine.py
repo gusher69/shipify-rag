@@ -2897,6 +2897,22 @@ def _current_intent_breaks_pending_flow(semantic, message, *, flow_family=None,
     fam = getattr(semantic, "intent_family", "UNKNOWN")
     op = getattr(semantic, "follow_up_op", "NONE")
     conf = float(getattr(semantic, "confidence", 0.0) or 0.0)
+    # An EXPLICIT topic switch ("ไม่เอาแล้ว ขอถามเรื่อง…", "เปลี่ยนไปถาม…",
+    # "กลับมาถาม…" — the deterministic _TOPIC_RE) is decisive and must be
+    # checked BEFORE the same-family early return: after a completed
+    # link-conversion / import turn the interpreter's family label often
+    # stays STUCK to that flow's family from the history frame, so a plain
+    # `fam == flow_family` check would wrongly keep the stale flow. It
+    # still CONTINUES the flow only when the switch phrase is also a valid
+    # slot value for it (flow_extract).
+    if op == "TOPIC_CHANGE":
+        if flow_extract is not None:
+            try:
+                if flow_extract(message):
+                    return False
+            except Exception:
+                pass
+        return True
     if fam == flow_family:
         return False
     # If the message is itself a valid slot value for THIS flow, it
@@ -2909,17 +2925,12 @@ def _current_intent_breaks_pending_flow(semantic, message, *, flow_family=None,
                 return False
         except Exception:
             pass
-    # CORE-CONVERSATION — an EXPLICIT topic switch ("ขอถามเรื่อง…แทน",
-    # "เปลี่ยนไปถาม…", "ไม่เอาแล้ว ถาม…", "งั้น…ดีกว่า/แทน/แล้วกัน" — the
-    # deterministic _TOPIC_RE only, no phrase list here) breaks the pending
-    # flow: the customer explicitly moved on, even when the NEW subject
-    # could not be classified (degraded LLM -> GENERAL/UNKNOWN). Previously
-    # ANY follow_up_op != "NONE" was read as "continue this flow", so a
-    # stated switch was swallowed as another failed slot answer.
+    # CORE-CONVERSATION — an EXPLICIT topic switch (_TOPIC_RE) is handled
+    # at the top of this function now, ahead of the same-family early
+    # return, so a switch after a completed link/import turn breaks the
+    # stale flow even when the family label is still stuck to it.
     # CORRECTION / COMPARISON / CONTINUE / SET_VALUE / CONFIRMATION still
     # continue — those refine the SAME flow.
-    if op == "TOPIC_CHANGE":
-        return True
     # PHASE-6B — an explicit REJECT of the previous answer, or a decisive
     # PUBLIC company-information turn (contact / website / warehouse-inbound
     # / policy / how-to), is never a slot value for a pending collection —
@@ -3815,7 +3826,17 @@ class DecisionEngine:
                     _last_asst_turn.strip() == (_link_pending_ask or "").strip()
                     and semantic.intent_family not in _SERVICE_INTENT_FAMILIES
                     and getattr(semantic, "conversation_act", "NONE") != "REJECT")
-                if semantic.intent_family == "LINK_CONVERSION" or (
+                # A LINK_CONVERSION family label after a COMPLETED link turn
+                # stays STUCK from the history frame. An explicit topic
+                # switch whose message carries NO link-conversion signal of
+                # its own ("ไม่เอาแล้ว ขอถามค่าตีลังไม้") must NOT re-fire
+                # the link action — only a switch that actually names a
+                # link / platform ("…ขอแปลงลิงก์แทน") still does.
+                _link_fam_now = (
+                    semantic.intent_family == "LINK_CONVERSION"
+                    and (getattr(semantic, "follow_up_op", "NONE") != "TOPIC_CHANGE"
+                         or _is_link_conversion_signal(message)))
+                if _link_fam_now or (
                         _link_was_pending
                         and private_state_inquiry is None
                         and not _current_intent_breaks_pending_flow(
@@ -4182,7 +4203,12 @@ class DecisionEngine:
                     _rj_reply = _service_intent_reply(
                         _svc_fam, sb=self.registry._sb, entities=_svc_ent) \
                         if _svc_fam in _SERVICE_INTENT_FAMILIES else None
-                    if _rj_reply is None:
+                    # A REJECT that would only re-emit the SAME family reply
+                    # the customer just rejected ("ขอลิงก์เว็บ" -> 3 links ->
+                    # "ไม่ใช่ค่ะ หมายถึง…" -> "คุณยังไม่เข้าใจ") must NOT
+                    # resend it — switch to the neutral clarification ask so
+                    # the loop is broken with a genuinely different turn.
+                    if _rj_reply is None or _is_repeat_of_last_assistant(history, _rj_reply):
                         _rj_reply = _SERVICE_CLARIFY_REPLY
                     if not _is_repeat_of_last_assistant(history, _rj_reply):
                         developer_trace["selection_source"] = "phase6b_reject_reevaluate"
@@ -4231,7 +4257,7 @@ class DecisionEngine:
                     and not re.search(r"ไหม|มั้ย|หรือเปล่า|รึเปล่า|อะไรบ้าง|อะไรบาง|ยังไง|อย่างไร|เท่าไหร่|กี่\S|\?",
                                       message or "")
                     and _derive_active_frame(history) is None)
-                if (_svc_pre_rag and _svc_conf >= 0.6
+                if (_svc_pre_rag and _svc_conf >= 0.6 and _svc_act != "REJECT"
                         and not private_state_inquiry and not _msg_has_identifier):
                     _svc_reply = _service_intent_reply(
                         _svc_fam, sb=self.registry._sb, entities=_svc_ent,

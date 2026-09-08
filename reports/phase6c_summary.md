@@ -1,0 +1,16 @@
+# PHASE-6C — Production Conversation Lab
+
+- generated: 2026-09-08T11:53:49  (107.3s)
+- TOTAL: 167   MULTI_TURN: 51   LIVE_RUN: False
+
+- PASS: 166
+- FAIL_ROUTING: 0
+- FAIL_CONTEXT: 0
+- FAIL_GROUNDING: 0
+- FAIL_HALLUCINATION: 0
+- FAIL_NEXT_ACTION: 0
+- FAIL_STATE: 0
+- FAIL_AUTH: 0
+- EXPECTED_LIMITATION: 1
+
+## Non-passing cases

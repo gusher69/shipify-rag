@@ -47,7 +47,7 @@ _KNOWN_BRANDS = ("SP", "FT")
 # brand / code) so it never fires on a topic switch. Only consulted when
 # the immediately-preceding assistant turn was the SP-or-FT ask.
 _BRAND_ANSWER_RE = re.compile(
-    r"^\s*(?:แบรนด์\s*|เป็น\s*|ของ\s*|โค้ด\s*|รหัส\s*)?"
+    r"^\s*(?:แบรนด์\s*|เป็น\s*|ของ\s*|โค้ด\s*|รหัส\s*|เอา\s*|ใช้\s*|ขอ\s*)?"
     r"(SP|FT|เอสพี|เอฟที)\d{0,7}\s*"
     r"(?:ค่ะ|ค่า|คะ|ครับ|คับ|จ้า|จ้ะ|นะคะ|นะครับ)?\s*$",
     re.IGNORECASE)

@@ -434,9 +434,11 @@ _OBJ_ADDRESS = re.compile(r"ที่อยู่จัดส่ง|ที่อ
 # unrelated add_vat / self-pickup / cancellation flow. Checked as its
 # own decisive verb+object composite, same shape as every other family
 # here — never a bare keyword-in-message check.
-_WITHDRAWAL_VERB_RE = re.compile(r"ถอนเงิน|จะถอนยังไง|จะถอนมายังไง|ถอนได้ไหม|ถอนยังไง", re.IGNORECASE)
+_WITHDRAWAL_VERB_RE = re.compile(
+    r"ถอนเงิน|ถอนเครดิต|ถอนยอด|จะถอนยังไง|จะถอนมายังไง|ถอนได้ไหม|ถอนยังไง|ถอนออกมา|ขอถอน",
+    re.IGNORECASE)
 _PURCHASE_WITHDRAWAL_OBJ_RE = re.compile(r"สั่งซื้อ|ร้าน.{0,6}คืน|เครดิตสั่งซื้อ", re.IGNORECASE)
-_SHIPPING_WITHDRAWAL_OBJ_RE = re.compile(r"ขนส่ง", re.IGNORECASE)
+_SHIPPING_WITHDRAWAL_OBJ_RE = re.compile(r"ขนส่ง|ค่าส่ง|ค่าขนส่ง|เครดิตขนส่ง", re.IGNORECASE)
 
 # ── PHASE-6B pre-RAG conversational / service-intent markers ──────────
 # Compositional & anchored, never a bare keyword scan. They fire only
@@ -452,7 +454,8 @@ _HELP_INTENT_RE = re.compile(
     r"|^\s*ช่วย(?:หน่อย|ที|ด้วย)\S*\s*$"
     r"|สอบถามหน่อย|สอบถามหน่อยครับ|สอบถามหน่อยค่ะ|อยากสอบถาม|รบกวนสอบถาม|มีเรื่องอยากสอบถาม"
     r"|มีเรื่อง(?:อยาก|จะ)?(?:ถาม|สอบถาม|ปรึกษา)|มีคำถาม(?:อยาก|จะ)?ถาม|มีอะไร(?:อยาก|จะ)?ถาม"
-    r"|ปรึกษาหน่อย|มีอะไรให้ช่วย(?:ไหม|มั้ย)?",
+    r"|ปรึกษาหน่อย|มีอะไรให้ช่วย(?:ไหม|มั้ย)?"
+    r"|(?:อยากได้|ขอ)คำแนะนำ|ขอถามอะไร(?:หน่อย)?|ขอถามหน่อย|มีอะไรจะถาม",
     re.IGNORECASE)
 
 # SERVICE_DISCOVERY — "what do you offer" / broad "import-export" topic /
@@ -460,6 +463,7 @@ _HELP_INTENT_RE = re.compile(
 _SERVICE_DISCOVERY_RE = re.compile(
     r"มีบริการอะไร|บริการอะไรบ้าง|ให้บริการอะไร|รับทำอะไรบ้าง|ทำอะไรได้บ้าง|บริการมีอะไร"
     r"|มีบริการไหนบ้าง|ช่วยอะไรได้บ้าง|บริการของ\S{0,10}มีอะไร"
+    r"|(?:บริการ|ที่นี่|ที่นี้)\S{0,6}มีไร(?:มั่ง|บ้าง)|มีไรมั่ง|ทำอะไรได้(?:บ้าง|มั่ง)|ทำอะไรมั่ง"
     r"|สนใจใช้บริการ|อยากใช้บริการ|สนใจบริการ"
     r"|การนำเข้าส่งออก|นำเข้าส่งออก|นำเข้า-ส่งออก|นำเข้าและส่งออก|import\s*[/-]?\s*export",
     re.IGNORECASE)
@@ -485,7 +489,9 @@ _WEBSITE_LINK_RE = re.compile(
     r"|ลิงก์(?:ที่จะ)?(?:เข้าไป)?(?:ดู|เลือก|ช้อป|เปิด)(?:ของ|สินค้า|เว็บ)?"
     r"|ขอ(?:ที่อยู่)?เว็บไซต์(?:ของ)?\s*(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์|อาลีบาบา)?"
     r"|(?:เว็บไซต์|เว็บ|url)(?:ของ)?\s*(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์)(?![ก-๙\w])"
-    r"|ลิงก์\s*(?:เว็บ\s*)?(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์)\s*(?:และ|กับ|,|/)",
+    r"|ลิงก์\s*(?:เว็บ\s*)?(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์)\s*(?:และ|กับ|,|/)"
+    r"|เว็บ(?:ไซต์)?\s*(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์)\S{0,14}(?:เข้า(?:ยังไง|ไง)|ขอลิงก์|ขอ url)"
+    r"|(?:เข้าเว็บ|ลิงก์เว็บ)\s*(?:taobao|tmall|1688|เถาเป่า|ทีมอลล์)",
     re.IGNORECASE)
 
 # CONTACT_INFO — a PUBLIC company contact request (channels / phone /
@@ -494,8 +500,10 @@ _WEBSITE_LINK_RE = re.compile(
 _CONTACT_INFO_RE = re.compile(
     r"ติดต่อ(?:ได้)?(?:ทาง|ช่องทาง|ยัง)?ไหน|ช่องทาง(?:การ)?ติดต่อ|ติดต่อ\S{0,6}ช่องทางไหน"
     r"|ติดต่อ\s*(?:shipify|บริษัท|แอดมิน|เจ้าหน้าที่|ฝ่าย\S{0,10})?\s*(?:ยังไง|อย่างไร|ทางไหน|ช่องทางไหน)"
-    r"|ขอ\s*(?:เบอร์(?:โทร)?|โทรศัพท์|อีเมล|อีเมล์|เมล|e-?mail|ไลน์|line\s*id|line|เว็บไซต์บริษัท|ที่อยู่บริษัท|แฟนเพจ|เพจ|ช่องทางติดต่อ)"
-    r"|เบอร์(?:โทร)?(?:ติดต่อ|บริษัท|แอดมิน|ฝ่าย\S{0,10})|อีเมล(?:ติดต่อ|บริษัท|ของบริษัท)",
+    r"|ขอ\s*(?:เบอร์(?:โทร)?|โทรศัพท์|อีเมล|อีเมล์|เมล|e-?mail|ไลน์|line\s*id|line|ไอดีไลน์|ไอดี\s*line|เว็บไซต์บริษัท|ที่อยู่บริษัท|แฟนเพจ|เพจ|ช่องทางติดต่อ)"
+    r"|มี(?:ไลน์|line|เพจ|แฟนเพจ)\s*(?:ไหม|มั้ย|หรือเปล่า)"
+    r"|เบอร์(?:โทร)?(?:ติดต่อ|บริษัท|แอดมิน|ฝ่าย\S{0,10})|อีเมล(?:ติดต่อ|บริษัท|ของบริษัท)"
+    r"|(?:อยาก|ต้องการ)ติดต่อ(?:แอดมิน|เจ้าหน้าที่|บริษัท|shipify)\S{0,8}(?:ทำไง|ยังไง|ทำยังไง|อย่างไร)?",
     re.IGNORECASE)
 
 # WAREHOUSE_INBOUND_JOURNEY — the "my supplier will ship to your China
@@ -564,7 +572,10 @@ _PRICE_Q_RE = re.compile(r"เท่าไหร่|เท่าไร|กี่
 _DIMS_TRIPLE_RE = re.compile(
     r"\d+(?:\.\d+)?\s*(?:มม\.?|mm|ซม\.?|cm|เซน\S*|ม\.?|m|นิ้ว|inch(?:es)?)?\s*[x×*]\s*"
     r"\d+(?:\.\d+)?\s*(?:มม\.?|mm|ซม\.?|cm|เซน\S*|ม\.?|m|นิ้ว|inch(?:es)?)?\s*[x×*]\s*"
-    r"\d+(?:\.\d+)?", re.IGNORECASE)
+    r"\d+(?:\.\d+)?"
+    # spelled-out: "กว้าง 40 ยาว 40 สูง 40"
+    r"|กว้าง\s*\d+(?:\.\d+)?\s*\S{0,4}\s*ยาว\s*\d+(?:\.\d+)?\s*\S{0,4}\s*สูง\s*\d+(?:\.\d+)?",
+    re.IGNORECASE)
 # a description of a SPECIFIC parcel — turns a price question into a
 # calculation request.
 _PARCEL_DESC_RE = re.compile(
@@ -600,7 +611,10 @@ _DEST_MARKER_RE = re.compile(r"(?:ไป|ปลายทาง|ส่งไป�
 # a follow-up that clearly changes the CURRENT calculation / frame.
 _CORR_RE = re.compile(r"ไม่ใช่\s*\S+.{0,12}(?:เป็น|เอา)\s*\S")
 _CMP_RE = re.compile(r"^\s*(?:ถ้า|แล้วถ้า|หากเป็น|สมมติ|งั้นถ้า).{0,28}(?:ล่ะ|ล้ะ|หละ|มั้ย|ไหม)\s*(?:คะ|ครับ|ค่ะ)?\s*$|แล้ว\S{0,18}(?:ล่ะ|หละ)\s*(?:คะ|ครับ|ค่ะ)?\s*$")
-_TOPIC_RE = re.compile(r"งั้น.{0,24}(?:ดีกว่า|แทน|แล้วกัน)|เปลี่ยนไป(?:ถาม|เรื่อง)|ขอถามเรื่อง|เอาเป็นว่าถาม|ไม่เอาแล้ว\s*ถาม")
+_TOPIC_RE = re.compile(
+    r"งั้น.{0,24}(?:ดีกว่า|แทน|แล้วกัน)|เปลี่ยนไป(?:ถาม|เรื่อง)|ขอถามเรื่อง|เอาเป็นว่าถาม"
+    r"|ไม่เอาแล้ว\s*(?:ขอ)?ถาม|ไม่เอาแล้ว\S{0,10}(?:ขอถาม|เปลี่ยนไป|ถามเรื่อง)"
+    r"|พอแล้ว\S{0,10}(?:ขอถาม|เปลี่ยน)|กลับมา(?:เรื่อง|ถาม)")
 
 # genuinely structural (non-conversational) inputs — skip semantics.
 _STRUCT_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
@@ -791,8 +805,10 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
     # in an "unsupported company fact" Human-CS handoff. A BARE
     # how-much rate question ("ค่านำเข้าเท่าไหร่", only "เท่าไหร่"/"กี่บาท")
     # is deliberately NOT included — it stays a rate FAQ (CUSTOMER-CALC-1).
-    if obj_cost and re.search(r"แพงไหม|แพงมั้ย|แพงรึเปล่า|แพงมั๊ย|แพงมาก(?:ไหม|มั้ย)?|ราคาสูงไหม|แพงหรือเปล่า",
-                              t, re.IGNORECASE):
+    if obj_cost and re.search(
+            r"แพงไหม|แพงมั้ย|แพงรึเปล่า|แพงมั๊ย|แพงมาก(?:ไหม|มั้ย)?|ราคาสูงไหม|แพงหรือเปล่า|แพงป่าว|แพงปะ|"
+            r"แรง(?:ไหม|มั้ย|ป่าว)|(?:เยอะ|สูง|โหด)(?:ไหม|มั้ย|ป่าว)",
+            t, re.IGNORECASE):
         return "SHIPPING_ESTIMATE", 0.7, ent
 
     # INVOICE — a tax-document object with an issue / permit / how-to move.

@@ -50,6 +50,47 @@ from rag.hybrid_scoring import has_strong_company_profile_evidence
 _URGENCY_SIGNAL_RE = re.compile(r"รีบ|ด่วน|ตามมาหลาย|ตามอยู่|ไม่ทันใช้", re.IGNORECASE)
 _COMPLAINT_SIGNAL_RE = re.compile(r"ของเก่า|มีรอย|ชำรุด|เสียหาย|ของผิด|ของขาด|ตกหล่น|ไม่ครบ", re.IGNORECASE)
 
+
+def _g6c_promote_general_assistance(question, interpretation, history, *,
+                                     rag_strong_direct=False, rag_faq_exact=False) -> bool:
+    """PHASE-6C — Smart General Assistance. PROMOTE a turn onto the
+    general-chat path (LLM answers from general knowledge, with the same
+    no-fabrication guardrails in GENERAL_CHAT_GUIDANCE) when the Request
+    Grounding Classifier decisively reads it as GENERAL_ASSISTANCE — a
+    general packing / fragile-goods / logistics how-to question — that
+    the existing company-topic gate does NOT already claim.
+
+    STRICTLY ADDITIVE: it can only send a turn to general-chat that the
+    keyword gate below would otherwise have sent to the SAME general-chat
+    branch anyway (its `not (...)` arm). It defers entirely to the
+    curated `_COMPANY_OPERATIONAL_TOPIC_RE` — a message carrying any
+    company-topic term (CBM, ทางเรือ/ทางรถ, นำเข้า, ค่าส่ง, นโยบาย, …) is a
+    Shipify question by project definition and stays on the company RAG
+    path (that gate is deliberately broad; do not fight it here). It
+    NEVER promotes a BUSINESS_TRUTH_REQUIRED / PRIVATE_OR_ERP_REQUIRED /
+    MIXED / UNCLEAR turn, and never fires when the company RAG actually
+    found strong/exact evidence (that answer is better than a general
+    one). Its one job: an unseen PURE how-to paraphrase that _compose
+    mislabelled as PRODUCT_POLICY ("ของแตกง่ายควรแพ็กยังไงดี") must not
+    dead-end on "no confirmed info" + Human CS."""
+    if rag_strong_direct or rag_faq_exact:
+        return False
+    if _COMPANY_OPERATIONAL_TOPIC_RE.search(question or ""):
+        return False
+    try:
+        from services.request_grounding_classifier import classify_request_grounding
+        g = classify_request_grounding(question or "", interpretation, history)
+    except Exception:
+        return False
+    # g.cls == GENERAL_ASSISTANCE already REQUIRES an explicit general-
+    # knowhow shape AND zero business / private marker — a strictly
+    # stronger signal than the family label. It overrides a _compose
+    # mislabel that bucketed a general how-to as PRODUCT_POLICY. A real
+    # public-info family question ("โกดังจีนอยู่ไหน", "ขอเบอร์ติดต่อ") does
+    # not carry that shape, so its grounding class is never
+    # GENERAL_ASSISTANCE and it stays on the company RAG path here.
+    return g.cls == "GENERAL_ASSISTANCE" and g.business_part is False and g.private_part is False
+
 # P7.1 — a company GUARANTEE / WARRANTY / RESPONSIBILITY yes-no question
 # ("Shipify รับประกันว่า…ไหม", "…รับผิดชอบเรื่อง…ไหม", "…การันตี…ไหม"). Such a
 # question is a binary company-POLICY fact — when the KB actually holds a
@@ -1636,7 +1677,10 @@ def run_playground_turn(
         input_tokens = output_tokens = 0
         llm_latency = 0.0
         llm_failed = False
-    elif not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
+    elif _g6c_promote_general_assistance(question, interpretation, history,
+                                          rag_strong_direct=_rag_strong_direct,
+                                          rag_faq_exact=_rag_faq_exact) \
+            or not (_COMPANY_OPERATIONAL_TOPIC_RE.search(question or "")
               or _CHINA_SOURCED_ACTION_RE.search(question or "")
               or _URGENCY_SIGNAL_RE.search(question or "")
               or _COMPLAINT_SIGNAL_RE.search(question or "")
