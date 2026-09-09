@@ -1077,6 +1077,12 @@ def _assistant_asked_for_product(history: Optional[List[Dict]]) -> bool:
 _QUANTITY_REPLY_RE = re.compile(
     r"\d+\s*(?:ชิ้น|อัน|ใบ|กล่อง|ลัง|ตัว|ชุด|คู่|โหล|แพ็ค|แพ็ก|pcs?|kg|กิโล|กก|โล|ตัน|บาท|หยวน)",
     re.IGNORECASE)
+# OWNER-REAL-LINE-FIX-04 — a refusal / cancellation / stop is never a
+# product name, even in reply to a "which product?" question. Keeps
+# "ไม่เอาแล้ว" / "ยกเลิก" / "ไม่ใช่" out of the bare-product slot path so
+# a topic switch or rejection still wins.
+_NEGATION_STOPWORD_RE = re.compile(
+    r"^(?:ไม่|ยัง)\S{0,3}(?:เอา|ต้อง|ใช่|อยาก|สน)|^ยกเลิก|^เปลี่ยนใจ|^หยุด|^พอแล้ว|^เลิก")
 
 
 def _looks_like_bare_product(t: str) -> bool:
@@ -1084,6 +1090,8 @@ def _looks_like_bare_product(t: str) -> bool:
     if not (1 <= len(s) <= 42) or not _THAI_CHAR_RE.search(s):
         return False
     if _GREET_CONFIRM_RE.match(s) or _REPLY_IS_QUESTION_RE.search(s):
+        return False
+    if _NEGATION_STOPWORD_RE.search(s):
         return False
     # not a structural value — weight / dimensions / bare number /
     # a quantity ("500 ชิ้น"), a price, a URL/id.
@@ -1107,6 +1115,74 @@ def _bare_product_noun(t: str) -> Optional[str]:
         s = _BARE_PRODUCT_STRIP_RE.sub("", s).strip()
     s = re.sub(r"\s+", "", s)
     return s if 2 <= len(s) <= 30 and _THAI_CHAR_RE.search(s) else None
+
+
+# OWNER-REAL-LINE-FIX-04 — a bare product name supplied in reply to the
+# assistant's "which product?" question is a PRODUCT-SLOT response. It
+# belongs to whichever journey asked for it: the default owner is the
+# IMPORT_INTEREST / service-discovery journey (acknowledge + keep going).
+# PRODUCT_POLICY only takes the turn when the customer is actually in a
+# restriction / eligibility context, or the named product matches a
+# trusted high-risk category — so the trusted policy (not this layer)
+# still returns the prohibited-vs-allowed verdict.
+#
+# _HIGH_RISK_PRODUCT_RE is NOT a new prohibited-goods list: it mirrors
+# the category vocabulary the trusted policy layer already carries
+# (services/playground_orchestrator.py::_PROHIBITED_CATEGORY_WORDS) plus
+# the direct product nouns that ARE one of those categories, so a
+# customer who volunteers "เป็นน้ำยา" / "มีแบตเตอรี่" still reaches the
+# PRODUCT_POLICY path.
+_HIGH_RISK_PRODUCT_RE = re.compile(
+    r"แบตเตอรี่|แบตเตอร์รี่|แบตเตอรรี่|ถ่านไฟฉาย|พาวเวอร์แบง|power\s*bank|"
+    r"น้ำหอม|น้ำยา|ของเหลว|สเปรย์|สเปรผ์|aerosol|"
+    r"สารเคมี|เคมีภัณฑ์|วัตถุไวไฟ|วัตถุอันตราย|ไวไฟ|แอลกอฮอล์|น้ำมันเชื้อเพลิง|"
+    r"บุหรี่ไฟฟ้า|บุหรี่|พอตไฟฟ้า|"
+    r"อาหารสด|ของกิน|เครื่องดื่ม|เวชภัณฑ์|อาหารเสริม|"
+    r"สิ่งมีชีวิต|สัตว์เป็น|เมล็ดพันธุ์", re.IGNORECASE)
+
+# an explicit restriction / eligibility question ("… นำเข้าได้ไหม",
+# "… ห้ามไหม", "สินค้าต้องห้าม …") — used to detect that the CURRENT turn
+# or a recent user turn put the exchange in a product-policy context.
+_RESTRICTION_Q_RE = re.compile(
+    r"(?:นำเข้า|ส่ง|ขนส่ง|เอาเข้า|ฝากส่ง|ฝากนำเข้า)\S{0,6}(?:ได้|ไหว)?\S{0,3}(?:ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|หรือไม่)"
+    r"|ห้าม\S{0,8}(?:ไหม|มั้ย|หรือเปล่า|รึเปล่า)|(?:ของ|สินค้า)?ต้องห้าม|ผิดกฎหมาย"
+    r"|สินค้าที่ห้าม|ของที่ห้าม|นำเข้าไม่ได้|ส่งไม่ได้", re.IGNORECASE)
+
+
+def _restriction_context_in_history(history: Optional[List[Dict]]) -> bool:
+    """True when a recent USER turn framed the exchange as a
+    restriction / prohibited-goods question, so a following bare product
+    name is a policy check rather than an import-journey slot."""
+    for turn in reversed(list(history or [])[-6:]):
+        if turn.get("role") != "user":
+            continue
+        if _RESTRICTION_Q_RE.search(turn.get("content") or ""):
+            return True
+    return False
+
+
+# assistant turns that mark the exchange as an import / proxy-buy
+# discovery journey — the FIX-01 import_interest_reply, the frame
+# acknowledgement, and the service-discovery reply. Their presence (or a
+# recent user import-interest turn) is what lets a bare product-slot
+# reply continue as IMPORT_INTEREST instead of a product-policy check.
+_ASSIST_IMPORT_DISCOVERY_RE = re.compile(
+    r"ถ้ามีลิงก์สินค้า|มีลิงก์สินค้าที่สนใจ|บอกคร่าว\s*ๆ?\s*ได้เลยว่าอยากสั่งสินค้า"
+    r"|แนะนำขั้นตอน|รับทราบค่ะ\s*\(สินค้า|สนใจนำเข้า|(?:อยาก|ต้องการ)นำเข้า"
+    r"|แจ้งรายละเอียดสินค้าและปริมาณ|สินค้าและปริมาณมาได้เลย")
+
+
+def _import_journey_active(history: Optional[List[Dict]]) -> bool:
+    """True when the exchange is inside an import / proxy-buy discovery
+    journey: a recent USER turn expressed import interest, or the
+    assistant's recent turn is an import-discovery ack / prompt."""
+    for turn in reversed(list(history or [])[-6:]):
+        role, content = turn.get("role"), turn.get("content") or ""
+        if role == "user" and _is_import_interest(content):
+            return True
+        if role == "assistant" and _ASSIST_IMPORT_DISCOVERY_RE.search(content):
+            return True
+    return False
 
 
 def interpret(message: str, history: Optional[List[Dict]] = None,
@@ -1162,6 +1238,28 @@ def interpret(message: str, history: Optional[List[Dict]] = None,
     if fam == "UNKNOWN" and _assistant_asked_for_product(history) and _looks_like_bare_product(t):
         noun = _bare_product_noun(t)
         if noun:
+            # OWNER-REAL-LINE-FIX-04 — the bare product name belongs to the
+            # journey that asked for it. Inside an active IMPORT_INTEREST /
+            # proxy-buy discovery journey it is a PRODUCT-SLOT response and
+            # the journey keeps going (acknowledge the product, invite a
+            # link / ask a useful detail) — naming a product is NOT itself
+            # a prohibited-goods question. It stays PRODUCT_POLICY (the
+            # INVOICE-PRODUCT-REGRESSION-2 default) whenever the exchange
+            # is in a restriction/eligibility context (an explicit "can I
+            # import / is it banned" now or earlier), the product matches a
+            # trusted high-risk category, or there is simply no active
+            # import journey — so the trusted policy still owns the verdict
+            # for every case that needs it.
+            _policy_ctx = (_restriction_context_in_history(history)
+                           or bool(_RESTRICTION_Q_RE.search(t)))
+            _hi_risk = bool(_HIGH_RISK_PRODUCT_RE.search(noun)
+                            or _HIGH_RISK_PRODUCT_RE.search(t))
+            if (not _policy_ctx and not _hi_risk
+                    and _import_journey_active(history)):
+                return Interpretation(intent_family="IMPORT_INTEREST",
+                                      entities={"product": noun}, is_private=is_priv,
+                                      follow_up_op="NONE", confidence=0.7,
+                                      source="deterministic")
             return Interpretation(intent_family="PRODUCT_POLICY",
                                   entities={"product": noun}, is_private=is_priv,
                                   follow_up_op="SET_VALUE", confidence=0.7,

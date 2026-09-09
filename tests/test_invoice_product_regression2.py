@@ -9,10 +9,19 @@ escape any path.
 
 Problem B — a bare product NAME given in reply to the assistant's own
 "what product?" question must be understood generically as a PRODUCT
-entity (no product dictionary), route into the trusted product-policy
-path, and NEVER become UNKNOWN / unsupported_company_information / Human
-CS just because the noun is novel. The trusted policy — not the semantic
-layer — decides prohibited vs. allowed.
+entity (no product dictionary), and NEVER become UNKNOWN /
+unsupported_company_information / Human CS just because the noun is
+novel. The trusted policy — not the semantic layer — decides prohibited
+vs. allowed.
+
+OWNER-REAL-LINE-FIX-04 refinement — that bare product name belongs to
+the journey that asked for it. In an IMPORT_INTEREST discovery journey
+it is a PRODUCT-SLOT response and the journey continues (family
+IMPORT_INTEREST). It routes to PRODUCT_POLICY only when the exchange is
+already in a restriction/eligibility context, or the named product
+matches a trusted high-risk category (battery, liquid, chemical,
+perfume, …) — so the trusted policy still owns the verdict for the
+cases that need it.
 """
 import unittest
 
@@ -68,17 +77,23 @@ class TestProblemB_GenericProductEntity(unittest.TestCase):
         self.assertFalse(_assistant_asked_for_product(
             [{"role": "assistant", "content": "ต้องการที่อยู่โกดังไทยหรือจีนคะ"}]))
 
-    def test_ordinary_and_unseen_products_become_product_entities(self):
+    def test_ordinary_and_unseen_products_continue_the_import_journey(self):
+        # OWNER-REAL-LINE-FIX-04 — an ordinary product name inside an
+        # IMPORT_INTEREST discovery journey is a PRODUCT-SLOT response;
+        # the journey continues, it is NOT a prohibited-goods question.
         for m in ["กล่องพลาสติกครับ", "เป็นพวกกล่องพลาสติกใส่ของครับ", "เสื้อผ้าครับ",
                   "ชั้นวางของ", "แก้วน้ำ", "กระเป๋า", "อะไหล่รถยนต์ครับ", self._UNSEEN + "ค่ะ"]:
             it = interpret(m, _H)
-            self.assertEqual(it.intent_family, "PRODUCT_POLICY", m)
-            self.assertEqual(it.follow_up_op, "SET_VALUE", m)
+            self.assertEqual(it.intent_family, "IMPORT_INTEREST", m)
             self.assertTrue(it.entities.get("product"), m)
             self.assertNotEqual(it.entities["product"], "", m)
+            # the real Problem-B invariant: never a dead-end family
+            self.assertNotIn(it.intent_family, ("UNKNOWN",), m)
 
-    def test_prohibited_products_are_still_product_entities_not_a_hardcoded_verdict(self):
-        for m in ["น้ำหอมครับ", "แบตเตอรี่ครับ"]:
+    def test_high_risk_products_still_route_to_trusted_policy(self):
+        # a trusted high-risk category name still reaches PRODUCT_POLICY so
+        # the trusted policy (not this layer) returns the verdict.
+        for m in ["น้ำหอมครับ", "แบตเตอรี่ครับ", "เป็นน้ำยา"]:
             it = interpret(m, _H)
             self.assertEqual(it.intent_family, "PRODUCT_POLICY", m)
             self.assertTrue(it.entities.get("product"), m)
