@@ -56,6 +56,12 @@ _ASSIST_PRODUCT_RES = (
     re.compile(r"รับทราบค่ะ\s*เป็น(?P<p>[ก-๙A-Za-z ]{2,28}?)นะคะ"),
     re.compile(r"\(สินค้า\s*(?P<p>[ก-๙A-Za-z ]{2,28}?)\s*(?:•|\)|จำนวน|ขนส่ง)"),
     re.compile(r"สนใจนำเข้า(?P<p>[ก-๙A-Za-z ]{2,28}?)(?:นะคะ|ค่ะ|$)"),
+    # OWNER-REAL-LINE-FIX-06 — natural-prose frame_ack_reply carriers
+    # (no state-token parenthetical). Lazy, and anchored so ordinary
+    # sentences ("ขอบคุณสำหรับข้อมูลนะคะ") never match.
+    re.compile(r"ต้องการนำเข้า(?P<p>[ก-๙A-Za-z ]{2,28}?)(?=\s*(?:จำนวน|ขนส่ง|นะคะ|ค่ะ|😊|$))"),
+    re.compile(r"เปลี่ยนเป็น(?P<p>[ก-๙A-Za-z ]{2,28}?)ได้เลย(?:ค่ะ|เลย)?"),
+    re.compile(r"(?:ชิ้น|ทางรถ|ทางเรือ|ทางอากาศ)\s*สำหรับ(?P<p>[ก-๙A-Za-z ]{2,28}?)นะคะ"),
 )
 _NOT_A_PRODUCT_RE = re.compile(
     r"จำนวน|ชิ้น|ตัว|ประมาณ|ขนส่ง|ทางรถ|ทางเรือ|ทางอากาศ|กิโล|น้ำหนัก|ราคา|บริการ|Shipify", re.IGNORECASE)
@@ -332,27 +338,35 @@ _METHOD_TH = {"road": "ทางรถ", "sea": "ทางเรือ", "air": 
 
 
 def frame_ack_reply(frame: Frame, *, changed: str) -> str:
-    """Deterministic acknowledgement that also RE-STATES the frame so the
-    next turn's derive_active_frame() can read it back. Never a policy
-    claim, never an eligibility verdict."""
-    bits = []
-    if frame.product:
-        bits.append(f"สินค้า {frame.product}")
-    if frame.quantity:
-        bits.append(f"จำนวนประมาณ {frame.quantity} ชิ้น")
-    if frame.method:
-        bits.append(f"ขนส่ง{_METHOD_TH.get(frame.method, frame.method)}")
-    summary = " • ".join(bits) if bits else "รายละเอียดการนำเข้า"
-    head = "รับทราบค่ะ "
+    """Deterministic acknowledgement that re-states the frame IN NATURAL
+    PROSE so the next turn's derive_active_frame() can read it back.
+    OWNER-REAL-LINE-FIX-06 — no "(สินค้า X)" / state-token parenthetical
+    is ever shown to the customer; the product / quantity / method are
+    carried in plain sentence form that _ASSIST_PRODUCT_RES /
+    _ASSIST_QTY_RE / _ASSIST_METHOD_RE parse. Never a policy claim, never
+    an eligibility verdict."""
+    p = frame.product or "สินค้า"
+    qty = f" จำนวนประมาณ {frame.quantity} ชิ้น" if frame.quantity else ""
+    # "ขนส่งทาง…" (NOT "ส่งทาง…") so the trailing "สนใจส่งทางรถหรือทางเรือ"
+    # ask clause is never mis-read as a chosen method.
+    mth = f" ขนส่ง{_METHOD_TH.get(frame.method, frame.method)}" if frame.method else ""
+    # EVERY variant re-states ALL known slots in plain prose so
+    # derive_active_frame() can read product / quantity / method back
+    # without any "(สินค้า X)" state token.
     if changed == "quantity":
-        head = f"รับทราบค่ะ ปรับเป็นจำนวนประมาณ {frame.quantity} ชิ้นนะคะ "
+        head = f"รับทราบค่ะ ปรับเป็นจำนวนประมาณ {frame.quantity} ชิ้น สำหรับ{p}นะคะ"
+        if mth:
+            head += f"{mth} ตามเดิมค่ะ"
     elif changed == "method":
-        head = f"รับทราบค่ะ เปลี่ยนเป็นขนส่ง{_METHOD_TH.get(frame.method, frame.method)}นะคะ "
+        head = f"รับทราบค่ะ เปลี่ยนเป็นขนส่ง{_METHOD_TH.get(frame.method, frame.method)} สำหรับ{p}นะคะ"
+        if qty:
+            head += f"{qty} ตามเดิมค่ะ"
     elif changed == "product":
-        # OWNER-REAL-LINE-FIX-05 — a product-slot CORRECTION inside the
-        # active import journey. Natural lead, still carries the
-        # "(สินค้า X)" state token derive_active_frame() reads back.
-        head = f"ได้ค่ะ เปลี่ยนเป็น{frame.product}ได้เลยค่ะ 😊 "
+        head = f"ได้ค่ะ เปลี่ยนเป็น{p}ได้เลยค่ะ 😊"
+        if qty or mth:
+            head += f"{qty}{mth} ตามเดิมนะคะ"
+    else:  # "none"
+        head = f"ได้ค่ะ รับทราบว่าต้องการนำเข้า{p}{qty}{mth}นะคะ 😊"
     ask = ""
     if not frame.quantity:
         ask = " รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ"
@@ -360,7 +374,7 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
         ask = " สนใจส่งทางรถหรือทางเรือคะ"
     elif not frame.weight:
         ask = " รบกวนแจ้งน้ำหนักโดยประมาณเพิ่มเติมได้ไหมคะ"
-    return f"{head}({summary}){ask}"
+    return f"{head}{ask}"
 
 
 # ── OWNER-REAL-LINE-FIX-05 — deterministic active-frame correction ────

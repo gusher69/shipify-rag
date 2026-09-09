@@ -4388,7 +4388,8 @@ class DecisionEngine:
                     message or "", re.IGNORECASE)) and _no_rag_question \
                     and "http" not in (message or "").lower() \
                     and getattr(semantic, "follow_up_op", "NONE") == "NONE" \
-                    and _derive_active_frame(history) is None
+                    and (_derive_active_frame(history) is None
+                         or not _is_frame_followup(message))
                 # broad proxy-buy interest: serve the two-path discovery
                 # ack even when the interpreter could only reach UNKNOWN /
                 # GENERAL / low confidence (a degraded LLM read of
@@ -4409,7 +4410,12 @@ class DecisionEngine:
                     and getattr(semantic, "follow_up_op", "NONE") == "NONE"
                     and _svc_ent.get("product")
                     and _no_rag_question
-                    and _derive_active_frame(history) is None)
+                    # OWNER-REAL-LINE-FIX-06 — a stale frame from earlier
+                    # history must not suppress a FRESH IMPORT_INTEREST
+                    # opener / product-slot turn; a genuine in-frame
+                    # follow-up was already handled by SEM-GEN-1 above.
+                    and (_derive_active_frame(history) is None
+                         or not _is_frame_followup(message)))
                 if (_svc_pre_rag and _svc_conf >= 0.6 and _svc_act != "REJECT"
                         and not private_state_inquiry and not _msg_has_identifier):
                     _svc_reply = _service_intent_reply(
