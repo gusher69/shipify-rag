@@ -79,10 +79,12 @@ from services.conversation_semantics import (
     derive_active_frame as _derive_active_frame,
     is_frame_followup as _is_frame_followup,
     resolve_followup as _resolve_frame_followup,
+    resolve_frame_correction as _resolve_frame_correction,
     frame_ack_reply as _frame_ack_reply,
     interpret as _interpret_message,
     PUBLIC_INFO_FAMILIES as _PUBLIC_INFO_FAMILIES,
     _compose as _compose_intent_family,
+    _HIGH_RISK_PRODUCT_RE as _HIGH_RISK_PRODUCT_RE,
 )
 # PHASE-6B — pre-RAG conversational / service-intent layer (help /
 # service-discovery / money-transfer / website-link / public-contact /
@@ -2350,6 +2352,17 @@ def _extract_reply_attachments(chunks: List[Dict]) -> "tuple[List[str], List[Dic
     return images, files
 
 
+# OWNER-REAL-LINE-FIX-05 — active-frame conversation-act replies. No
+# business truth, no policy, no staff-referral: a correction / cancel /
+# clarification inside the import-discovery journey.
+_FRAME_CANCEL_REPLY = (
+    "ได้ค่ะ ยกเลิกรายการนี้ให้นะคะ 😊 ถ้าต้องการให้ช่วยเรื่องอื่น แจ้งได้เลยค่ะ"
+)
+_FRAME_CORRECTION_CLARIFY_REPLY = (
+    "ได้ค่ะ ต้องการเปลี่ยนสินค้า จำนวน หรือวิธีจัดส่งดีคะ?"
+)
+
+
 def _safe_fallback_response(reason: str) -> Dict:
     # PHASE-6E — natural no-information wording. No staff-referral clause:
     # this path is NOT a handoff (routing_type stays SAFE_FALLBACK), and
@@ -4009,6 +4022,92 @@ class DecisionEngine:
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))
 
+                # OWNER-REAL-LINE-FIX-05 — a short CORRECTION / REJECTION /
+                # AMBIGUOUS turn inside an active IMPORT_INTEREST journey is
+                # resolved against the FRAME here, BEFORE the operational-
+                # change flow / Business-Action search / RAG. "เปลี่ยนเป็น
+                # รองเท้าได้ไหม" while product=ชั้นวางของ is a PRODUCT-slot
+                # correction, not a merchandise return/exchange question.
+                # The gated LLM resolve_followup() is tried first (open
+                # vocabulary); a deterministic, typo-tolerant resolver
+                # carries the offline / degraded path. An explicit family
+                # (CONTACT_INFO / ADDRESS_CHANGE / LINK_CONVERSION / a
+                # withdrawal / a private-state inquiry) still wins — those
+                # are excluded here, so §7 "current explicit topic switch
+                # wins" holds. Never invents business truth.
+                _f5_frame = _derive_active_frame(history)
+                _F5_EXPLICIT = {
+                    "CONTACT_INFO", "ADDRESS_CHANGE", "LINK_CONVERSION", "SHIPMENT_STATUS",
+                    "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL", "MY_COUPONS", "INVOICE",
+                    "PICKUP_LOCATION", "SELF_PICKUP", "COUPON_USAGE", "CHARTER_TRUCK",
+                    "SERVICE_DISCOVERY", "HELP_INTENT", "MONEY_TRANSFER_INTEREST",
+                    "WEBSITE_LINK_REQUEST", "WAREHOUSE_INBOUND_JOURNEY", "SHIPPING_ESTIMATE",
+                }
+                if (_f5_frame and _f5_frame.product
+                        and getattr(semantic, "intent_family", "UNKNOWN") not in _F5_EXPLICIT
+                        and _classify_private_state_inquiry(message) is None
+                        and _wd_pending_brand is None):
+                    _f5 = _resolve_frame_correction(message, _f5_frame)
+                    if _f5["op"] == "REJECT":
+                        developer_trace["selection_source"] = "frame_reject_fix05"
+                        developer_trace["semantic_op"] = "REJECT"
+                        return self._finalize(
+                            reply=_build_response(text=_FRAME_CANCEL_REPLY),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    if _f5["op"] == "AMBIGUOUS":
+                        developer_trace["selection_source"] = "frame_correction_ambiguous_fix05"
+                        developer_trace["semantic_op"] = "AMBIGUOUS"
+                        return self._finalize(
+                            reply=_build_response(text=_FRAME_CORRECTION_CLARIFY_REPLY),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    if _f5["op"] in ("CHANGE_TARGET", "CORRECT_QUANTITY", "CHANGE_METHOD"):
+                        # the deterministic read of an explicit "เปลี่ยนเป็น
+                        # X" / "เอ้ย <n>" correction is high-confidence and
+                        # decides directly; the gated LLM resolve_followup()
+                        # still owns the open-vocabulary follow-ups
+                        # ("เสื้อยืดล่ะ") in the SEM-GEN-1 block below.
+                        _use5 = _f5
+                        developer_trace["semantic_frame"] = _f5_frame.as_dict()
+                        developer_trace["semantic_op"] = _use5["op"]
+                        developer_trace["selection_source"] = "frame_correction_fix05"
+                        if _use5["op"] == "CHANGE_TARGET" and _use5.get("product"):
+                            _newp = _use5["product"]
+                            if _HIGH_RISK_PRODUCT_RE.search(_newp):
+                                # a trusted high-risk category -> FIX-04
+                                # canonical form so the trusted policy, not
+                                # this layer, returns the verdict.
+                                message = f"{_newp}นำเข้าได้ไหม"
+                                developer_trace["semantic_rewrite"] = message
+                            else:
+                                _f5_frame.product = _newp
+                                return self._finalize(
+                                    reply=_build_response(
+                                        text=_frame_ack_reply(_f5_frame, changed="product")),
+                                    routing_type="GENERAL", workflow=workflow_hint,
+                                    developer_trace=developer_trace, context=context, start=start,
+                                    alert=_detect_alert(message, context))
+                        elif _use5["op"] in ("CORRECT_QUANTITY", "SET_QUANTITY") and _use5.get("quantity"):
+                            _f5_frame.quantity = _use5["quantity"]
+                            return self._finalize(
+                                reply=_build_response(
+                                    text=_frame_ack_reply(_f5_frame, changed="quantity")),
+                                routing_type="GENERAL", workflow=workflow_hint,
+                                developer_trace=developer_trace, context=context, start=start,
+                                alert=_detect_alert(message, context))
+                        elif _use5["op"] == "CHANGE_METHOD" and _use5.get("method"):
+                            _f5_frame.method = _use5["method"]
+                            return self._finalize(
+                                reply=_build_response(
+                                    text=_frame_ack_reply(_f5_frame, changed="method")),
+                                routing_type="GENERAL", workflow=workflow_hint,
+                                developer_trace=developer_trace, context=context, start=start,
+                                alert=_detect_alert(message, context))
+                    # CHANGE_BRAND / UNKNOWN -> fall through to ordinary routing.
+
                 # CUSTOMER-ACTION-1 — an operational CHANGE / VERIFY request
                 # on the customer's own record that has NO executable
                 # Business Action (แก้จำนวนในบิล / เปลี่ยนวิธีจัดส่ง /
@@ -4158,6 +4257,15 @@ class DecisionEngine:
                         and _classify_private_state_inquiry(message) is None
                         and not _is_referentless_underspecified(message)):
                     _sem = _resolve_frame_followup(message, _sem_frame)
+                    if _sem["op"] == "UNKNOWN":
+                        # OWNER-REAL-LINE-FIX-05 — deterministic fallback
+                        # when the gated LLM resolver is offline / degraded
+                        # / undecided (also the PHASE-6D typo path): a bare
+                        # quantity answer, or a "เปลี่ยนเป็น X" correction.
+                        _det = _resolve_frame_correction(message, _sem_frame)
+                        if _det["op"] in ("CHANGE_TARGET", "CORRECT_QUANTITY",
+                                          "SET_QUANTITY", "CHANGE_METHOD"):
+                            _sem = {**_sem, **_det}
                     developer_trace["semantic_frame"] = _sem_frame.as_dict()
                     developer_trace["semantic_op"] = _sem["op"]
                     _op = _sem["op"]

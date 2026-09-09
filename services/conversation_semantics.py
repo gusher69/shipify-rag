@@ -111,7 +111,10 @@ def _import_noun(q: str):
 # route.
 _FRAME_EXIT_RE = re.compile(
     r"คูปอง|coupon|วอลเล็ท|wallet|ยอดเงิน|ติดตาม|แทรค|แทร็ก|เลขพัสดุ|บิลขนส่ง|สถานะ|"
-    r"ที่อยู่โกดัง|เบอร์ติดต่อ|สมัคร|ลงทะเบียน|ยกเลิก|คืนเงิน|ร้องเรียน", re.IGNORECASE)
+    r"ที่อยู่โกดัง|เบอร์ติดต่อ|สมัคร|ลงทะเบียน|ยกเลิก|คืนเงิน|ร้องเรียน|"
+    # OWNER-REAL-LINE-FIX-05 — a bare abandon / "never mind" also expires
+    # the active import frame, so the NEXT turn is not treated as in-frame.
+    r"ไม่เอาแล้ว|ไม่เอาละ|ไม่เอาล่ะ|ไม่ต้องแล้ว|พอแล้ว|ไม่สนแล้ว|เลิกแล้ว", re.IGNORECASE)
 
 _FRAME_MAX_LOOKBACK = 14
 _FRAME_MAX_GAP = 3  # off-topic-weight after the frame opened -> it is stale
@@ -225,6 +228,14 @@ _FOLLOWUP_SHAPE_RES = (
     re.compile(r"งั้น.*(ดีกว่า|แทน|แล้วกัน)"),
     re.compile(r"เปลี่ยน(ไป|เป็น)?(ถาม|เรื่อง)"),
     re.compile(r"^\s*(ทางรถ|ทางเรือ|ทางอากาศ|รถ|เรือ|เครื่องบิน)\s*(ล่ะ|มั้ย|ไหม)?\s*$"),
+    # OWNER-REAL-LINE-FIX-05 — a slot-CORRECTION shape ("เปลี่ยนเป็น X",
+    # "เอา X แทน", "เอ้ย <n>", "แก้เป็น X"). Typo-tolerant: เปลี่ยน~เปลียน,
+    # เป็น~เปน~เป้น. Deliberately NOT matched: a fresh "สนใจนำเข้า X"
+    # statement, a topic switch ("ขอเบอร์ติดต่อ"), a policy ask.
+    re.compile(r"เปล[ีิ]?[่้]?ย?น\S{0,3}(?:เป[็้]?น|ไป|ของ|มัน)"
+               r"|(?<![ก-๙])เอา\S{1,20}?แทน(?![ก-๙])"
+               r"|^\s*เอ[้๊]?ย[\s\d]"
+               r"|(?:^|[\s,])แก้\S{0,3}เป[็้]?น"),
 )
 _FOLLOWUP_MAX_LEN = 36
 
@@ -337,6 +348,11 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
         head = f"รับทราบค่ะ ปรับเป็นจำนวนประมาณ {frame.quantity} ชิ้นนะคะ "
     elif changed == "method":
         head = f"รับทราบค่ะ เปลี่ยนเป็นขนส่ง{_METHOD_TH.get(frame.method, frame.method)}นะคะ "
+    elif changed == "product":
+        # OWNER-REAL-LINE-FIX-05 — a product-slot CORRECTION inside the
+        # active import journey. Natural lead, still carries the
+        # "(สินค้า X)" state token derive_active_frame() reads back.
+        head = f"ได้ค่ะ เปลี่ยนเป็น{frame.product}ได้เลยค่ะ 😊 "
     ask = ""
     if not frame.quantity:
         ask = " รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ"
@@ -345,6 +361,131 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     elif not frame.weight:
         ask = " รบกวนแจ้งน้ำหนักโดยประมาณเพิ่มเติมได้ไหมคะ"
     return f"{head}({summary}){ask}"
+
+
+# ── OWNER-REAL-LINE-FIX-05 — deterministic active-frame correction ────
+# A short CORRECTION / REJECTION / AMBIGUOUS turn inside an active
+# IMPORT_INTEREST journey must be resolved against the FRAME before any
+# generic RAG / general knowledge. This is the offline / degraded / typo
+# path (the gated LLM resolve_followup() is tried first in production).
+# Typo-tolerant, per PHASE-6D (no fuzzy-fix at intent time):
+#   เปลี่ยน ~ เปลียน ~ เปลี่ยน   เป็น ~ เปน ~ เป้น   ใช่ ~ ไช่
+_FZ_CHANGE_VB = r"เปล[ีิ]?[่้]?ย?น"
+_FZ_BE_TH = r"เป[็้]?น"
+
+# any substitution / correction SHAPE (a swap of a slot value).
+_FRAME_CORRECTION_SHAPE_RE = re.compile(
+    _FZ_CHANGE_VB
+    + r"|(?<![ก-๙])เอา\S{0,20}?แทน(?![ก-๙])"
+    + r"|(?:^|[\s,])เอ[้๊]?ย(?:[\s\d,]|$)"
+    + r"|(?:^|[\s,])แก้\S{0,3}" + _FZ_BE_TH
+    + r"|(?:^|\s)ไม[่้]?(?:ใช่|ไช่)\s*\S+.{0,4}(?:" + _FZ_BE_TH + r"|เอา)",
+    re.IGNORECASE)
+
+# a bare abandon / "never mind" — cancels the active journey.
+_FRAME_CANCEL_RE = re.compile(
+    r"^\s*(?:ไม่เอา(?:แล้ว|ละ|ล่ะ)?|ไม่ต้อง(?:แล้ว|ละ)?|พอ(?:แล้ว|ก่อน)|"
+    r"ยกเลิก(?:เลย|ก่อน|รายการ)?|เลิก(?:แล้ว|ก่อน)|หยุด(?:ก่อน)?|ไม่สนแล้ว|"
+    r"ช่างมัน|ไม่อยากได้แล้ว)\s*(?:ค่ะ|คะ|ครับ|คับ|นะ|น่ะ|จ้า|จ้ะ)?\s*$",
+    re.IGNORECASE)
+
+# a change request with NO stated target ("เปลี่ยนได้ไหม", "ขอเปลี่ยนหน่อย").
+_FRAME_CORRECTION_NO_TARGET_RE = re.compile(
+    r"^\s*(?:ขอ|อยาก|จะ|ช่วย)?\s*" + _FZ_CHANGE_VB + r"\S{0,3}(?:ได้|ไหว)?\S{0,3}"
+    r"(?:ไหม|มั้ย|มัย|ป่าว|บ่|หรอ|เหรอ|หน่อย|ด้วย)?\s*(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*$",
+    re.IGNORECASE)
+
+# nouns after a change marker that are NOT an import product (they belong
+# to address / account / logistics changes, handled by their own flows).
+_NOT_A_CORRECTION_PRODUCT_RE = re.compile(
+    r"^(?:ที่อยู่|ที่ส่ง|ปลายทาง|ผู้รับ|เบอร์|ชื่อ|บัญชี|รหัส|โกดัง|วิธี|บิล|ออเดอร์|"
+    r"ที่รับ|จุดรับ|สาขา|ธนาคาร|พาสเวิร์ด|รหัสผ่าน|การจัดส่ง|การชำระ)")
+
+_BRAND_TOKEN_RE = re.compile(r"(?<![A-Za-z])(SP|FT)(?![A-Za-z])|เอสพี|เอฟที", re.IGNORECASE)
+_TH_BRAND_WORD = {"เอสพี": "SP", "เอฟที": "FT"}
+
+
+def _frame_correction_product(t: str, current: Optional[str]) -> Optional[str]:
+    """The bare goods noun a substitution turn points to, or None.
+    Takes the span AFTER the last change / be / take marker."""
+    s = (t or "").strip()
+    markers = list(re.finditer(
+        _FZ_CHANGE_VB + r"(?:ของ|สินค้า|มัน)?\s*(?:" + _FZ_BE_TH + r")?"
+        + r"|(?<![ก-๙])เอา\s*(?:" + _FZ_BE_TH + r")?"
+        + r"|(?<![ก-๙])" + _FZ_BE_TH
+        + r"|^\s*เอ[้๊]?ย",
+        s))
+    if not markers:
+        return None
+    tail = s[markers[-1].end():].strip()
+    for _ in range(4):
+        t2 = re.sub(
+            r"[\s,]*(?:แทน|ได้ไหม|ได้มั้ย|ได้ป่าว|ได้บ่|มั้ย|ไหม|ดีกว่า|หน่อย|ด้วย|"
+            r"เลย|ค่ะ|คะ|ครับ|คับ|นะคะ|นะ|น่ะ|จ้า|จ้ะ|แล้ว)\s*$", "", tail).strip()
+        if t2 == tail:
+            break
+        tail = t2
+    tail = re.sub(r"\s+", "", tail)
+    if not (2 <= len(tail) <= 26) or not _THAI_CHAR_RE.search(tail):
+        return None
+    if (any(c.isdigit() for c in tail) or _NEGATION_STOPWORD_RE.search(tail)
+            or _METHOD_WORD_RE.search(tail) or _NOT_A_CORRECTION_PRODUCT_RE.search(tail)):
+        return None
+    if current and tail == current:
+        return None
+    return tail
+
+
+def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
+    """Deterministic resolution of a correction / rejection / ambiguous
+    turn against an active frame. Returns {op, product, quantity, method,
+    brand}; op in CHANGE_TARGET / CORRECT_QUANTITY / CHANGE_METHOD /
+    CHANGE_BRAND / REJECT / AMBIGUOUS / UNKNOWN. Never raises."""
+    out = {"op": "UNKNOWN", "product": None, "quantity": None, "method": None, "brand": None}
+    t = (message or "").strip()
+    if not t or len(t) > 48 or frame is None or not getattr(frame, "product", None):
+        return out
+    if _FRAME_CANCEL_RE.match(t):
+        out["op"] = "REJECT"
+        return out
+    # a bare quantity answer ("20 คู่", "ประมาณ 300 ชิ้น") fills the slot.
+    # COUNT units only — a bare weight ("10 กิโล") is not a quantity.
+    _bareq = re.fullmatch(r"\s*(?:ประมาณ\s*)?(\d{1,7})\s*"
+                          r"(?:ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|โหล|แพ็ค|แพค|ลัง|ผืน|หลัง|"
+                          r"เครื่อง|pcs?|ชิน)?\s*(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*", t, re.IGNORECASE)
+    if _bareq:
+        out["op"], out["quantity"] = "SET_QUANTITY", int(_bareq.group(1))
+        return out
+    if not _FRAME_CORRECTION_SHAPE_RE.search(t):
+        return out
+    cur_product = frame.product if frame else None
+    # shipping-method swap ("เปลี่ยนเป็นทางเรือ", "เอาทางรถแทน")
+    if _METHOD_WORD_RE.search(t) or re.search(
+            r"(?<![ก-๙])(?:ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน)(?![ก-๙])", t):
+        mth = _method_label(t)
+        if mth:
+            out["op"], out["method"] = "CHANGE_METHOD", mth
+            return out
+    prod = _frame_correction_product(t, cur_product)
+    # quantity swap ("เอ้ย 20", "แก้เป็น 8 อัน") — only when no product noun
+    if not prod:
+        mq = re.search(r"(\d{1,7})", t)
+        if mq:
+            out["op"], out["quantity"] = "CORRECT_QUANTITY", int(mq.group(1))
+            return out
+        # brand swap ("เอ้ย FT", "ไม่ใช่ SP เป็น FT") — the LAST brand
+        # token is the correction target.
+        mbs = list(_BRAND_TOKEN_RE.finditer(t))
+        if mbs:
+            b = (mbs[-1].group(1) or mbs[-1].group(0)).upper()
+            out["op"], out["brand"] = "CHANGE_BRAND", _TH_BRAND_WORD.get(b.lower(), b)
+            return out
+    if prod:
+        out["op"], out["product"] = "CHANGE_TARGET", prod
+        return out
+    if _FRAME_CORRECTION_NO_TARGET_RE.match(t):
+        out["op"] = "AMBIGUOUS"
+    return out
 
 
 # ═════════════════════════════════════════════════════════════════════
