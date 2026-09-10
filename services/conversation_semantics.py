@@ -1362,12 +1362,103 @@ def _import_journey_active(history: Optional[List[Dict]]) -> bool:
     return False
 
 
+# P2-STAB — the assistant just asked for a journey slot. A compatible
+# answer on the next turn is a REQUESTED_SLOT_ANSWER (P1 precedence
+# tier 3) and is canonical — the gated LLM must not reclassify it.
+_ASSISTANT_ASKED_QTY_RE = re.compile(
+    r"แจ้งจำนวน|จำนวน\S{0,6}(?:เท่าไหร่|กี่|โดยประมาณ|ประมาณเท่าไร)|กี่(?:ชิ้น|ตัว|คู่|อัน|กล่อง|ชุด)")
+_ASSISTANT_ASKED_METHOD_RE = re.compile(
+    r"ทางรถหรือทางเรือ|ทางรถหรือเรือ|ส่งทางไหน|ขนส่งทางไหน|วิธี(?:การ)?จัดส่ง")
+_BARE_QTY_ANSWER_RE = re.compile(
+    r"^\s*(?:ประมาณ\s*)?\d{1,7}\s*"
+    r"(?:ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|โหล|แพ็ค|แพก|แพค|ลัง|ผืน|หลัง|เครื่อง|pcs?)?\s*"
+    r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
+_BARE_METHOD_ANSWER_RE = re.compile(
+    r"^\s*(?:เอา|ขอ)?\s*(?:ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|รถ|เรือ|เครื่องบิน|"
+    r"โดยรถ|โดยเรือ|โดยเครื่องบิน)\s*(?:ก็ได้|เลย|ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
+
+
+def _last_assistant(history: Optional[List[Dict]]) -> str:
+    for turn in reversed(list(history or [])[-4:]):
+        if turn.get("role") == "assistant":
+            return turn.get("content") or ""
+        if turn.get("role") == "user":
+            return ""
+    return ""
+
+
+def _deterministic_context_authority(t: str, history: Optional[List[Dict]],
+                                     op: str) -> Optional["Interpretation"]:
+    """P2-STAB CENTRAL AUTHORITY RULE (task §2/§3). A high-confidence
+    deterministic CONTEXT resolution is canonical; the gated LLM is
+    disambiguation evidence only and must NOT override it. Returns a
+    canonical Interpretation when such a signal exists (so the caller
+    skips _llm_family entirely), else None.
+
+    Covers: an explicit journey rejection; an active-frame follow-up op;
+    a compatible answer to the slot the assistant just requested
+    (quantity / shipping method — the 'product' case is the FIX-04 block
+    just above). Never fires on an explicit topic switch / restriction
+    question — those are handled by their own deterministic families."""
+    journey_open = _import_journey_active(history)
+    frame = derive_active_frame(history)
+
+    # an explicit journey REJECTION ("ไม่เอาแล้ว", "ยกเลิก") while a
+    # journey is open is canonical — the LLM must not guess a family (it
+    # has been seen to reclassify a bare "ไม่เอาแล้ว" as
+    # PURCHASE_WITHDRAWAL). Family stays UNKNOWN; the REJECT act carries
+    # the meaning and the decision engine's frame-reject path owns it.
+    if _FRAME_CANCEL_RE.match(t) and (journey_open or (frame and frame.product)):
+        return Interpretation(intent_family="UNKNOWN", entities={},
+                              follow_up_op=op, confidence=0.6, source="deterministic",
+                              conversation_act="REJECT")
+
+    if not (frame and frame.product):
+        return None
+    la = _last_assistant(history)
+
+    # explicit topic-switch / restriction / reject-of-previous-answer
+    # wording is NOT a slot answer — let it route on its own signals.
+    if _REJECT_ACT_RE.search(t) or _RESTRICTION_Q_RE.search(t) or _TOPIC_RE.search(t):
+        return None
+
+    # (a) an active-frame follow-up op — attribute to the running frame.
+    if op in ("CORRECTION", "COMPARISON", "TOPIC_CHANGE", "CONTINUE", "SET_VALUE"):
+        return Interpretation(intent_family="IMPORT_INTEREST",
+                              entities={"product": frame.product},
+                              follow_up_op=op, confidence=0.7, source="deterministic",
+                              conversation_act=_conversation_act(t))
+
+    # (b) a compatible answer to the slot the assistant just requested.
+    if _ASSISTANT_ASKED_QTY_RE.search(la) and _BARE_QTY_ANSWER_RE.match(t):
+        return Interpretation(intent_family="IMPORT_INTEREST",
+                              entities={"product": frame.product},
+                              follow_up_op="SET_VALUE", confidence=0.7, source="deterministic",
+                              conversation_act=_conversation_act(t))
+    if _ASSISTANT_ASKED_METHOD_RE.search(la) and _BARE_METHOD_ANSWER_RE.match(t):
+        _m = _method_label(t)
+        _e = {"product": frame.product}
+        if _m:
+            _e["method"] = _m
+        return Interpretation(intent_family="IMPORT_INTEREST", entities=_e,
+                              follow_up_op="SET_VALUE", confidence=0.7, source="deterministic",
+                              conversation_act=_conversation_act(t))
+    return None
+
+
 def interpret(message: str, history: Optional[List[Dict]] = None,
               context: Optional[Dict] = None) -> Interpretation:
     """The ONE central semantic interpretation. Natural language ->
     normalised {intent_family, entities, is_private, follow_up_op}. A
     single gated LLM call only disambiguates novel / ambiguous phrasing
-    and always degrades to the deterministic result."""
+    and always degrades to the deterministic result.
+
+    P2-STAB: the gated LLM is DISAMBIGUATION EVIDENCE. It never overrides
+    a high-confidence deterministic canonical resolution — an explicit
+    current intent, an explicit correction / rejection / topic switch, a
+    structural URL / identifier, an active-frame correction, or a
+    compatible answer to a slot the assistant just requested (see
+    _deterministic_context_authority)."""
     raw = message or ""
     t = raw.strip()
 
@@ -1443,6 +1534,15 @@ def interpret(message: str, history: Optional[List[Dict]] = None,
                                   source="deterministic")
 
     source = "deterministic"
+    # P2-STAB CENTRAL AUTHORITY — before consulting the gated LLM, honour
+    # a high-confidence deterministic CONTEXT resolution (active-frame
+    # follow-up / requested-slot answer). The LLM is disambiguation
+    # evidence; it must not override this.
+    if fam in ("UNKNOWN", "GENERAL") or conf < 0.5:
+        _ctx = _deterministic_context_authority(t, history, op)
+        if _ctx is not None:
+            return _ctx
+
     # SEMANTIC-FIRST-2 — the gated LLM family call also runs when the
     # deterministic tier could only reach GENERAL: "conversational but no
     # specific family" is exactly the case one semantic call is meant to
