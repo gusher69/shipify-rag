@@ -496,11 +496,18 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
             out["op"], out["method"] = "CHANGE_METHOD", mth
             return out
     prod = _frame_correction_product(t, cur_product)
-    # quantity swap ("เอ้ย 20", "แก้เป็น 8 อัน") — only when no product noun
-    if not prod:
-        mq = re.search(r"(\d{1,7})", t)
-        if mq:
-            out["op"], out["quantity"] = "CORRECT_QUANTITY", int(mq.group(1))
+    # quantity swap ("เอ้ย 20", "แก้เป็น 8 อัน", "ไม่ใช่ 5 เป็น 8") — only
+    # when no product noun. For an "A เป็น B" shape the NEW value is the
+    # number AFTER the last "เป็น"/"เอา" marker, else the last number.
+    if not prod and not re.search(r"\d\s*(?:กิโล|กก\.?|โล|กรัม|ตัน|kg|g\b|ซม|cm|มม|mm|เมตร|นิ้ว)", t):
+        _nums = list(re.finditer(r"(\d{1,7})", t))
+        if _nums:
+            _split = None
+            for _mm in re.finditer(r"เป[็้]?น|เอา", t):
+                _split = _mm.end()
+            _after = [m for m in _nums if _split is not None and m.start() >= _split]
+            _pick = (_after[-1] if _after else _nums[-1] if _split is not None else _nums[0])
+            out["op"], out["quantity"] = "CORRECT_QUANTITY", int(_pick.group(1))
             return out
         # brand swap ("เอ้ย FT", "ไม่ใช่ SP เป็น FT") — the LAST brand
         # token is the correction target.

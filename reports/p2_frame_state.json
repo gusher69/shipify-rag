@@ -1,0 +1,4963 @@
+{
+  "summary": {
+    "cases": 205,
+    "turns_scored": 1155,
+    "parity_pct": 100.0,
+    "classes": {
+      "STRUCTURED_IMPROVEMENT": 1065,
+      "MATCH": 90
+    },
+    "structured_wrong": 0,
+    "unit_preservation_pct": 100.0,
+    "by_category": {
+      "corrections": {
+        "pct": 100.0,
+        "n": 75
+      },
+      "lifecycle": {
+        "pct": 100.0,
+        "n": 26
+      },
+      "long_history": {
+        "pct": 100.0,
+        "n": 11
+      },
+      "multi_turn": {
+        "pct": 100.0,
+        "n": 37
+      },
+      "topic_switch": {
+        "pct": 100.0,
+        "n": 34
+      },
+      "unit_preservation": {
+        "pct": 100.0,
+        "n": 22
+      }
+    },
+    "overall_case_pct": 100.0
+  },
+  "rows": [
+    {
+      "id": "A",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "missing": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "B",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "quantity": [
+            20,
+            "คู่"
+          ],
+          "product": [
+            "ชั้นวางของ",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "C",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "quantity": [
+            20,
+            "คู่"
+          ],
+          "product": [
+            "รองเท้า",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "D",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "quantity": [
+            10,
+            "คู่"
+          ],
+          "product": [
+            "รองเท้า",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "E",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            10,
+            "คู่"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "F",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "G",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT00",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โต๊ะ",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT01",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ],
+          "quantity": [
+            5,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT02",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            100,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT03",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋า",
+            null
+          ],
+          "quantity": [
+            3,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT04",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟ",
+            null
+          ],
+          "quantity": [
+            6,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT05",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นวางของ",
+            null
+          ],
+          "quantity": [
+            2,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT06",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องจักร",
+            null
+          ],
+          "quantity": [
+            40,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT07",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "อะไหล่รถยนต์",
+            null
+          ],
+          "quantity": [
+            12,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT08",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ของเล่น",
+            null
+          ],
+          "quantity": [
+            2,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT09",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องครัว",
+            null
+          ],
+          "quantity": [
+            8,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT10",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พรม",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MT11",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "หมอน",
+            null
+          ],
+          "quantity": [
+            5,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC00",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋า",
+            null
+          ],
+          "quantity": [
+            100,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC01",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟ",
+            null
+          ],
+          "quantity": [
+            3,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC02",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นวางของ",
+            null
+          ],
+          "quantity": [
+            6,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC03",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องจักร",
+            null
+          ],
+          "quantity": [
+            2,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC04",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "อะไหล่รถยนต์",
+            null
+          ],
+          "quantity": [
+            40,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC05",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ของเล่น",
+            null
+          ],
+          "quantity": [
+            12,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC06",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องครัว",
+            null
+          ],
+          "quantity": [
+            2,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC07",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พรม",
+            null
+          ],
+          "quantity": [
+            8,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC08",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "หมอน",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC09",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โต๊ะ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC10",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ],
+          "quantity": [
+            100,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PC11",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            3,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC00",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โต๊ะ",
+            null
+          ],
+          "quantity": [
+            12,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC01",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ],
+          "quantity": [
+            107,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC02",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            10,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC03",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋า",
+            null
+          ],
+          "quantity": [
+            13,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC04",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟ",
+            null
+          ],
+          "quantity": [
+            9,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC05",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นวางของ",
+            null
+          ],
+          "quantity": [
+            47,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC06",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องจักร",
+            null
+          ],
+          "quantity": [
+            19,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC07",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "อะไหล่รถยนต์",
+            null
+          ],
+          "quantity": [
+            9,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC08",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ของเล่น",
+            null
+          ],
+          "quantity": [
+            15,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC09",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องครัว",
+            null
+          ],
+          "quantity": [
+            27,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC10",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พรม",
+            null
+          ],
+          "quantity": [
+            12,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QC11",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "หมอน",
+            null
+          ],
+          "quantity": [
+            107,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM00",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โต๊ะ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM01",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM02",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM03",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋า",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM04",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM05",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นวางของ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM06",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องจักร",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM07",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "อะไหล่รถยนต์",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM08",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ของเล่น",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM09",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เครื่องครัว",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM10",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พรม",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "SM11",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "หมอน",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ],
+          "shipping_method": [
+            "sea",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS00",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "โต๊ะ",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS01",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS02",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS03",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "กระเป๋า",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS04",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "โคมไฟ",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS05",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "ชั้นวางของ",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS06",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "เครื่องจักร",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS07",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "อะไหล่รถยนต์",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS08",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "ของเล่น",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS09",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "เครื่องครัว",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS10",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "พรม",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TS11",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "หมอน",
+            null
+          ],
+          "quantity": [
+            10,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ00",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "โต๊ะ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ01",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ02",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ03",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "กระเป๋า",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ04",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "โคมไฟ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ05",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "ชั้นวางของ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ06",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "เครื่องจักร",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ07",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "อะไหล่รถยนต์",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ08",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "ของเล่น",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ09",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "เครื่องครัว",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ10",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "พรม",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "RJ11",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "CANCELLED",
+        "slots": {
+          "product": [
+            "หมอน",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN00",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN01",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            5,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN02",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            100,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN03",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            3,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN04",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            6,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN05",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            2,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN06",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            40,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN07",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            12,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN08",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            2,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN09",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            8,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN-W1",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "weight_canonical": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "weight": [
+            5000,
+            "กรัม"
+          ],
+          "quantity": [
+            3,
+            "ตัว"
+          ],
+          "product": [
+            "โต๊ะ",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "UN-D1",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กล่องรองเท้า",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LH-empty",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "no_stale_takeover": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LH-10turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "no_stale_takeover": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LH-30turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "no_stale_takeover": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LH-50turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "no_stale_takeover": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LH-100turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "no_stale_takeover": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LHC-30turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "หมวก",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "LHC-70turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "หมวก",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "LC-suspend-resume",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ],
+          "quantity": [
+            10,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LC-cancel-then-new",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "LC-topic-then-back",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            5,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "NJ00",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true
+      },
+      "pass": true,
+      "final": {
+        "journey": null,
+        "status": null,
+        "slots": {}
+      }
+    },
+    {
+      "id": "NJ01",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true
+      },
+      "pass": true,
+      "final": {
+        "journey": null,
+        "status": null,
+        "slots": {}
+      }
+    },
+    {
+      "id": "NJ02",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true
+      },
+      "pass": true,
+      "final": {
+        "journey": null,
+        "status": null,
+        "slots": {}
+      }
+    },
+    {
+      "id": "NJ03",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true
+      },
+      "pass": true,
+      "final": {
+        "journey": null,
+        "status": null,
+        "slots": {}
+      }
+    },
+    {
+      "id": "NJ04",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true
+      },
+      "pass": true,
+      "final": {
+        "journey": null,
+        "status": null,
+        "slots": {}
+      }
+    },
+    {
+      "id": "NJ05",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true
+      },
+      "pass": true,
+      "final": {
+        "journey": null,
+        "status": null,
+        "slots": {}
+      }
+    },
+    {
+      "id": "MTX00",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX01",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "นาฬิกา",
+            null
+          ],
+          "quantity": [
+            5,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX02",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้าผ้าใบ",
+            null
+          ],
+          "quantity": [
+            100,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX03",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋าเดินทาง",
+            null
+          ],
+          "quantity": [
+            3,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX04",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "จักรยาน",
+            null
+          ],
+          "quantity": [
+            6,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX05",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เตาอบ",
+            null
+          ],
+          "quantity": [
+            2,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX06",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พัดลม",
+            null
+          ],
+          "quantity": [
+            40,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX07",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ผ้าม่าน",
+            null
+          ],
+          "quantity": [
+            12,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX08",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ที่นอน",
+            null
+          ],
+          "quantity": [
+            2,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX09",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตู้เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            8,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX10",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้สำนักงาน",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX11",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟตั้งโต๊ะ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX12",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กล่องเก็บของ",
+            null
+          ],
+          "quantity": [
+            100,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX13",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นหนังสือ",
+            null
+          ],
+          "quantity": [
+            3,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MTX14",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โซฟา",
+            null
+          ],
+          "quantity": [
+            6,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX00",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เตาอบ",
+            null
+          ],
+          "quantity": [
+            6,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX01",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พัดลม",
+            null
+          ],
+          "quantity": [
+            2,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX02",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ผ้าม่าน",
+            null
+          ],
+          "quantity": [
+            40,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX03",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ที่นอน",
+            null
+          ],
+          "quantity": [
+            12,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX04",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตู้เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            2,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX05",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้สำนักงาน",
+            null
+          ],
+          "quantity": [
+            8,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX06",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟตั้งโต๊ะ",
+            null
+          ],
+          "quantity": [
+            20,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX07",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กล่องเก็บของ",
+            null
+          ],
+          "quantity": [
+            5,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX08",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นหนังสือ",
+            null
+          ],
+          "quantity": [
+            100,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX09",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โซฟา",
+            null
+          ],
+          "quantity": [
+            3,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX10",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            6,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX11",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "นาฬิกา",
+            null
+          ],
+          "quantity": [
+            2,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX12",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้าผ้าใบ",
+            null
+          ],
+          "quantity": [
+            40,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX13",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋าเดินทาง",
+            null
+          ],
+          "quantity": [
+            12,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "PCX14",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "จักรยาน",
+            null
+          ],
+          "quantity": [
+            2,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX00",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            8,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX01",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "นาฬิกา",
+            null
+          ],
+          "quantity": [
+            11,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX02",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้าผ้าใบ",
+            null
+          ],
+          "quantity": [
+            7,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX03",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋าเดินทาง",
+            null
+          ],
+          "quantity": [
+            45,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX04",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "จักรยาน",
+            null
+          ],
+          "quantity": [
+            17,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX05",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เตาอบ",
+            null
+          ],
+          "quantity": [
+            7,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX06",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พัดลม",
+            null
+          ],
+          "quantity": [
+            13,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX07",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ผ้าม่าน",
+            null
+          ],
+          "quantity": [
+            25,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX08",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ที่นอน",
+            null
+          ],
+          "quantity": [
+            10,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX09",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตู้เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            105,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX10",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้สำนักงาน",
+            null
+          ],
+          "quantity": [
+            8,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX11",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟตั้งโต๊ะ",
+            null
+          ],
+          "quantity": [
+            11,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX12",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กล่องเก็บของ",
+            null
+          ],
+          "quantity": [
+            7,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX13",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นหนังสือ",
+            null
+          ],
+          "quantity": [
+            45,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "QCX14",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โซฟา",
+            null
+          ],
+          "quantity": [
+            17,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX00",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX01",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "นาฬิกา",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX02",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "รองเท้าผ้าใบ",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX03",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "กระเป๋าเดินทาง",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX04",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "จักรยาน",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX05",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "เตาอบ",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX06",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "พัดลม",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX07",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "ผ้าม่าน",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX08",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "ที่นอน",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX09",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "ตู้เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX10",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "เก้าอี้สำนักงาน",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX11",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "โคมไฟตั้งโต๊ะ",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX12",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "กล่องเก็บของ",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX13",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "ชั้นหนังสือ",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TSX14",
+      "category": "topic_switch",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "SUSPENDED",
+        "slots": {
+          "product": [
+            "โซฟา",
+            null
+          ],
+          "quantity": [
+            8,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX00",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ผ้าม่าน",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX01",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ที่นอน",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX02",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตู้เสื้อผ้า",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX03",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้สำนักงาน",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX04",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โคมไฟตั้งโต๊ะ",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX05",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กล่องเก็บของ",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX06",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ชั้นหนังสือ",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX07",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "โซฟา",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX08",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LCX09",
+      "category": "lifecycle",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "นาฬิกา",
+            null
+          ],
+          "quantity": [
+            5,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "LHX-20turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "สกู๊ตเตอร์",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "LHX-40turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "สกู๊ตเตอร์",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "LHX-60turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "สกู๊ตเตอร์",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "LHX-80turn",
+      "category": "long_history",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "สกู๊ตเตอร์",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX00",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            40,
+            "คู่"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX01",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            10,
+            "ตัว"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX02",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            200,
+            "ชิ้น"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX03",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            6,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX04",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            12,
+            "ชุด"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX05",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            4,
+            "โหล"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX06",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            80,
+            "อัน"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX07",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            24,
+            "ใบ"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX08",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            4,
+            "เครื่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "UNX09",
+      "category": "unit_preservation",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            16,
+            "แพ็ค"
+          ]
+        }
+      }
+    },
+    {
+      "id": "TY00",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้า",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "TY01",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋า",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "TY02",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "หมวก",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "TY03",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เก้าอี้",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "TY04",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ผ้าห่ม",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "TY05",
+      "category": "corrections",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เสื้อ",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ00",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ตุ๊กตา",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ01",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "นาฬิกา",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ02",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "รองเท้าผ้าใบ",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ03",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "กระเป๋าเดินทาง",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ04",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "จักรยาน",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ05",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "เตาอบ",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ06",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "พัดลม",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    },
+    {
+      "id": "BQ07",
+      "category": "multi_turn",
+      "checks": {
+        "journey": true,
+        "status": true,
+        "slots": true,
+        "unit": true
+      },
+      "pass": true,
+      "final": {
+        "journey": "IMPORT_INTEREST",
+        "status": "ACTIVE",
+        "slots": {
+          "product": [
+            "ผ้าม่าน",
+            null
+          ],
+          "quantity": [
+            30,
+            "กล่อง"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -3225,6 +3225,37 @@ class DecisionEngine:
                 resolution = None
                 developer_trace["conversation_resolution_error"] = str(_e)
 
+            # SYSTEM-WIDE CONVERSATION INTELLIGENCE — P2 SHADOW-WRITE.
+            # Build the structured conversation frame from the P1
+            # resolution + the previously-persisted frame (passed in by
+            # the channel adapter as context["conversation_frame"]). It
+            # is logged with its parity vs the legacy text-derived frame
+            # and returned in the result for the adapter to persist —
+            # NOTHING routes off it (legacy derive_active_frame stays
+            # authoritative until shadow parity >= 99%).
+            structured_frame = None
+            try:
+                if resolution is not None:
+                    from services.conversation_frame_store import build_frame as _build_frame, frame_parity as _frame_parity
+                    from services.conversation_semantics import derive_active_frame as _legacy_frame
+                    _prev_frame = context.get("conversation_frame")
+                    structured_frame = _build_frame(_prev_frame, resolution)
+                    _parity = _frame_parity(_legacy_frame(history), structured_frame, resolution)
+                    developer_trace["conversation_frame"] = {
+                        "version": structured_frame.get("version"),
+                        "journey": structured_frame.get("journey"),
+                        "status": structured_frame.get("status"),
+                        "requested_slot": structured_frame.get("requested_slot"),
+                        "slots": structured_frame.get("slots"),
+                        "turn_seq": structured_frame.get("turn_seq"),
+                        "source": "conversation_resolution",
+                        "parity_with_legacy": _parity,
+                    }
+            except Exception as _e:
+                developer_trace["conversation_frame_error"] = str(_e)
+            # surfaced for the channel adapter's post-decide persistence.
+            context["_structured_conversation_frame"] = structured_frame
+
             # Confirmed Pending Action — Direct Execution (Confirmation
             # Continuation Correctness fix, 2026-08-23). A caller
             # (line_bot/webhook.py, admin/routes.py Auto mode) that has
@@ -6991,6 +7022,12 @@ class DecisionEngine:
             "handoff_payload": handoff_payload,
             "error": error,
         }
+        # P2 SHADOW-WRITE — the structured conversation frame for this
+        # turn, for the channel adapter to persist to ai_sessions
+        # .conversation_frame. Advisory only; never a routing input.
+        _sf = context.get("_structured_conversation_frame")
+        if _sf is not None:
+            response["conversation_frame"] = _sf
         if bool(context.get("developer_mode")):
             developer_trace.setdefault("confidence", None)
             response["developer"] = {**developer_trace, "latency_ms": round((time.time() - start) * 1000, 2)}

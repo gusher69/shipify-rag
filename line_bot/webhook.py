@@ -578,6 +578,17 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     handoff_status_before = handoff_state_before["status"]
     decide_context["handoff_status"] = handoff_status_before
 
+    # P2 SHADOW-WRITE (2026-09-10) — load the previously-persisted
+    # structured conversation frame so decide() can build the next one
+    # and measure parity. Degrades to None if the column is absent
+    # (pre-migration 048). NOT a routing input — legacy
+    # derive_active_frame stays authoritative.
+    try:
+        decide_context["conversation_frame"] = (
+            session_service.get_conversation_frame(conversation["id"]) if conversation else None)
+    except Exception:
+        decide_context["conversation_frame"] = None
+
     # LINE Confirmation Flow (2026-08-10) — a customer-typed reply like
     # "ยืนยัน"/"yes" only means anything in the context of a PENDING
     # confirmation for THIS exact tenant/channel/user (never another
@@ -961,6 +972,14 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                 session=conversation)
     except Exception as e:
         print(f"[webhook] record_conversation_turn failed (non-fatal): {e}")
+
+    # P2 SHADOW-WRITE — persist the structured conversation frame decide()
+    # built this turn. Non-fatal; no-op if the column is absent.
+    try:
+        if conversation and isinstance(result, dict) and result.get("conversation_frame"):
+            session_service.save_conversation_frame(conversation["id"], result["conversation_frame"])
+    except Exception as e:
+        print(f"[webhook] save_conversation_frame failed (non-fatal, shadow-write): {e}")
 
     # Phase 3.2-3.3 — profile 'notes', incremental profile stats, and
     # customer-tier rescoring. Pure analytics/enrichment: nothing here is

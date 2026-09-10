@@ -678,6 +678,29 @@ class SessionService:
         except Exception as e:
             print(f"[SessionService] set_handoff_status failed (non-fatal): {e}")
 
+    # ── P2 structured conversation frame (SHADOW-WRITE, 2026-09-10) ───
+    # Same ai_sessions row as the conversation object; one nullable JSONB
+    # column (migrations/048_conversation_frame_shadow_state.sql). Both
+    # degrade to None / no-op if the column is absent (pre-migration) —
+    # legacy text-based derive_active_frame stays authoritative.
+    def get_conversation_frame(self, conversation_id: str) -> Optional[Dict]:
+        try:
+            res = _get_sb().table("ai_sessions").select("conversation_frame") \
+                .eq("id", conversation_id).single().execute()
+            return (res.data or {}).get("conversation_frame") or None
+        except Exception as e:
+            print(f"[SessionService] get_conversation_frame degraded to None: {e}")
+            return None
+
+    def save_conversation_frame(self, conversation_id: str, frame: Optional[Dict]) -> None:
+        if not conversation_id or not frame:
+            return
+        try:
+            _get_sb().table("ai_sessions").update({"conversation_frame": frame}) \
+                .eq("id", conversation_id).execute()
+        except Exception as e:
+            print(f"[SessionService] save_conversation_frame failed (non-fatal, shadow-write): {e}")
+
     def record_conversation_turn(self, session_id: Optional[str], question: str, decide_result: Dict,
                                   *, line_user_id: Optional[str] = None, conversation_tier: Optional[str] = None,
                                   session: Optional[Dict] = None) -> Optional[Dict]:

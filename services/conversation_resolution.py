@@ -471,21 +471,37 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
     if fc.get("op") == "CHANGE_TARGET" and fc.get("product"):
         slot_corrections["product"] = {"old": (frame.product if frame else None), "new": fc["product"]}
     elif fc.get("op") in ("CORRECT_QUANTITY",) and fc.get("quantity") is not None:
-        slot_corrections["quantity"] = {"old": (frame.quantity if frame else None), "new": fc["quantity"]}
+        # keep the unit the customer gave this turn ("เอ้ย 30 กล่อง") —
+        # the deterministic fc drops it, extract_entities kept it.
+        _eq = ent_raw.get("quantity")
+        _unit = _eq.unit if (isinstance(_eq, SlotValue) and _eq.value == fc["quantity"]) else None
+        slot_corrections["quantity"] = {"old": (frame.quantity if frame else None),
+                                        "new": fc["quantity"], "unit": _unit,
+                                        "raw": (_eq.raw if isinstance(_eq, SlotValue) else str(fc["quantity"]))}
     elif fc.get("op") == "CHANGE_METHOD" and fc.get("method"):
         slot_corrections["shipping_method"] = {"old": (frame.method if frame else None), "new": fc["method"]}
     elif fc.get("op") == "CHANGE_BRAND" and fc.get("brand"):
         slot_corrections["brand"] = {"old": None, "new": fc["brand"]}
     elif fc.get("op") == "SET_QUANTITY" and fc.get("quantity") is not None:
-        slot_updates["quantity"] = _slot(fc["quantity"], None, raw=str(fc["quantity"]))
-    # entity-derived fresh fills — ONLY inside (or opening) an import
-    # journey, so a PRODUCT_POLICY / SHIPMENT_STATUS / calculator turn's
-    # incidental numbers never look like journey slot fills.
+        # keep the unit the customer actually gave ("20 คู่") — the
+        # deterministic _bareq that produced fc drops it, extract_entities
+        # kept it.
+        _eq = ent_raw.get("quantity")
+        if isinstance(_eq, SlotValue) and _eq.value == fc["quantity"]:
+            slot_updates["quantity"] = _eq
+        else:
+            slot_updates["quantity"] = _slot(fc["quantity"], None, raw=str(fc["quantity"]))
+    # entity-derived fresh fills — what THIS turn actually supplied.
+    # ONLY inside (or opening) an import journey, so a PRODUCT_POLICY /
+    # SHIPMENT_STATUS / calculator turn's incidental numbers never look
+    # like journey slot fills. NOT gated on `known` (which is the
+    # legacy-derived frame and may be polluted) — a slot the turn
+    # supplies is an update even if the legacy frame already guessed one.
     if fam == "IMPORT_INTEREST" or active_journey == "IMPORT_INTEREST":
         for k, v in ent_raw.items():
             if k in ("platform", "url", "identifier", "brand"):
                 continue
-            if k not in slot_corrections and k not in known:
+            if k not in slot_corrections:
                 slot_updates.setdefault(k, v)
 
     # ── conversation act ──
@@ -521,8 +537,10 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
     topic_switch = fam if act == "TOPIC_SWITCH" else None
 
     # ── precedence ──
-    has_new_intent = act == "NEW_INTENT" or (
-        fam in _JOURNEY_FAMILIES and not in_ffup and op == "NONE" and not slot_corrections)
+    # a fresh explicit opener ONLY — a bare slot ANSWER to the assistant's
+    # own question (act == ANSWER) is precedence tier 3, never tier 1,
+    # even though its family is IMPORT_INTEREST.
+    has_new_intent = act == "NEW_INTENT"
     has_crt = act in ("CORRECTION", "REJECTION", "TOPIC_SWITCH")
     answers_req = act == "ANSWER"
     winner = resolve_precedence(

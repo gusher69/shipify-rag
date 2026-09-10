@@ -1,0 +1,44 @@
+{
+  "summary": {
+    "cases": 205,
+    "turns_scored": 1155,
+    "parity_pct": 100.0,
+    "classes": {
+      "STRUCTURED_IMPROVEMENT": 1065,
+      "MATCH": 90
+    },
+    "structured_wrong": 0,
+    "unit_preservation_pct": 100.0,
+    "by_category": {
+      "corrections": {
+        "pct": 100.0,
+        "n": 75
+      },
+      "lifecycle": {
+        "pct": 100.0,
+        "n": 26
+      },
+      "long_history": {
+        "pct": 100.0,
+        "n": 11
+      },
+      "multi_turn": {
+        "pct": 100.0,
+        "n": 37
+      },
+      "topic_switch": {
+        "pct": 100.0,
+        "n": 34
+      },
+      "unit_preservation": {
+        "pct": 100.0,
+        "n": 22
+      }
+    },
+    "overall_case_pct": 100.0
+  },
+  "parity": {
+    "STRUCTURED_IMPROVEMENT": 1065,
+    "MATCH": 90
+  }
+}
