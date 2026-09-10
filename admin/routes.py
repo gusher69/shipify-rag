@@ -3698,6 +3698,15 @@ async def hybrid_playground_ask(request: Request):
         pg_channel = "playground"
         decide_base_context = {"developer_mode": True, "channel": "playground",
                                 "customer_context": profile or {}, "handoff_status": handoff_status_before}
+        # P2 SHADOW-WRITE — same additive load as line_bot/webhook.py so
+        # Auto-mode (the production-equivalent channel) also persists the
+        # structured conversation frame. Degrades to None; never a
+        # routing input.
+        try:
+            decide_base_context["conversation_frame"] = (
+                pg_session_service.get_conversation_frame(conversation["id"]) if conversation else None)
+        except Exception:
+            decide_base_context["conversation_frame"] = None
 
         pending = pending_service.get_active(tenant_id=pg_tenant_id, channel=pg_channel,
                                               conversation_key=playground_user_id)
@@ -3924,6 +3933,14 @@ async def hybrid_playground_ask(request: Request):
             pg_session_service.record_conversation_turn(
                 conversation["id"], question, decide_result, line_user_id=playground_user_id,
                 conversation_tier=(profile or {}).get("conversation_tier"), session=conversation)
+            # P2 SHADOW-WRITE — persist the structured conversation frame
+            # decide() built this turn (non-fatal; no-op if column absent).
+            try:
+                if decide_result.get("conversation_frame"):
+                    pg_session_service.save_conversation_frame(
+                        conversation["id"], decide_result["conversation_frame"])
+            except Exception as _e:
+                print(f"[playground-auto] save_conversation_frame failed (non-fatal): {_e}")
             conversation_fields = extract_conversation_fields(decide_result)
             update_profile_from_turn(playground_user_id, decide_result=decide_result,
                                       conversation_fields=conversation_fields,
