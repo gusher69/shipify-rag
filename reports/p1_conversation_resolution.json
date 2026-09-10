@@ -1,0 +1,4189 @@
+{
+  "summary": {
+    "total": 302,
+    "by_category": {
+      "multi_turn": 100,
+      "corrections": 51,
+      "topic_switch": 65,
+      "multi_entity": 25,
+      "typo_context": 25,
+      "long_history": 20,
+      "referents": 12,
+      "anchor": 4
+    },
+    "accuracy": {
+      "act": {
+        "pct": 100.0,
+        "n": 194
+      },
+      "intent": {
+        "pct": 100.0,
+        "n": 116
+      },
+      "journey": {
+        "pct": 100.0,
+        "n": 75
+      },
+      "topic": {
+        "pct": 100.0,
+        "n": 39
+      },
+      "correction": {
+        "pct": 100.0,
+        "n": 76
+      },
+      "multi_entity": {
+        "pct": 92.0,
+        "n": 25
+      },
+      "unit_preservation": {
+        "pct": 100.0,
+        "n": 1
+      }
+    },
+    "structured_token_corruption": 0
+  },
+  "rows": [
+    {
+      "id": "mt_open_1",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_2",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_3",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_4",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_5",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_6",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_7",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_8",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_9",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_10",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_11",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_12",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_13",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_14",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_15",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_16",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_17",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_18",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_19",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_20",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_21",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_22",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_23",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_24",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_25",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_26",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_27",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_28",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_29",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_30",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_31",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_32",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_33",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_34",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_35",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_36",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_37",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_38",
+      "category": "multi_turn",
+      "message": "สนใจนำเข้าสินค้าจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_39",
+      "category": "multi_turn",
+      "message": "อยากซื้อของจาก 1688",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_open_40",
+      "category": "multi_turn",
+      "message": "อยากสั่งของจีน",
+      "dims": {
+        "act": true,
+        "intent": true,
+        "journey": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_41",
+      "category": "multi_turn",
+      "message": "เป็นรองเท้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_42",
+      "category": "multi_turn",
+      "message": "รองเท้าค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_43",
+      "category": "multi_turn",
+      "message": "อยากได้รองเท้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_44",
+      "category": "multi_turn",
+      "message": "ขอเป็นรองเท้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_45",
+      "category": "multi_turn",
+      "message": "รองเท้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_46",
+      "category": "multi_turn",
+      "message": "เป็นโต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_47",
+      "category": "multi_turn",
+      "message": "โต๊ะค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_48",
+      "category": "multi_turn",
+      "message": "อยากได้โต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_49",
+      "category": "multi_turn",
+      "message": "ขอเป็นโต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_50",
+      "category": "multi_turn",
+      "message": "โต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_51",
+      "category": "multi_turn",
+      "message": "เป็นเก้าอี้",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_52",
+      "category": "multi_turn",
+      "message": "เก้าอี้ค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_53",
+      "category": "multi_turn",
+      "message": "อยากได้เก้าอี้",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_54",
+      "category": "multi_turn",
+      "message": "ขอเป็นเก้าอี้",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_55",
+      "category": "multi_turn",
+      "message": "เก้าอี้",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_56",
+      "category": "multi_turn",
+      "message": "เป็นเสื้อผ้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_57",
+      "category": "multi_turn",
+      "message": "เสื้อผ้าค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_58",
+      "category": "multi_turn",
+      "message": "อยากได้เสื้อผ้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_59",
+      "category": "multi_turn",
+      "message": "ขอเป็นเสื้อผ้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_60",
+      "category": "multi_turn",
+      "message": "เสื้อผ้า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_61",
+      "category": "multi_turn",
+      "message": "เป็นกระเป๋า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_62",
+      "category": "multi_turn",
+      "message": "กระเป๋าค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_63",
+      "category": "multi_turn",
+      "message": "อยากได้กระเป๋า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_64",
+      "category": "multi_turn",
+      "message": "ขอเป็นกระเป๋า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_65",
+      "category": "multi_turn",
+      "message": "กระเป๋า",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_66",
+      "category": "multi_turn",
+      "message": "เป็นหมวก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_67",
+      "category": "multi_turn",
+      "message": "หมวกค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_68",
+      "category": "multi_turn",
+      "message": "อยากได้หมวก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_69",
+      "category": "multi_turn",
+      "message": "ขอเป็นหมวก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_70",
+      "category": "multi_turn",
+      "message": "หมวก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_71",
+      "category": "multi_turn",
+      "message": "เป็นชั้นวางของ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_72",
+      "category": "multi_turn",
+      "message": "ชั้นวางของค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_73",
+      "category": "multi_turn",
+      "message": "อยากได้ชั้นวางของ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_74",
+      "category": "multi_turn",
+      "message": "ขอเป็นชั้นวางของ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_75",
+      "category": "multi_turn",
+      "message": "ชั้นวางของ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_76",
+      "category": "multi_turn",
+      "message": "เป็นโคมไฟตั้งโต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_77",
+      "category": "multi_turn",
+      "message": "โคมไฟตั้งโต๊ะค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_78",
+      "category": "multi_turn",
+      "message": "อยากได้โคมไฟตั้งโต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_79",
+      "category": "multi_turn",
+      "message": "ขอเป็นโคมไฟตั้งโต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_80",
+      "category": "multi_turn",
+      "message": "โคมไฟตั้งโต๊ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_81",
+      "category": "multi_turn",
+      "message": "เป็นอะไหล่รถยนต์",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_82",
+      "category": "multi_turn",
+      "message": "อะไหล่รถยนต์ค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_83",
+      "category": "multi_turn",
+      "message": "อยากได้อะไหล่รถยนต์",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_84",
+      "category": "multi_turn",
+      "message": "ขอเป็นอะไหล่รถยนต์",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_85",
+      "category": "multi_turn",
+      "message": "อะไหล่รถยนต์",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_86",
+      "category": "multi_turn",
+      "message": "เป็นกล่องพลาสติก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_87",
+      "category": "multi_turn",
+      "message": "กล่องพลาสติกค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_88",
+      "category": "multi_turn",
+      "message": "อยากได้กล่องพลาสติก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_89",
+      "category": "multi_turn",
+      "message": "ขอเป็นกล่องพลาสติก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_90",
+      "category": "multi_turn",
+      "message": "กล่องพลาสติก",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_91",
+      "category": "multi_turn",
+      "message": "เป็นผ้าห่ม",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_92",
+      "category": "multi_turn",
+      "message": "ผ้าห่มค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_93",
+      "category": "multi_turn",
+      "message": "อยากได้ผ้าห่ม",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_94",
+      "category": "multi_turn",
+      "message": "ขอเป็นผ้าห่ม",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_95",
+      "category": "multi_turn",
+      "message": "ผ้าห่ม",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_96",
+      "category": "multi_turn",
+      "message": "เป็นที่นอน",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_97",
+      "category": "multi_turn",
+      "message": "ที่นอนค่ะ",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_98",
+      "category": "multi_turn",
+      "message": "อยากได้ที่นอน",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_99",
+      "category": "multi_turn",
+      "message": "ขอเป็นที่นอน",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "mt_slot_100",
+      "category": "multi_turn",
+      "message": "ที่นอน",
+      "dims": {
+        "intent": true
+      },
+      "act": "ANSWER",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_101",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นโคมไฟตั้งโต๊ะได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_102",
+      "category": "corrections",
+      "message": "เอาเป็นโคมไฟตั้งโต๊ะได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_103",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นอะไหล่รถยนต์ได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_104",
+      "category": "corrections",
+      "message": "เอาเป็นอะไหล่รถยนต์ได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_105",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นอะไหล่รถยนต์ได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_106",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นกล่องพลาสติกได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_107",
+      "category": "corrections",
+      "message": "เอาเป็นกล่องพลาสติกได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_108",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นกล่องพลาสติกได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_109",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นผ้าห่มได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_110",
+      "category": "corrections",
+      "message": "เอาเป็นผ้าห่มได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_111",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นผ้าห่มได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_112",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นที่นอนได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_113",
+      "category": "corrections",
+      "message": "เอาเป็นที่นอนได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_114",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นที่นอนได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_115",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นจักรยานได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_116",
+      "category": "corrections",
+      "message": "เอาเป็นจักรยานได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_117",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นจักรยานได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_118",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นตุ๊กตาได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_119",
+      "category": "corrections",
+      "message": "เอาเป็นตุ๊กตาได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_120",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นตุ๊กตาได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_121",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นแก้วน้ำได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_122",
+      "category": "corrections",
+      "message": "เอาเป็นแก้วน้ำได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_123",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นแก้วน้ำได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_124",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นจานได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_125",
+      "category": "corrections",
+      "message": "เอาเป็นจานได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_126",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นจานได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_127",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นช้อนส้อมได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_128",
+      "category": "corrections",
+      "message": "เอาเป็นช้อนส้อมได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_129",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นช้อนส้อมได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_130",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นนาฬิกาได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_131",
+      "category": "corrections",
+      "message": "เอาเป็นนาฬิกาได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_prod_132",
+      "category": "corrections",
+      "message": "ขอเปลี่ยนเป็นนาฬิกาได้ไหม",
+      "dims": {
+        "act": true,
+        "journey": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_133",
+      "category": "corrections",
+      "message": "เอ้ย 10 คู่",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_134",
+      "category": "corrections",
+      "message": "เอ้ย 11 ตัว",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_135",
+      "category": "corrections",
+      "message": "เอ้ย 12 ชิ้น",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_136",
+      "category": "corrections",
+      "message": "เอ้ย 13 อัน",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_137",
+      "category": "corrections",
+      "message": "เอ้ย 14 ใบ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_138",
+      "category": "corrections",
+      "message": "เอ้ย 15 ชุด",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_139",
+      "category": "corrections",
+      "message": "เอ้ย 16 กล่อง",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_140",
+      "category": "corrections",
+      "message": "เอ้ย 17 โหล",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_141",
+      "category": "corrections",
+      "message": "เอ้ย 18 แพ็ค",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_qty_142",
+      "category": "corrections",
+      "message": "เอ้ย 19 ลัง",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_143",
+      "category": "corrections",
+      "message": "ทางเรือดีกว่า",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_144",
+      "category": "corrections",
+      "message": "ทางอากาศดีกว่า",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_145",
+      "category": "corrections",
+      "message": "ทางรถดีกว่า",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_146",
+      "category": "corrections",
+      "message": "ทางอากาศดีกว่า",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_147",
+      "category": "corrections",
+      "message": "ทางรถดีกว่า",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_148",
+      "category": "corrections",
+      "message": "ทางเรือดีกว่า",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_switch_149",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นทางรถ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_switch_150",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นทางเรือ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "corr_mth_switch_151",
+      "category": "corrections",
+      "message": "เปลี่ยนเป็นทางอากาศ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_152",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_153",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_154",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_155",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_156",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_157",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อหน่อยครับ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_158",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อหน่อยครับ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_159",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อหน่อยครับ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_160",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อหน่อยครับ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_161",
+      "category": "topic_switch",
+      "message": "ขอเบอร์ติดต่อหน่อยครับ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_162",
+      "category": "topic_switch",
+      "message": "ถอนเงินขนส่งยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPPING_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_163",
+      "category": "topic_switch",
+      "message": "ถอนเงินขนส่งยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPPING_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_164",
+      "category": "topic_switch",
+      "message": "ถอนเงินขนส่งยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPPING_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_165",
+      "category": "topic_switch",
+      "message": "ถอนเงินขนส่งยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPPING_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_166",
+      "category": "topic_switch",
+      "message": "ถอนเงินขนส่งยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPPING_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_167",
+      "category": "topic_switch",
+      "message": "ขอถอนเงินค่าสั่งซื้อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PURCHASE_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_168",
+      "category": "topic_switch",
+      "message": "ขอถอนเงินค่าสั่งซื้อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PURCHASE_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_169",
+      "category": "topic_switch",
+      "message": "ขอถอนเงินค่าสั่งซื้อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PURCHASE_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_170",
+      "category": "topic_switch",
+      "message": "ขอถอนเงินค่าสั่งซื้อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PURCHASE_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_171",
+      "category": "topic_switch",
+      "message": "ขอถอนเงินค่าสั่งซื้อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PURCHASE_WITHDRAWAL",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_172",
+      "category": "topic_switch",
+      "message": "คูปองใช้ยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "COUPON_USAGE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_173",
+      "category": "topic_switch",
+      "message": "คูปองใช้ยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "COUPON_USAGE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_174",
+      "category": "topic_switch",
+      "message": "คูปองใช้ยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "COUPON_USAGE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_175",
+      "category": "topic_switch",
+      "message": "คูปองใช้ยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "COUPON_USAGE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_176",
+      "category": "topic_switch",
+      "message": "คูปองใช้ยังไง",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "COUPON_USAGE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_177",
+      "category": "topic_switch",
+      "message": "โกดังไทยอยู่ที่ไหน",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PICKUP_LOCATION",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_178",
+      "category": "topic_switch",
+      "message": "โกดังไทยอยู่ที่ไหน",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PICKUP_LOCATION",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_179",
+      "category": "topic_switch",
+      "message": "โกดังไทยอยู่ที่ไหน",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PICKUP_LOCATION",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_180",
+      "category": "topic_switch",
+      "message": "โกดังไทยอยู่ที่ไหน",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PICKUP_LOCATION",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_181",
+      "category": "topic_switch",
+      "message": "โกดังไทยอยู่ที่ไหน",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PICKUP_LOCATION",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_182",
+      "category": "topic_switch",
+      "message": "ขอใบกำกับภาษีหน่อย",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "INVOICE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_183",
+      "category": "topic_switch",
+      "message": "ขอใบกำกับภาษีหน่อย",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "INVOICE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_184",
+      "category": "topic_switch",
+      "message": "ขอใบกำกับภาษีหน่อย",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "INVOICE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_185",
+      "category": "topic_switch",
+      "message": "ขอใบกำกับภาษีหน่อย",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "INVOICE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "topic_186",
+      "category": "topic_switch",
+      "message": "ขอใบกำกับภาษีหน่อย",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "INVOICE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_187",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_188",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_189",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_190",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_191",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_192",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_193",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_194",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_195",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_196",
+      "category": "topic_switch",
+      "message": "ไม่เอาแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_197",
+      "category": "topic_switch",
+      "message": "ยกเลิก",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_198",
+      "category": "topic_switch",
+      "message": "ยกเลิก",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_199",
+      "category": "topic_switch",
+      "message": "ยกเลิก",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_200",
+      "category": "topic_switch",
+      "message": "ยกเลิก",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_201",
+      "category": "topic_switch",
+      "message": "ยกเลิก",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_202",
+      "category": "topic_switch",
+      "message": "ไม่ต้องแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_203",
+      "category": "topic_switch",
+      "message": "ไม่ต้องแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_204",
+      "category": "topic_switch",
+      "message": "ไม่ต้องแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_205",
+      "category": "topic_switch",
+      "message": "ไม่ต้องแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_206",
+      "category": "topic_switch",
+      "message": "ไม่ต้องแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_207",
+      "category": "topic_switch",
+      "message": "พอแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_208",
+      "category": "topic_switch",
+      "message": "พอแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_209",
+      "category": "topic_switch",
+      "message": "พอแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_210",
+      "category": "topic_switch",
+      "message": "พอแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_211",
+      "category": "topic_switch",
+      "message": "พอแล้วค่ะ",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_212",
+      "category": "topic_switch",
+      "message": "ไม่สนแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_213",
+      "category": "topic_switch",
+      "message": "ไม่สนแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_214",
+      "category": "topic_switch",
+      "message": "ไม่สนแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_215",
+      "category": "topic_switch",
+      "message": "ไม่สนแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "reject_216",
+      "category": "topic_switch",
+      "message": "ไม่สนแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "multi_217",
+      "category": "multi_entity",
+      "message": "อยากสั่งรองเท้า 20 คู่จากจีน ส่งทางเรือ",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_218",
+      "category": "multi_entity",
+      "message": "อยากสั่งโต๊ะ 5 ตัว หนักตัวละ 8 กิโล",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_219",
+      "category": "multi_entity",
+      "message": "สั่งเก้าอี้ 12 ตัวจาก 1688 ทางรถ",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_220",
+      "category": "multi_entity",
+      "message": "อยากนำเข้ากระเป๋า 100 ใบ จากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_221",
+      "category": "multi_entity",
+      "message": "ซื้อหมวก 3 โหลจาก taobao",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_222",
+      "category": "multi_entity",
+      "message": "อยากสั่งผ้าห่ม 50 ผืน ทางเรือ จากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_223",
+      "category": "multi_entity",
+      "message": "สั่งจาน 200 ใบ ขนาด 25x25x5 cm",
+      "dims": {
+        "multi_entity": false
+      },
+      "act": "NEW_INTENT",
+      "intent": "SHIPPING_ESTIMATE",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": false
+    },
+    {
+      "id": "multi_224",
+      "category": "multi_entity",
+      "message": "อยากได้นาฬิกา 6 เรือน ราคาเท่าไหร่",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "QUESTION",
+      "intent": "GENERAL_ASSISTANCE",
+      "journey": null,
+      "winner": "STALE_HISTORY",
+      "pass": true
+    },
+    {
+      "id": "multi_225",
+      "category": "multi_entity",
+      "message": "20 คู่อยากสั่งของจากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_226",
+      "category": "multi_entity",
+      "message": "10 ตัว โต๊ะ จากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_227",
+      "category": "multi_entity",
+      "message": "อยากสั่งรองเท้า 20 คู่จากจีน ส่งทางเรือ",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_228",
+      "category": "multi_entity",
+      "message": "อยากสั่งโต๊ะ 5 ตัว หนักตัวละ 8 กิโล",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_229",
+      "category": "multi_entity",
+      "message": "สั่งเก้าอี้ 12 ตัวจาก 1688 ทางรถ",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_230",
+      "category": "multi_entity",
+      "message": "อยากนำเข้ากระเป๋า 100 ใบ จากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_231",
+      "category": "multi_entity",
+      "message": "ซื้อหมวก 3 โหลจาก taobao",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_232",
+      "category": "multi_entity",
+      "message": "อยากสั่งผ้าห่ม 50 ผืน ทางเรือ จากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_233",
+      "category": "multi_entity",
+      "message": "สั่งจาน 200 ใบ ขนาด 25x25x5 cm",
+      "dims": {
+        "multi_entity": false
+      },
+      "act": "NEW_INTENT",
+      "intent": "SHIPPING_ESTIMATE",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": false
+    },
+    {
+      "id": "multi_234",
+      "category": "multi_entity",
+      "message": "อยากได้นาฬิกา 6 เรือน ราคาเท่าไหร่",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "QUESTION",
+      "intent": "GENERAL_ASSISTANCE",
+      "journey": null,
+      "winner": "STALE_HISTORY",
+      "pass": true
+    },
+    {
+      "id": "multi_235",
+      "category": "multi_entity",
+      "message": "20 คู่อยากสั่งของจากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_236",
+      "category": "multi_entity",
+      "message": "10 ตัว โต๊ะ จากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_237",
+      "category": "multi_entity",
+      "message": "อยากสั่งรองเท้า 20 คู่จากจีน ส่งทางเรือ",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_238",
+      "category": "multi_entity",
+      "message": "อยากสั่งโต๊ะ 5 ตัว หนักตัวละ 8 กิโล",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_239",
+      "category": "multi_entity",
+      "message": "สั่งเก้าอี้ 12 ตัวจาก 1688 ทางรถ",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_240",
+      "category": "multi_entity",
+      "message": "อยากนำเข้ากระเป๋า 100 ใบ จากจีน",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "multi_241",
+      "category": "multi_entity",
+      "message": "ซื้อหมวก 3 โหลจาก taobao",
+      "dims": {
+        "multi_entity": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "typo_242",
+      "category": "typo_context",
+      "message": "เปลี่ยนเป้นรองเท้าได้ไหม",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_243",
+      "category": "typo_context",
+      "message": "เปลียนเปนเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_244",
+      "category": "typo_context",
+      "message": "ไม่ไช่โต๊ะ เป้นเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_245",
+      "category": "typo_context",
+      "message": "เอ้ย 15 คู่",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_246",
+      "category": "typo_context",
+      "message": "เปลี่ยนเปนทางเรือ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_247",
+      "category": "typo_context",
+      "message": "เปลี่ยนเป้นรองเท้าได้ไหม",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_248",
+      "category": "typo_context",
+      "message": "เปลียนเปนเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_249",
+      "category": "typo_context",
+      "message": "ไม่ไช่โต๊ะ เป้นเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_250",
+      "category": "typo_context",
+      "message": "เอ้ย 15 คู่",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_251",
+      "category": "typo_context",
+      "message": "เปลี่ยนเปนทางเรือ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_252",
+      "category": "typo_context",
+      "message": "เปลี่ยนเป้นรองเท้าได้ไหม",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_253",
+      "category": "typo_context",
+      "message": "เปลียนเปนเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_254",
+      "category": "typo_context",
+      "message": "ไม่ไช่โต๊ะ เป้นเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_255",
+      "category": "typo_context",
+      "message": "เอ้ย 15 คู่",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_256",
+      "category": "typo_context",
+      "message": "เปลี่ยนเปนทางเรือ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_257",
+      "category": "typo_context",
+      "message": "เปลี่ยนเป้นรองเท้าได้ไหม",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_258",
+      "category": "typo_context",
+      "message": "เปลียนเปนเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_259",
+      "category": "typo_context",
+      "message": "ไม่ไช่โต๊ะ เป้นเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_260",
+      "category": "typo_context",
+      "message": "เอ้ย 15 คู่",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_261",
+      "category": "typo_context",
+      "message": "เปลี่ยนเปนทางเรือ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_262",
+      "category": "typo_context",
+      "message": "เปลี่ยนเป้นรองเท้าได้ไหม",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_263",
+      "category": "typo_context",
+      "message": "เปลียนเปนเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_264",
+      "category": "typo_context",
+      "message": "ไม่ไช่โต๊ะ เป้นเก้าอี้",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_265",
+      "category": "typo_context",
+      "message": "เอ้ย 15 คู่",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "typo_266",
+      "category": "typo_context",
+      "message": "เปลี่ยนเปนทางเรือ",
+      "dims": {
+        "act": true,
+        "correction": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_267",
+      "category": "long_history",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "long_268",
+      "category": "long_history",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_269",
+      "category": "long_history",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_270",
+      "category": "long_history",
+      "message": "ของผมถึงไหนแล้ว",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPMENT_STATUS",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_271",
+      "category": "long_history",
+      "message": "ชั้นวางของนำเข้าได้ไหม",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PRODUCT_POLICY",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_272",
+      "category": "long_history",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "long_273",
+      "category": "long_history",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_274",
+      "category": "long_history",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_275",
+      "category": "long_history",
+      "message": "ของผมถึงไหนแล้ว",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPMENT_STATUS",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_276",
+      "category": "long_history",
+      "message": "ชั้นวางของนำเข้าได้ไหม",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PRODUCT_POLICY",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_277",
+      "category": "long_history",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "long_278",
+      "category": "long_history",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_279",
+      "category": "long_history",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_280",
+      "category": "long_history",
+      "message": "ของผมถึงไหนแล้ว",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPMENT_STATUS",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_281",
+      "category": "long_history",
+      "message": "ชั้นวางของนำเข้าได้ไหม",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PRODUCT_POLICY",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_282",
+      "category": "long_history",
+      "message": "อยากสั่งของจากจีน",
+      "dims": {
+        "act": true,
+        "intent": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "long_283",
+      "category": "long_history",
+      "message": "ขอเบอร์ติดต่อ",
+      "dims": {
+        "act": true,
+        "topic": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "CONTACT_INFO",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_284",
+      "category": "long_history",
+      "message": "ไม่เอาแล้ว",
+      "dims": {
+        "act": true
+      },
+      "act": "REJECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_285",
+      "category": "long_history",
+      "message": "ของผมถึงไหนแล้ว",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "SHIPMENT_STATUS",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "long_286",
+      "category": "long_history",
+      "message": "ชั้นวางของนำเข้าได้ไหม",
+      "dims": {
+        "intent": true
+      },
+      "act": "TOPIC_SWITCH",
+      "intent": "PRODUCT_POLICY",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "ref_287",
+      "category": "referents",
+      "message": "แล้วทางเรือล่ะ",
+      "dims": {
+        "journey": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "ref_288",
+      "category": "referents",
+      "message": "อันนี้ราคาเท่าไหร่",
+      "dims": {},
+      "act": "QUESTION",
+      "intent": "GENERAL_ASSISTANCE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "ACTIVE_JOURNEY",
+      "pass": true
+    },
+    {
+      "id": "ref_289",
+      "category": "referents",
+      "message": "เอาอันแรก",
+      "dims": {},
+      "act": "UNKNOWN",
+      "intent": "UNKNOWN",
+      "journey": "IMPORT_INTEREST",
+      "winner": "ACTIVE_JOURNEY",
+      "pass": true
+    },
+    {
+      "id": "ref_290",
+      "category": "referents",
+      "message": "แบบนี้ส่งได้ไหม",
+      "dims": {},
+      "act": "TOPIC_SWITCH",
+      "intent": "PRODUCT_POLICY",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "ref_291",
+      "category": "referents",
+      "message": "แล้วทางเรือล่ะ",
+      "dims": {
+        "journey": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "ref_292",
+      "category": "referents",
+      "message": "อันนี้ราคาเท่าไหร่",
+      "dims": {},
+      "act": "QUESTION",
+      "intent": "GENERAL_ASSISTANCE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "ACTIVE_JOURNEY",
+      "pass": true
+    },
+    {
+      "id": "ref_293",
+      "category": "referents",
+      "message": "เอาอันแรก",
+      "dims": {},
+      "act": "UNKNOWN",
+      "intent": "UNKNOWN",
+      "journey": "IMPORT_INTEREST",
+      "winner": "ACTIVE_JOURNEY",
+      "pass": true
+    },
+    {
+      "id": "ref_294",
+      "category": "referents",
+      "message": "แบบนี้ส่งได้ไหม",
+      "dims": {},
+      "act": "TOPIC_SWITCH",
+      "intent": "PRODUCT_POLICY",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "ref_295",
+      "category": "referents",
+      "message": "แล้วทางเรือล่ะ",
+      "dims": {
+        "journey": true
+      },
+      "act": "CORRECTION",
+      "intent": "IMPORT_INTEREST",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "ref_296",
+      "category": "referents",
+      "message": "อันนี้ราคาเท่าไหร่",
+      "dims": {},
+      "act": "QUESTION",
+      "intent": "GENERAL_ASSISTANCE",
+      "journey": "IMPORT_INTEREST",
+      "winner": "ACTIVE_JOURNEY",
+      "pass": true
+    },
+    {
+      "id": "ref_297",
+      "category": "referents",
+      "message": "เอาอันแรก",
+      "dims": {},
+      "act": "UNKNOWN",
+      "intent": "UNKNOWN",
+      "journey": "IMPORT_INTEREST",
+      "winner": "ACTIVE_JOURNEY",
+      "pass": true
+    },
+    {
+      "id": "ref_298",
+      "category": "referents",
+      "message": "แบบนี้ส่งได้ไหม",
+      "dims": {},
+      "act": "TOPIC_SWITCH",
+      "intent": "PRODUCT_POLICY",
+      "journey": "IMPORT_INTEREST",
+      "winner": "CORRECTION_REJECTION_TOPIC",
+      "pass": true
+    },
+    {
+      "id": "anchor_A",
+      "category": "anchor",
+      "message": "20 คู่อยากสั่งของจากจีน",
+      "dims": {
+        "intent": true,
+        "unit_preservation": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "IMPORT_INTEREST",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "anchor_G",
+      "category": "anchor",
+      "message": "ชั้นวางของนำเข้าได้ไหม",
+      "dims": {
+        "act": true,
+        "intent": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "PRODUCT_POLICY",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    },
+    {
+      "id": "anchor_H",
+      "category": "anchor",
+      "message": "ของแก้วแพ็กยังไง",
+      "dims": {
+        "intent": true
+      },
+      "act": "QUESTION",
+      "intent": "GENERAL_ASSISTANCE",
+      "journey": null,
+      "winner": "STALE_HISTORY",
+      "pass": true
+    },
+    {
+      "id": "anchor_I",
+      "category": "anchor",
+      "message": "ของผมถึงไหนแล้ว",
+      "dims": {
+        "intent": true
+      },
+      "act": "NEW_INTENT",
+      "intent": "SHIPMENT_STATUS",
+      "journey": null,
+      "winner": "NEW_INTENT",
+      "pass": true
+    }
+  ]
+}

@@ -3206,6 +3206,25 @@ class DecisionEngine:
             developer_trace["intent"] = actionable_intent
             developer_trace["workflow"] = workflow_hint
 
+            # SYSTEM-WIDE CONVERSATION INTELLIGENCE — P1. Build the ONE
+            # canonical ConversationResolution here, once, by composing
+            # the trusted capabilities already computed above. SHADOW-
+            # FIRST: it is logged structurally and only low-risk
+            # conversational branches (currently: the FIX-05 frame
+            # correction / reject / clarify block) read it — auth / ERP
+            # truth / business policy / money / confirmed execution are
+            # untouched, no DB / schema change (P2, not yet approved).
+            try:
+                from services.conversation_resolution import resolve_conversation as _resolve_conversation
+                resolution = _resolve_conversation(
+                    message, history, context, semantic=semantic,
+                    normalized_text=message,
+                    has_pending_workflow=bool(context.get("pending_action_id")))
+                developer_trace["conversation_resolution"] = resolution.as_dict()
+            except Exception as _e:            # never let the shadow layer break a turn
+                resolution = None
+                developer_trace["conversation_resolution_error"] = str(_e)
+
             # Confirmed Pending Action — Direct Execution (Confirmation
             # Continuation Correctness fix, 2026-08-23). A caller
             # (line_bot/webhook.py, admin/routes.py Auto mode) that has
@@ -4047,7 +4066,11 @@ class DecisionEngine:
                         and getattr(semantic, "intent_family", "UNKNOWN") not in _F5_EXPLICIT
                         and _classify_private_state_inquiry(message) is None
                         and _wd_pending_brand is None):
-                    _f5 = _resolve_frame_correction(message, _f5_frame)
+                    # P1 — read the correction from the canonical resolution
+                    # (same _resolve_frame_correction call, computed once);
+                    # fall back to a direct call if the shadow layer errored.
+                    _f5 = ((resolution.frame_correction if resolution is not None else None)
+                           or _resolve_frame_correction(message, _f5_frame))
                     if _f5["op"] == "REJECT":
                         developer_trace["selection_source"] = "frame_reject_fix05"
                         developer_trace["semantic_op"] = "REJECT"

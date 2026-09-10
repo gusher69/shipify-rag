@@ -391,6 +391,7 @@ _FZ_BE_TH = r"เป[็้]?น"
 _FRAME_CORRECTION_SHAPE_RE = re.compile(
     _FZ_CHANGE_VB
     + r"|(?<![ก-๙])เอา\S{0,20}?แทน(?![ก-๙])"
+    + r"|(?<![ก-๙])เอา\s*" + _FZ_BE_TH + r"\s*[ก-๙]"     # "เอาเป็น X" (take-as, no แทน)
     + r"|(?:^|[\s,])เอ[้๊]?ย(?:[\s\d,]|$)"
     + r"|(?:^|[\s,])แก้\S{0,3}" + _FZ_BE_TH
     + r"|(?:^|\s)ไม[่้]?(?:ใช่|ไช่)\s*\S+.{0,4}(?:" + _FZ_BE_TH + r"|เอา)",
@@ -470,6 +471,20 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
     if _bareq:
         out["op"], out["quantity"] = "SET_QUANTITY", int(_bareq.group(1))
         return out
+    # OWNER P1 — a shipping-method the customer already picked, re-named
+    # to a DIFFERENT one ("ทางเรือดีกว่า", "เอาทางเรือ", "ไม่เอา เอาทางรถ"),
+    # is a method correction even without an explicit "เปลี่ยน" verb. Only
+    # a short, non-question turn (never "ส่งทางเรือกี่วัน").
+    if (getattr(frame, "method", None) and len(t) <= 32
+            and not re.search(r"กี่|เท่าไหร่|ไหม|มั้ย|ยังไง|อย่างไร|\?|วัน|บาท|กิโล|นาน", t)):
+        _m2 = re.search(r"ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|โดยรถ|โดยเรือ|โดยเครื่องบิน", t)
+        if _m2:
+            _lab = _method_label(_m2.group(0)) or (
+                "sea" if "เรือ" in _m2.group(0) else "road" if "รถ" in _m2.group(0)
+                else "air" if ("อากาศ" in _m2.group(0) or "บิน" in _m2.group(0)) else None)
+            if _lab and _lab != frame.method:
+                out["op"], out["method"] = "CHANGE_METHOD", _lab
+                return out
     if not _FRAME_CORRECTION_SHAPE_RE.search(t):
         return out
     cur_product = frame.product if frame else None

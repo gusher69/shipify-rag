@@ -1,0 +1,822 @@
+{
+  "total": 13,
+  "counts": {
+    "MATCH": 13
+  },
+  "rows": [
+    {
+      "label": "fix01_broad",
+      "message": "อยากสั่งของจากจีน",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "phase6b_service_intent",
+        "routing": "GENERAL",
+        "semantic_family": "IMPORT_INTEREST"
+      },
+      "resolution": {
+        "conversation_act": "NEW_INTENT",
+        "primary_intent": "IMPORT_INTEREST",
+        "active_journey": null,
+        "topic_switch": null,
+        "entities": {},
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {},
+        "requested_slot": null,
+        "missing_slots": [
+          "product",
+          "quantity",
+          "shipping_method"
+        ],
+        "grounding_requirement": "CONVERSATION",
+        "execution_hint": "import_discovery",
+        "confidence": 0.7,
+        "precedence_winner": "NEW_INTENT",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "IMPORT_INTEREST",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.7
+          }
+        ]
+      },
+      "expected_route": "phase6b_service_intent",
+      "expected_resolution": {
+        "conversation_act": "NEW_INTENT",
+        "primary_intent": "IMPORT_INTEREST"
+      }
+    },
+    {
+      "label": "fix04_slot",
+      "message": "เป็นชั้นวางของ",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "phase6b_service_intent",
+        "routing": "GENERAL",
+        "semantic_family": "IMPORT_INTEREST"
+      },
+      "resolution": {
+        "conversation_act": "ANSWER",
+        "primary_intent": "IMPORT_INTEREST",
+        "active_journey": null,
+        "topic_switch": null,
+        "entities": {
+          "product": {
+            "value": "ชั้นวางของ",
+            "unit": null,
+            "canonical_value": "ชั้นวางของ",
+            "canonical_unit": null,
+            "raw": "ชั้นวางของ"
+          }
+        },
+        "slot_updates": {
+          "product": {
+            "value": "ชั้นวางของ",
+            "unit": null,
+            "canonical_value": "ชั้นวางของ",
+            "canonical_unit": null,
+            "raw": "ชั้นวางของ"
+          }
+        },
+        "slot_corrections": {},
+        "known_slots": {},
+        "requested_slot": "product",
+        "missing_slots": [
+          "quantity",
+          "shipping_method"
+        ],
+        "grounding_requirement": "CONVERSATION",
+        "execution_hint": "import_discovery",
+        "confidence": 0.7,
+        "precedence_winner": "NEW_INTENT",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "IMPORT_INTEREST",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.7
+          },
+          {
+            "kind": "requested_slot_match",
+            "slot": "product",
+            "supplied": true
+          }
+        ]
+      },
+      "expected_route": "phase6b_service_intent",
+      "expected_resolution": {
+        "primary_intent": "IMPORT_INTEREST"
+      }
+    },
+    {
+      "label": "fix05_corr",
+      "message": "เปลี่ยนเป้นรองเท้าได้ไหม",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "frame_correction_fix05",
+        "routing": "GENERAL",
+        "semantic_family": "IMPORT_INTEREST"
+      },
+      "resolution": {
+        "conversation_act": "CORRECTION",
+        "primary_intent": "IMPORT_INTEREST",
+        "active_journey": "IMPORT_INTEREST",
+        "topic_switch": null,
+        "entities": {
+          "product": {
+            "value": "ชั้นวางของ",
+            "unit": null,
+            "canonical_value": "ชั้นวางของ",
+            "canonical_unit": null,
+            "raw": "ชั้นวางของ"
+          }
+        },
+        "slot_updates": {},
+        "slot_corrections": {
+          "product": {
+            "old": "ชั้นวางของ",
+            "new": "รองเท้า"
+          }
+        },
+        "known_slots": {
+          "product": {
+            "value": "ชั้นวางของ",
+            "unit": null,
+            "canonical_value": "ชั้นวางของ",
+            "canonical_unit": null,
+            "raw": "ชั้นวางของ"
+          }
+        },
+        "requested_slot": "quantity",
+        "missing_slots": [
+          "quantity",
+          "shipping_method"
+        ],
+        "grounding_requirement": "CONVERSATION",
+        "execution_hint": "frame_correction",
+        "confidence": 0.55,
+        "precedence_winner": "CORRECTION_REJECTION_TOPIC",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "IMPORT_INTEREST",
+            "op": "CONTINUE",
+            "act": "NONE",
+            "source": "degraded",
+            "confidence": 0.55
+          },
+          {
+            "kind": "frame_signal",
+            "product": "ชั้นวางของ",
+            "quantity": null,
+            "method": null
+          },
+          {
+            "kind": "frame_correction_signal",
+            "op": "CHANGE_TARGET",
+            "product": "รองเท้า",
+            "quantity": null,
+            "method": null,
+            "brand": null
+          },
+          {
+            "kind": "regex_signal",
+            "name": "frame_followup_shape"
+          },
+          {
+            "kind": "requested_slot_match",
+            "slot": "quantity",
+            "supplied": false
+          }
+        ]
+      },
+      "expected_route": "frame_correction_fix05",
+      "expected_resolution": {
+        "conversation_act": "CORRECTION"
+      }
+    },
+    {
+      "label": "fix05_reject",
+      "message": "ไม่เอาแล้ว",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "frame_reject_fix05",
+        "routing": "GENERAL",
+        "semantic_family": "UNKNOWN"
+      },
+      "resolution": {
+        "conversation_act": "REJECTION",
+        "primary_intent": "IMPORT_INTEREST",
+        "active_journey": "IMPORT_INTEREST",
+        "topic_switch": null,
+        "entities": {},
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {
+          "product": {
+            "value": "รองเท้า",
+            "unit": null,
+            "canonical_value": "รองเท้า",
+            "canonical_unit": null,
+            "raw": "รองเท้า"
+          }
+        },
+        "requested_slot": "quantity",
+        "missing_slots": [
+          "quantity",
+          "shipping_method"
+        ],
+        "grounding_requirement": "GENERAL",
+        "execution_hint": "frame_reject",
+        "confidence": 0.0,
+        "precedence_winner": "CORRECTION_REJECTION_TOPIC",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "UNKNOWN",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "degraded",
+            "confidence": 0.0
+          },
+          {
+            "kind": "frame_signal",
+            "product": "รองเท้า",
+            "quantity": null,
+            "method": null
+          },
+          {
+            "kind": "frame_correction_signal",
+            "op": "REJECT",
+            "product": null,
+            "quantity": null,
+            "method": null,
+            "brand": null
+          },
+          {
+            "kind": "requested_slot_match",
+            "slot": "quantity",
+            "supplied": false
+          }
+        ]
+      },
+      "expected_route": "frame_reject_fix05",
+      "expected_resolution": {
+        "conversation_act": "REJECTION"
+      }
+    },
+    {
+      "label": "fix05_ambig",
+      "message": "เปลี่ยนได้ไหม",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "frame_correction_ambiguous_fix05",
+        "routing": "GENERAL",
+        "semantic_family": "UNKNOWN"
+      },
+      "resolution": {
+        "conversation_act": "QUESTION",
+        "primary_intent": "IMPORT_INTEREST",
+        "active_journey": "IMPORT_INTEREST",
+        "topic_switch": null,
+        "entities": {},
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {
+          "product": {
+            "value": "โต๊ะ",
+            "unit": null,
+            "canonical_value": "โต๊ะ",
+            "canonical_unit": null,
+            "raw": "โต๊ะ"
+          }
+        },
+        "requested_slot": "quantity",
+        "missing_slots": [
+          "quantity",
+          "shipping_method"
+        ],
+        "grounding_requirement": "GENERAL",
+        "execution_hint": "frame_clarify",
+        "confidence": 0.0,
+        "precedence_winner": "ACTIVE_JOURNEY",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "UNKNOWN",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "degraded",
+            "confidence": 0.0
+          },
+          {
+            "kind": "frame_signal",
+            "product": "โต๊ะ",
+            "quantity": null,
+            "method": null
+          },
+          {
+            "kind": "frame_correction_signal",
+            "op": "AMBIGUOUS",
+            "product": null,
+            "quantity": null,
+            "method": null,
+            "brand": null
+          },
+          {
+            "kind": "requested_slot_match",
+            "slot": "quantity",
+            "supplied": false
+          }
+        ]
+      },
+      "expected_route": "frame_correction_ambiguous_fix05",
+      "expected_resolution": {
+        "conversation_act": "QUESTION"
+      }
+    },
+    {
+      "label": "fix06_stale",
+      "message": "อยากสั่งของจากจีน",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "phase6b_service_intent",
+        "routing": "GENERAL",
+        "semantic_family": "IMPORT_INTEREST"
+      },
+      "resolution": {
+        "conversation_act": "NEW_INTENT",
+        "primary_intent": "IMPORT_INTEREST",
+        "active_journey": "IMPORT_INTEREST",
+        "topic_switch": null,
+        "entities": {},
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {
+          "product": {
+            "value": "เก้าอี้",
+            "unit": null,
+            "canonical_value": "เก้าอี้",
+            "canonical_unit": null,
+            "raw": "เก้าอี้"
+          }
+        },
+        "requested_slot": "quantity",
+        "missing_slots": [
+          "quantity",
+          "shipping_method"
+        ],
+        "grounding_requirement": "CONVERSATION",
+        "execution_hint": "service_intent",
+        "confidence": 0.7,
+        "precedence_winner": "NEW_INTENT",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "IMPORT_INTEREST",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.7
+          },
+          {
+            "kind": "frame_signal",
+            "product": "เก้าอี้",
+            "quantity": null,
+            "method": null
+          },
+          {
+            "kind": "requested_slot_match",
+            "slot": "quantity",
+            "supplied": false
+          }
+        ]
+      },
+      "expected_route": "phase6b_service_intent",
+      "expected_resolution": {
+        "precedence_winner": "NEW_INTENT"
+      }
+    },
+    {
+      "label": "topic_contact",
+      "message": "ขอเบอร์ติดต่อ",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "phase6b_service_intent",
+        "routing": "GENERAL",
+        "semantic_family": "CONTACT_INFO"
+      },
+      "resolution": {
+        "conversation_act": "TOPIC_SWITCH",
+        "primary_intent": "CONTACT_INFO",
+        "active_journey": "IMPORT_INTEREST",
+        "topic_switch": "CONTACT_INFO",
+        "entities": {},
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {
+          "product": {
+            "value": "โต๊ะ",
+            "unit": null,
+            "canonical_value": "โต๊ะ",
+            "canonical_unit": null,
+            "raw": "โต๊ะ"
+          }
+        },
+        "requested_slot": "quantity",
+        "missing_slots": [
+          "quantity",
+          "shipping_method"
+        ],
+        "grounding_requirement": "CONVERSATION",
+        "execution_hint": "service_intent",
+        "confidence": 0.8,
+        "precedence_winner": "CORRECTION_REJECTION_TOPIC",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "CONTACT_INFO",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.8
+          },
+          {
+            "kind": "frame_signal",
+            "product": "โต๊ะ",
+            "quantity": null,
+            "method": null
+          },
+          {
+            "kind": "requested_slot_match",
+            "slot": "quantity",
+            "supplied": false
+          }
+        ]
+      },
+      "expected_route": "phase6b_service_intent",
+      "expected_resolution": {
+        "conversation_act": "TOPIC_SWITCH",
+        "topic_switch": "CONTACT_INFO"
+      }
+    },
+    {
+      "label": "private_status",
+      "message": "ของผมถึงไหนแล้ว",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "private_state_inquiry",
+        "routing": "WORKFLOW",
+        "semantic_family": "SHIPMENT_STATUS"
+      },
+      "resolution": {
+        "conversation_act": "NEW_INTENT",
+        "primary_intent": "SHIPMENT_STATUS",
+        "active_journey": null,
+        "topic_switch": null,
+        "entities": {},
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {},
+        "requested_slot": null,
+        "missing_slots": [],
+        "grounding_requirement": "PRIVATE_ERP",
+        "execution_hint": "private_erp",
+        "confidence": 0.8,
+        "precedence_winner": "NEW_INTENT",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "SHIPMENT_STATUS",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.8
+          }
+        ]
+      },
+      "expected_route": "private_state_inquiry",
+      "expected_resolution": {
+        "primary_intent": "SHIPMENT_STATUS",
+        "grounding_requirement": "PRIVATE_ERP"
+      }
+    },
+    {
+      "label": "policy_q",
+      "message": "ชั้นวางของนำเข้าได้ไหม",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "fresh_search",
+        "routing": "SAFE_FALLBACK",
+        "semantic_family": "PRODUCT_POLICY"
+      },
+      "resolution": {
+        "conversation_act": "NEW_INTENT",
+        "primary_intent": "PRODUCT_POLICY",
+        "active_journey": null,
+        "topic_switch": null,
+        "entities": {
+          "product": {
+            "value": "ชั้นวางของ",
+            "unit": null,
+            "canonical_value": "ชั้นวางของ",
+            "canonical_unit": null,
+            "raw": "ชั้นวางของ"
+          }
+        },
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {},
+        "requested_slot": null,
+        "missing_slots": [],
+        "grounding_requirement": "BUSINESS_RAG",
+        "execution_hint": "rag",
+        "confidence": 0.7,
+        "precedence_winner": "NEW_INTENT",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "PRODUCT_POLICY",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.7
+          }
+        ]
+      },
+      "expected_route": null,
+      "expected_resolution": {
+        "primary_intent": "PRODUCT_POLICY"
+      }
+    },
+    {
+      "label": "method_corr",
+      "message": "ทางเรือดีกว่า",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "frame_correction_fix05",
+        "routing": "GENERAL",
+        "semantic_family": "UNKNOWN"
+      },
+      "resolution": {
+        "conversation_act": "CORRECTION",
+        "primary_intent": "IMPORT_INTEREST",
+        "active_journey": "IMPORT_INTEREST",
+        "topic_switch": null,
+        "entities": {
+          "shipping_method": {
+            "value": "sea",
+            "unit": null,
+            "canonical_value": "sea",
+            "canonical_unit": null,
+            "raw": "ทางเรือ"
+          }
+        },
+        "slot_updates": {},
+        "slot_corrections": {
+          "shipping_method": {
+            "old": "road",
+            "new": "sea"
+          }
+        },
+        "known_slots": {
+          "product": {
+            "value": "รองเท้า",
+            "unit": null,
+            "canonical_value": "รองเท้า",
+            "canonical_unit": null,
+            "raw": "รองเท้า"
+          },
+          "shipping_method": {
+            "value": "road",
+            "unit": null,
+            "canonical_value": "road",
+            "canonical_unit": null,
+            "raw": "road"
+          }
+        },
+        "requested_slot": "quantity",
+        "missing_slots": [
+          "quantity"
+        ],
+        "grounding_requirement": "GENERAL",
+        "execution_hint": "frame_correction",
+        "confidence": 0.0,
+        "precedence_winner": "CORRECTION_REJECTION_TOPIC",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "UNKNOWN",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "degraded",
+            "confidence": 0.0
+          },
+          {
+            "kind": "frame_signal",
+            "product": "รองเท้า",
+            "quantity": null,
+            "method": "road"
+          },
+          {
+            "kind": "frame_correction_signal",
+            "op": "CHANGE_METHOD",
+            "product": null,
+            "quantity": null,
+            "method": "sea",
+            "brand": null
+          },
+          {
+            "kind": "regex_signal",
+            "name": "entity:shipping_method"
+          },
+          {
+            "kind": "requested_slot_match",
+            "slot": "quantity",
+            "supplied": false
+          }
+        ]
+      },
+      "expected_route": "frame_correction_fix05",
+      "expected_resolution": {
+        "conversation_act": "CORRECTION"
+      }
+    },
+    {
+      "label": "link_conv",
+      "message": "https://detail.1688.com/offer/652702302959.html",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": null,
+        "routing": "API",
+        "semantic_family": "LINK_CONVERSION"
+      },
+      "resolution": {
+        "conversation_act": "NEW_INTENT",
+        "primary_intent": "LINK_CONVERSION",
+        "active_journey": null,
+        "topic_switch": null,
+        "entities": {
+          "platform": {
+            "value": "1688",
+            "unit": null,
+            "canonical_value": "1688",
+            "canonical_unit": null,
+            "raw": "1688"
+          },
+          "url": {
+            "value": "https://detail.1688.com/offer/652702302959.html",
+            "unit": null,
+            "canonical_value": "https://detail.1688.com/offer/652702302959.html",
+            "canonical_unit": null,
+            "raw": "https://detail.1688.com/offer/652702302959.html"
+          }
+        },
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {},
+        "requested_slot": null,
+        "missing_slots": [],
+        "grounding_requirement": "BUSINESS_RAG",
+        "execution_hint": "link_conversion",
+        "confidence": 0.9,
+        "precedence_winner": "NEW_INTENT",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "LINK_CONVERSION",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "structural",
+            "confidence": 0.9
+          },
+          {
+            "kind": "regex_signal",
+            "name": "entity:platform"
+          }
+        ]
+      },
+      "expected_route": null,
+      "expected_resolution": {
+        "execution_hint": "link_conversion"
+      }
+    },
+    {
+      "label": "calc",
+      "message": "ค่านำเข้าเท่าไหร่คะ สินค้า1ชิ้น น้ำหนัก 2กิโล ขนาด 54*12*43",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "shipping_estimate_flow",
+        "routing": "WORKFLOW",
+        "semantic_family": "SHIPPING_ESTIMATE"
+      },
+      "resolution": {
+        "conversation_act": "NEW_INTENT",
+        "primary_intent": "SHIPPING_ESTIMATE",
+        "active_journey": null,
+        "topic_switch": null,
+        "entities": {
+          "dimensions": {
+            "value": "54x12x43",
+            "unit": null,
+            "canonical_value": "54x12x43",
+            "canonical_unit": "cm",
+            "raw": "54*12*43"
+          },
+          "weight": {
+            "value": 2,
+            "unit": "กิโล",
+            "canonical_value": 2.0,
+            "canonical_unit": "kg",
+            "raw": "2กิโล"
+          },
+          "quantity": {
+            "value": 1,
+            "unit": "ชิ้น",
+            "canonical_value": 1,
+            "canonical_unit": "ชิ้น",
+            "raw": "1ชิ้น"
+          }
+        },
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {},
+        "requested_slot": null,
+        "missing_slots": [],
+        "grounding_requirement": "CALCULATOR",
+        "execution_hint": "calculator",
+        "confidence": 0.85,
+        "precedence_winner": "NEW_INTENT",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "SHIPPING_ESTIMATE",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.85
+          },
+          {
+            "kind": "regex_signal",
+            "name": "entity:dimensions"
+          },
+          {
+            "kind": "regex_signal",
+            "name": "entity:weight"
+          },
+          {
+            "kind": "regex_signal",
+            "name": "entity:quantity"
+          }
+        ]
+      },
+      "expected_route": "shipping_estimate_flow",
+      "expected_resolution": {}
+    },
+    {
+      "label": "greet",
+      "message": "สวัสดีค่ะ",
+      "verdict": "MATCH",
+      "existing": {
+        "selection_source": "fresh_search",
+        "routing": "SAFE_FALLBACK",
+        "semantic_family": "UNKNOWN"
+      },
+      "resolution": {
+        "conversation_act": "GENERAL_CHAT",
+        "primary_intent": "GENERAL_ASSISTANCE",
+        "active_journey": null,
+        "topic_switch": null,
+        "entities": {},
+        "slot_updates": {},
+        "slot_corrections": {},
+        "known_slots": {},
+        "requested_slot": null,
+        "missing_slots": [],
+        "grounding_requirement": "GENERAL",
+        "execution_hint": "rag",
+        "confidence": 0.0,
+        "precedence_winner": "STALE_HISTORY",
+        "evidence": [
+          {
+            "kind": "llm_semantic_signal",
+            "family": "UNKNOWN",
+            "op": "NONE",
+            "act": "NONE",
+            "source": "deterministic",
+            "confidence": 0.0
+          }
+        ]
+      },
+      "expected_route": null,
+      "expected_resolution": {
+        "conversation_act": "GENERAL_CHAT"
+      }
+    }
+  ]
+}
