@@ -26,6 +26,16 @@ SUPABASE_DB_URL      = os.getenv("SUPABASE_DB_URL")
 LINE_CHANNEL_SECRET  = os.getenv("LINE_CHANNEL_SECRET")
 LINE_CHANNEL_TOKEN   = os.getenv("LINE_CHANNEL_TOKEN")
 LINE_NOTIFY_TOKEN    = os.getenv("LINE_NOTIFY_TOKEN")
+# P2.1A — SHADOW-OBSERVABILITY SAMPLE SEPARATION ONLY (not auth, not a
+# feature flag, not read by routing). Comma-separated LINE user ids
+# (the webhook's own HMAC-verified event.source.user_id) that
+# line_bot/webhook.py classifies as OWNER_TEST traffic so it never
+# counts toward the >= 200 REAL_LINE shadow-parity cutover sample
+# (services/conversation_intelligence_telemetry.py). The id itself is
+# never persisted — only the resulting "OWNER_TEST" label is. Absent or
+# empty (the default) -> every LINE sender is REAL_LINE, unchanged.
+OWNER_TEST_LINE_USER_IDS = frozenset(
+    x.strip() for x in os.getenv("OWNER_TEST_LINE_USER_IDS", "").split(",") if x.strip())
 
 # Google Drive
 # NOTE: GOOGLE_DRIVE_ATTACHMENTS_FOLDER_ID was removed here (2026-08-01 final

@@ -16,8 +16,9 @@ denominator — task §8 must not be inflated by other traffic):
   STRUCTURED_WRONG / AMBIGUOUS, FRAME PARITY %, UNIT PRESERVATION FAIL,
   STALE JOURNEY TAKEOVER, KNOWN SLOT RE-ASK, LLM AUTHORITY VIOLATION.
 
-ADMIN_AUTO and TEST/OTHER turns are reported separately and never mixed
-into the REAL_LINE denominator.
+OWNER_TEST (a configured owner/tester LINE sender — task P2.1A,
+config.OWNER_TEST_LINE_USER_IDS), ADMIN_AUTO, and TEST/OTHER turns are
+all reported separately and never mixed into the REAL_LINE denominator.
 """
 from __future__ import annotations
 
@@ -66,6 +67,10 @@ def _summarize(rows: list[dict]) -> dict:
         }
 
     real_line = _agg(by_source.get("REAL_LINE", []))
+    # P2.1A — a configured owner/tester LINE sender (config.
+    # OWNER_TEST_LINE_USER_IDS) is REPORTED separately and MUST NEVER be
+    # folded into the REAL_LINE denominator (task §5/§6).
+    owner_test = _agg(by_source.get("OWNER_TEST", []))
     admin_auto = _agg(by_source.get("ADMIN_AUTO", []))
     other = _agg(by_source.get("TEST", []) + by_source.get("OTHER", []))
 
@@ -77,8 +82,8 @@ def _summarize(rows: list[dict]) -> dict:
            and real_line["stale_journey_takeover"] == 0
            and real_line["known_slot_reask"] == 0)
 
-    return {"REAL_LINE": real_line, "ADMIN_AUTO": admin_auto, "OWNER_TEST": other,
-            "ready_for_read_cutover": gate}
+    return {"REAL_LINE": real_line, "OWNER_TEST": owner_test, "ADMIN_AUTO": admin_auto,
+            "TEST_OR_OTHER": other, "ready_for_read_cutover": gate}
 
 
 def main():
@@ -99,6 +104,9 @@ def main():
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print()
     print(f"LIVE ELIGIBLE TURNS (REAL_LINE): {summary['REAL_LINE']['eligible_turns']}")
+    print(f"OWNER_TEST TURNS: {summary['OWNER_TEST']['eligible_turns']}")
+    print(f"ADMIN_AUTO TURNS: {summary['ADMIN_AUTO']['eligible_turns']}")
+    print(f"TEST/OTHER TURNS: {summary['TEST_OR_OTHER']['eligible_turns']}")
     print(f"FRAME PARITY: {summary['REAL_LINE']['frame_parity_pct']}%")
     print(f"READY FOR STRUCTURED READ CUTOVER: {'YES' if summary['ready_for_read_cutover'] else 'NO'}")
     return 0

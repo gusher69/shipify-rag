@@ -25,7 +25,11 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 RESOLVER_VERSION = 1
-SAMPLE_SOURCES = ("REAL_LINE", "ADMIN_AUTO", "TEST", "OTHER")
+# P2.1A — OWNER_TEST is a configured owner/tester LINE sender (task
+# §OWNER_TEST_LINE_USER_IDS in config.py); it is classified at the
+# webhook boundary from a verified LINE user id and reaches this module
+# ONLY as this label — never as the id itself.
+SAMPLE_SOURCES = ("REAL_LINE", "OWNER_TEST", "ADMIN_AUTO", "TEST", "OTHER")
 PARITY_CLASSES = ("MATCH", "STRUCTURED_IMPROVEMENT", "LEGACY_CORRECT",
                   "STRUCTURED_WRONG", "AMBIGUOUS")
 
@@ -38,9 +42,11 @@ _CONTEXT_AUTHORITY_TIERS = ("REQUESTED_SLOT_ANSWER", "CORRECTION_REJECTION_TOPIC
 def classify_sample_source(raw: Optional[str]) -> str:
     """Normalises a caller-supplied source marker. Unknown / missing ->
     OTHER, never guessed from message content (channel adapters set this
-    explicitly: line_bot/webhook.py -> REAL_LINE, the Admin Hybrid-
-    Playground auto mode -> ADMIN_AUTO; anything else, including every
-    existing test/harness that does not set it, is OTHER by default)."""
+    explicitly: line_bot/webhook.py -> REAL_LINE, or OWNER_TEST when the
+    verified LINE sender is in config.OWNER_TEST_LINE_USER_IDS; the
+    Admin Hybrid-Playground auto mode -> ADMIN_AUTO; anything else,
+    including every existing test/harness that does not set it, is
+    OTHER by default)."""
     s = (raw or "").strip().upper()
     return s if s in SAMPLE_SOURCES else "OTHER"
 
