@@ -546,6 +546,11 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         # is the LINE webhook's own HMAC-verified user id), never from
         # message text.
         "tenant_id": tenant_id, "external_user_id": user_id,
+        # P2.1 SHADOW OBSERVABILITY — this IS the real LINE webhook path;
+        # marks every conversation_intelligence telemetry row from this
+        # turn REAL_LINE so it counts toward the >= 200 live-turn
+        # read-cutover gate. Observability only — never read for routing.
+        "sample_source": "REAL_LINE",
     }
 
     # Context Continuity (Customer Intelligence V1, 2026-08-15) -- a

@@ -3241,6 +3241,16 @@ class DecisionEngine:
                     _prev_frame = context.get("conversation_frame")
                     structured_frame = _build_frame(_prev_frame, resolution)
                     _parity = _frame_parity(_legacy_frame(history), structured_frame, resolution)
+                    # P2.1 SHADOW OBSERVABILITY — a purely diagnostic flag
+                    # (never read by routing): the requested slot did not
+                    # advance between the previous persisted frame and
+                    # this one, and this turn was not an answer/correction
+                    # to it. Computed here only because both frames are
+                    # already in scope; changes no behaviour.
+                    _known_slot_reask = bool(
+                        _prev_frame and _prev_frame.get("requested_slot")
+                        and _prev_frame.get("requested_slot") == structured_frame.get("requested_slot")
+                        and resolution.conversation_act not in ("ANSWER", "CORRECTION"))
                     developer_trace["conversation_frame"] = {
                         "version": structured_frame.get("version"),
                         "journey": structured_frame.get("journey"),
@@ -3250,11 +3260,21 @@ class DecisionEngine:
                         "turn_seq": structured_frame.get("turn_seq"),
                         "source": "conversation_resolution",
                         "parity_with_legacy": _parity,
+                        "known_slot_reask": _known_slot_reask,
                     }
             except Exception as _e:
                 developer_trace["conversation_frame_error"] = str(_e)
             # surfaced for the channel adapter's post-decide persistence.
             context["_structured_conversation_frame"] = structured_frame
+            # P2.1 SHADOW OBSERVABILITY — which channel/caller produced
+            # this turn, set explicitly by the caller (line_bot/webhook.py
+            # -> "REAL_LINE", Admin Hybrid-Playground auto mode ->
+            # "ADMIN_AUTO"); every other caller (manual playground modes,
+            # every test/harness) leaves it unset -> "OTHER". Never
+            # inferred from message content. Used only by
+            # services/conversation_intelligence_telemetry.py to keep
+            # test/synthetic traffic out of the live cutover denominator.
+            developer_trace["sample_source"] = context.get("sample_source") or "OTHER"
 
             # Confirmed Pending Action — Direct Execution (Confirmation
             # Continuation Correctness fix, 2026-08-23). A caller

@@ -204,8 +204,25 @@ def extract_conversation_fields(decide_result: Dict) -> Dict:
         "collected_parameters": collection_status.get("collected_parameters") or {},
         "metadata": {"classification": (dev.get("classification") or {}).get("classification"),
                      "workflow": dev.get("workflow"), "alert": decide_result.get("alert"),
-                     "error": decide_result.get("error")},
+                     "error": decide_result.get("error"),
+                     # P2.1 SHADOW OBSERVABILITY (2026-09-11) — a small,
+                     # privacy-safe structured record of this turn's
+                     # ConversationResolution / structured-frame parity
+                     # (services/conversation_intelligence_telemetry.py).
+                     # None when the turn was not an eligible shadow
+                     # sample. Best-effort: a failure here never raises,
+                     # so it can never block this metadata dict or the
+                     # Conversation History write that follows it.
+                     "conversation_intelligence": _build_ci_telemetry(dev)},
     }
+
+
+def _build_ci_telemetry(dev: Dict) -> Optional[Dict]:
+    try:
+        from services.conversation_intelligence_telemetry import build_telemetry
+        return build_telemetry(dev)
+    except Exception:
+        return None
 
 
 class SessionService:

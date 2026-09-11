@@ -3697,7 +3697,13 @@ async def hybrid_playground_ask(request: Request):
         pg_tenant_id = _config.DEFAULT_TENANT_ID
         pg_channel = "playground"
         decide_base_context = {"developer_mode": True, "channel": "playground",
-                                "customer_context": profile or {}, "handoff_status": handoff_status_before}
+                                "customer_context": profile or {}, "handoff_status": handoff_status_before,
+                                # P2.1 SHADOW OBSERVABILITY — Auto mode is
+                                # owner/admin traffic, not a real customer;
+                                # tagged ADMIN_AUTO so it is reported
+                                # separately and never inflates the
+                                # REAL_LINE cutover denominator.
+                                "sample_source": "ADMIN_AUTO"}
         # P2 SHADOW-WRITE — same additive load as line_bot/webhook.py so
         # Auto-mode (the production-equivalent channel) also persists the
         # structured conversation frame. Degrades to None; never a
