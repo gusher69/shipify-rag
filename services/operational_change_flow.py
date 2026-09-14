@@ -85,6 +85,58 @@ def is_operational_cancellation(message: str) -> bool:
     return has_bill or bool(_CANCEL_IMPERATIVE_RE.search(t))
 
 
+# ── PHASE 6 POST-DEPLOY (defect class B — intent discrimination) ──────
+# ONE approved cancellation policy statement. The OPERATION ack and the
+# POLICY answer are both rendered from it, so the two can never state
+# different business truth. Source: the committed cancel_purchase_bill
+# acknowledgement that has been shipping in production.
+CANCELLATION_POLICY_STATEMENT = (
+    "หากยังไม่ได้ชำระเงินจะสามารถยกเลิกได้ "
+    "กรณีที่ชำระแล้วแอดมินต้องสอบถามร้านก่อนว่าจัดส่งสินค้าแล้วหรือยังนะคะ")
+# the OPERATION half — asked for only when the customer wants it DONE.
+CANCELLATION_IDENTIFIER_REQUEST = (
+    "รบกวนขอเลขบิลสั่งซื้อเพื่อให้เจ้าหน้าที่ดำเนินการต่อด้วยค่ะ")
+_CANCEL_OPERATION_ACK = (
+    "รับเรื่องขอยกเลิกค่ะ " + CANCELLATION_POLICY_STATEMENT + " "
+    + CANCELLATION_IDENTIFIER_REQUEST)
+# the POLICY half — explains the rule and demands NO identifier.
+CANCELLATION_POLICY_ANSWER = (
+    CANCELLATION_POLICY_STATEMENT
+    + " หากต้องการให้แอดมินดำเนินการยกเลิกให้ แจ้งเข้ามาได้เลยนะคะ")
+
+# The cancellable OBJECT. A cancel verb with no object at all is the
+# conversational "never mind" that abandons the active journey — owned by
+# conversation_semantics._FRAME_CANCEL_RE, never by this module.
+_CANCEL_OBJECT_RE = re.compile(
+    r"บิลสั่งซื้อ|คำสั่งซื้อ|ออเดอร์|order|บิล(?!ขนส่ง)|"
+    r"การถอน|ถอนเงิน|ถอนเครดิต|ถอนยอด|เงื่อนไข", re.IGNORECASE)
+
+
+def classify_cancellation(message: str) -> Optional[str]:
+    """The ONE place a cancellation intent is named: "POLICY",
+    "OPERATION" or None.
+
+    Why this exists (PHASE 6 POST-DEPLOY root cause G): the deterministic
+    tier named NO family for any cancellation wording, so every one of
+    them fell through to the gated LLM family call, which answered
+    PURCHASE_WITHDRAWAL — and the customer asking whether a purchase bill
+    can be cancelled was handed the money-withdrawal procedure. The fix
+    is to name the intent deterministically and confidently, so the LLM
+    is never consulted for it at all.
+
+    The cancel verb GOVERNS: "ยกเลิกการถอนเงินได้ไหม" and "ถอนเงินแล้ว
+    อยากยกเลิก" are cancellations OF a withdrawal, not withdrawal
+    requests. A turn with no cancel verb ("อยากถอนเงิน") is never touched
+    here and keeps its withdrawal family.
+    """
+    t = (message or "").strip()
+    if not t or not _CANCEL_VERB_RE.search(t):
+        return None
+    if not _CANCEL_OBJECT_RE.search(t):
+        return None
+    return "OPERATION" if is_operational_cancellation(t) else "POLICY"
+
+
 _CARRIER_VERB_RE = re.compile(
     r"เปลี่ยน|แก้ไข|แก้|ปรับ|ขอ|เอาเป็น|บิลนี้|ต้องการ|อยาก", re.IGNORECASE)
 
@@ -144,9 +196,7 @@ _KINDS = [
      "คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ VAT มาให้แอดมินได้เลยนะคะ", "เลขบิลสั่งซื้อ"),
     ("cancel_purchase_bill", _CANCEL_VERB_RE,
      re.compile(r"บิลสั่งซื้อ|คำสั่งซื้อ|ออเดอร์|order|บิล(?!ขนส่ง)", re.IGNORECASE),
-     "รับเรื่องขอยกเลิกค่ะ หากยังไม่ได้ชำระเงินจะสามารถยกเลิกได้ "
-     "กรณีที่ชำระแล้วแอดมินต้องสอบถามร้านก่อนว่าจัดส่งสินค้าแล้วหรือยังนะคะ "
-     "รบกวนขอเลขบิลสั่งซื้อเพื่อให้เจ้าหน้าที่ดำเนินการต่อด้วยค่ะ", "เลขบิลสั่งซื้อ"),
+     _CANCEL_OPERATION_ACK, "เลขบิลสั่งซื้อ"),
     ("duplicate_bill", None,
      re.compile(r"บิลซ้ำ|บิลซ้ำกัน|มีบิลซ้ำ|บิลออกมาซ้ำ|บิลตีซ้ำ|บิลเบิ้ล"),
      "แอดมินเช็คบิลซ้ำและลบบิลให้นะคะ รบกวนขอเลขแทรคจีนหน่อยนะคะ", "เลขแทรคจีน"),

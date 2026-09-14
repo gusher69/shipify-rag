@@ -37,6 +37,13 @@ from typing import Dict, List, Optional
 SERVICE_INTENT_FAMILIES = frozenset({
     "HELP_INTENT", "SERVICE_DISCOVERY", "MONEY_TRANSFER_INTEREST",
     "WEBSITE_LINK_REQUEST", "CONTACT_INFO", "WAREHOUSE_INBOUND_JOURNEY",
+    # PHASE 6 POST-DEPLOY (defect class B) — a cancellation POLICY
+    # question ("ยกเลิกบิลสั่งซื้อได้ไหม") is a one-turn public policy
+    # answer: it must never demand an identifier, and it must never be
+    # answered with the money-withdrawal procedure. The OPERATION
+    # sibling keeps its existing operational-collection path and is NOT
+    # listed here.
+    "CANCELLATION_POLICY",
 })
 
 # ── deterministic replies ────────────────────────────────────────────
@@ -148,7 +155,7 @@ def warehouse_inbound_reply(_wh_kind: Optional[str] = None) -> str:
 
 
 def import_interest_reply(product: Optional[str], *, quantity: Optional[int] = None,
-                          method: Optional[str] = None) -> str:
+                          method: Optional[str] = None, unit: Optional[str] = None) -> str:
     """Reuse the frame acknowledgement so ``derive_active_frame`` can read
     the product back on the next turn (same 'reply wording IS the state'
     pattern the import frame already uses).
@@ -168,7 +175,11 @@ def import_interest_reply(product: Optional[str], *, quantity: Optional[int] = N
     # back to the fully-generic two-path reply below (which would
     # silently discard the quantity the customer already gave).
     if product or quantity or method:
-        return frame_ack_reply(Frame(product=product, quantity=quantity, method=method), changed="none")
+        # PHASE 6 POST-DEPLOY (defect class C) — the unit the customer
+        # actually supplied travels with the quantity into the ack, so
+        # "20 คู่" is never echoed back as "20 ชิ้น".
+        return frame_ack_reply(Frame(product=product, quantity=quantity,
+                                     method=method, unit=unit), changed="none")
     # OWNER-REAL-LINE-FIX-01 — a broad "อยากสั่งของจากจีน" must NOT assume
     # the customer already has a product link. Offer BOTH paths in one
     # coherent reply: send a link if they have one, otherwise say what
@@ -196,9 +207,16 @@ def reply_for_family(family: str, *, sb=None, entities: Optional[Dict] = None,
         return contact_info_reply(sb)
     if family == "WAREHOUSE_INBOUND_JOURNEY":
         return warehouse_inbound_reply(ent.get("wh_kind"))
+    if family == "CANCELLATION_POLICY":
+        # rendered from the SAME approved statement the operational
+        # cancellation ack uses, so policy and operation can never state
+        # different business truth (services/operational_change_flow.py).
+        from services.operational_change_flow import CANCELLATION_POLICY_ANSWER
+        return CANCELLATION_POLICY_ANSWER
     if family == "IMPORT_INTEREST":
         return import_interest_reply(product or ent.get("product"),
-                                      quantity=ent.get("quantity"), method=ent.get("method"))
+                                      quantity=ent.get("quantity"), method=ent.get("method"),
+                                      unit=ent.get("quantity_unit"))
     return None
 
 

@@ -330,7 +330,15 @@ def _frame_known_slots(frame: Optional[_Frame]) -> Dict[str, Any]:
     if frame.product:
         ks["product"] = _slot(frame.product, raw=frame.product)
     if frame.quantity:
-        ks["quantity"] = _slot(frame.quantity, None, raw=str(frame.quantity))
+        # PHASE 6 POST-DEPLOY (defect class C) — the legacy Frame now
+        # carries the supplied count unit, so P1's typed SlotValue no
+        # longer loses it here (this was the one place where a unit that
+        # HAD been parsed silently became None on the way into the
+        # structured resolution).
+        _fu = getattr(frame, "unit", None)
+        ks["quantity"] = _slot(frame.quantity, _fu,
+                               raw=(f"{frame.quantity} {_fu}".strip() if _fu
+                                    else str(frame.quantity)))
     if frame.method:
         ks["shipping_method"] = _slot(frame.method, raw=frame.method)
     if getattr(frame, "weight", None):
@@ -409,7 +417,8 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
     active_journey = "IMPORT_INTEREST" if (frame and frame.product) else None
     if frame:
         ev.append({"kind": "frame_signal", "product": frame.product,
-                   "quantity": frame.quantity, "method": frame.method})
+                   "quantity": frame.quantity, "unit": getattr(frame, "unit", None),
+                   "method": frame.method})
 
     fc = _resolve_frame_correction(norm, frame) if (frame and frame.product) else {
         "op": "UNKNOWN", "product": None, "quantity": None, "method": None, "brand": None}

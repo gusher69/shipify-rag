@@ -2941,6 +2941,12 @@ _ACTIONABLE_INTENT_FAMILIES = frozenset({
     "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "INVOICE",
     "SHIPMENT_STATUS", "ADDRESS_CHANGE", "LINK_CONVERSION",
     "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL",
+    # PHASE 6 POST-DEPLOY (defect class B) — both cancellation families
+    # are decisive reads. Before this pass these same turns were named
+    # PURCHASE_WITHDRAWAL by the gated LLM and were therefore ALREADY in
+    # this set; keeping them here preserves the existing break semantics
+    # while fixing which family they are.
+    "CANCELLATION_POLICY", "CANCELLATION_OPERATION",
 })
 # The subset that is NEVER itself a Business-Action collection — used
 # where the pending flow's own family is unknown (a generic
@@ -2968,6 +2974,11 @@ _FLOW_ONLY_INTENT_FAMILIES = frozenset({
     # Business-Action collection); there is no "own continuation" of
     # theirs to protect.
     "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL",
+    # a cancellation POLICY question has no collection of its own (it is
+    # answered from the approved policy statement in one turn), so it is
+    # flow-only. CANCELLATION_OPERATION is deliberately EXCLUDED: it IS
+    # its own operational collection.
+    "CANCELLATION_POLICY",
 })
 
 
@@ -4258,6 +4269,10 @@ class DecisionEngine:
                                     alert=_detect_alert(message, context))
                         elif _use5["op"] in ("CORRECT_QUANTITY", "SET_QUANTITY") and _use5.get("quantity"):
                             _f5_frame.quantity = _use5["quantity"]
+                            # PHASE 6 POST-DEPLOY (defect class C) — a new
+                            # quantity carries its own unit; keep the frame's
+                            # previous unit when the correction stated none.
+                            _f5_frame.unit = _use5.get("unit") or _f5_frame.unit
                             return self._finalize(
                                 reply=_build_response(
                                     text=_frame_ack_reply(_f5_frame, changed="quantity")),
@@ -4446,6 +4461,7 @@ class DecisionEngine:
                         developer_trace["semantic_rewrite"] = message
                     elif _op in ("SET_QUANTITY", "CORRECT_QUANTITY") and _sem["quantity"]:
                         _sem_frame.quantity = _sem["quantity"]
+                        _sem_frame.unit = _sem.get("unit") or _sem_frame.unit
                         return self._finalize(
                             reply=_build_response(text=_frame_ack_reply(_sem_frame, changed="quantity")),
                             routing_type="GENERAL", workflow=workflow_hint,
@@ -4571,7 +4587,8 @@ class DecisionEngine:
                     return self._finalize(
                         reply=_build_response(text=_imp_reply(
                             _svc_ent.get("product"), quantity=_svc_ent.get("quantity"),
-                            method=_svc_ent.get("method"))),
+                            method=_svc_ent.get("method"),
+                            unit=_svc_ent.get("quantity_unit"))),
                         routing_type="GENERAL", workflow=workflow_hint,
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))

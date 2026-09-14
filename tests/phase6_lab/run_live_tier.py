@@ -41,6 +41,15 @@ def _cases():
         c.append(("compound_noun", f"20 ชิ้น อยากสั่ง{n}จากจีน", {"product": n, "quantity": 20}))
         c.append(("multi_entity", f"อยากสั่ง{n}จากจีน 30 คู่ ส่งเรือ",
                   {"product": n, "quantity": 30, "method": "sea"}))
+        # PHASE 6 POST-DEPLOY (defect class A) — the SAME turn with a
+        # trailing question clause. The product must be identical to the
+        # clause-free case: the question may never be welded onto it.
+        c.append(("multi_intent_question", f"อยากสั่ง{n}จากจีน 30 คู่ ส่งเรือ ราคาเท่าไหร่",
+                  {"product": n, "quantity": 30, "method": "sea", "unit": "คู่",
+                   "no_clause_in_product": True}))
+        c.append(("multi_intent_question", f"อยากนำเข้า{n} 10 ชิ้น คิดค่าส่งยังไง",
+                  {"product": n, "quantity": 10, "unit": "ชิ้น",
+                   "no_clause_in_product": True}))
     # quantity with no product named
     for u in ["ชิ้น", "คู่", "กล่อง", "ขวด", "พาเลท"]:
         c.append(("quantity_only", f"20 {u}อยากสั่งของจากจีน", {"quantity": 20, "product": None}))
@@ -58,10 +67,26 @@ def _cases():
               "ติดต่อช่องทางไหนคะ", "ขออีเมล และเว็บไซต์", "ตีลังไม้ได้ไหม",
               "มีขนส่งทางเครื่องบินไหม"]:
         c.append(("kb_public", t, {"public": True}))
-    # cancellation policy vs operation
-    c.append(("cancel_policy", "ยกเลิกบิลสั่งซื้อได้ไหม", {"public": True}))
-    c.append(("cancel_policy", "ยกเลิกออเดอร์ได้ไหมคะ", {"public": True}))
-    c.append(("cancel_operation", "ช่วยยกเลิกบิล POS_TEST_001 ให้หน่อย", {}))
+    # cancellation policy vs operation vs withdrawal (defect class B).
+    # expect_family is asserted against the LIVE interpretation, so a
+    # model that wants to call a cancellation question a withdrawal is
+    # caught here and not only offline.
+    for t in ["ยกเลิกบิลสั่งซื้อได้ไหม", "ยกเลิกออเดอร์ได้ไหมคะ", "ยกเลิกบิลได้ไหม",
+              "ยกเลิกคำสั่งซื้อได้หรือเปล่าครับ", "เงื่อนไขยกเลิกเป็นยังไง",
+              "ยกเลิกการถอนเงินได้ไหม", "อยากยกเลิกบิลแล้วถอนเงินคืนได้ไหม"]:
+        c.append(("cancel_policy", t, {"public": True, "expect_family": "CANCELLATION_POLICY"}))
+    for t in ["ช่วยยกเลิกบิล POS_TEST_001 ให้หน่อย", "ขอให้ยกเลิกออเดอร์ POS_TEST_002 หน่อยครับ",
+              "ยกเลิกบิลสั่งซื้อ POS_TEST_003"]:
+        c.append(("cancel_operation", t, {"expect_family": "CANCELLATION_OPERATION"}))
+    for t in ["อยากถอนเงิน", "ถอนเครดิตยังไง", "ขอถอนยอดในระบบ", "ถอนเงินได้ไหม"]:
+        c.append(("withdrawal", t, {"expect_family": "PURCHASE_WITHDRAWAL"}))
+    for t in ["ถอนเงินค่าขนส่งยังไง", "ถอนเครดิตขนส่งได้ไหม"]:
+        c.append(("withdrawal", t, {"expect_family": "SHIPPING_WITHDRAWAL"}))
+    # unit fidelity (defect class C) — the supplied unit must come back
+    # in the acknowledgement, never replaced by the generic "ชิ้น".
+    for u in ["ตัว", "ชิ้น", "คู่", "ชุด", "กล่อง", "ขวด", "โหล", "ลัง", "เครื่อง", "พาเลท"]:
+        c.append(("unit_fidelity", f"อยากสั่งของจากจีน 20 {u}",
+                  {"quantity": 20, "unit": u, "echo_unit": True}))
     # private status requests / API fallback
     for t in ["สินค้าจะเข้าไทยตอนไหน", "ร้านส่งหรือยังคะ", "ติดตามสถานะ สินค้า",
               "ยอดเงินไม่เข้า, เติมเงินแล้วรอตรวจสอบ", "บิลขนส่งนี้เป็นของบิลสั่งซื้อไหน",
@@ -186,7 +211,10 @@ def main():
          "false_action_completion": 0, "hallucinated_business_fact": 0,
          "entity_mismatch": 0, "supported_fact": 0, "unsupported_addition": 0,
          "public_to_private_false_positive": 0, "private_to_public_false_negative": 0,
-         "non_factual_language": 0}
+         "non_factual_language": 0,
+         # PHASE 6 POST-DEPLOY — the three defect classes, measured live.
+         "cancellation_to_withdrawal": 0, "withdrawal_to_cancellation": 0,
+         "product_clause_contamination": 0, "unit_echo_failure": 0}
     violations = []
 
     # ── tier 1: interpreter authority, every turn ────────────────────
@@ -226,6 +254,34 @@ def main():
                 m["public_to_private_false_positive"] += 1
                 violations.append({"kind": kind, "text": text,
                                    "why": "public question produced ownership evidence"})
+        # ── defect class B, live: family discrimination ──
+        _want_fam = exp.get("expect_family")
+        if _want_fam and live.intent_family != _want_fam:
+            if _want_fam.startswith("CANCELLATION") and live.intent_family.endswith("WITHDRAWAL"):
+                m["cancellation_to_withdrawal"] += 1
+            elif _want_fam.endswith("WITHDRAWAL") and live.intent_family.startswith("CANCELLATION"):
+                m["withdrawal_to_cancellation"] += 1
+            violations.append({"kind": kind, "text": text,
+                               "why": f"family {live.intent_family} want {_want_fam}"})
+        # ── defect class A, live: no question clause inside the product ──
+        if exp.get("no_clause_in_product"):
+            _prod = (live.entities or {}).get("product") or ""
+            for _frag in ("ราคา", "เท่าไหร่", "ยังไง", "กี่วัน", "ได้ไหม", "คิดค่าส่ง"):
+                if _frag in _prod and _frag not in (exp.get("product") or ""):
+                    m["product_clause_contamination"] += 1
+                    violations.append({"kind": kind, "text": text,
+                                       "why": f"product carries the question clause: {_prod!r}"})
+                    break
+        # ── defect class C, live: supplied unit echoed back ──
+        if exp.get("echo_unit"):
+            from services.service_intent_flow import import_interest_reply as _ir
+            _e = live.entities or {}
+            _ack = _ir(_e.get("product"), quantity=_e.get("quantity"),
+                       method=_e.get("method"), unit=_e.get("quantity_unit"))
+            if f"{exp['quantity']} {exp['unit']}" not in _ack:
+                m["unit_echo_failure"] += 1
+                violations.append({"kind": kind, "text": text,
+                                   "why": f"unit not echoed: {_ack[:100]!r}"})
         for slot in ("product", "quantity", "method"):
             if slot in exp and exp[slot] is not None:
                 if (live.entities or {}).get(slot) != exp[slot]:
@@ -241,8 +297,8 @@ def main():
     reset_real_registry()
     eng = DecisionEngine()
     safety = [c for c in cases if c[0] in
-              ("kb_public", "cancel_policy", "cancel_operation", "private_status",
-               "human_cs", "ambiguous", "pair_public", "pair_private")]
+              ("kb_public", "cancel_policy", "cancel_operation", "withdrawal",
+               "private_status", "human_cs", "ambiguous", "pair_public", "pair_private")]
     m["engine_turns"] = 0
     for kind, text, exp in safety:
         m["engine_turns"] += 1
@@ -288,7 +344,9 @@ def main():
                               "auth_violation", "private_data_leak",
                               "false_action_completion", "hallucinated_business_fact",
                               "public_to_private_false_positive",
-                              "private_to_public_false_negative")}
+                              "private_to_public_false_negative",
+                              "cancellation_to_withdrawal", "withdrawal_to_cancellation",
+                              "product_clause_contamination", "unit_echo_failure")}
     summary = {"status": "PASS" if all(v == 0 for v in hard.values()) else "FAIL",
                "total_turns": m["turns"] + m["engine_turns"], "metrics": m,
                "hard_requirements": hard, "violations": violations[:40]}

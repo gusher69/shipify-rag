@@ -65,7 +65,20 @@ _ASSIST_PRODUCT_RES = (
 )
 _NOT_A_PRODUCT_RE = re.compile(
     r"จำนวน|ชิ้น|ตัว|ประมาณ|ขนส่ง|ทางรถ|ทางเรือ|ทางอากาศ|กิโล|น้ำหนัก|ราคา|บริการ|Shipify", re.IGNORECASE)
-_ASSIST_QTY_RE = re.compile(r"จำนวน(?:ประมาณ)?\s*(?P<q>\d{1,7})")
+# PHASE 6 closure gate D/H — ONE count-unit vocabulary for the whole
+# module (see the PHASE-6-SLOT-CONSUMPTION note below for why). Defined
+# here, ahead of the first regex that substitutes it.
+_COUNT_UNIT_ALT = ("ตัว|ชิ้น|ชิน|อัน|ใบ|คู่|ชุด|กล่อง|ขวด|โหล|แพ็ค|แพก|แพค|ลัง|ผืน|"
+                   "หลัง|เครื่อง|พาเลท|pcs?")
+
+# PHASE 6 POST-DEPLOY (defect class C) — also capture the UNIT the
+# acknowledgement carried, so the typed quantity survives a round trip
+# through the conversation exactly like the product and method already do
+# ("reply wording IS the state"). The unit group is optional: an older
+# acknowledgement with no unit still parses, and the digits group is
+# unchanged, so every existing read-back keeps working.
+_ASSIST_QTY_RE = re.compile(r"จำนวน(?:ประมาณ)?\s*(?P<q>\d{1,7})\s*(?P<u>"
+                            + _COUNT_UNIT_ALT + r")?")
 _ASSIST_METHOD_RE = re.compile(r"ขนส่งทาง(?P<m>รถ|เรือ|อากาศ)")
 
 #
@@ -91,8 +104,6 @@ _ASSIST_METHOD_RE = re.compile(r"ขนส่งทาง(?P<m>รถ|เรื�
 # recognised by the opener and invisible to the bare-slot-answer
 # matchers. Every site below now substitutes this constant, so a new
 # unit can only ever be added in one place.
-_COUNT_UNIT_ALT = ("ตัว|ชิ้น|ชิน|อัน|ใบ|คู่|ชุด|กล่อง|ขวด|โหล|แพ็ค|แพก|แพค|ลัง|ผืน|"
-                   "หลัง|เครื่อง|พาเลท|pcs?")
 
 _USER_QTY_RE = re.compile(
     r"(?:ประมาณ\s*)?(?P<q>\d{1,7})\s*(" + _COUNT_UNIT_ALT + r")",
@@ -105,6 +116,104 @@ _USER_QTY_RE = re.compile(
 # back would be circular).
 _METHOD_WORD_RE = re.compile(
     r"ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|โดยรถ|โดยเรือ|โดยเครื่องบิน|ส่งเรือ|ส่งรถ")
+
+# ── ENTITY SPAN vs QUESTION / ACTION SPAN ─────────────────────────────
+# PHASE 6 POST-DEPLOY (defect class A — entity boundary / multi-intent).
+# A Thai turn routinely declares an ENTITY and asks an INTERROGATIVE /
+# ACTION question in one breath ("อยากสั่งรองเท้าจากจีน 30 คู่ ส่งเรือ
+# ราคาเท่าไหร่"). Thai has no word spaces, so a product-noun extractor
+# that only strips filler words returns "รองเท้าราคาเท่าไหร่" — the
+# question welded onto the product, which is then echoed back to the
+# customer.
+#
+# The separation implemented here is STRUCTURAL, not a phrase table. A
+# question/action clause is a CONTIGUOUS RUN at one end of the message
+# built ENTIRELY out of closed-class material — interrogatives, generic
+# predicates/auxiliaries, generic attribute/measure/place nouns,
+# transport-mode spans, conjunctions, particles, digits, punctuation —
+# that contains at least one interrogative. Any CONTENT word terminates
+# the run, and a product name is by definition a content word, so the
+# rule generalises to wordings nobody enumerated and can never eat a
+# product name. The run must reach the very end (or start) of the
+# message, which is what makes a product noun sitting at the boundary
+# self-protecting.
+#
+# Deliberately ABSENT from both lists:
+#   * "ของ" / "สินค้า" — legitimate formants inside real compound product
+#     nouns ("ชั้นวางของ", "กล่องใส่ของ"); same reason _FIX23_STRIP_RE
+#     leaves them alone.
+#   * every COUNT UNIT in _COUNT_UNIT_ALT — a run must not be able to
+#     swallow a quantity span.
+#   * bare "รถ" / "เรือ" — each can be a product in its own right, so
+#     only the full transport-MODE spans ("ทางรถ", "โดยเรือ") qualify.
+_QC_INTERROGATIVE_ALT = (
+    "เท่าไหร่|เท่าไร|เท่าใด|กี่|ยังไง|ยังงัย|อย่างไร|"
+    "ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|หรือไม่|ป่าว|หรือยัง|รึยัง|"
+    "เมื่อไหร่|เมื่อไร|ที่ไหน|ตรงไหน|อันไหน|แบบไหน|ไหน|อะไร|ทำไม")
+_QC_CLAUSE_FILLER_ALT = (
+    # generic predicates / auxiliaries
+    "คำนวณ|คำนวน|ประเมิน|ตีราคา|คิด|เสีย|จ่าย|ชำระ|"
+    "จัดส่ง|ขนส่ง|ส่ง|ถึง|ใช้|มี|เป็น|ได้|ต้อง|ควร|รับ|ทำ|นับ|รวม|"
+    # generic attribute / measure / place nouns
+    "ค่าใช้จ่าย|ค่าส่ง|ค่าขนส่ง|ค่านำเข้า|ค่า|ราคา|เรท|"
+    "ระยะเวลา|เวลา|วัน|นาน|บาท|กิโลกรัม|กิโล|กก|โล|kg|น้ำหนัก|คิว|cbm|"
+    "ประเทศไทย|ไทย|จีน|ปลายทาง|หน้าบ้าน|บ้าน|"
+    # transport MODE spans only (never a bare "รถ"/"เรือ")
+    "ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|โดยรถ|โดยเรือ|โดยเครื่องบิน|เครื่องบิน|"
+    # conjunctions / particles
+    "และ|กับ|หรือ|แล้ว|บ้าง|เลย|ด้วย|หน่อย|อีก|คือ|"
+    "ครับ|ค่ะ|คะ|คับ|ขอรับ|นะ|น่ะ|อ่ะ|จ๊ะ|จ้า|หรอ|เหรอ|ล่ะ|ละ|ๆ")
+
+
+def _qc_alt(alt: str) -> str:
+    """Longest-alternative-first, so "ทางเรือ" is never matched as the
+    shorter "ทาง…" prefix of something else."""
+    return "|".join(sorted(alt.split("|"), key=len, reverse=True))
+
+
+_QC_INTERROGATIVE_RE = re.compile("(?:" + _qc_alt(_QC_INTERROGATIVE_ALT) + ")", re.IGNORECASE)
+_QC_TOKEN_RE = re.compile(
+    "(?:" + _qc_alt(_QC_INTERROGATIVE_ALT) + "|" + _qc_alt(_QC_CLAUSE_FILLER_ALT)
+    + r"|\d+(?:[.,]\d+)?|[\s,.!?ฯ\-–_]" + ")", re.IGNORECASE)
+
+
+def _qc_run_end(s: str, i: int) -> "tuple[int, bool]":
+    """Consume a maximal run of closed-class clause tokens from i.
+    Returns (end_index, saw_interrogative)."""
+    seen_q = False
+    while i < len(s):
+        m = _QC_TOKEN_RE.match(s, i)
+        if not m:
+            break
+        if _QC_INTERROGATIVE_RE.fullmatch(m.group(0)):
+            seen_q = True
+        i = m.end()
+    return i, seen_q
+
+
+def split_question_clause(text: str) -> "tuple[str, str]":
+    """Split a turn into (entity_span, question_action_span).
+
+    The question/action span is the maximal closed-class run containing
+    an interrogative at the END of the message (the overwhelmingly
+    common Thai order), or failing that at the START. When the whole
+    message is question material there is no entity to protect and the
+    text is returned unsplit.
+    """
+    s = text or ""
+    n = len(s)
+    if not s.strip():
+        return s, ""
+    for i in range(1, n):                       # earliest cut = longest clause
+        if s[i].isspace():
+            continue
+        end, seen_q = _qc_run_end(s, i)
+        if end >= n and seen_q and s[:i].strip():
+            return s[:i], s[i:]
+    end, seen_q = _qc_run_end(s, 0)             # leading question clause
+    if seen_q and 0 < end < n and s[end:].strip():
+        return s[end:], s[:end]
+    return s, ""
 
 # import / product interest reused from the FIX-2.3 recognizer so the
 # frame opens on exactly the turns FIX-2.3 already treats as import
@@ -142,6 +251,18 @@ def _is_import_interest(q: str) -> bool:
     return bool(_import_recognizers()["is"](q or ""))
 
 
+def _classify_cancellation(q: str) -> Optional[str]:
+    """Lazy bridge to the ONE cancellation discriminator (see
+    services/operational_change_flow.py::classify_cancellation). Lazy for
+    the same reason as _import_recognizers: import order safety, never a
+    second copy of the rule."""
+    try:
+        from services.operational_change_flow import classify_cancellation
+    except Exception:  # pragma: no cover - import guard
+        return None
+    return classify_cancellation(q or "")
+
+
 def _import_noun(q: str):
     return _import_recognizers()["noun"](q or "")
 
@@ -164,6 +285,13 @@ class Frame:
     intent: str = "IMPORT_INTEREST"
     product: Optional[str] = None
     quantity: Optional[int] = None
+    # PHASE 6 POST-DEPLOY (defect class C — slot unit preservation) — the
+    # COUNT UNIT the customer supplied alongside the quantity. It used to
+    # be recognised by the quantity parser and then thrown away, so every
+    # acknowledgement rendered the generic fallback ("20 คู่" -> "20 ชิ้น")
+    # and the customer saw their own words replaced. A quantity is a
+    # TYPED value: number + unit.
+    unit: Optional[str] = None
     weight: Optional[str] = None
     dimensions: Optional[str] = None
     method: Optional[str] = None
@@ -232,7 +360,7 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
     # 3. accumulate product / quantity / method across the whole window
     #    (newest wins).
     product = open_product
-    quantity = method = None
+    quantity = method = unit = None
     for t in reversed(turns):
         c = t.get("content") or ""
         role = t.get("role")
@@ -246,6 +374,7 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
             mq = (_ASSIST_QTY_RE.search(c) if role == "assistant" else _USER_QTY_RE.search(c))
             if mq:
                 quantity = int(mq.group("q"))
+                unit = (mq.group("u") if role == "assistant" else mq.group(2)) or None
         if method is None:
             mm = (_ASSIST_METHOD_RE.search(c) if role == "assistant" else None)
             if mm:
@@ -253,7 +382,7 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
 
     if product is None:
         return None
-    return Frame(product=product, quantity=quantity, method=method)
+    return Frame(product=product, quantity=quantity, unit=unit, method=method)
 
 
 # ── deterministic follow-up-shape gate ────────────────────────────────
@@ -370,6 +499,13 @@ def resolve_followup(message: str, frame: Frame) -> Dict:
 _METHOD_TH = {"road": "ทางรถ", "sea": "ทางเรือ", "air": "ทางอากาศ"}
 
 
+# PHASE 6 POST-DEPLOY — ONE wording for "what the rate actually depends
+# on", shared by the frame slot ladder and by the RAG product-interest
+# continuation, so a customer who asked about price is moved toward a
+# real answer with the same sentence either way.
+ASK_WEIGHT_FOR_RATE = "รบกวนแจ้งน้ำหนักโดยประมาณเพิ่มเติมได้ไหมคะ"
+
+
 def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     """Deterministic acknowledgement that re-states the frame IN NATURAL
     PROSE so the next turn's derive_active_frame() can read it back.
@@ -379,7 +515,10 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     _ASSIST_QTY_RE / _ASSIST_METHOD_RE parse. Never a policy claim, never
     an eligibility verdict."""
     p = frame.product or "สินค้า"
-    qty = f" จำนวนประมาณ {frame.quantity} ชิ้น" if frame.quantity else ""
+    # the supplied unit wins; "ชิ้น" is the fallback ONLY when the
+    # customer never stated one.
+    _u = frame.unit or "ชิ้น"
+    qty = f" จำนวนประมาณ {frame.quantity} {_u}" if frame.quantity else ""
     # "ขนส่งทาง…" (NOT "ส่งทาง…") so the trailing "สนใจส่งทางรถหรือทางเรือ"
     # ask clause is never mis-read as a chosen method.
     mth = f" ขนส่ง{_METHOD_TH.get(frame.method, frame.method)}" if frame.method else ""
@@ -387,7 +526,7 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     # derive_active_frame() can read product / quantity / method back
     # without any "(สินค้า X)" state token.
     if changed == "quantity":
-        head = f"รับทราบค่ะ ปรับเป็นจำนวนประมาณ {frame.quantity} ชิ้น สำหรับ{p}นะคะ"
+        head = f"รับทราบค่ะ ปรับเป็นจำนวนประมาณ {frame.quantity} {_u} สำหรับ{p}นะคะ"
         if mth:
             head += f"{mth} ตามเดิมค่ะ"
     elif changed == "method":
@@ -425,7 +564,7 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     elif not frame.method:
         ask = " สนใจส่งทางรถหรือทางเรือคะ"
     elif not frame.weight:
-        ask = " รบกวนแจ้งน้ำหนักโดยประมาณเพิ่มเติมได้ไหมคะ"
+        ask = " " + ASK_WEIGHT_FOR_RATE
     return f"{head}{ask}"
 
 
@@ -508,7 +647,8 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
     turn against an active frame. Returns {op, product, quantity, method,
     brand}; op in CHANGE_TARGET / CORRECT_QUANTITY / CHANGE_METHOD /
     CHANGE_BRAND / REJECT / AMBIGUOUS / UNKNOWN. Never raises."""
-    out = {"op": "UNKNOWN", "product": None, "quantity": None, "method": None, "brand": None}
+    out = {"op": "UNKNOWN", "product": None, "quantity": None, "unit": None,
+           "method": None, "brand": None}
     t = (message or "").strip()
     if not t or len(t) > 48 or frame is None or not getattr(frame, "product", None):
         return out
@@ -518,10 +658,15 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
     # a bare quantity answer ("20 คู่", "ประมาณ 300 ชิ้น") fills the slot.
     # COUNT units only — a bare weight ("10 กิโล") is not a quantity.
     _bareq = re.fullmatch(r"\s*(?:ประมาณ\s*)?(\d{1,7})\s*"
-                          r"(?:" + _COUNT_UNIT_ALT + r")?\s*"
+                          r"(" + _COUNT_UNIT_ALT + r")?\s*"
                           r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*", t, re.IGNORECASE)
     if _bareq:
         out["op"], out["quantity"] = "SET_QUANTITY", int(_bareq.group(1))
+        # PHASE 6 POST-DEPLOY (defect class C) — a corrected quantity
+        # brings its OWN unit with it ("เอา 5 ลัง" after "20 คู่"), so the
+        # acknowledgement echoes the unit the customer just used, not the
+        # one from the superseded value.
+        out["unit"] = _bareq.group(2) or None
         return out
     # OWNER P1 — a shipping-method the customer already picked, re-named
     # to a DIFFERENT one ("ทางเรือดีกว่า", "เอาทางเรือ", "ไม่เอา เอาทางรถ"),
@@ -607,6 +752,9 @@ INTENT_FAMILIES = (
     "COUPON_USAGE", "MY_COUPONS", "PRODUCT_POLICY", "CHARTER_TRUCK",
     "SHIPPING_ESTIMATE", "ADDRESS_CHANGE", "IMPORT_INTEREST",
     "LINK_CONVERSION", "PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL",
+    # PHASE 6 POST-DEPLOY (defect class B) — cancellation is TWO
+    # families, never one and never the withdrawal family.
+    "CANCELLATION_POLICY", "CANCELLATION_OPERATION",
     # PHASE-6B — pre-RAG conversational / service-intent families. These
     # are NEVER a knowledge-base fact question, so a "KB has no chunk"
     # result must never end the journey for one (customer "แก้ไขเคส
@@ -889,7 +1037,80 @@ def _followup_op(t: str) -> str:
     return "NONE"
 
 
+# ── PHASE 6 POST-DEPLOY — multi-intent fact preservation ─────────────
+# CURRENT_TURN_ENTITY_CANNOT_BE_DROPPED. One turn may carry an intent, a
+# product, a quantity+unit, a shipping method AND a question
+# ("อยากนำเข้าชั้นวางของ 10 ชิ้น คิดค่าส่งยังไง"). Exactly one family wins
+# the routing decision, and before this block whichever family that was
+# (SHIPPING_ESTIMATE, or no family at all) simply DISCARDED the product
+# and quantity the customer had just supplied, so the next turn asked
+# for them again.
+#
+# This runs after every deterministic branch and only ever `setdefault`s
+# — the winning family's own extraction always takes precedence. The
+# product is carried only when the turn genuinely IS an import-interest
+# declaration (the same recogniser the IMPORT_INTEREST branch itself
+# gates on), so no other family gains a spurious product.
+_QUESTION_KIND_RES = (
+    ("PRICE", re.compile(r"ราคา|ค่าส่ง|ค่าขนส่ง|ค่านำเข้า|ค่าใช้จ่าย|เรท|กี่บาท|เท่าไหร่|เท่าไร")),
+    ("DURATION", re.compile(r"กี่วัน|นานไหม|นานแค่ไหน|ระยะเวลา|ใช้เวลา|เมื่อไหร่|เมื่อไร")),
+    ("METHOD_ELIGIBILITY", re.compile(r"ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|ขนส่ง|จัดส่ง|ส่ง")),
+    ("HOWTO", re.compile(r"ยังไง|ยังงัย|อย่างไร|วิธี")),
+)
+
+
+def _classify_question_span(span: str) -> Optional[str]:
+    s = (span or "").strip()
+    if not s:
+        return None
+    for kind, rx in _QUESTION_KIND_RES:
+        if rx.search(s):
+            return kind
+    return "OTHER"
+
+
+def _carry_current_turn_entities(t: str, ent: Dict) -> None:
+    """Preserve every fact THIS turn stated, whichever family won."""
+    text = t or ""
+    entity_span, question_span = split_question_clause(text)
+    if question_span.strip():
+        ent.setdefault("question_span", question_span.strip())
+        _qk = _classify_question_span(question_span)
+        if _qk:
+            ent.setdefault("question_kind", _qk)
+    qm = _USER_QTY_RE.search(text)
+    if qm:
+        ent.setdefault("quantity", int(qm.group("q")))
+        # PHASE 6 POST-DEPLOY (defect class C) — the TYPED quantity. The
+        # unit the customer actually supplied is a fact of the turn, not
+        # a parsing by-product: it must survive into the acknowledgement
+        # and the frame instead of being replaced by a generic "ชิ้น".
+        ent.setdefault("quantity_unit", qm.group(2))
+        ent.setdefault("quantity_raw", qm.group(0).strip())
+    mm = _METHOD_WORD_RE.search(text)
+    if mm:
+        _meth = _method_label(mm.group(0))
+        if _meth:
+            ent.setdefault("method", _meth)
+    if not ent.get("product") and _is_import_interest(text):
+        p = _import_noun(text)
+        if p:
+            ent["product"] = p
+
+
 def _compose(t: str) -> "tuple[str, float, Dict]":
+    """Deterministic compositional classification — see _compose_family.
+    Every fact the CURRENT turn stated is preserved on the way out, no
+    matter which family won (multi-intent invariant)."""
+    fam, conf, ent = _compose_family(t)
+    try:
+        _carry_current_turn_entities(t, ent)
+    except Exception:          # never let fact-carrying break routing
+        pass
+    return fam, conf, ent
+
+
+def _compose_family(t: str) -> "tuple[str, float, Dict]":
     """Deterministic compositional classification. Returns
     (intent_family, confidence, entities). Order = most distinctive
     composite first."""
@@ -954,11 +1175,34 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
     # incidental object word never steals it, and before the generic
     # operational "add_vat"/change-request flow so a withdrawal is never
     # mistaken for a VAT request.
+    # CANCELLATION (PHASE 6 POST-DEPLOY, defect class B) — named
+    # DETERMINISTICALLY and confidently, BEFORE withdrawal, because the
+    # cancel verb governs: "ยกเลิกการถอนเงินได้ไหม" is a cancellation of a
+    # withdrawal, not a withdrawal request. Naming it here is the whole
+    # fix for root cause G: at confidence 0.85 interpret() never consults
+    # the gated LLM for these turns, so the LLM can no longer answer
+    # "PURCHASE_WITHDRAWAL" for a question about cancelling a bill. The
+    # POLICY/OPERATION discriminator itself is NOT duplicated here — it
+    # is the one in services/operational_change_flow.py that the
+    # operational collection path already obeys.
+    _cancel_kind = _classify_cancellation(t)
+    if _cancel_kind == "POLICY":
+        return "CANCELLATION_POLICY", 0.85, ent
+    if _cancel_kind == "OPERATION":
+        return "CANCELLATION_OPERATION", 0.85, ent
+
     if _WITHDRAWAL_VERB_RE.search(t):
         if _SHIPPING_WITHDRAWAL_OBJ_RE.search(t):
             return "SHIPPING_WITHDRAWAL", 0.85, ent
         if _PURCHASE_WITHDRAWAL_OBJ_RE.search(t):
             return "PURCHASE_WITHDRAWAL", 0.85, ent
+        # PHASE 6 POST-DEPLOY (defect class B) — a bare withdraw verb with
+        # no distinguishing object ("อยากถอนเงิน", "ถอนเครดิตยังไง",
+        # "ขอถอนยอดในระบบ") is the purchase-credit wallet, the default the
+        # production LLM tier was already returning. Naming it here makes
+        # the withdrawal side deterministic too, so BOTH directions of the
+        # cancellation/withdrawal boundary are decided without an LLM.
+        return "PURCHASE_WITHDRAWAL", 0.7, ent
 
     # PHASE-6B — MONEY_TRANSFER_INTEREST: wants to SEND / pay money to a
     # China shop ("ฝากโอน", "โอนเงินให้ร้านที่จีน"). Opposite direction
@@ -1086,8 +1330,16 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
             _mm = _rx.search(t)
             if _mm and _mm.start() < _cut:
                 _cut = _mm.start()
-        _noun = _bare_product_noun(t[:_cut]) or (
-            re.split(r"\s+", t[:_cut].strip())[-1] if _cut else "")
+        # PHASE 6 POST-DEPLOY (defect class A) — the last resort used to
+        # be "the last whitespace-separated token before the verb", which
+        # for the Thai VERB-noun order ("อยากนำเข้ารองเท้า 10 ชุด …") is the
+        # INTEREST WORD, not goods, and produced product="อยาก". The ONE
+        # shared extractor is consulted first now; the old positional
+        # fallback is kept last, for the spaced pre-verb shapes it was
+        # written for.
+        _noun = (_bare_product_noun(t[:_cut])
+                 or _import_noun(t)
+                 or (re.split(r"\s+", t[:_cut].strip())[-1] if _cut else ""))
         _noun_ok = bool(_noun and 2 <= len(_noun) <= 30 and _THAI_CHAR_RE.search(_noun))
         # PHASE-5 D15 — Thai "VERB noun" order ("สั่งแบตเตอรี่...ได้ไหม"):
         # the goods noun sits AFTER a leading order verb (never use the
@@ -1101,10 +1353,20 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
             _ov = _ORDER_GOODS_VERB.search(t)
             _pm = _ACT_PERMIT.search(t)
             if _ov is not None and _pm is not None and _pm.start() > _ov.end():
-                _seg = t[_ov.end():_pm.start()]
-                _seg = re.sub(r"จำนวน\S*|เยอะ\S*|หลาย\S*|มาก\S*|ปริมาณ\S*|เท่าไหร่|ๆ|\s+", "", _seg).strip()
-                if 3 <= len(_seg) <= 30 and _THAI_CHAR_RE.search(_seg):
-                    _noun, _noun_ok, _order_noun_ok = _seg, True, True
+                # PHASE 6 POST-DEPLOY (defect class A) — this branch used
+                # to run its OWN ad-hoc strip over the raw span between
+                # the order verb and the permission marker, a THIRD
+                # product extractor carrying the same contamination bug
+                # ("อยากสั่งรองเท้าจากจีน 10 ชุด ส่งทางรถได้ไหม" ->
+                # product "รองเท้าจากจีน10ชุดส่งทางรถ"). The positional
+                # SHAPE gate is kept — a goods noun must sit between the
+                # order verb and the permission marker — but the
+                # EXTRACTION is delegated to the ONE shared extractor, so
+                # there is no third copy of the rule to drift.
+                _span = re.sub(r"\s+", "", t[_ov.end():_pm.start()])
+                _cand = _import_noun(t)
+                if _cand and _cand in _span:
+                    _noun, _noun_ok, _order_noun_ok = _cand, True, True
         # A shipping verb ("นำเข้า") is decisive on its own; an order verb
         # counts only once a real goods noun was extracted from after it.
         if v_ship or _order_noun_ok:
@@ -1372,7 +1634,12 @@ def _looks_like_bare_product(t: str) -> bool:
 
 
 def _bare_product_noun(t: str) -> Optional[str]:
-    s = (t or "").strip()
+    # PHASE 6 POST-DEPLOY (defect class A) — same structural clause
+    # separation the opener extractor uses, so a slot answer that also
+    # carries a question ("เป็นรองเท้า ราคาเท่าไหร่") yields the product
+    # alone. Shared function, not a second copy of the rule.
+    s, _q = split_question_clause((t or "").strip())
+    s = s.strip()
     for _ in range(3):
         s = _BARE_PRODUCT_STRIP_RE.sub("", s).strip()
     s = re.sub(r"\s+", "", s)
@@ -1381,7 +1648,23 @@ def _bare_product_noun(t: str) -> Optional[str]:
     s = s.rstrip("ๆ").strip()
     if s and _BARE_PRODUCT_PLACEHOLDER_RE.match(s):
         return None
+    # PHASE 6 POST-DEPLOY (defect class A) — a remnant that is NOTHING but
+    # opener filler ("อยาก", "ต้องการ", "จะเอา") is not a product either.
+    # This reuses the opener extractor's OWN filler vocabulary rather than
+    # duplicating it here, so the two extractors cannot disagree about
+    # what counts as filler; it is the same "only when the whole remnant
+    # is filler" rule the placeholder check above applies.
+    if s and _opener_filler_only(s):
+        return None
     return s if 2 <= len(s) <= 30 and _THAI_CHAR_RE.search(s) else None
+
+
+def _opener_filler_only(s: str) -> bool:
+    try:
+        from services.playground_orchestrator import _FIX23_STRIP_RE
+    except Exception:  # pragma: no cover - import guard
+        return False
+    return not _FIX23_STRIP_RE.sub("", s).strip()
 
 
 # OWNER-REAL-LINE-FIX-04 — a bare product name supplied in reply to the
@@ -1682,6 +1965,10 @@ FAMILY_TO_ACTIONABLE_INTENT = {
     "LINK_CONVERSION": None,
     "PURCHASE_WITHDRAWAL": None,
     "SHIPPING_WITHDRAWAL": None,
+    # answered from the approved committed policy statement by the
+    # Decision Engine, never forced into a RAG intent bucket.
+    "CANCELLATION_POLICY": None,
+    "CANCELLATION_OPERATION": None,
     "IMPORT_INTEREST": None,
     # PHASE-6B pre-RAG families — handled by their own Decision-Engine
     # branch BEFORE RAG, so they never force a RAG actionable intent.
@@ -1714,4 +2001,8 @@ PUBLIC_INFO_FAMILIES = frozenset({
     # never be offered an identity-gated ERP / customer-data action
     # ("ขออีเมล และเว็บไซต์" must not ask for a CustCode).
     "CONTACT_INFO", "WEBSITE_LINK_REQUEST", "WAREHOUSE_INBOUND_JOURNEY",
+    # PHASE 6 POST-DEPLOY — "can a bill be cancelled?" is a POLICY
+    # question: public, and never an identity-gated lookup. The
+    # OPERATION sibling is deliberately NOT public.
+    "CANCELLATION_POLICY",
 })

@@ -79,13 +79,50 @@ class TestCancellationContract(unittest.TestCase):
             self.assertFalse(is_operational_cancellation(m), m)
 
     # ── end-to-end ──────────────────────────────────────────────────
-    def test_policy_question_stays_rag_and_asks_no_identifier(self):
+    def test_policy_question_is_answered_as_public_policy(self):
+        """PHASE 6 POST-DEPLOY — assertion updated, and STRENGTHENED, on
+        owner instruction.
+
+        The original assertion was `route == "RAG"`, written when a
+        cancellation policy question had no family of its own and simply
+        fell through to retrieval. Production evidence (three identical
+        runs on the deployed container, plus the same result locally)
+        showed what that fall-through actually did: the gated LLM named
+        the turn PURCHASE_WITHDRAWAL and the customer asking whether a
+        bill can be cancelled was handed the money-withdrawal procedure.
+        The owner's post-deploy instruction (defect G) requires the turn
+        to be named a cancellation policy inquiry deterministically and
+        to "never enter purchase-withdrawal family".
+
+        Naming it deterministically means it is now answered before
+        retrieval, from the ONE approved policy statement that the
+        operational cancellation acknowledgement is also rendered from —
+        the same pre-RAG public-answer path CONTACT_INFO and
+        SERVICE_DISCOVERY already use, whose honest route label is
+        GENERAL. The route assertion therefore accepts either public
+        route, and three NEW assertions were added in its place: the
+        family must be CANCELLATION_POLICY (never a withdrawal family),
+        no workflow/ERP collection may run, and the reply must actually
+        state the cancellation policy. That is strictly more than the
+        single label check it replaces."""
+        from services.conversation_semantics import interpret
         for m in self.POLICY:
             o = self._run(m)
-            self.assertEqual(o["route"], "RAG", f"{m!r} -> {o['route']}")
+            self.assertIn(o["route"], ("RAG", "GENERAL"), f"{m!r} -> {o['route']}")
+            self.assertEqual(interpret(m, []).intent_family, "CANCELLATION_POLICY", m)
             self.assertNotEqual(o["src"], "operational_change_collection", m)
             self.assertIsNone(_IDENTITY_ASK_RE.search(o["reply"]), m)
             self.assertIsNone(_FALSE_COMPLETION_RE.search(o["reply"]), m)
+            self.assertIn("ยกเลิก", o["reply"], f"{m!r} -> {o['reply'][:80]!r}")
+            self.assertNotIn("ถอนเงิน", o["reply"], f"{m!r} answered with the withdrawal procedure")
+
+    def test_policy_question_never_enters_a_withdrawal_family(self):
+        """The exact production defect, locked from the other side."""
+        from services.conversation_semantics import interpret
+        for m in self.POLICY + ["ยกเลิกบิลได้ไหม", "เงื่อนไขยกเลิกเป็นยังไง",
+                                "ยกเลิกการถอนเงินได้ไหม"]:
+            self.assertNotIn(interpret(m, []).intent_family,
+                             ("PURCHASE_WITHDRAWAL", "SHIPPING_WITHDRAWAL"), m)
 
     def test_operational_request_is_recognised_and_collects(self):
         for m in self.OPERATION:

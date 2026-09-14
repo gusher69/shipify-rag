@@ -28,6 +28,11 @@ from services.conversation_semantics import PUBLIC_INFO_FAMILIES as _PUBLIC_INFO
 # quantity+unit span is never mistaken for a product noun below.
 from services.conversation_semantics import _USER_QTY_RE as _IMPORT_QTY_UNIT_RE
 from services.conversation_semantics import _METHOD_WORD_RE as _IMPORT_METHOD_WORD_RE
+# PHASE 6 POST-DEPLOY (defect class A) — the ONE structural entity-span /
+# question-action-span separator, shared with conversation_semantics'
+# own bare-slot extractor so the two can never disagree about where a
+# product name ends and a question begins.
+from services.conversation_semantics import split_question_clause as _split_question_clause
 from services.rag_service import get_rag_service
 from services.policy_engine import evaluate as evaluate_policies, get_escalation_settings, get_messaging_settings, PolicyVerdict
 from services.policy_studio_service import get_default_policy_set
@@ -441,12 +446,29 @@ def _is_product_import_interest(question: str) -> bool:
         return True
     if _FIX23_INTEREST_RE.search(q) and _FIX23_IMPORT_VERB_RE.search(q):
         return True
-    if _FIX23_WANT_GOODS_RE.search(q) and not _NON_GOODS_OBJECT_RE.search(q):
+    # PHASE 6 POST-DEPLOY (defect class A) — the non-goods guard is
+    # evaluated against the ENTITY SPAN, never the whole turn: a trailing
+    # question clause routinely contains one of these words ("...
+    # ราคาเท่าไหร่", "... ขอลิงก์"), and testing the whole message made a
+    # perfectly ordinary "อยากได้รองเท้า 2 ตัว ราคาเท่าไหร่" look like a
+    # request for a NON-goods object and drop the product entirely.
+    _entity_span = _split_question_clause(q)[0]
+    if _FIX23_WANT_GOODS_RE.search(q) and not _NON_GOODS_OBJECT_RE.search(_entity_span):
         # a named goods noun, OR a quantity with the product still to be
         # asked for ("15 ชิ้นอยากได้สินค้า") -- the same shape as the
         # owner's original repro, which only worked because it happened
         # to carry an explicit import verb.
         return bool(_product_interest_noun(q) or _IMPORT_QTY_UNIT_RE.search(q))
+    # PHASE 6 POST-DEPLOY (defect class A / multi-intent) — an explicit
+    # ordering/import VERB with a concrete goods noun AND a stated
+    # quantity is an import-interest declaration even with no "interest"
+    # word at all ("สั่งกล่องพลาสติก 5 ลัง ถึงไทยกี่วัน"). All three are
+    # required together: the verb alone is ambiguous ("ชิปปิ้งคืออะไร"),
+    # and requiring a real surviving goods noun plus an explicit
+    # quantity+unit span keeps a bare how-to question out.
+    if (_FIX23_IMPORT_VERB_RE.search(q) and not _NON_GOODS_OBJECT_RE.search(_entity_span)
+            and _IMPORT_QTY_UNIT_RE.search(q)):
+        return bool(_product_interest_noun(q))
     return False
 
 
@@ -477,7 +499,14 @@ def _product_interest_noun(question: str) -> Optional[str]:
     real product named) when the ENTIRE remnant is bare "สินค้า"/"ของ"
     with nothing else left — never when they are part of a longer
     surviving span."""
-    q = _IMPORT_QTY_UNIT_RE.sub(" ", question or "")
+    # PHASE 6 POST-DEPLOY (defect class A) — drop the trailing/leading
+    # interrogative-or-action clause FIRST, structurally, so it can never
+    # be welded onto the product noun ("รองเท้า...ราคาเท่าไหร่" ->
+    # "รองเท้าราคาเท่าไหร่"). The clause is separated, not deleted from
+    # the turn: quantity / method / the question's own family are all
+    # still read from the ORIGINAL message by their own extractors.
+    q, _question_span = _split_question_clause(question or "")
+    q = _IMPORT_QTY_UNIT_RE.sub(" ", q)
     q = _IMPORT_METHOD_WORD_RE.sub(" ", q)
     remnant = _FIX23_STRIP_RE.sub("", q).strip()
     # "ๆ" is the Thai repetition mark, never part of a product's name.
@@ -489,9 +518,17 @@ def _product_interest_noun(question: str) -> Optional[str]:
     return None
 
 
+def _is_price_question(interpretation) -> bool:
+    """PHASE 6 POST-DEPLOY (multi-intent) — did THIS turn also ask what it
+    costs? Read from the central interpretation's separated question
+    clause, never re-derived from the raw text here."""
+    return (getattr(interpretation, "entities", None) or {}).get("question_kind") == "PRICE"
+
+
 def _product_answer_service_continuation(noun: str, *, lead_stage: Optional[str],
                                           sentiment_status: Optional[str], history,
-                                          transport_known: bool) -> "tuple[str, str]":
+                                          transport_known: bool,
+                                          price_question: bool = False) -> "tuple[str, str]":
     """Deterministic Branch-B reply: acknowledge the product, then ONE
     useful Shipify service next-step. Never invents an eligibility verdict;
     road/sea are trusted Shipify service facts. NEGATIVE -> acknowledge
@@ -507,6 +544,15 @@ def _product_answer_service_continuation(noun: str, *, lead_stage: Optional[str]
             and not _purpose_recently_served("elicit_transport_mode", history)):
         q = render_followup_question("elicit_transport_mode")
         return ack + "\n\n" + q, "appended:elicit_transport_mode"
+    # PHASE 6 POST-DEPLOY (multi-intent) — the customer declared a product
+    # AND asked what it costs. With the transport mode already known, the
+    # only thing still missing before a real rate answer is what the rate
+    # is charged ON, so ask for THAT instead of ending on a generic
+    # service blurb. Same sentence the frame slot ladder uses, so the two
+    # paths ask for the rate basis with one wording.
+    if price_question and noun not in _PROHIBITED_CATEGORY_WORDS:
+        from services.conversation_semantics import ASK_WEIGHT_FOR_RATE
+        return ack + "\n\n" + ASK_WEIGHT_FOR_RATE, "appended:ask_weight_for_rate"
     return ack, "ack-service-only"
 
 
@@ -1927,7 +1973,8 @@ def run_playground_turn(
         if _pac_noun:
             answer_text, _pac_note = _product_answer_service_continuation(
                 _pac_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
-                history=history, transport_known=_pac_transport_known)
+                history=history, transport_known=_pac_transport_known,
+                price_question=_is_price_question(interpretation))
             stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                                  f"P5.1 product-answer continuation ({_pac_note}) — no LLM call"))
         elif _is_product_import_interest(question):
@@ -1946,7 +1993,8 @@ def run_playground_turn(
             if _pi_noun:
                 answer_text, _pi_note = _product_answer_service_continuation(
                     _pi_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
-                    history=history, transport_known=_pac_transport_known)
+                    history=history, transport_known=_pac_transport_known,
+                    price_question=_is_price_question(interpretation))
             else:
                 answer_text = ("รับทราบค่ะ สนใจนำเข้าสินค้ากับ Shipify นะคะ 😊 "
                                "มีบริการขนส่งทั้งทางรถและทางเรือค่ะ "
@@ -1970,7 +2018,8 @@ def run_playground_turn(
             _sf_noun = (interpretation.entities or {}).get("product")
             answer_text, _sf_note = _product_answer_service_continuation(
                 _sf_noun, lead_stage=lead_stage, sentiment_status=sentiment_status,
-                history=history, transport_known=_pac_transport_known)
+                history=history, transport_known=_pac_transport_known,
+                price_question=_is_price_question(interpretation))
             stages.append(Stage("LLM", "skipped", (time.time() - t0) * 1000,
                                  f"SEMANTIC-FIRST product entity ({_sf_note}) — novel product noun is "
                                  "not a company-fact no-info, no LLM call, no Human CS"))

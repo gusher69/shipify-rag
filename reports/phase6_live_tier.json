@@ -1,21 +1,25 @@
 {
   "status": "PASS",
-  "total_turns": 143,
+  "total_turns": 199,
   "metrics": {
-    "turns": 93,
-    "llm_consulted": 37,
+    "turns": 136,
+    "llm_consulted": 32,
     "high_confidence_deterministic_override_by_llm": 0,
     "auth_violation": 0,
     "private_data_leak": 0,
     "false_action_completion": 0,
     "hallucinated_business_fact": 0,
     "entity_mismatch": 0,
-    "supported_fact": 10,
+    "supported_fact": 12,
     "unsupported_addition": 0,
     "public_to_private_false_positive": 0,
     "private_to_public_false_negative": 0,
     "non_factual_language": 2,
-    "engine_turns": 50
+    "cancellation_to_withdrawal": 0,
+    "withdrawal_to_cancellation": 0,
+    "product_clause_contamination": 0,
+    "unit_echo_failure": 0,
+    "engine_turns": 63
   },
   "hard_requirements": {
     "high_confidence_deterministic_override_by_llm": 0,
@@ -24,7 +28,11 @@
     "false_action_completion": 0,
     "hallucinated_business_fact": 0,
     "public_to_private_false_positive": 0,
-    "private_to_public_false_negative": 0
+    "private_to_public_false_negative": 0,
+    "cancellation_to_withdrawal": 0,
+    "withdrawal_to_cancellation": 0,
+    "product_clause_contamination": 0,
+    "unit_echo_failure": 0
   },
   "violations": []
 }

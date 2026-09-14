@@ -9,7 +9,7 @@ All **26** API_GAP requirements, each with an executable safe-fallback turn. PAS
 | AI-API-S1-16.0 | GET /orders/{bill}/status | routed WORKFLOW (private_state_inquiry) | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
 | AI-API-S1-17.0 | GET /shipments/{bill}/tracking_th | routed WORKFLOW (None) | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
 | AI-API-S1-18.0 | GET /wallet/{cust}/transactions | collects the identifier then hands off | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
-| AI-API-S1-21.0 | GET /orders/{bill}/status (payment_status) | routed RAG (fresh_search) | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
+| AI-API-S1-21.0 | GET /orders/{bill}/status (payment_status) | routed GENERAL (phase6b_service_intent) | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
 | AI-API-S1-3.0 | GET /orders/{bill}/tracking + ETA | routed WORKFLOW (private_state_inquiry) | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
 | AI-API-S2-1.0 | GET /orders/{bill}/tracking | routed WORKFLOW (private_state_inquiry) | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
 | AI-API-S2-11.0 | PUT /shipments/{bill}/carrier | collects the identifier then hands off | tests/test_phase6_api_gap_fallback.py::TestApiGapSafeFallback::test_1..test_5 | PASS |
