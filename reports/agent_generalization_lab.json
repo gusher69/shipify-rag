@@ -1,0 +1,514 @@
+{
+  "total_turns": 2075,
+  "understanding_turns": 2044,
+  "safety_turns": 31,
+  "elapsed_s": 127.2,
+  "accuracy": {
+    "product": 100.0,
+    "quantity": 100.0,
+    "unit": 100.0,
+    "method": 98.33,
+    "context_continuity": 81.82
+  },
+  "hard_requirements": {
+    "auth_violation": 0,
+    "private_leak": 0,
+    "false_action_completion": 0,
+    "known_slot_reask": 0,
+    "stale_journey_takeover": 0,
+    "product_clause_contamination": 0,
+    "family_divergence": 2,
+    "intent_consistency_fail": 2,
+    "topic_switch_fail": 0,
+    "private_missed": 3
+  },
+  "comparison": {
+    "MATCH": 24,
+    "LANGGRAPH_IMPROVEMENT": 5,
+    "LANGGRAPH_WRONG": 2
+  },
+  "langgraph_wrong": [
+    {
+      "text": "คูปองของฉันเหลืออะไรบ้าง",
+      "class": "LANGGRAPH_WRONG",
+      "dimension": "auth",
+      "why": "AUTH_VIOLATION: public turn demanded identity"
+    },
+    {
+      "text": "บิลขนส่ง FT ต้องการเปลี่ยนที่อยู่จัดส่ง",
+      "class": "LANGGRAPH_WRONG",
+      "dimension": "auth",
+      "why": "AUTH_VIOLATION: public turn demanded identity"
+    }
+  ],
+  "misses": [
+    {
+      "kind": "family_divergence",
+      "family": "public_delivery_capability",
+      "variants": [
+        "('ANSWER_PUBLIC_INFO', 'PUBLIC_RAG', False)",
+        "('CLARIFY', 'PUBLIC_RAG', False)"
+      ]
+    },
+    {
+      "kind": "paraphrase",
+      "family": "private_own_shipment",
+      "text": "ของที่ผมสั่งไปถึงไหนแล้ว",
+      "field": "auth_required",
+      "got": false,
+      "want": true
+    },
+    {
+      "kind": "paraphrase",
+      "family": "private_own_shipment",
+      "text": "ของที่ผมสั่งไปถึงไหนแล้ว",
+      "field": "planned_action",
+      "got": "ANSWER_PUBLIC_INFO",
+      "want": "ASK_IDENTIFIER"
+    },
+    {
+      "kind": "family_divergence",
+      "family": "private_own_shipment",
+      "variants": [
+        "('ANSWER_PUBLIC_INFO', 'PUBLIC_RAG', False)",
+        "('ASK_IDENTIFIER', 'PRIVATE_ERP', True)"
+      ]
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้ารองเท้า 10ชุด ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้าชั้นวางของ 10คู่ ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้ากล่องพลาสติก 10ชิ้น ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้าเครื่องซีลถุง 10ตัว ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้าของเล่น 10พาเลท ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้ากระเป๋าเดินทาง 10เครื่อง ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้าโคมไฟตั้งโต๊ะ 10ลัง ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้าผ้าม่าน 10โหล ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้าเก้าอี้สำนักงาน 10ขวด ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "method",
+      "text": "อยากนำเข้าตู้เก็บของ 10กล่อง ส่งเรือ ส่งทางรถได้ไหม",
+      "got": "road",
+      "want": "sea"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ตัว",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ตัว",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ตัว",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ตัว",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ชิ้น",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ชิ้น",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ชิ้น",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ชิ้น",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::คู่",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::คู่",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::คู่",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::คู่",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ชุด",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ชุด",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ชุด",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ชุด",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::กล่อง",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::กล่อง",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::กล่อง",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::กล่อง",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ขวด",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ขวด",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ขวด",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ขวด",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::โหล",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::โหล",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::โหล",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::โหล",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ลัง",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::ลัง",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ลัง",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::ลัง",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::เครื่อง",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::เครื่อง",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::เครื่อง",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::เครื่อง",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::พาเลท",
+      "say": "รองเท้าครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::รองเท้า::พาเลท",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "รองเท้า"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::พาเลท",
+      "say": "เปลี่ยนเป็นเครื่องซีลถุง",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::รองเท้า::พาเลท",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "รองเท้า",
+      "want": "เครื่องซีลถุง"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::ชั้นวางของ::ตัว",
+      "say": "ชั้นวางของครับ",
+      "slot": "product",
+      "got": null,
+      "want": "ชั้นวางของ"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::ชั้นวางของ::ตัว",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "ชั้นวางของ"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::ชั้นวางของ::ตัว",
+      "say": "เปลี่ยนเป็นของเล่น",
+      "slot": "product",
+      "got": "ชั้นวางของ",
+      "want": "ของเล่น"
+    },
+    {
+      "kind": "continuity",
+      "journey": "product_correction::ชั้นวางของ::ตัว",
+      "say": "ทางเรือค่ะ",
+      "slot": "product",
+      "got": "ชั้นวางของ",
+      "want": "ของเล่น"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::ชั้นวางของ::ชิ้น",
+      "say": "ชั้นวางของครับ",
+      "slot": "product",
+      "got": null,
+      "want": "ชั้นวางของ"
+    },
+    {
+      "kind": "continuity",
+      "journey": "qty_first::ชั้นวางของ::ชิ้น",
+      "say": "ส่งเรือครับ",
+      "slot": "product",
+      "got": null,
+      "want": "ชั้นวางของ"
+    }
+  ],
+  "miss_kinds": {
+    "family_divergence": 2,
+    "paraphrase": 2,
+    "method": 10,
+    "continuity": 400,
+    "private_missed": 3
+  },
+  "status": "FAIL"
+}

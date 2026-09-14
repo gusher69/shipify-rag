@@ -698,10 +698,43 @@ def _handle_message_via_decision_engine(event: MessageEvent):
         if result is None:
             result = engine.decide(question, history=recent_history, context=decide_context)
 
+    # ── LANGGRAPH AGENT (services/agent/) ────────────────────────────
+    # The current engine has ALREADY produced this customer's answer
+    # above. The graph now runs the same turn beside it, reusing that
+    # result as its execution step (so nothing is executed twice — no
+    # second ERP call, no second notification) and producing a comparable
+    # AgentDecision. In `shadow` mode that decision is telemetry only. In
+    # `owner_test` it replaces the reply for the configured owner/tester
+    # senders only; in `production`, for everyone. Best-effort throughout:
+    # any failure leaves this turn exactly as the current engine decided.
+    _agent_decision = None
+    _agent_comparison = None
+    try:
+        from services.agent import runner as _agent_runner
+        _agent_decision = _agent_runner.shadow_run(
+            question, history=recent_history,
+            context={**decide_context, "_precomputed_engine_result": result})
+        if _agent_decision is not None:
+            _agent_comparison = _agent_runner.compare(result, _agent_decision)
+            if (_agent_runner.graph_is_authoritative(decide_context.get("sample_source") or "")
+                    and not _agent_decision.errors
+                    and (_agent_decision.final_response or "").strip()):
+                # The graph may only take the turn when its OWN safety gate
+                # raised nothing. A flagged turn always falls back to the
+                # current engine's answer.
+                result = {**result,
+                          "reply": {**(result.get("reply") or {}),
+                                    "text": _agent_decision.final_response}}
+    except Exception as _agent_exc:
+        print(f"[webhook] agent graph skipped (non-fatal): {_agent_exc!r}")
+
     reply = result.get("reply") or {}
     reply_text = reply.get("text") or ""
     routing_type = (result.get("routing") or {}).get("type")
     is_handoff = routing_type == "HUMAN_HANDOFF"
+    if _agent_comparison is not None and isinstance(result.get("developer"), dict):
+        # observability only — never read for routing.
+        result["developer"]["langgraph_comparison"] = _agent_comparison
 
     # Persist a NEW pending confirmation whenever THIS turn's result is
     # itself a confirmation-required response (works for any COMMAND-type

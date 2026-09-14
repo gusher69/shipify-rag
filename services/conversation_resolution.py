@@ -442,6 +442,15 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
                 ent_raw["shipping_method"] = _slot(_mv, raw=str(v))
         elif k in ("url", "identifier", "platform") and k not in ent_raw and v:
             ent_raw[k] = _slot(v, raw=str(v))
+        elif k in ("question_span", "question_kind", "quantity_unit", "quantity_raw") \
+                and k not in ent_raw and v:
+            # LANGGRAPH UPGRADE — the separated question clause and the
+            # typed quantity's unit are FACTS OF THE TURN. They were being
+            # dropped here, so the canonical resolution (and therefore the
+            # agent graph, which consumes only the resolution) could not
+            # see that the customer had also asked about price. Forwarded
+            # verbatim, never re-derived.
+            ent_raw[k] = v
 
     # OWNER P1 — multi-fact fallback: the semantic layer alone could not
     # name a family, but the turn carries an order verb + a China/platform

@@ -65,6 +65,27 @@ _ASSIST_PRODUCT_RES = (
 )
 _NOT_A_PRODUCT_RE = re.compile(
     r"จำนวน|ชิ้น|ตัว|ประมาณ|ขนส่ง|ทางรถ|ทางเรือ|ทางอากาศ|กิโล|น้ำหนัก|ราคา|บริการ|Shipify", re.IGNORECASE)
+# LANGGRAPH UPGRADE (cross-turn continuity) — a product carrier above can
+# also match the assistant's own REQUEST for the product, because the ask
+# ("รบกวนแจ้งชื่อหรือประเภทสินค้าที่สนใจนำเข้าด้วยนะคะ") ends in the same
+# "สนใจนำเข้า…นะคะ" shape as the acknowledgement it was modelled on. That
+# made the NEXT turn read product="ด้วย" — the frame remembering a
+# particle out of its own question, which then looked like a filled slot
+# and skipped the product ask entirely. A captured span that is nothing
+# but grammatical particles is never a product name; this is the same
+# "only when the WHOLE remnant is filler" rule the two product-noun
+# extractors already apply, stated for the frame reader.
+_PARTICLE_ONLY_PRODUCT_RE = re.compile(
+    r"^(?:ด้วย|หน่อย|เลย|อีก|นะ|น่ะ|ค่ะ|คะ|ครับ|คับ|จ้า|เพิ่มเติม|โดยประมาณ|"
+    r"ที่สนใจ|ที่ต้องการ|อะไร|ไหน|บ้าง|ๆ|\s)+$")
+
+
+def _is_product_carrier_span(span: str) -> bool:
+    """True when a captured product-carrier span is a real product noun
+    rather than the assistant's own phrasing."""
+    s = (span or "").strip()
+    return bool(s) and not _NOT_A_PRODUCT_RE.search(s) \
+        and not _PARTICLE_ONLY_PRODUCT_RE.match(s)
 # PHASE 6 closure gate D/H — ONE count-unit vocabulary for the whole
 # module (see the PHASE-6-SLOT-CONSUMPTION note below for why). Defined
 # here, ahead of the first regex that substitutes it.
@@ -114,8 +135,21 @@ _USER_QTY_RE = re.compile(
 # recognizes (kept as a separate literal here, not an import, because
 # conversation_resolution.py itself imports FROM this module — importing
 # back would be circular).
-_METHOD_WORD_RE = re.compile(
-    r"ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|โดยรถ|โดยเรือ|โดยเครื่องบิน|ส่งเรือ|ส่งรถ")
+# LANGGRAPH UPGRADE — ONE shipping-method vocabulary for the module, the
+# same consolidation _COUNT_UNIT_ALT already applies to count units. The
+# bare-method ANSWER matcher below is built from this same alternation,
+# so a phrasing the opener understands can never be one the slot answer
+# does not ("ส่งเรือครับ" was recognised as frame material by
+# derive_active_frame and NOT as a follow-up by is_frame_followup).
+_METHOD_WORD_ALT = ("ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|โดยรถ|โดยเรือ|"
+                    "โดยเครื่องบิน|ส่งเรือ|ส่งรถ")
+_METHOD_WORD_RE = re.compile(_METHOD_WORD_ALT)
+# a bare method ANSWER: an optional verb, a method from the ONE
+# vocabulary above (or the bare mode noun), an optional polite particle.
+_BARE_METHOD_ANSWER_RE = re.compile(
+    r"^\s*(?:ส่ง|เอา|ขอ|ไป|เป็น|ใช้)?\s*(?:" + _METHOD_WORD_ALT
+    + r"|รถ|เรือ|เครื่องบิน)\s*"
+    r"(?:ก็ได้|ล่ะ|มั้ย|ไหม|ครับ|ค่ะ|คะ|คับ|นะ|เลย|จ้า)?\s*$", re.IGNORECASE)
 
 # ── ENTITY SPAN vs QUESTION / ACTION SPAN ─────────────────────────────
 # PHASE 6 POST-DEPLOY (defect class A — entity boundary / multi-intent).
@@ -331,7 +365,7 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
         if t.get("role") == "assistant":
             for rx in _ASSIST_PRODUCT_RES:
                 m = rx.search(content)
-                if m and not _NOT_A_PRODUCT_RE.search(m.group("p")):
+                if m and _is_product_carrier_span(m.group("p")):
                     open_idx, open_product = i, m.group("p").strip()
                     break
             if open_idx is not None:
@@ -367,7 +401,7 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
         if product is None and role == "assistant":
             for rx in _ASSIST_PRODUCT_RES:
                 m = rx.search(c)
-                if m and not _NOT_A_PRODUCT_RE.search(m.group("p")):
+                if m and _is_product_carrier_span(m.group("p")):
                     product = m.group("p").strip()
                     break
         if quantity is None:
@@ -380,7 +414,24 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
             if mm:
                 method = _method_label(mm.group("m"))
 
-    if product is None:
+    # LANGGRAPH UPGRADE (cross-turn continuity) — an import journey that
+    # has a QUANTITY or a METHOD but not yet a product is still an ACTIVE
+    # frame. Requiring a product here is what broke the customer's own
+    # reported sequence:
+    #
+    #     "20 คู่อยากสั่งของจากจีน"   -> ack + "which product?"
+    #     "รองเท้าครับ"               -> no frame existed, so the answer
+    #                                    attached to nothing and the turn
+    #                                    fell through to "ตอนนี้ยังไม่มี
+    #                                    ข้อมูลยืนยันเรื่องนี้ค่ะ"
+    #
+    # i.e. exactly "เปลี่ยนบริบท AI ตอบไม่ได้". The frame now survives with
+    # product=None, so the quantity the customer already gave is still
+    # known on the next turn and the product answer has a journey to join.
+    # Every existing consumer guards on `frame.product` before using the
+    # frame as a product context, so a product-less frame changes no
+    # routing decision — it only stops the KNOWN slots being forgotten.
+    if product is None and quantity is None and method is None:
         return None
     return Frame(product=product, quantity=quantity, unit=unit, method=method)
 
@@ -395,7 +446,7 @@ _FOLLOWUP_SHAPE_RES = (
     re.compile(r"ไม่ใช่\s*\S+\s*(เอา|เป็น)\s*\S+"),
     re.compile(r"งั้น.*(ดีกว่า|แทน|แล้วกัน)"),
     re.compile(r"เปลี่ยน(ไป|เป็น)?(ถาม|เรื่อง)"),
-    re.compile(r"^\s*(ทางรถ|ทางเรือ|ทางอากาศ|รถ|เรือ|เครื่องบิน)\s*(ล่ะ|มั้ย|ไหม)?\s*$"),
+    _BARE_METHOD_ANSWER_RE,
     # OWNER-REAL-LINE-FIX-05 — a slot-CORRECTION shape ("เปลี่ยนเป็น X",
     # "เอา X แทน", "เอ้ย <n>", "แก้เป็น X"). Typo-tolerant: เปลี่ยน~เปลียน,
     # เป็น~เปน~เป้น. Deliberately NOT matched: a fresh "สนใจนำเข้า X"
@@ -504,6 +555,11 @@ _METHOD_TH = {"road": "ทางรถ", "sea": "ทางเรือ", "air": 
 # continuation, so a customer who asked about price is moved toward a
 # real answer with the same sentence either way.
 ASK_WEIGHT_FOR_RATE = "รบกวนแจ้งน้ำหนักโดยประมาณเพิ่มเติมได้ไหมคะ"
+# LANGGRAPH UPGRADE — the product ask is now a NAMED constant so the
+# detector that recognises the customer's answer to it
+# (_ASSISTANT_ASKED_PRODUCT_RE) can be parity-tested against the exact
+# sentence the platform actually sends. The two had silently drifted.
+ASK_PRODUCT_SLOT = "รบกวนแจ้งชื่อหรือประเภทสินค้าที่สนใจนำเข้าด้วยนะคะ"
 
 
 def frame_ack_reply(frame: Frame, *, changed: str) -> str:
@@ -558,7 +614,7 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     # quantity it just gave while product is still genuinely unknown.
     ask = ""
     if not frame.product:
-        ask = " รบกวนแจ้งชื่อหรือประเภทสินค้าที่สนใจนำเข้าด้วยนะคะ"
+        ask = " " + ASK_PRODUCT_SLOT
     elif not frame.quantity:
         ask = " รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ"
     elif not frame.method:
@@ -648,7 +704,7 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
     brand}; op in CHANGE_TARGET / CORRECT_QUANTITY / CHANGE_METHOD /
     CHANGE_BRAND / REJECT / AMBIGUOUS / UNKNOWN. Never raises."""
     out = {"op": "UNKNOWN", "product": None, "quantity": None, "unit": None,
-           "method": None, "brand": None}
+           "method": None, "brand": None, "method_was_unset": False}
     t = (message or "").strip()
     if not t or len(t) > 48 or frame is None or not getattr(frame, "product", None):
         return out
@@ -668,6 +724,20 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
         # one from the superseded value.
         out["unit"] = _bareq.group(2) or None
         return out
+    # LANGGRAPH UPGRADE — a bare method ANSWER ("ส่งเรือครับ", "ทางรถค่ะ")
+    # when no method is set yet is a SET, exactly parallel to the bare
+    # quantity answer above. Only the SWAP case existed, so answering the
+    # assistant's own "สนใจส่งทางรถหรือทางเรือคะ" resolved to nothing and
+    # the journey dead-ended on a no-information reply.
+    if not getattr(frame, "method", None) and _BARE_METHOD_ANSWER_RE.match(t):
+        _lab = _method_label(t)
+        if _lab:
+            out["op"], out["method"] = "CHANGE_METHOD", _lab
+            # the op name stays CHANGE_METHOD so every existing consumer
+            # keeps working; this flag lets the acknowledgement say
+            # "noted" rather than "changed to" for a FIRST-time answer.
+            out["method_was_unset"] = True
+            return out
     # OWNER P1 — a shipping-method the customer already picked, re-named
     # to a DIFFERENT one ("ทางเรือดีกว่า", "เอาทางเรือ", "ไม่เอา เอาทางรถ"),
     # is a method correction even without an explicit "เปลี่ยน" verb. Only
@@ -934,7 +1004,16 @@ _ACT_STATUS = re.compile(r"ถึงไหน|ถึงหรือยัง|ถ
 _ACT_ISSUE_GET = re.compile(r"ออก\S{0,6}(?:ได้ไหม|ให้|หรือเปล่า|หรือไม่)|ออกให้ได้|ขอ\S{0,3}(?:ใบ|เอกสาร)|มี\S{0,10}(?:ไหม|มั้ย)|ให้\S{0,6}(?:หรือเปล่า|ไหม|มั้ย)|issue|provide", re.IGNORECASE)
 _ACT_HOWTO = re.compile(r"ใช้\S{0,6}(?:ยังไง|อย่างไร|ตรงไหน|ที่ไหน)|วิธีใช้|กดตรงไหน|กดยังไง|กดใช้\S{0,4}(?:ตรงไหน|ยังไง)|ทำยังไง|ขั้นตอน\S{0,6}ใช้|how\s*to\s*use", re.IGNORECASE)
 _ACT_LIST_MINE = re.compile(r"มี\S{0,10}อะไรบ้าง|มี\S{0,6}(?:กี่|เท่าไหร่)|เหลือ\S{0,6}(?:ไหม|เท่าไหร่|กี่)|ของผม\S{0,12}(?:มี|เหลือ)|บัญชีผม|บัญชีฉัน|ในระบบผม", re.IGNORECASE)
-_ACT_PERMIT = re.compile(r"ได้ไหม|ได้มั้ย|ได้มัย|ได้ป่าว|ได้บ่|ได้หรือเปล่า|ได้รึเปล่า|ได้หรือไม่|สามารถ\S{0,24}ได้|\bcan\s+i\b|allowed", re.IGNORECASE)
+# LANGGRAPH UPGRADE — the colloquial question particles "หรอ" / "เหรอ" /
+# "ป่ะ" are the spoken-Thai equivalents of "หรือเปล่า" and appear
+# constantly in real LINE ("กระต่ายนำเข้าได้หรอ"). Completing the particle
+# vocabulary in the ONE place a permission question is recognised
+# generalises to every family that reads it — the opposite of adding a
+# rule per phrase.
+_ACT_PERMIT = re.compile(
+    r"ได้ไหม|ได้มั้ย|ได้มัย|ได้ป่าว|ได้ป่ะ|ได้ปะ|ได้บ่|ได้หรือเปล่า|ได้รึเปล่า|"
+    r"ได้หรือไม่|ได้หรอ|ได้เหรอ|สามารถ\S{0,24}ได้|\bcan\s+i\b|allowed",
+    re.IGNORECASE)
 # an explicit CALCULATE / ESTIMATE verb — distinct from a bare "how much"
 # price question (that stays a rate FAQ, per CUSTOMER-CALC-1).
 _ACT_CALC_VERB = re.compile(r"คำนวณ|คำนวน|ประเมิน|ช่วยคิด|คิดค่า|คิดราคา|ตีราคา|estimate|calculate|quote", re.IGNORECASE)
@@ -1561,7 +1640,16 @@ _ASSISTANT_ASKED_PRODUCT_RE = re.compile(
     r"|(?:นำเข้า|สั่ง|ฝากสั่ง|ฝากนำเข้า)\S{0,4}อะไร"
     r"|สินค้าที่(?:ต้องการ|จะ|อยาก)\S{0,20}(?:คืออะไร|อะไร)"
     r"|เป็นสินค้าอะไร|สินค้าของลูกค้าเป็นอะไร|ประเภทสินค้า\S{0,4}(?:คือ|อะไร)"
-    r"|รบกวน\S{0,10}(?:ประเภท|ชนิด)สินค้า")
+    # LANGGRAPH UPGRADE — a REQUEST VERB followed by the product-slot noun,
+    # with no character budget between them. The previous alternative used
+    # `รบกวน\S{0,10}(?:ประเภท|ชนิด)สินค้า`, and the platform's OWN ask
+    # ("รบกวนแจ้งชื่อหรือประเภทสินค้าที่สนใจนำเข้าด้วยนะคะ") has eleven
+    # characters in that gap — so the renderer asked for the product and
+    # this detector did not believe it had, which is why a perfectly
+    # ordinary "รองเท้าครับ" on the next turn was not read as the answer.
+    # Structure (request verb -> slot noun) instead of a length budget.
+    r"|(?:รบกวน|กรุณา|ขอทราบ|ช่วย|แจ้ง|บอก|ระบุ).{0,24}?(?:ชื่อ|ประเภท|ชนิด)สินค้า"
+    r"|(?:รบกวน|กรุณา|ขอทราบ|ช่วย).{0,24}?สินค้าที่(?:สนใจ|ต้องการ|จะ)")
 # a Thai question particle that would make the reply itself a question,
 # not a bare answer.
 _REPLY_IS_QUESTION_RE = re.compile(r"ไหม|มั้ย|หรือเปล่า|หรือไม่|ยังไง|อย่างไร|เท่าไหร่|กี่|ที่ไหน|\?")
@@ -1746,9 +1834,14 @@ _BARE_QTY_ANSWER_RE = re.compile(
     r"^\s*(?:ประมาณ\s*)?\d{1,7}\s*"
     r"(?:" + _COUNT_UNIT_ALT + r")?\s*"
     r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
-_BARE_METHOD_ANSWER_RE = re.compile(
-    r"^\s*(?:เอา|ขอ)?\s*(?:ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|รถ|เรือ|เครื่องบิน|"
-    r"โดยรถ|โดยเรือ|โดยเครื่องบิน)\s*(?:ก็ได้|เลย|ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
+# LANGGRAPH UPGRADE — this file used to define _BARE_METHOD_ANSWER_RE
+# TWICE. The second definition (here) silently shadowed the first at
+# import time and was the narrower of the two: it knew "ทางเรือ" but not
+# "ส่งเรือ", which the shared _METHOD_WORD_ALT vocabulary has recognised
+# for the opener all along. The consequence was that answering the
+# assistant's own "สนใจส่งทางรถหรือทางเรือคะ" with "ส่งเรือครับ" matched
+# nothing and the journey dead-ended. The single definition now lives
+# next to _METHOD_WORD_ALT, built from it, so the two can never diverge.
 
 
 def _last_assistant(history: Optional[List[Dict]]) -> str:

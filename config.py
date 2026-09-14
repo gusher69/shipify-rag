@@ -215,6 +215,47 @@ CREDENTIAL_ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
 # is scoped under this tenant_id by default.
 DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "default")
 
+# ── LangGraph agent orchestration (services/agent/) ──────────────────────
+# The graph ORCHESTRATES the already-validated primitives (the central
+# semantic interpreter, ConversationResolution, the Decision Engine and
+# its tools); it is not a second decision engine and it never becomes an
+# authority implicitly. Four explicit modes, defaulting to the safest:
+#
+#   off         the graph never runs at all.
+#   shadow      (DEFAULT) the CURRENT engine answers every customer. The
+#               graph runs the same turn alongside it, produces an
+#               AgentDecision, and the two are compared into telemetry.
+#               The graph's output never reaches a customer.
+#   owner_test  the graph is the response authority ONLY for the
+#               configured OWNER_TEST LINE senders
+#               (OWNER_TEST_LINE_USER_IDS above). Every REAL_LINE
+#               customer still goes through the current engine.
+#   production  the graph is the response authority for all traffic.
+#               Requires a deliberate owner decision; never a default.
+LANGGRAPH_MODE = (os.getenv("LANGGRAPH_MODE", "shadow") or "shadow").strip().lower()
+LANGGRAPH_MODES = ("off", "shadow", "owner_test", "production")
+if LANGGRAPH_MODE not in LANGGRAPH_MODES:
+    LANGGRAPH_MODE = "shadow"
+# Kept as a separate boolean because the shadow comparison must be able to
+# run while the graph is ALSO answering owner-test traffic.
+LANGGRAPH_SHADOW_MODE = os.getenv(
+    "LANGGRAPH_SHADOW_MODE", "true").strip().lower() in ("1", "true", "yes", "on")
+# Graph revision, recorded on every Langfuse trace so a reply can be tied
+# back to the exact graph that produced it.
+LANGGRAPH_VERSION = os.getenv("LANGGRAPH_VERSION", "1")
+
+# ── Langfuse observability (services/observability/) ─────────────────────
+# OBSERVABILITY ONLY. Every call is best-effort and non-fatal: if Langfuse
+# is unset, down, slow or misconfigured the customer conversation runs
+# exactly as it would without it. Absent keys simply disable tracing.
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+LANGFUSE_ENABLED = bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY) and os.getenv(
+    "LANGFUSE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+# Hard ceiling on anything tracing is allowed to cost the request path.
+LANGFUSE_TIMEOUT_SECONDS = float(os.getenv("LANGFUSE_TIMEOUT_SECONDS", "2"))
+
 # NOTE: SHOW_AI_EVALUATION / SHOW_PRODUCTION_VALIDATION /
 # SHOW_BUSINESS_ACTION_CENTER precomputed constants were removed here
 # (2026-08-01 final config cleanup) — confirmed nothing ever imported them.

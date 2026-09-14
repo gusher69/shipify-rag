@@ -4283,7 +4283,10 @@ class DecisionEngine:
                             _f5_frame.method = _use5["method"]
                             return self._finalize(
                                 reply=_build_response(
-                                    text=_frame_ack_reply(_f5_frame, changed="method")),
+                                    text=_frame_ack_reply(
+                                        _f5_frame,
+                                        changed="none" if _use5.get("method_was_unset")
+                                        else "method")),
                                 routing_type="GENERAL", workflow=workflow_hint,
                                 developer_trace=developer_trace, context=context, start=start,
                                 alert=_detect_alert(message, context))
@@ -4470,7 +4473,9 @@ class DecisionEngine:
                     elif _op == "CHANGE_METHOD" and _sem["method"]:
                         _sem_frame.method = _sem["method"]
                         return self._finalize(
-                            reply=_build_response(text=_frame_ack_reply(_sem_frame, changed="method")),
+                            reply=_build_response(text=_frame_ack_reply(
+                                _sem_frame,
+                                changed="none" if _sem.get("method_was_unset") else "method")),
                             routing_type="GENERAL", workflow=workflow_hint,
                             developer_trace=developer_trace, context=context, start=start,
                             alert=_detect_alert(message, context))
@@ -4497,6 +4502,34 @@ class DecisionEngine:
                 _svc_act = getattr(semantic, "conversation_act", "NONE")
                 _svc_conf = float(getattr(semantic, "confidence", 0.0) or 0.0)
                 _svc_ent = dict(getattr(semantic, "entities", {}) or {})
+                # LANGGRAPH UPGRADE (cross-turn continuity) — COMPATIBLE
+                # KNOWN INFORMATION SURVIVES FOLLOW-UP TURNS. `semantic
+                # .entities` is what THIS turn said; the active frame is
+                # what the customer already told us. Without this merge a
+                # bare product answer ("รองเท้าครับ") arrives carrying only
+                # the product, and the reply ladder asks for the quantity
+                # the customer supplied one turn earlier — the exact
+                # "เปลี่ยนบริบท AI ตอบไม่ได้" complaint. The current turn
+                # always wins; only genuinely MISSING slots are filled in.
+                # The PRODUCT is deliberately NOT inherited: a fresh
+                # explicit opener ("อยากสั่งของจากจีน") must re-establish the
+                # journey rather than resume whatever product a previous
+                # owner-test round left in history — that is exactly what
+                # tests/test_owner_real_line_fix_06.py exists to prevent,
+                # and inheriting it here made the bot answer "รับทราบว่า
+                # ต้องการนำเข้าเก้าอี้" to a customer who had just started
+                # over. Only the measurement slots are carried, and only
+                # when this turn did not supply them itself.
+                try:
+                    _svc_frame = _derive_active_frame(history)
+                    if _svc_frame is not None and _svc_ent.get("product"):
+                        for _fk, _fv in (("quantity", _svc_frame.quantity),
+                                         ("quantity_unit", getattr(_svc_frame, "unit", None)),
+                                         ("method", _svc_frame.method)):
+                            if _fv and not _svc_ent.get(_fk):
+                                _svc_ent[_fk] = _fv
+                except Exception:
+                    pass
                 _msg_has_identifier = any(
                     _validate_generic_identifier(tok) and not tok.isdigit()
                     for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)

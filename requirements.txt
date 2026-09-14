@@ -38,6 +38,21 @@ sentence-transformers>=2.7.0
 google-api-python-client>=2.100.0
 google-auth>=2.20.0
 
+# Agent orchestration + observability (2026-09-14)
+# Exact pins, deliberately — unlike the `>=` floors above these two sit on
+# the live conversation path and both ship breaking changes on minor
+# releases, so a fresh install must resolve to the versions the shadow
+# comparison and the regression suites were measured against. Neither
+# replaces any existing service: LangGraph ORCHESTRATES the already
+# validated DecisionEngine / conversation_semantics / RAG / ERP
+# primitives (services/agent/), and Langfuse is observability only and is
+# degrade-safe by construction (services/observability/langfuse_client.py).
+# Verified against this environment: neither touches fastapi, starlette
+# (which carries its own documented pin above), supabase, openai or
+# pydantic — they only add their own dependency trees.
+langgraph==1.2.11
+langfuse==4.15.2
+
 # Utils
 python-dotenv>=1.0.0
 requests>=2.31.0
