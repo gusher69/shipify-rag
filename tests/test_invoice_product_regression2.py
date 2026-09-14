@@ -117,7 +117,17 @@ class TestProblemB_GenericProductEntity(unittest.TestCase):
             self.assertFalse(_looks_like_bare_product(m), m)
 
     def test_noun_extraction_strips_particles_and_prefixes(self):
-        self.assertEqual(_bare_product_noun("เป็นพวกกล่องพลาสติกใส่ของครับ"), "กล่องพลาสติก")
+        # PHASE 6: "ใส่ของ" is no longer stripped. Checked against this
+        # suite's own customer source (docs/customer_uat_sources/
+        # INVOICE_PRODUCT_REGRESSION_2.md): the source only ever carries the
+        # bare "กล่องพลาสติกค่ะ" — it never asked for a purpose clause to be
+        # discarded, and discarding one cost real information and truncated
+        # genuine compound nouns elsewhere ("กล่องใส่ของ" -> "กล่อง"). The
+        # behavioural invariant the source DOES state (the import journey
+        # continues, a product entity is present) is asserted above and is
+        # unchanged.
+        self.assertEqual(_bare_product_noun("เป็นพวกกล่องพลาสติกใส่ของครับ"),
+                         "กล่องพลาสติกใส่ของ")
         self.assertEqual(_bare_product_noun("อะไหล่รถยนต์ครับ"), "อะไหล่รถยนต์")
         self.assertIsNone(_bare_product_noun("ครับ"))
 

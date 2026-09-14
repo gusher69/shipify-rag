@@ -334,11 +334,16 @@ class TestCompoundProductNounProtection(unittest.TestCase):
         self.assertIsNone(_product_interest_noun("อยากได้สินค้าค่ะ"))
         self.assertIsNone(_bare_product_noun("เป็นของครับ"))
 
-    def test_existing_protected_redundant_container_phrase_unchanged(self):
-        # tests/test_invoice_product_regression2.py's own confirmed case:
-        # "ใส่ของ" IS stripped as descriptive padding when the noun in
-        # front of it already fully names the product on its own.
-        self.assertEqual(_bare_product_noun("เป็นพวกกล่องพลาสติกใส่ของครับ"), "กล่องพลาสติก")
+    def test_purpose_clause_is_kept_not_stripped(self):
+        # Superseded by the system-wide pass: an earlier revision stripped a
+        # trailing "ใส่ของ" when the preceding noun was "long enough". That
+        # length threshold was brittle, and checking the actual customer
+        # source (docs/customer_uat_sources/INVOICE_PRODUCT_REGRESSION_2.md)
+        # showed it defended an expectation no customer ever stated -- the
+        # source only carries the bare "กล่องพลาสติกค่ะ". A purpose clause
+        # the customer chose to say is part of how they named their goods.
+        self.assertEqual(_bare_product_noun("เป็นพวกกล่องพลาสติกใส่ของครับ"),
+                         "กล่องพลาสติกใส่ของ")
 
 
 # ── G. typo / noisy-Thai tolerance (Step 4/6) ──────────────────────────

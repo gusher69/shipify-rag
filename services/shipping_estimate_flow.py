@@ -149,6 +149,11 @@ class EstimateState:
             m.append("method")
         return m
 
+    def known_any(self) -> bool:
+        """Has the customer supplied ANY estimate slot yet? (PHASE 6 —
+        distinguishes a cold opener from a collection turn in progress.)"""
+        return bool(self.weight is not None or self._dims_present() or self.method)
+
     def complete(self) -> bool:
         return not self.missing()
 
@@ -508,10 +513,57 @@ _MISSING_TH = {"weight": "น้ำหนักสินค้า", "dimensions"
                "method": "วิธีขนส่ง (ทางรถ / ทางเรือ)"}
 
 
-def estimate_missing_prompt(state: EstimateState) -> str:
+# PHASE 6 — CURRENT-TURN QUESTION MUST NOT BE DROPPED.
+# "ค่าขนส่งคิดยังไง คำนวนค่าส่งให้หน่อย" carries TWO intents in one turn: a
+# PUBLIC question about HOW the charge is derived, and a request to run
+# the calculation. The estimate flow used to consume only the second and
+# reply with a bare slot request, silently dropping a question the
+# customer had actually asked (customer_uat CUS-G04 / CUS-P07). This
+# recognizes the basis/rate half so the reply can answer it before asking
+# for what is still missing. It is a QUESTION-SHAPE test only — it never
+# decides routing and never invents a number.
+_RATE_BASIS_Q_RE = re.compile(
+    r"(?:ค่าขนส่ง|ค่าส่ง|ค่านำเข้า|ราคา|เรท|คิดเงิน|คิดราคา|ค่าบริการ)\S{0,6}"
+    r"(?:คิด|คำนวณ|คำนวน|ประเมิน)\S{0,4}(?:ยังไง|ยังงัย|อย่างไร|จากอะไร|ไง)"
+    r"|(?:คิด|คำนวณ|คำนวน)\S{0,4}(?:ยังไง|ยังงัย|อย่างไร|จากอะไร)"
+    r"|คิดจาก(?:อะไร|ไหน)|คิดตาม(?:อะไร|ไหน)|ใช้อะไรคิด",
+    re.IGNORECASE)
+
+
+def asks_rate_basis(message: str) -> bool:
+    """True when the turn also asks HOW the shipping charge is derived."""
+    return bool(_RATE_BASIS_Q_RE.search(message or ""))
+
+
+def rate_basis_answer() -> str:
+    """The truthful charge-basis explanation, rendered from the SAME
+    RATES table compute_estimate() charges from — one source of truth, so
+    this can never drift from what the calculator actually applies, and
+    no rate is ever restated by hand."""
+    road, sea = RATES["road"], RATES["sea"]
+    return ("ค่าขนส่งคิดจากน้ำหนักและปริมาตรค่ะ ค่าไหนมากกว่าจะถูกใช้เป็นค่าขนส่ง "
+            f"โดยทางรถ {road['kg']:g} บาท/กก. หรือ {road['cbm']:g} บาท/คิว "
+            f"และทางเรือ {sea['kg']:g} บาท/กก. หรือ {sea['cbm']:g} บาท/คิวค่ะ")
+
+
+def estimate_turn_answers(state: EstimateState, *, basis_question: bool = False) -> bool:
+    """True when THIS turn's reply carries a public answer (the charge
+    basis) and not only a slot request. A cold opener with nothing known
+    always answers; a partial turn that merely acknowledges what was
+    supplied and asks for the rest does not. The caller uses this to
+    label the execution route truthfully: a turn that answers is the same
+    GENERAL route the completed estimate already uses, while a pure
+    collection turn stays WORKFLOW."""
+    return bool(basis_question or not state.known_any())
+
+
+def estimate_missing_prompt(state: EstimateState, *, basis_question: bool = False) -> str:
+    """`basis_question` -> the turn ALSO asked how the charge is derived;
+    answer that first (PHASE 6), then ask for what is still missing, so a
+    question the customer actually asked is never silently dropped."""
     miss = state.missing()
     if not miss:
-        return ""
+        return rate_basis_answer() if basis_question else ""
     got = []
     if state.weight is not None:
         got.append(f"น้ำหนัก {_fmt(state.weight)} กก.")
@@ -521,9 +573,16 @@ def estimate_missing_prompt(state: EstimateState) -> str:
     if state.method:
         got.append("ทั้งทางรถและทางเรือ" if state.method == "both" else _METHOD_TH[state.method])
     # only method left -> the short preferred question
+    # Answer-bearing first turn: when NOTHING is known yet the customer
+    # has supplied no slot to acknowledge, so a bare slot request would
+    # return nothing at all for the question they asked. The public rate
+    # basis is free to give and is exactly what the CS team's own scripted
+    # answer leads with (AI_API_Requirement_For_Client.xlsx, sheet
+    # "1.ถามเบื้องต้น" row 4), so lead with it too.
+    basis = (rate_basis_answer() + " ") if (basis_question or not got) else ""
     if miss == ["method"]:
         head = f"รับทราบค่ะ ({' • '.join(got)}) " if got else ""
-        return head + "ต้องการประเมินทางรถหรือทางเรือคะ"
+        return basis + head + "ต้องการประเมินทางรถหรือทางเรือคะ"
     ack = f"รับทราบค่ะ ({' • '.join(got)}) " if got else ""
     want = " และ ".join(_MISSING_TH[k] for k in miss)
-    return f"{ack}ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้ง{want}เพิ่มเติมด้วยนะคะ"
+    return f"{basis}{ack}ยังขาดข้อมูลสำหรับประเมินค่ะ รบกวนแจ้ง{want}เพิ่มเติมด้วยนะคะ"

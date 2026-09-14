@@ -394,13 +394,43 @@ _FIX23_ABOUT_TO_RE = re.compile(
 # survives the rest of this strip.
 _FIX23_STRIP_RE = re.compile(
     r"(สนใจ|อยากจะ|อยากได้|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|เอา|ได้|"
-    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|สั่ง|ชิปปิ้ง|ขนของ|นำสินค้าเข้า|"
+    # PHASE 6 — the verb+placeholder compounds "สั่งของ"/"สั่งสินค้า" were
+    # REMOVED and "ขนของ" given a Thai-letter lookahead: they greedily ate
+    # the leading "ของ"/"สินค้า" of a genuine compound product noun
+    # ("อยากสั่งของเล่นจากจีน" -> "เล่น", "อยากสั่งของแต่งบ้าน…" -> "แต่งบ้าน").
+    # The bare verb "สั่ง" already recognises the verb, and the leftover
+    # placeholder is handled by the ONE placeholder rule in
+    # _product_interest_noun below -- so the compounds were redundant as
+    # well as harmful.
+    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่ง|ซื้อ|ชิปปิ้ง|ขน(?=ของ)|นำสินค้าเข้า|"
     r"จาก|เว็บ|จีน|taobao|1688|tmall|เถาเป่า|"
     r"ครับ|ค่ะ|คะ|นะ|หน่อย|ผม|ฉัน|เรา|\s)+", re.IGNORECASE)
 # the bare generic placeholder noun ("อยากสั่งของจากจีน", "อยากได้สินค้า")
 # with NOTHING else left after the strip above -> no real product was
 # named at all.
-_FIX23_BARE_PLACEHOLDER_RE = re.compile(r"^(?:สินค้า|ของ)+$")
+# "ขนของ" (haul goods) is the verb+placeholder form left behind when the
+# lookahead above declines to strip it; as the WHOLE remnant it still
+# means "no product was named". Extending this ONE rule is preferred to
+# adding another strip alternative that could eat a real noun.
+_FIX23_BARE_PLACEHOLDER_RE = re.compile(r"^(?:สินค้า|ของ|ขนของ)+$")
+
+
+# PHASE 6 (invariant H: a purchase/discovery intent must be able to
+# continue even with no FAQ hit) — "อยากได้<goods>" is a purchase-interest
+# opener that names goods without any explicit import verb, so the
+# interest+verb pair above never fired and the turn fell through to RAG
+# with nothing captured. Recognised only when a REAL goods noun survives
+# extraction AND the object named is not one of the service / document /
+# information objects that belong to other families ("อยากได้ใบกำกับ" is
+# INVOICE, "อยากได้ที่อยู่โกดัง" is PICKUP_LOCATION, "อยากได้ความช่วยเหลือ"
+# is HELP_INTENT) — so this widens recognition without stealing any
+# other family's traffic.
+_FIX23_WANT_GOODS_RE = re.compile(r"อยากได้|อยากซื้อ")
+_NON_GOODS_OBJECT_RE = re.compile(
+    r"ที่อยู่|โกดัง|คลัง|ข้อมูล|รายละเอียด|ใบกำกับ|ใบเสร็จ|ใบแจ้งหนี้|เอกสาร|"
+    r"เบอร์|ลิงก์|ลิงค์|เว็บ|อีเมล|email|รหัส|สถานะ|แทรค|tracking|บิล|ออเดอร์|"
+    r"เรท|ราคา|ส่วนลด|คูปอง|โปร|ความช่วยเหลือ|คำแนะนำ|ตัวอย่าง|ใบรับรอง|"
+    r"วอลเล็ท|ยอดเงิน|เงินคืน|สลิป|ประกัน", re.IGNORECASE)
 
 
 def _is_product_import_interest(question: str) -> bool:
@@ -409,7 +439,15 @@ def _is_product_import_interest(question: str) -> bool:
         return False
     if _FIX23_ABOUT_TO_RE.search(q):
         return True
-    return bool(_FIX23_INTEREST_RE.search(q) and _FIX23_IMPORT_VERB_RE.search(q))
+    if _FIX23_INTEREST_RE.search(q) and _FIX23_IMPORT_VERB_RE.search(q):
+        return True
+    if _FIX23_WANT_GOODS_RE.search(q) and not _NON_GOODS_OBJECT_RE.search(q):
+        # a named goods noun, OR a quantity with the product still to be
+        # asked for ("15 ชิ้นอยากได้สินค้า") -- the same shape as the
+        # owner's original repro, which only worked because it happened
+        # to carry an explicit import verb.
+        return bool(_product_interest_noun(q) or _IMPORT_QTY_UNIT_RE.search(q))
+    return False
 
 
 def _product_interest_noun(question: str) -> Optional[str]:

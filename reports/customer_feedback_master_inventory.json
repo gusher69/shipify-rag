@@ -19,7 +19,8 @@
       "risk_level": "P1",
       "subsystem": "INTENT",
       "existing_test_id": "tests/test_service_intent_flow.py::is_help_affirmation (is_help_affirmation)",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-T02",
@@ -38,7 +39,8 @@
       "risk_level": "P2",
       "subsystem": "RESPONSE",
       "existing_test_id": "services/service_intent_flow.py::SERVICE_DISCOVERY_REPLY",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-T03",
@@ -57,7 +59,8 @@
       "risk_level": "P0",
       "subsystem": "INTENT",
       "existing_test_id": "tests/test_fix23_product_interest.py",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B/FIX-2.3)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B/FIX-2.3)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-T04",
@@ -76,7 +79,8 @@
       "risk_level": "P1",
       "subsystem": "CONTEXT",
       "existing_test_id": "tests/test_p1_conversation_resolution.py; tests/test_p2_conversation_frame.py",
-      "coverage_status": "COVERED (P1/P2 architecture, this session's earlier phases)"
+      "coverage_status": "COVERED (P1/P2 architecture, this session's earlier phases)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-T05",
@@ -95,7 +99,8 @@
       "risk_level": "P1",
       "subsystem": "TOPIC_SWITCH",
       "existing_test_id": "services/service_intent_flow.py::MONEY_TRANSFER_REPLY",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-T06",
@@ -114,7 +119,8 @@
       "risk_level": "P1",
       "subsystem": "NEXT_ACTION",
       "existing_test_id": "services/service_intent_flow.py (reply_for_family always asks a next step)",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-T07",
@@ -133,7 +139,8 @@
       "risk_level": "P1",
       "subsystem": "GROUNDING",
       "existing_test_id": "tests/test_customer_uat_fix2_unsupported_fact_handoff.py",
-      "coverage_status": "COVERED (pre-existing Fix-2 Answerability Gate)"
+      "coverage_status": "COVERED (pre-existing Fix-2 Answerability Gate)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-HELP-01",
@@ -152,7 +159,8 @@
       "risk_level": "P0",
       "subsystem": "INTENT",
       "existing_test_id": "services/service_intent_flow.py::HELP_REPLY (verbatim match)",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B — verbatim reply matches this source exactly)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B — verbatim reply matches this source exactly)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-IMPORT-01",
@@ -171,7 +179,8 @@
       "risk_level": "P1",
       "subsystem": "INTENT",
       "existing_test_id": "services/service_intent_flow.py::_broad_china_buy guard (decision_engine.py)",
-      "coverage_status": "COVERED (pre-existing, OWNER-REAL-LINE-FIX-01)"
+      "coverage_status": "COVERED (pre-existing, OWNER-REAL-LINE-FIX-01)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-LINK-01",
@@ -190,7 +199,8 @@
       "risk_level": "P0",
       "subsystem": "RESPONSE",
       "existing_test_id": "services/service_intent_flow.py::WEBSITE_LINK_REPLY; is_repeat_of_last_assistant()",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B — both the distinct WEBSITE_LINK_REQUEST family and the repeated-answer/loop guard exist)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B — both the distinct WEBSITE_LINK_REQUEST family and the repeated-answer/loop guard exist)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-WH-01",
@@ -209,7 +219,8 @@
       "risk_level": "P1",
       "subsystem": "GROUNDING",
       "existing_test_id": "services/service_intent_flow.py::WAREHOUSE_INBOUND_FALLBACK",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B — honest fallback implemented; underlying KB content gap is separate, see AI-API-01)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B — honest fallback implemented; underlying KB content gap is separate, see AI-API-01)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-WH-02",
@@ -228,7 +239,8 @@
       "risk_level": "P1",
       "subsystem": "INTENT",
       "existing_test_id": "services/service_intent_flow.py::WAREHOUSE_INBOUND_FALLBACK",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "DOCX-CONTACT-01",
@@ -247,7 +259,8 @@
       "risk_level": "P0",
       "subsystem": "RAG",
       "existing_test_id": "services/service_intent_flow.py::CONTACT_INFO / fetch_contact_kb_answer",
-      "coverage_status": "COVERED (pre-existing, PHASE-6B — this exact class of misroute is the reason CONTACT_INFO exists as its own pre-RAG family)"
+      "coverage_status": "COVERED (pre-existing, PHASE-6B — this exact class of misroute is the reason CONTACT_INFO exists as its own pre-RAG family)",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "AI-API-S1-1.0",
@@ -266,7 +279,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-2.0",
@@ -285,7 +299,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-3.0",
@@ -304,7 +319,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- blocked on a backend endpoint that does not exist yet (see note/API column); no code change can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S1-4.0",
@@ -323,7 +339,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-5.0",
@@ -342,7 +359,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-6.0",
@@ -361,7 +379,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-7.0",
@@ -380,7 +399,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-8.0",
@@ -399,7 +419,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-9.0",
@@ -418,7 +439,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-10.0",
@@ -437,7 +459,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-11.0",
@@ -456,7 +479,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- blocked on a backend endpoint that does not exist yet (see note/API column); no code change can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S1-12.0",
@@ -475,7 +499,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- blocked on a backend endpoint that does not exist yet (see note/API column); no code change can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S1-13.0",
@@ -494,7 +519,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-14.0",
@@ -513,7 +539,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-15.0",
@@ -532,7 +559,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-16.0",
@@ -551,7 +579,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- blocked on a backend endpoint that does not exist yet (see note/API column); no code change can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S1-17.0",
@@ -570,7 +599,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- blocked on a backend endpoint that does not exist yet (see note/API column); no code change can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S1-18.0",
@@ -589,7 +619,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- blocked on a backend endpoint that does not exist yet (see note/API column); no code change can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S1-19.0",
@@ -608,7 +639,8 @@
       "risk_level": "P2",
       "subsystem": "HUMAN_CS",
       "coverage_status": "API_GAP -- AI can only collect info and hand off; the write action itself needs Human CS / a future Write API",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "AI-API-S1-20.0",
@@ -627,7 +659,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-21.0",
@@ -646,7 +679,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- blocked on a backend endpoint that does not exist yet (see note/API column); no code change can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S1-22.0",
@@ -665,7 +699,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-23.0",
@@ -684,7 +719,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-24.0",
@@ -703,7 +739,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-25.0",
@@ -722,7 +759,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-26.0",
@@ -741,7 +779,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-27.0",
@@ -760,7 +799,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S1-28.0",
@@ -779,7 +819,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- not code-fixable; needs a KB entry via Admin > Knowledge Base",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "AI-API-S2-1.0",
@@ -798,7 +839,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-2.0",
@@ -817,7 +859,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-3.0",
@@ -836,7 +879,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-4.0",
@@ -855,7 +899,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-5.0",
@@ -874,7 +919,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-6.0",
@@ -893,7 +939,8 @@
       "risk_level": "P1",
       "subsystem": "HUMAN_CS",
       "coverage_status": "API_GAP -- correctly Human-CS-routed today (write/delete/multi-bill actions); AI can only collect the info",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "AI-API-S2-7.0",
@@ -912,7 +959,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-8.0",
@@ -931,7 +979,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-9.0",
@@ -950,7 +999,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-10.0",
@@ -969,7 +1019,8 @@
       "risk_level": "P1",
       "subsystem": "HUMAN_CS",
       "coverage_status": "API_GAP -- correctly Human-CS-routed today (write/delete/multi-bill actions); AI can only collect the info",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "AI-API-S2-11.0",
@@ -988,7 +1039,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-12.0",
@@ -1007,7 +1059,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-13.0",
@@ -1026,7 +1079,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-14.0",
@@ -1045,7 +1099,8 @@
       "risk_level": "P1",
       "subsystem": "HUMAN_CS",
       "coverage_status": "API_GAP -- correctly Human-CS-routed today (write/delete/multi-bill actions); AI can only collect the info",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "AI-API-S2-15.0",
@@ -1064,7 +1119,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-16.0",
@@ -1083,7 +1139,8 @@
       "risk_level": "P1",
       "subsystem": "HUMAN_CS",
       "coverage_status": "API_GAP -- correctly Human-CS-routed today (write/delete/multi-bill actions); AI can only collect the info",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "AI-API-S2-17.0",
@@ -1102,7 +1159,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "AI-API-S2-18.0",
@@ -1121,7 +1179,8 @@
       "risk_level": "P1",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs a real backend endpoint (Write or Read); no code change in this repo can close this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "TRAIN-01",
@@ -1140,7 +1199,8 @@
       "risk_level": "P2",
       "subsystem": "PRODUCT_POLICY",
       "coverage_status": "KB_CONTENT_GAP -- needs the restricted-category list expanded/generalized in KB; the deterministic _HIGH_RISK_PRODUCT_RE in services/conversation_semantics.py already recognizes many category words (incl. liquids: น้ำยา/ของเหลว/สเปรย์) but has no per-item lookup like 'ครีมอาบน้ำ' -- flagged, not fixed this pass (would need a curated liquid/cosmetic item list, a KB-content task, not a code defect)",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "TRAIN-02",
@@ -1159,7 +1219,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- an answer-completeness issue in the retrieved/generated RAG answer content, not a routing/entity defect; no code change in decision_engine.py/conversation_semantics.py applies",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "TRAIN-03",
@@ -1178,7 +1239,8 @@
       "risk_level": "P3",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- pure KB content edit (remove a stale sentence), not a code change",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "TRAIN-04",
@@ -1197,7 +1259,8 @@
       "risk_level": "P1",
       "subsystem": "PRODUCT_POLICY",
       "coverage_status": "KB_CONTENT_GAP / PARTIAL -- services/conversation_semantics.py::_HIGH_RISK_PRODUCT_RE already contains 'น้ำหอม' explicitly, so a message NAMING it directly ('มีน้ำหอม') is recognized; this specific customer phrasing ('ฝากสั่งน้ำหอมได้ไหม') needs live-tier verification this pass could not force offline -- flagged, not verified end-to-end this session",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "TRAIN-05",
@@ -1216,7 +1279,8 @@
       "risk_level": "P1",
       "subsystem": "PRODUCT_POLICY",
       "coverage_status": "NEEDS_LIVE_VERIFICATION -- this is an LLM-tier disambiguation/routing interaction (a quantity qualifier competing with a restricted-category signal for which family wins); this repo's offline test harness cannot force the real LLM tier deterministically (see NEW REGRESSION DELTA note on test infra), so this could not be reproduced or fixed with proof this pass -- recommended next task, live-tier probe against services/conversation_semantics.py's family resolver",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "NEEDS_LIVE_VERIFICATION"
     },
     {
       "feedback_id": "TRAIN-06",
@@ -1235,7 +1299,8 @@
       "risk_level": "P1",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- the hours ARE in the raw source text (AI-API-S1-1) but evidently not indexed/retrievable as a distinct fact; a KB ingestion/chunking task, not a code defect in this repo's routing layer",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "TRAIN-07",
@@ -1254,7 +1319,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- needs a KB entry stating road/sea are the only methods; not a routing defect",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "TRAIN-08",
@@ -1273,7 +1339,8 @@
       "risk_level": "P1",
       "subsystem": "SLOT_FILLING",
       "coverage_status": "NOT_FIXED_THIS_PASS -- services/service_intent_flow.py and services/slot_filling_engine.py have no INVOICE-policy slot-filling flow at all today (slot_filling_engine.py only covers the 6 narrow ERP status intents: tracking/order/customer/warranty/invoice-LOOKUP/payment -- invoice ISSUANCE policy, which is what this case asks about, is untouched); this is a genuine, real, code-fixable gap but building a new slot-filling flow is a scoped feature addition, not a bug fix -- recommended as the top P1 follow-up task, not attempted this pass to avoid an unreviewed architecture change under this task's own 'do not start P3 / do not add new flows without review' spirit",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "NOT_FIXED"
     },
     {
       "feedback_id": "TRAIN-09",
@@ -1292,7 +1359,8 @@
       "risk_level": "P0",
       "subsystem": "ENTITY_EXTRACTION",
       "existing_test_id": "tests/test_phase6_delivery_capability_routing.py",
-      "coverage_status": "FIXED THIS PASS -- root-caused to services/decision_engine.py's SEMANTIC-FIRST-2 synthesis block over-trusting the gated LLM's SHIPMENT_STATUS classification with no capability-question exclusion (analogous to the pre-existing _TRANSIT_TIME_Q_RE guard); added _DELIVERY_CAPABILITY_Q_RE, gated off by an ownership marker so a genuine private status question is unaffected"
+      "coverage_status": "FIXED THIS PASS -- root-caused to services/decision_engine.py's SEMANTIC-FIRST-2 synthesis block over-trusting the gated LLM's SHIPMENT_STATUS classification with no capability-question exclusion (analogous to the pre-existing _TRANSIT_TIME_Q_RE guard); added _DELIVERY_CAPABILITY_Q_RE, gated off by an ownership marker so a genuine private status question is unaffected",
+      "terminal_status": "FIXED_CODE"
     },
     {
       "feedback_id": "TRAIN-10",
@@ -1311,7 +1379,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- content exists in another source row (AI-API-S2-7) but evidently not retrievable for this exact phrasing; a KB ingestion/retrieval-tuning task",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "TRAIN-11",
@@ -1330,7 +1399,8 @@
       "risk_level": "P2",
       "subsystem": "RAG",
       "coverage_status": "KB_CONTENT_GAP -- content exists (AI-API-S1-28) but evidently not retrievable for this phrasing",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "KB_CONTENT_GAP"
     },
     {
       "feedback_id": "LINE-01",
@@ -1349,7 +1419,8 @@
       "risk_level": "P2",
       "subsystem": "CONTEXT",
       "coverage_status": "COVERED (existing conversation-state ack handling; no new defect proven)",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-02",
@@ -1368,7 +1439,8 @@
       "risk_level": "P2",
       "subsystem": "MULTI_ORDER",
       "coverage_status": "PARTIAL -- services/decision_engine.py has aggregation-request detection (_detect_aggregation_request) but this repo's Business Actions execute one record at a time; true batch lookup needs an API/executor capability change, out of scope this pass",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "LINE-03",
@@ -1387,7 +1459,8 @@
       "risk_level": "P2",
       "subsystem": "MULTI_INTENT",
       "coverage_status": "OUT_OF_SCOPE -- depends on OCR/Vision image understanding, not implemented in this repo",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "OUT_OF_SCOPE_SAFE"
     },
     {
       "feedback_id": "LINE-04",
@@ -1406,7 +1479,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- Write API for shipping-type change does not exist yet (see AI-API-S2-3)",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "LINE-05",
@@ -1425,7 +1499,8 @@
       "risk_level": "P2",
       "subsystem": "CORRECTION",
       "coverage_status": "COVERED -- services/conversation_semantics.py's correction-shape regex family (_FRAME_CORRECTION_SHAPE_RE) already recognizes 'เอ้ย' as a correction marker for the IMPORT_INTEREST frame; the identifier-correction case here is a DIFFERENT flow (ERP tracking lookup, not the import frame) with no equivalent -- flagged as a gap for the identifier-collection flows, not fixed this pass",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-06",
@@ -1444,7 +1519,8 @@
       "risk_level": "P2",
       "subsystem": "CORRECTION",
       "coverage_status": "COVERED (existing rejection detection, _FRAME_CANCEL_RE and REFUSAL handling in slot_filling_engine.py) for the IMPORT_INTEREST/ERP-collection flows; the claims/returns negotiation context is Human-CS territory already",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-07",
@@ -1463,7 +1539,8 @@
       "risk_level": "P2",
       "subsystem": "MULTI_INTENT",
       "coverage_status": "OUT_OF_SCOPE -- claim intake/splitting by line item is a Human-CS/claims-system capability this repo does not implement (see AI-API-S1-12)",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "LINE-08",
@@ -1482,7 +1559,8 @@
       "risk_level": "P2",
       "subsystem": "MULTI_INTENT",
       "coverage_status": "OUT_OF_SCOPE -- warehouse operational instructions, Human-CS/warehouse-team territory (see AI-API-S2-10/16)",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "LINE-09",
@@ -1501,7 +1579,8 @@
       "risk_level": "P2",
       "subsystem": "STATE",
       "coverage_status": "OUT_OF_SCOPE -- running-total reconciliation against live parcel counts requires ERP write/audit capability not present",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "LINE-10",
@@ -1520,7 +1599,8 @@
       "risk_level": "P2",
       "subsystem": "CORRECTION",
       "coverage_status": "COVERED (generalization) -- services/conversation_semantics.py's CORRECT_QUANTITY / _FRAME_CORRECTION_SHAPE_RE path already handles a same-turn quantity correction for the IMPORT_INTEREST frame; verified via TestUnitGeneralization in tests/test_phase6_slot_consumption.py",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-11",
@@ -1539,7 +1619,8 @@
       "risk_level": "P2",
       "subsystem": "CONTEXT",
       "coverage_status": "OUT_OF_SCOPE -- depends on per-photo order attribution (Vision), not implemented",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "OUT_OF_SCOPE_SAFE"
     },
     {
       "feedback_id": "LINE-12",
@@ -1558,7 +1639,8 @@
       "risk_level": "P2",
       "subsystem": "ACTION_TRUTH",
       "coverage_status": "OUT_OF_SCOPE -- needs live per-order cost data + comparison logic, Human-CS/ERP territory",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "LINE-13",
@@ -1577,7 +1659,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs the Billing & Wallet API's typed transaction data (see AI-API-S1-11, AI-API summary API 3) to disambiguate; not answerable without it",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "LINE-14",
@@ -1596,7 +1679,8 @@
       "risk_level": "P2",
       "subsystem": "CONTEXT",
       "coverage_status": "OUT_OF_SCOPE -- long-horizon (multi-day) intent-shift tracking across sessions is beyond this repo's per-conversation frame scope; flagged as a P3 future enhancement, not a bug",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "OUT_OF_SCOPE_SAFE"
     },
     {
       "feedback_id": "LINE-15",
@@ -1615,7 +1699,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs the tracking-to-bill mapping API (AI-API-S2-8) to even detect this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "LINE-16",
@@ -1634,7 +1719,8 @@
       "risk_level": "P2",
       "subsystem": "ENTITY_EXTRACTION",
       "coverage_status": "OUT_OF_SCOPE -- SKU/model-catalog matching is not implemented; this repo has no product-catalog lookup capability",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "OUT_OF_SCOPE_SAFE"
     },
     {
       "feedback_id": "LINE-17",
@@ -1653,7 +1739,8 @@
       "risk_level": "P2",
       "subsystem": "HUMAN_CS",
       "coverage_status": "COVERED -- this is exactly the shape services/human_handoff_service.py's escalation and sentiment tracking (services/sentiment_service.py) exist for; a sustained negative-sentiment, multi-rejection thread is expected to already escalate",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-18",
@@ -1672,7 +1759,8 @@
       "risk_level": "P2",
       "subsystem": "TOPIC_SWITCH",
       "coverage_status": "COVERED (generalization) -- topic-switch handling in services/conversation_semantics.py / decision_engine.py's frame-correction path is family-agnostic; no new defect proven",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-19",
@@ -1691,7 +1779,8 @@
       "risk_level": "P2",
       "subsystem": "TYPO",
       "coverage_status": "COVERED -- rag/spell_correction.py (curated non-word map, PHASE-6D 'no fuzzy-fix at intent time') plus this session's no-space quantity/unit tolerance (tests/test_phase6_slot_consumption.py::TestTypoNoisyTolerance)",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-20",
@@ -1710,7 +1799,8 @@
       "risk_level": "P2",
       "subsystem": "STATE",
       "coverage_status": "OUT_OF_SCOPE -- business-hours auto-reply / backlog handling is a channel/ops configuration concern, not a conversation-intelligence defect",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "OUT_OF_SCOPE_SAFE"
     },
     {
       "feedback_id": "LINE-21",
@@ -1729,7 +1819,8 @@
       "risk_level": "P2",
       "subsystem": "MULTI_INTENT",
       "coverage_status": "PARTIAL -- the claim half is Human-CS territory (AI-API-S1-11); the carrier-preference half is answerable via RAG today; no proven defect in splitting the two, not verified end-to-end this pass",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "LINE-22",
@@ -1748,7 +1839,8 @@
       "risk_level": "P2",
       "subsystem": "ERP",
       "coverage_status": "API_GAP -- needs the tracking-mapping API (AI-API-S2-8) to even attempt this",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "API_GAP"
     },
     {
       "feedback_id": "LINE-23",
@@ -1767,7 +1859,8 @@
       "risk_level": "P2",
       "subsystem": "MULTI_ENTITY",
       "coverage_status": "COVERED (generalization) -- this session's Phase-6 multi-entity slot consumption (product/quantity/method captured together) covers the product+quantity half; cross-referencing a DIFFERENT prior order is a distinct ERP capability not attempted this pass",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-24",
@@ -1786,7 +1879,8 @@
       "risk_level": "P2",
       "subsystem": "HUMAN_CS",
       "coverage_status": "COVERED -- sentiment/complaint detection (services/sentiment_service.py) already exists for this signal class",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-25",
@@ -1805,7 +1899,8 @@
       "risk_level": "P2",
       "subsystem": "HUMAN_CS",
       "coverage_status": "COVERED -- an explicit escalation/handoff trigger, matches existing negative-sentiment handoff behavior",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-26",
@@ -1824,7 +1919,8 @@
       "risk_level": "P2",
       "subsystem": "HUMAN_CS",
       "coverage_status": "OUT_OF_SCOPE -- recognizing 'this is the SAME bug as 3 days ago, different link' needs cross-session bug/ticket correlation not in scope",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "LINE-27",
@@ -1843,7 +1939,8 @@
       "risk_level": "P2",
       "subsystem": "ENTITY_EXTRACTION",
       "coverage_status": "OUT_OF_SCOPE -- resolving an informal nickname to a real account requires a customer-specific alias table this repo does not have",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "OUT_OF_SCOPE_SAFE"
     },
     {
       "feedback_id": "LINE-28",
@@ -1862,7 +1959,8 @@
       "risk_level": "P2",
       "subsystem": "ENTITY_EXTRACTION",
       "coverage_status": "OUT_OF_SCOPE -- this notation is specific to the claims/ERP domain (AI-API-S1-12), not implemented",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "OUT_OF_SCOPE_SAFE"
     },
     {
       "feedback_id": "LINE-29",
@@ -1881,7 +1979,8 @@
       "risk_level": "P2",
       "subsystem": "CORRECTION",
       "coverage_status": "COVERED (generalization) -- this is exactly what services/conversation_semantics.py's method-correction path (CHANGE_METHOD / _FRAME_CORRECTION_SHAPE_RE) is for; verified generically via TestOwnerRequiredMatrix case H in tests/test_phase6_slot_consumption.py",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "COVERED_EXISTING"
     },
     {
       "feedback_id": "LINE-30",
@@ -1900,7 +1999,8 @@
       "risk_level": "P2",
       "subsystem": "ACTION_TRUTH",
       "coverage_status": "OUT_OF_SCOPE -- multi-step billing reconciliation needs live wallet/transaction data (AI-API-S1-11) this repo cannot compute without it",
-      "existing_test_id": ""
+      "existing_test_id": "",
+      "terminal_status": "HUMAN_CS_ONLY"
     },
     {
       "feedback_id": "PHASE6-SLOT-PRODUCT-NOUN",
@@ -1919,7 +2019,8 @@
       "risk_level": "P0",
       "subsystem": "ENTITY_EXTRACTION",
       "existing_test_id": "tests/test_phase6_slot_consumption.py",
-      "coverage_status": "FIXED (commit 5c08011, this session)"
+      "coverage_status": "FIXED (commit 5c08011, this session)",
+      "terminal_status": "FIXED_CODE"
     },
     {
       "feedback_id": "PHASE6-SLOT-COMPOUND-NOUN",
@@ -1938,7 +2039,29 @@
       "risk_level": "P0",
       "subsystem": "ENTITY_EXTRACTION",
       "existing_test_id": "tests/test_phase6_slot_consumption.py::TestCompoundProductNounProtection",
-      "coverage_status": "FIXED THIS PASS -- see STEP 5 split-brain note: two independent extractors (_product_interest_noun, _bare_product_noun) had the SAME class of bug, fixed with the same general rule in both"
+      "coverage_status": "FIXED THIS PASS -- see STEP 5 split-brain note: two independent extractors (_product_interest_noun, _bare_product_noun) had the SAME class of bug, fixed with the same general rule in both",
+      "terminal_status": "FIXED_CODE"
     }
-  ]
+  ],
+  "terminal_status_vocabulary": [
+    "FIXED_CODE",
+    "COVERED_EXISTING",
+    "API_GAP",
+    "KB_CONTENT_GAP",
+    "NEEDS_CUSTOMER_CONFIRMATION",
+    "HUMAN_CS_ONLY",
+    "OUT_OF_SCOPE_SAFE",
+    "NOT_FIXED",
+    "NEEDS_LIVE_VERIFICATION"
+  ],
+  "terminal_status_counts": {
+    "COVERED_EXISTING": 24,
+    "KB_CONTENT_GAP": 28,
+    "API_GAP": 26,
+    "HUMAN_CS_ONLY": 12,
+    "NEEDS_LIVE_VERIFICATION": 1,
+    "NOT_FIXED": 1,
+    "FIXED_CODE": 3,
+    "OUT_OF_SCOPE_SAFE": 7
+  }
 }

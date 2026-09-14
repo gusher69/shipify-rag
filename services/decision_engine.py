@@ -124,6 +124,8 @@ from services.shipping_estimate_flow import (
     extract_estimate_fields as _extract_estimate_fields,
     estimate_missing_prompt as _estimate_missing_prompt,
     estimate_reply as _estimate_reply,
+    asks_rate_basis as _asks_rate_basis,
+    estimate_turn_answers as _estimate_turn_answers,
 )
 # Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
 # 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
@@ -4329,8 +4331,11 @@ class DecisionEngine:
                             developer_trace=developer_trace, context=context, start=start,
                             alert=_detect_alert(message, context))
                     return self._finalize(
-                        reply=_build_response(text=_estimate_missing_prompt(_est)),
-                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        reply=_build_response(text=_estimate_missing_prompt(
+                            _est, basis_question=_asks_rate_basis(message))),
+                        routing_type=("GENERAL" if _estimate_turn_answers(
+                            _est, basis_question=_asks_rate_basis(message))
+                            else "WORKFLOW"), workflow=workflow_hint,
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))
 

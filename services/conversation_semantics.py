@@ -1307,17 +1307,15 @@ _BARE_PRODUCT_STRIP_RE = re.compile(
 # the bare generic placeholder with nothing else left ("เป็นของครับ" ->
 # no real product named at all).
 _BARE_PRODUCT_PLACEHOLDER_RE = re.compile(r"^(?:สินค้า|ของ)+$")
-# a trailing "ใส่ของ(ได้)?" ("...for holding things") is descriptive
-# padding ONLY when the noun in front of it is already a specific,
-# qualified product name on its own ("กล่องพลาสติกใส่ของ" -> "กล่อง
-# พลาสติก" — a real customer-confirmed case, tests/
-# test_invoice_product_regression2.py). When it is the ONLY thing turning
-# an otherwise too-generic bare container word into a real product name
-# ("กล่องใส่ของ" — a bare "กล่อง" alone is too vague), it IS the product
-# name and must survive intact. A short length threshold on what remains
-# before it distinguishes the two without hardcoding either phrase.
-_BARE_PRODUCT_CONTAINER_SUFFIX_RE = re.compile(r"(?:ใส่ของได้|ใส่ของ)$")
-_MIN_QUALIFIED_CONTAINER_LEN = 6
+# NOTE (PHASE 6, system-wide pass): an earlier revision ALSO stripped a
+# trailing "ใส่ของ(ได้)?" when what preceded it was "long enough" to look
+# like a self-sufficient noun. That length threshold was brittle by
+# construction and — checked against the actual customer source
+# (docs/customer_uat_sources/INVOICE_PRODUCT_REGRESSION_2.md) — it was
+# defending an assertion no customer ever made: the source only ever
+# carries the bare "กล่องพลาสติกค่ะ". A purpose clause the customer chose
+# to say IS part of how they named their goods, so nothing strips it now;
+# the one rule below is the whole mechanism.
 
 
 def _assistant_asked_for_product(history: Optional[List[Dict]]) -> bool:
@@ -1371,9 +1369,6 @@ def _bare_product_noun(t: str) -> Optional[str]:
     s = re.sub(r"\s+", "", s)
     if s and _BARE_PRODUCT_PLACEHOLDER_RE.match(s):
         return None
-    m = _BARE_PRODUCT_CONTAINER_SUFFIX_RE.search(s)
-    if m and len(s) - len(m.group(0)) >= _MIN_QUALIFIED_CONTAINER_LEN:
-        s = s[:m.start()]
     return s if 2 <= len(s) <= 30 and _THAI_CHAR_RE.search(s) else None
 
 
