@@ -4474,7 +4474,9 @@ class DecisionEngine:
                     developer_trace["selection_source"] = "phase6b_service_intent"
                     developer_trace["service_intent_family"] = "IMPORT_INTEREST"
                     return self._finalize(
-                        reply=_build_response(text=_imp_reply(_svc_ent.get("product"))),
+                        reply=_build_response(text=_imp_reply(
+                            _svc_ent.get("product"), quantity=_svc_ent.get("quantity"),
+                            method=_svc_ent.get("method"))),
                         routing_type="GENERAL", workflow=workflow_hint,
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))

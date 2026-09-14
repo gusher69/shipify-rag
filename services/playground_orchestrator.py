@@ -23,6 +23,11 @@ from rag.confidence import compute_confidence, confidence_label as _confidence_l
 # SEMANTIC-FIRST-2.1 — the central-interpreter families that are always a
 # PUBLIC company-information question (never general chit-chat).
 from services.conversation_semantics import PUBLIC_INFO_FAMILIES as _PUBLIC_INFO_COMPANY_FAMILIES
+# PHASE-6-SLOT-CONSUMPTION — the SAME count-unit vocabulary already used
+# for a bare quantity ANSWER, reused here (never re-declared) so a
+# quantity+unit span is never mistaken for a product noun below.
+from services.conversation_semantics import _USER_QTY_RE as _IMPORT_QTY_UNIT_RE
+from services.conversation_semantics import _METHOD_WORD_RE as _IMPORT_METHOD_WORD_RE
 from services.rag_service import get_rag_service
 from services.policy_engine import evaluate as evaluate_policies, get_escalation_settings, get_messaging_settings, PolicyVerdict
 from services.policy_studio_service import get_default_policy_set
@@ -356,8 +361,19 @@ def _product_answer_continuation_noun(followup_type: Optional[str], history, sin
 # GUARANTEE/POLICY question (_COMPANY_GUARANTEE_Q_RE) is explicitly
 # excluded — that remains TRUE no-info -> Fix-2. A prohibited product
 # retrieves its own firm policy evidence and never reaches this branch.
+#
+# PHASE-6-SLOT-CONSUMPTION — bare "สั่ง" (order) is now its own
+# alternative, not only the compound "สั่งซื้อ/สั่งของ/สั่งสินค้า" forms.
+# "อยากสั่งรองเท้าจากจีน" (order SHOES, a specific goods noun straight
+# after the verb, no generic "ของ/สินค้า" placeholder) previously matched
+# NEITHER this regex NOR _FIX23_STRIP_RE's own recognition of "สั่ง" as a
+# filler verb consistently — the two regexes disagreed on what counts as
+# an ordering verb, so a product-first opener with a real product noun
+# fell through to plain RAG instead of opening the IMPORT_INTEREST
+# journey at all. The compound alternatives are kept (harmless, already
+# subsumed by bare "สั่ง") for readability / history.
 _FIX23_IMPORT_VERB_RE = re.compile(
-    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|ชิปปิ้ง|ขนของ|นำสินค้าเข้า")
+    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|สั่ง|ชิปปิ้ง|ขนของ|นำสินค้าเข้า")
 _FIX23_INTEREST_RE = re.compile(
     r"สนใจ|อยาก|ต้องการ|วางแผน|เล็ง|กำลังมองหา|กำลังสนใจ|มองหา")
 _FIX23_ABOUT_TO_RE = re.compile(
@@ -365,7 +381,7 @@ _FIX23_ABOUT_TO_RE = re.compile(
 # stripped to expose the bare product noun; generic markers only, never a
 # product dictionary.
 _FIX23_STRIP_RE = re.compile(
-    r"(สนใจ|อยากจะ|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|"
+    r"(สนใจ|อยากจะ|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|เอา|"
     r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|สั่ง|ชิปปิ้ง|ขนของ|นำสินค้าเข้า|"
     r"สินค้า|ของ|จาก|เว็บ|จีน|taobao|1688|tmall|เถาเป่า|"
     r"ครับ|ค่ะ|คะ|นะ|หน่อย|ผม|ฉัน|เรา|\s)+", re.IGNORECASE)
@@ -383,8 +399,24 @@ def _is_product_import_interest(question: str) -> bool:
 def _product_interest_noun(question: str) -> Optional[str]:
     """The bare product noun in a product/import-interest declarative,
     or None (-> a generic acknowledgement). Deterministic generic-token
-    strip, never a product-name lookup."""
-    remnant = _FIX23_STRIP_RE.sub("", question or "").strip()
+    strip, never a product-name lookup.
+
+    PHASE-6-SLOT-CONSUMPTION: a quantity+unit span ("20 คู่") is a
+    QUANTITY, never a product noun, regardless of where in the sentence
+    it appears ("20 คู่อยากสั่งของจากจีน" vs "อยากสั่งของจากจีน 20 คู่").
+    It is stripped FIRST, using the SAME count-unit vocabulary already
+    used for a bare quantity ANSWER (_USER_QTY_RE / here aliased
+    _IMPORT_QTY_UNIT_RE) — never a second, duplicated unit list — so this
+    generalizes to every unit that vocabulary already knows. Without this
+    step a leading/trailing quantity either got returned AS the product
+    (when nothing else was left after the generic filler strip) or got
+    glued onto a real product noun ("30 ชิ้น...ชั้นวางของ" ->
+    "30ชิ้นชั้นวาง"), corrupting both slots at once. A shipping-method
+    mention ("ส่งเรือ") is stripped the same way and for the same reason
+    ("รองเท้า...ส่งเรือ" -> "รองเท้าส่งเรือ" glued)."""
+    q = _IMPORT_QTY_UNIT_RE.sub(" ", question or "")
+    q = _IMPORT_METHOD_WORD_RE.sub(" ", q)
+    remnant = _FIX23_STRIP_RE.sub("", q).strip()
     if remnant and _PRODUCT_ANSWER_NOUN_OK_RE.match(remnant):
         return remnant
     return None

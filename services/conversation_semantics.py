@@ -68,10 +68,34 @@ _NOT_A_PRODUCT_RE = re.compile(
 _ASSIST_QTY_RE = re.compile(r"จำนวน(?:ประมาณ)?\s*(?P<q>\d{1,7})")
 _ASSIST_METHOD_RE = re.compile(r"ขนส่งทาง(?P<m>รถ|เรือ|อากาศ)")
 
+#
+# PHASE-6-SLOT-CONSUMPTION — generalized the unit vocabulary (added
+# ขวด/พาเลท) and dropped the trailing `\b`: a Thai count-unit that ends in
+# a bare combining tone/vowel mark ("คู่" = ค + ู + ่, the LAST character a
+# non-word Mn mark) never satisfied `\b` when followed by end-of-string
+# OR a space, because a word boundary needs a transition INTO/OUT OF a
+# `\w` character and Python's `\w` does not count standalone combining
+# marks — so "20 คู่" as the very LAST word, or followed only by a space
+# ("20 คู่ ส่งเรือ"), silently failed to match at all, while "20 คู่อยาก…"
+# (more text glued right on, no space) happened to work (the boundary
+# exists between the mark and the very next real letter). No trailing
+# anchor is needed here in the first place: this pattern only ever fires
+# on an explicit DIGIT + unit-word span, so even the one case a trailing
+# boundary might have guarded against — a longer, unrelated compound word
+# starting right after the unit ("20 คู่กางเกง") — is itself the CORRECT
+# split (quantity=20/unit=คู่, remnant "กางเกง" left for the product noun),
+# never a false positive.
 _USER_QTY_RE = re.compile(
-    r"(?:ประมาณ\s*)?(?P<q>\d{1,7})\s*(ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|โหล|แพ็ค|แพค|ลัง|ผืน|หลัง|เครื่อง|pcs?)\b",
+    r"(?:ประมาณ\s*)?(?P<q>\d{1,7})\s*(ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|ขวด|โหล|แพ็ค|แพค|ลัง|ผืน|หลัง|เครื่อง|พาเลท|pcs?)",
     re.IGNORECASE)
-_METHOD_WORD_RE = re.compile(r"ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน")
+# PHASE-6-SLOT-CONSUMPTION — added the bare "ส่ง<mode>"/"โดย<mode>"
+# phrasings ("ส่งเรือ", "ส่งรถ") alongside the existing "ทาง<mode>" ones;
+# same vocabulary P1's own services/conversation_resolution.py::_METHOD_RE
+# recognizes (kept as a separate literal here, not an import, because
+# conversation_resolution.py itself imports FROM this module — importing
+# back would be circular).
+_METHOD_WORD_RE = re.compile(
+    r"ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|โดยรถ|โดยเรือ|โดยเครื่องบิน|ส่งเรือ|ส่งรถ")
 
 # import / product interest reused from the FIX-2.3 recognizer so the
 # frame opens on exactly the turns FIX-2.3 already treats as import
@@ -365,10 +389,29 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
         head = f"ได้ค่ะ เปลี่ยนเป็น{p}ได้เลยค่ะ 😊"
         if qty or mth:
             head += f"{qty}{mth} ตามเดิมนะคะ"
+    elif changed == "none" and not frame.product:
+        # PHASE-6-SLOT-CONSUMPTION — a quantity/method-only opener with NO
+        # product yet must never claim "ต้องการนำเข้า<placeholder>" — the
+        # "สินค้า" placeholder would otherwise satisfy _ASSIST_PRODUCT_RES
+        # on the NEXT turn and derive_active_frame() would read the
+        # generic word back as if it were a real, confirmed product name.
+        # Acknowledge only what IS known (quantity/method); the ask below
+        # covers product.
+        detail = f"{qty}{mth}"
+        head = f"ได้ค่ะ รับทราบ{detail}นะคะ 😊" if detail else "ได้ค่ะ 😊"
     else:  # "none"
         head = f"ได้ค่ะ รับทราบว่าต้องการนำเข้า{p}{qty}{mth}นะคะ 😊"
+    # PHASE-6-SLOT-CONSUMPTION — product is the FIRST missing slot to ask
+    # for, ahead of quantity/method/weight. A correction call (changed in
+    # ("quantity", "method", "product")) always already has frame.product
+    # set by the time it reaches here (the frame it corrects already had
+    # an open product) — this only changes behaviour for the "none"
+    # (fresh-turn) case, where a quantity-only opener must not re-ask a
+    # quantity it just gave while product is still genuinely unknown.
     ask = ""
-    if not frame.quantity:
+    if not frame.product:
+        ask = " รบกวนแจ้งชื่อหรือประเภทสินค้าที่สนใจนำเข้าด้วยนะคะ"
+    elif not frame.quantity:
         ask = " รบกวนแจ้งจำนวนโดยประมาณด้วยนะคะ"
     elif not frame.method:
         ask = " สนใจส่งทางรถหรือทางเรือคะ"
@@ -1078,6 +1121,20 @@ def _compose(t: str) -> "tuple[str, float, Dict]":
         p = _import_noun(t)
         if p:
             ent["product"] = p
+        # PHASE-6-SLOT-CONSUMPTION — a FRESH opener may already state
+        # quantity and/or shipping method in the SAME turn ("20 คู่อยาก
+        # สั่งของจากจีน", "อยากสั่งรองเท้าจากจีน 20 คู่ ส่งเรือ"). Extract them
+        # with the SAME regexes already used for a bare quantity/method
+        # ANSWER (_USER_QTY_RE / _METHOD_WORD_RE) so a slot confidently
+        # supplied in the opening turn is never re-asked one turn later.
+        _qm = _USER_QTY_RE.search(t)
+        if _qm:
+            ent["quantity"] = int(_qm.group("q"))
+        _mm = _METHOD_WORD_RE.search(t)
+        if _mm:
+            _meth = _method_label(_mm.group(0))
+            if _meth:
+                ent["method"] = _meth
         return "IMPORT_INTEREST", 0.7, ent
 
     # PHASE-6B — SERVICE_DISCOVERY: "what services do you offer" / a broad

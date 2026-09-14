@@ -147,13 +147,28 @@ def warehouse_inbound_reply(_wh_kind: Optional[str] = None) -> str:
     return WAREHOUSE_INBOUND_FALLBACK
 
 
-def import_interest_reply(product: Optional[str]) -> str:
+def import_interest_reply(product: Optional[str], *, quantity: Optional[int] = None,
+                          method: Optional[str] = None) -> str:
     """Reuse the frame acknowledgement so ``derive_active_frame`` can read
     the product back on the next turn (same 'reply wording IS the state'
-    pattern the import frame already uses)."""
+    pattern the import frame already uses).
+
+    PHASE-6-SLOT-CONSUMPTION: `quantity`/`method`, when the SAME opening
+    turn already stated them, must be carried into the ack's Frame too —
+    building a Frame from `product` alone silently discarded a
+    confidently-known quantity/method, so the very next line asked for a
+    slot the customer had just supplied ("20 คู่อยากสั่งของจากจีน" ->
+    re-asks quantity). The caller is the single source of these values
+    (services/conversation_semantics.py's own IMPORT_INTEREST entity
+    extraction); this function never re-derives them itself."""
     from services.conversation_semantics import Frame, frame_ack_reply
-    if product:
-        return frame_ack_reply(Frame(product=product), changed="none")
+    # PHASE-6-SLOT-CONSUMPTION — a quantity/method-only opener ("20 คู่
+    # อยากสั่งของจากจีน", no specific product noun) still has REAL known
+    # state; it must acknowledge that and ask for product, never fall
+    # back to the fully-generic two-path reply below (which would
+    # silently discard the quantity the customer already gave).
+    if product or quantity or method:
+        return frame_ack_reply(Frame(product=product, quantity=quantity, method=method), changed="none")
     # OWNER-REAL-LINE-FIX-01 — a broad "อยากสั่งของจากจีน" must NOT assume
     # the customer already has a product link. Offer BOTH paths in one
     # coherent reply: send a link if they have one, otherwise say what
@@ -182,7 +197,8 @@ def reply_for_family(family: str, *, sb=None, entities: Optional[Dict] = None,
     if family == "WAREHOUSE_INBOUND_JOURNEY":
         return warehouse_inbound_reply(ent.get("wh_kind"))
     if family == "IMPORT_INTEREST":
-        return import_interest_reply(product or ent.get("product"))
+        return import_interest_reply(product or ent.get("product"),
+                                      quantity=ent.get("quantity"), method=ent.get("method"))
     return None
 
 
