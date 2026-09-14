@@ -1294,9 +1294,30 @@ _ASSISTANT_ASKED_PRODUCT_RE = re.compile(
 # a Thai question particle that would make the reply itself a question,
 # not a bare answer.
 _REPLY_IS_QUESTION_RE = re.compile(r"ไหม|มั้ย|หรือเปล่า|หรือไม่|ยังไง|อย่างไร|เท่าไหร่|กี่|ที่ไหน|\?")
+# PHASE-6 (customer master pass) — "สินค้า"/"ของ" were removed from the
+# PREFIX group and "ใส่ของ"/"ใส่ของได้" from the SUFFIX group: all three
+# are also legitimate word-formants inside a real Thai compound product
+# noun ("ของเล่น", "กล่องใส่ของ") — Thai script has no word spaces, so a
+# blanket strip corrupted these by prefix ("ของเล่น" -> "เล่น") or suffix
+# ("กล่องใส่ของ" -> "กล่อง"). See _bare_product_noun below for how they
+# are still recognised as filler, just no longer unconditionally.
 _BARE_PRODUCT_STRIP_RE = re.compile(
-    r"^(?:เป็น|คือ|ก็|น่าจะ|ประมาณ|พวก|เป็นพวก|จำพวก|ชนิด|ประเภท|สินค้า|ของ|อยากได้|ต้องการ|สั่ง|นำเข้า)\s*"
-    r"|\s*(?:ครับ|ค่ะ|คะ|ค่า|นะ|น่ะ|จ้า|จ้ะ|เลย|อ่ะ|อะ|ล่ะ|หน่อย|ด้วย|ค่ะๆ|ครับๆ|ใส่ของ|ใส่ของได้)+\s*$")
+    r"^(?:เป็น|คือ|ก็|น่าจะ|ประมาณ|พวก|เป็นพวก|จำพวก|ชนิด|ประเภท|อยากได้|ต้องการ|สั่ง|นำเข้า)\s*"
+    r"|\s*(?:ครับ|ค่ะ|คะ|ค่า|นะ|น่ะ|จ้า|จ้ะ|เลย|อ่ะ|อะ|ล่ะ|หน่อย|ด้วย|ค่ะๆ|ครับๆ)+\s*$")
+# the bare generic placeholder with nothing else left ("เป็นของครับ" ->
+# no real product named at all).
+_BARE_PRODUCT_PLACEHOLDER_RE = re.compile(r"^(?:สินค้า|ของ)+$")
+# a trailing "ใส่ของ(ได้)?" ("...for holding things") is descriptive
+# padding ONLY when the noun in front of it is already a specific,
+# qualified product name on its own ("กล่องพลาสติกใส่ของ" -> "กล่อง
+# พลาสติก" — a real customer-confirmed case, tests/
+# test_invoice_product_regression2.py). When it is the ONLY thing turning
+# an otherwise too-generic bare container word into a real product name
+# ("กล่องใส่ของ" — a bare "กล่อง" alone is too vague), it IS the product
+# name and must survive intact. A short length threshold on what remains
+# before it distinguishes the two without hardcoding either phrase.
+_BARE_PRODUCT_CONTAINER_SUFFIX_RE = re.compile(r"(?:ใส่ของได้|ใส่ของ)$")
+_MIN_QUALIFIED_CONTAINER_LEN = 6
 
 
 def _assistant_asked_for_product(history: Optional[List[Dict]]) -> bool:
@@ -1348,6 +1369,11 @@ def _bare_product_noun(t: str) -> Optional[str]:
     for _ in range(3):
         s = _BARE_PRODUCT_STRIP_RE.sub("", s).strip()
     s = re.sub(r"\s+", "", s)
+    if s and _BARE_PRODUCT_PLACEHOLDER_RE.match(s):
+        return None
+    m = _BARE_PRODUCT_CONTAINER_SUFFIX_RE.search(s)
+    if m and len(s) - len(m.group(0)) >= _MIN_QUALIFIED_CONTAINER_LEN:
+        s = s[:m.start()]
     return s if 2 <= len(s) <= 30 and _THAI_CHAR_RE.search(s) else None
 
 

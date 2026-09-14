@@ -1642,6 +1642,21 @@ _ORDER_STATUS_VERB_RE = re.compile(
 # a duration / transit-time question is a PUBLIC FAQ, never a private
 # status inquiry.
 _TRANSIT_TIME_Q_RE = re.compile(r"กี่วัน|กี่ชั่วโมง|กี่ชม|ระยะเวลา|ใช้เวลา|นานไหม|นานแค่ไหน|กี่สัปดาห์|เท่าไหร่วัน")
+# PHASE-6 (customer master pass, source: docs/customer_uat_sources'
+# training summary row 10) — "จัดส่งสินค้าถึงหน้าบ้านเลยไหม" (do you deliver
+# TO MY DOOR AT ALL — a general delivery-SERVICE-CAPABILITY/coverage
+# question) is a PUBLIC FAQ, never a private status inquiry, same spirit
+# as _TRANSIT_TIME_Q_RE above. It differs from a genuine "is MY OWN
+# parcel on its way to my house" status question (which always carries an
+# ownership marker — "ของผม", "บิลผม" — or an explicit tense/status verb
+# like "ถึงหรือยัง") by asking whether the SERVICE exists/covers a
+# destination TYPE at all ("...ไหม/มั้ย/ได้ไหม" about a place-type noun),
+# with no ownership signal. Deliberately does not fire on a message that
+# already carries an ownership marker (_PSI_OWNERSHIP_RE) so a real
+# "ของผมจะถึงบ้านไหม" status question is unaffected.
+_DELIVERY_CAPABILITY_Q_RE = re.compile(
+    r"(?:จัดส่ง|ส่ง)\S{0,10}(?:ถึง)?(?:หน้าบ้าน|บ้านเลย|คอนโด|ต่างจังหวัด|ทั่วประเทศ|ที่ทำงาน|ออฟฟิศ)"
+    r"\S{0,8}(?:ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|ได้ไหม|ได้มั้ย|ป่าว|บ่)")
 # SEMANTIC-FIRST-2 / FIX-2 BOUNDARY — a bare elliptical possessive /
 # demonstrative follow-up with no referent the engine could resolve
 # ("ของผมล่ะ", "อันนี้ล่ะคะ", "แล้วของผมไหม") is UNCLEAR LANGUAGE, not
@@ -3446,11 +3461,19 @@ class DecisionEngine:
             # "ใช้เวลานานไหม") is a PUBLIC FAQ and is excluded, and a
             # remembered last_business_action is left for the
             # conversation-reference resolver below to resume (a genuine
-            # continuation, not a fresh synthesized inquiry).
+            # continuation, not a fresh synthesized inquiry). A general
+            # delivery-capability/coverage question ("จัดส่งสินค้าถึงหน้าบ้าน
+            # เลยไหม" — PHASE-6, customer master pass) is likewise a PUBLIC
+            # FAQ and excluded UNLESS the customer also names it as THEIR
+            # OWN record (an ownership marker), in which case it is a
+            # genuine private status question and this guard must not
+            # suppress it.
             if (private_state_inquiry is None
                     and semantic.intent_family == "SHIPMENT_STATUS"
                     and not customer_context.get("last_business_action")
-                    and not _TRANSIT_TIME_Q_RE.search(message or "")):
+                    and not _TRANSIT_TIME_Q_RE.search(message or "")
+                    and not (_DELIVERY_CAPABILITY_Q_RE.search(message or "")
+                             and not _PSI_OWNERSHIP_RE.search(message or ""))):
                 _sf2_has_id = any(
                     _validate_generic_identifier(tok) and not tok.isdigit()
                     for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)

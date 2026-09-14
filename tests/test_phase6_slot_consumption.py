@@ -37,13 +37,18 @@ CENTRAL FIX (never a per-phrase patch):
   5. `frame_ack_reply()`'s ask-priority cascade checks product FIRST,
      ahead of quantity/method/weight.
 
-Known, separately-tracked, NOT-fixed-here gap: a generic filler particle
-embedded at the TAIL of a real compound product noun ("ชั้นวางของ") has no
-word-boundary protection in the Thai script and gets truncated
-("ชั้นวางของ" -> "ชั้นวาง") independent of any quantity involvement. See
-the Technical Debt entry in this task's final report -- fixing it
-generally requires real Thai word segmentation, not a phrase patch, and
-is out of scope for this pass.
+PHASE-6 CUSTOMER MASTER PASS follow-up (owner UAT completion round) --
+the compound-product-noun truncation gap above ("ชั้นวางของ" -> "ชั้นวาง")
+IS fixed here, generally: _FIX23_STRIP_RE / _BARE_PRODUCT_STRIP_RE no
+longer strip "สินค้า"/"ของ"/"ใส่ของ" unconditionally -- both are also
+legitimate word-formants inside a real compound noun, and Thai script has
+no spaces to disambiguate "the generic placeholder" from "the same
+syllables sitting inside a real product name" by position alone. The new
+rule: "สินค้า"/"ของ" are treated as a placeholder (no product named) ONLY
+when the ENTIRE remnant, after every OTHER filler word is stripped, is
+exactly that bare word with nothing else left -- never when they are part
+of a longer surviving span, whether as prefix, suffix, or infix. See
+TestCompoundProductNounProtection below.
 """
 import os
 import unittest
@@ -52,6 +57,7 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-invalid-phase6slot")
 
 from services.conversation_semantics import (
     _compose, Frame, frame_ack_reply, _USER_QTY_RE, _METHOD_WORD_RE,
+    _bare_product_noun,
 )
 from services.playground_orchestrator import (
     _is_product_import_interest, _product_interest_noun,
@@ -271,6 +277,70 @@ class TestUnitGeneralization(unittest.TestCase):
                 self.assertEqual(ent.get("quantity"), 12, msg)
 
 
+# ── H. compound-product-noun protection (owner UAT completion round) ──
+# Real Thai compound nouns that contain "สินค้า"/"ของ" as a prefix,
+# suffix, or infix -- exactly the class of case the original commit
+# left as a known, deferred gap. Tested via BOTH independent product-
+# noun extractors the runtime has (Step 5's split-brain audit found
+# two): _product_interest_noun (fresh IMPORT_INTEREST opener) and
+# _bare_product_noun (a bare reply to "which product?", FIX-04/05/06).
+_COMPOUND_NOUNS = [
+    "ชั้นวางของ", "กล่องใส่ของ", "รองเท้าวิ่ง", "เครื่องซีลถุง",
+    "ขวดใส่น้ำ", "อะไหล่รถยนต์", "โต๊ะวางคอม", "ชั้นเก็บสินค้า",
+]
+
+
+class TestCompoundProductNounProtection(unittest.TestCase):
+    def test_fresh_opener_quantity_before_no_truncation(self):
+        for noun in _COMPOUND_NOUNS:
+            with self.subTest(noun=noun):
+                self.assertEqual(_product_interest_noun(f"30 ชิ้น อยากนำเข้า{noun}"), noun)
+
+    def test_fresh_opener_quantity_after_no_truncation(self):
+        for noun in _COMPOUND_NOUNS:
+            with self.subTest(noun=noun):
+                self.assertEqual(_product_interest_noun(f"อยากนำเข้า{noun} 30 ชิ้น"), noun)
+
+    def test_fresh_opener_no_quantity_no_truncation(self):
+        for noun in _COMPOUND_NOUNS:
+            with self.subTest(noun=noun):
+                self.assertEqual(_product_interest_noun(f"อยากนำเข้า{noun}"), noun)
+
+    def test_fresh_opener_no_space_between_quantity_and_noun(self):
+        for noun in _COMPOUND_NOUNS:
+            with self.subTest(noun=noun):
+                self.assertEqual(_product_interest_noun(f"30ชิ้นอยากนำเข้า{noun}"), noun)
+
+    def test_fresh_opener_polite_particle_no_truncation(self):
+        for noun in _COMPOUND_NOUNS:
+            with self.subTest(noun=noun):
+                self.assertEqual(_product_interest_noun(f"อยากนำเข้า{noun}ค่ะ"), noun)
+
+    def test_compose_end_to_end_product_entity_intact(self):
+        for noun in _COMPOUND_NOUNS:
+            with self.subTest(noun=noun):
+                fam, conf, ent = _compose(f"20 ชิ้น อยากสั่ง{noun}จากจีน")
+                self.assertEqual(ent.get("product"), noun)
+                self.assertEqual(ent.get("quantity"), 20)
+
+    def test_bare_reply_to_which_product_question_no_truncation(self):
+        for noun in _COMPOUND_NOUNS:
+            with self.subTest(noun=noun):
+                self.assertEqual(_bare_product_noun(f"เป็น{noun}"), noun)
+                self.assertEqual(_bare_product_noun(f"{noun}ค่ะ"), noun)
+
+    def test_placeholder_alone_still_yields_no_product(self):
+        self.assertIsNone(_product_interest_noun("อยากสั่งของจากจีน"))
+        self.assertIsNone(_product_interest_noun("อยากได้สินค้าค่ะ"))
+        self.assertIsNone(_bare_product_noun("เป็นของครับ"))
+
+    def test_existing_protected_redundant_container_phrase_unchanged(self):
+        # tests/test_invoice_product_regression2.py's own confirmed case:
+        # "ใส่ของ" IS stripped as descriptive padding when the noun in
+        # front of it already fully names the product on its own.
+        self.assertEqual(_bare_product_noun("เป็นพวกกล่องพลาสติกใส่ของครับ"), "กล่องพลาสติก")
+
+
 # ── G. typo / noisy-Thai tolerance (Step 4/6) ──────────────────────────
 class TestTypoNoisyTolerance(unittest.TestCase):
     def test_no_space_between_quantity_and_unit(self):
@@ -281,6 +351,39 @@ class TestTypoNoisyTolerance(unittest.TestCase):
     def test_polite_particle_after_product(self):
         fam, conf, ent = _compose("อยากสั่งรองเท้าค่ะจากจีน 20 คู่ค่ะ")
         self.assertEqual(ent.get("quantity"), 20)
+
+
+# ── I. split-brain audit (Step 4/5/13) — P1 canonical resolver must not
+# disagree with the legacy runtime on quantity+unit vocabulary ─────────
+class TestP1QuantityUnitVocabularySync(unittest.TestCase):
+    """Found via direct comparison, not assumed: services/
+    conversation_resolution.py's OWN quantity+unit regex (_QTY_RE, P1's
+    canonical entity extraction) had quietly drifted out of sync with
+    services/conversation_semantics.py::_USER_QTY_RE (the legacy runtime's
+    vocabulary) -- "ขวด"/"พาเลท" were recognized by the legacy runtime but
+    invisible to P1. P1 is shadow-only (never read-authoritative), so this
+    could not change customer-visible behaviour, but it WOULD have shown
+    up as a false STRUCTURED_WRONG in the P2.1 frame_parity telemetry the
+    moment a real customer used either unit."""
+
+    def test_qty_re_recognizes_every_legacy_unit(self):
+        from services.conversation_resolution import _QTY_RE
+        from services.conversation_semantics import _USER_QTY_RE
+        import re as _re
+        legacy_units = _re.search(r"\(ตัว\|.+?\)", _USER_QTY_RE.pattern).group(0)[1:-1].split("|")
+        for unit in legacy_units:
+            if unit in ("pcs?",):
+                continue  # regex alternative, not a literal unit string
+            msg = f"20 {unit}อยากสั่งของจากจีน"
+            with self.subTest(unit=unit):
+                self.assertIsNotNone(_QTY_RE.search(msg), f"P1 _QTY_RE missed unit {unit!r}")
+
+    def test_end_to_end_resolution_captures_bottle_and_pallet_quantity(self):
+        from services.conversation_resolution import resolve_conversation
+        for msg, qty in [("20 ขวดอยากสั่งของจากจีน", 20), ("5 พาเลทอยากนำเข้าสินค้า", 5)]:
+            with self.subTest(msg=msg):
+                r = resolve_conversation(msg, history=None)
+                self.assertEqual(r.entities.get("quantity").value, qty)
 
 
 if __name__ == "__main__":

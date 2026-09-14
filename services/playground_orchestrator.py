@@ -380,11 +380,27 @@ _FIX23_ABOUT_TO_RE = re.compile(
     r"(จะ|กำลังจะ)\s*(นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า)")
 # stripped to expose the bare product noun; generic markers only, never a
 # product dictionary.
+#
+# PHASE-6 (customer master pass) — "สินค้า"/"ของ" are deliberately NOT in
+# this list. Both are also legitimate word-formants inside a real Thai
+# compound product noun ("ชั้นวางของ", "กล่องใส่ของ", "ของเล่น", "ชั้นเก็บ
+# สินค้า") — Thai script has no spaces between words, so a regex cannot
+# tell "the generic placeholder noun used as filler" from "the same two/
+# three syllables that happen to end/start/sit inside a real product
+# name" by position alone. Stripping them unconditionally here corrupted
+# compound nouns by prefix, suffix, AND infix (e.g. "ของเล่น" -> "เล่น",
+# "ชั้นวางของ" -> "ชั้นวาง"). See _product_interest_noun below for how
+# they ARE still recognised as a placeholder — only when nothing else
+# survives the rest of this strip.
 _FIX23_STRIP_RE = re.compile(
-    r"(สนใจ|อยากจะ|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|เอา|"
+    r"(สนใจ|อยากจะ|อยากได้|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|เอา|ได้|"
     r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|สั่ง|ชิปปิ้ง|ขนของ|นำสินค้าเข้า|"
-    r"สินค้า|ของ|จาก|เว็บ|จีน|taobao|1688|tmall|เถาเป่า|"
+    r"จาก|เว็บ|จีน|taobao|1688|tmall|เถาเป่า|"
     r"ครับ|ค่ะ|คะ|นะ|หน่อย|ผม|ฉัน|เรา|\s)+", re.IGNORECASE)
+# the bare generic placeholder noun ("อยากสั่งของจากจีน", "อยากได้สินค้า")
+# with NOTHING else left after the strip above -> no real product was
+# named at all.
+_FIX23_BARE_PLACEHOLDER_RE = re.compile(r"^(?:สินค้า|ของ)+$")
 
 
 def _is_product_import_interest(question: str) -> bool:
@@ -413,10 +429,21 @@ def _product_interest_noun(question: str) -> Optional[str]:
     glued onto a real product noun ("30 ชิ้น...ชั้นวางของ" ->
     "30ชิ้นชั้นวาง"), corrupting both slots at once. A shipping-method
     mention ("ส่งเรือ") is stripped the same way and for the same reason
-    ("รองเท้า...ส่งเรือ" -> "รองเท้าส่งเรือ" glued)."""
+    ("รองเท้า...ส่งเรือ" -> "รองเท้าส่งเรือ" glued).
+
+    PHASE-6 (customer master pass) — a real compound product noun must
+    survive intact even when it contains "สินค้า"/"ของ" as a prefix,
+    suffix, or infix ("ชั้นวางของ", "กล่องใส่ของ", "ของเล่น", "ชั้นเก็บ
+    สินค้า"): _FIX23_STRIP_RE no longer touches those two tokens at all,
+    so they are only ever treated as the GENERIC placeholder noun (no
+    real product named) when the ENTIRE remnant is bare "สินค้า"/"ของ"
+    with nothing else left — never when they are part of a longer
+    surviving span."""
     q = _IMPORT_QTY_UNIT_RE.sub(" ", question or "")
     q = _IMPORT_METHOD_WORD_RE.sub(" ", q)
     remnant = _FIX23_STRIP_RE.sub("", q).strip()
+    if remnant and _FIX23_BARE_PLACEHOLDER_RE.match(remnant):
+        return None
     if remnant and _PRODUCT_ANSWER_NOUN_OK_RE.match(remnant):
         return remnant
     return None

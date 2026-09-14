@@ -5,10 +5,26 @@ mock the Business Action Registry (via _FakeSupabase, same convention as
 tests/test_business_action_registry.py) and the Generic Action Executor
 / RAG service at their call sites, never a real DB/network/LLM call.
 """
+import os
 import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+# PHASE-6 (customer master pass, Step 11 — deterministic test
+# environment) — this file has real LLM-gated code paths (the semantic
+# interpreter's gated family call) but, unlike every other test file in
+# this suite, never guarded OPENAI_API_KEY. Importing config.py (below,
+# transitively via services.business_action_registry) calls
+# load_dotenv(), which — since the local dev .env carries a REAL OpenAI
+# key — made this file silently hit the live API instead of the
+# deterministic degraded (401) path whenever it ran first in a process
+# (e.g. tests/run_regression_gate.py, which loads it first among the
+# protected suites), producing non-deterministic pass/fail unrelated to
+# any code change. setdefault (not direct assignment) so an operator who
+# deliberately exports a real key for an explicit LIVE-tier run is never
+# silently overridden.
+os.environ.setdefault("OPENAI_API_KEY", "sk-invalid-test-decision-engine")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

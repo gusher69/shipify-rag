@@ -97,9 +97,19 @@ _QUESTION_TAIL_RE = re.compile(r"(?:ไหม|มั้ย|มัย|หรื�
 
 # ── multi-entity extraction ─────────────────────────────────────────
 # COUNT units (a bare weight is NOT a quantity). Ordered longest-first.
+# PHASE-6 (customer master pass, Step 13 split-brain audit) — "ขวด" and
+# "พาเลท" added to match services/conversation_semantics.py::_USER_QTY_RE
+# exactly. Found by direct comparison, not assumed: this list had quietly
+# drifted out of sync with the legacy runtime's own quantity+unit
+# vocabulary (a real customer saying "20 ขวดอยากสั่งของจากจีน" was
+# correctly captured by the legacy runtime but produced NO quantity here
+# at all) -- this module is P1's canonical, currently SHADOW-ONLY entity
+# extraction (never read-authoritative; see docs/CONVERSATION_INTELLIGENCE_P1.md),
+# so this fix only improves the P2 structured/legacy frame_parity signal
+# and cannot change any customer-visible behaviour on its own.
 _COUNT_UNIT = (
     "คู่", "โหล", "แพ็ค", "แพ็ก", "แพค", "กล่อง", "ลัง", "ชุด", "เครื่อง",
-    "ผืน", "หลัง", "ตัว", "ชิ้น", "อัน", "ใบ", "pcs", "pc",
+    "ผืน", "หลัง", "ตัว", "ชิ้น", "อัน", "ใบ", "ขวด", "พาเลท", "pcs", "pc",
 )
 _WEIGHT_UNIT = {
     "กก": ("kg", 1.0), "กก.": ("kg", 1.0), "กิโล": ("kg", 1.0), "กิโลกรัม": ("kg", 1.0),
