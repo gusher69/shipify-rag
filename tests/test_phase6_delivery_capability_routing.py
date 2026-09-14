@@ -41,7 +41,7 @@ import unittest
 os.environ.setdefault("OPENAI_API_KEY", "sk-invalid-phase6delivery")
 
 from services.decision_engine import (
-    _classify_private_state_inquiry, _DELIVERY_CAPABILITY_Q_RE,
+    _classify_private_state_inquiry, _private_ownership_evidence,
 )
 from services.conversation_semantics import interpret
 from tests.test_semantic_first_2 import _mk_engine, _decide
@@ -86,18 +86,21 @@ class TestDeliveryCapabilityExclusion(unittest.TestCase):
         "บิลผมส่งถึงหน้าบ้านหรือยัง",
     ]
 
-    def test_regex_matches_the_exact_case_and_paraphrases(self):
+    def test_capability_questions_carry_no_ownership_evidence(self):
+        """PHASE 6 FINAL SAFETY CLOSURE: the exclusion REGEX this suite
+        originally locked is gone. The guarantee is now stated positively
+        -- a delivery-capability question carries no private-ownership
+        evidence, so the LLM family name alone can never make it private.
+        That is strictly stronger than the old blocklist, which only
+        covered the phrasings someone had already thought of."""
         for m in [self.EXACT] + self.PARAPHRASES:
             with self.subTest(m=m):
-                self.assertTrue(_DELIVERY_CAPABILITY_Q_RE.search(m), m)
+                self.assertIsNone(_private_ownership_evidence(m, None, {}), m)
 
-    def test_regex_does_not_fire_on_genuine_ownership_wording(self):
-        # the exclusion itself only looks at destination-type wording;
-        # the caller additionally requires NO ownership marker, tested
-        # end-to-end below.
+    def test_genuine_ownership_wording_does_carry_evidence(self):
         for m in self.GENUINE_PRIVATE:
             with self.subTest(m=m):
-                self.assertFalse(_DELIVERY_CAPABILITY_Q_RE.search(m), m)
+                self.assertIsNotNone(_private_ownership_evidence(m, None, {}), m)
 
     def setUp(self):
         self.eng = _mk_engine()

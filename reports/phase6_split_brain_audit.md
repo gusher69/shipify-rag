@@ -46,40 +46,53 @@ A new unit can only be added in one place.
 Locked by `tests/test_phase6_slot_consumption.py::TestP1QuantityUnitVocabularySync`.
 
 ## 3. Intent/family naming — deterministic vs gated LLM
-**ACTIVE_BEHAVIORAL_RISK**
+**SAFE_DUPLICATION_WITH_PARITY_TEST** *(was ACTIVE_BEHAVIORAL_RISK — closed)*
 
 `_compose()` (deterministic) and `_llm_family()` (gated LLM) both name a
 family. Where the deterministic tier is confident,
 `_deterministic_context_authority()` (P2-STAB) arbitrates and the LLM may
-not override it — **verified live**: 77 live-tier turns, 29 of which
-actually consulted the model, produced **0** high-confidence deterministic
-overrides (`reports/phase6_live_tier.json`).
+not override it — verified live: **0** high-confidence deterministic
+overrides across 93 live interpreter turns, 37 of which consulted the
+model (`reports/phase6_live_tier.json`).
 
-**The residual risk — exact scenario:** when the deterministic tier has *no*
-opinion (UNKNOWN/GENERAL), the LLM's family name alone can synthesise a
-**private** status inquiry in `decision_engine.py`'s SEMANTIC-FIRST-2
-block. That path is guarded only by an *enumerated list of public
-exceptions* (`_TRANSIT_TIME_Q_RE`, and `_DELIVERY_CAPABILITY_Q_RE` added
-this pass). A public question whose shape is not yet enumerated can still
-be classified `SHIPMENT_STATUS` by the model and turned into a demand for
-the customer's identity.
+**The residual risk is now closed by inversion.** Previously, where the
+deterministic tier had no opinion, an LLM family name alone could
+synthesise a **private** inquiry, guarded only by an enumerated list of
+public exceptions (`_TRANSIT_TIME_Q_RE`, `_DELIVERY_CAPABILITY_Q_RE`) —
+an open-ended blocklist that could never be complete. Those two constants
+have been **deleted**. The gate now requires POSITIVE private-ownership
+evidence (`_private_ownership_evidence()`), of which there are five
+forms: first-person possession of a record/asset; a concrete record
+identifier; an active authenticated workflow; a compatible slot answer
+inside an already-established private journey; and a seller-dispatch
+status question ("ต้นทางส่งมาหรือยังครับ" — subject is the supplier AND the
+predicate asks whether they have dispatched yet, a speech act that
+presupposes an order the asker placed). An LLM family name is evidence,
+never authorization.
 
-*Concretely:* "จัดส่งสินค้าถึงหน้าบ้านเลยไหม" did exactly this in
-production until it was added to the exception list. Another
-public-capability phrasing outside both regexes would reproduce it.
+**A residual source tension, reported not hidden.** The owner's public
+list contains "ร้านส่งของหรือยัง", while the SEMANTIC_FIRST_2 source
+requires "ร้านส่งหรือยังคะ" to collect the bill id rather than dead-end on
+no-information. These two customer-derived expectations disagree about
+the *same* phrasing. It is **not** the inversion that decides this case:
+the PRE-EXISTING deterministic recogniser
+(`_classify_private_state_inquiry`) already classified it as a private
+inquiry before Phase 6 and still does, unchanged. The inversion governs
+only turns the deterministic tier has no opinion about. Flagged for the
+owner; no behaviour was changed to force either expectation.
 
-*Recommended inversion (not done this pass):* require a positive
-ownership/record signal before an LLM family name may synthesise a private
-inquiry, instead of enumerating public exceptions. That converts an
-open-ended blocklist into a closed-form allowlist.
+Locked by `tests/test_phase6_private_authority.py` (201 targeted cases:
+public→private false positive 0, private→public false negative 0, stale
+private takeover 0) and by the live-tier contrast pairs.
 
 ## 4. Private-state recognition — two paths
-**ACTIVE_BEHAVIORAL_RISK (same root as §3)**
+**SAFE_DUPLICATION_WITH_PARITY_TEST** *(was ACTIVE_BEHAVIORAL_RISK — closed with §3)*
 
 `_classify_private_state_inquiry()` (deterministic) and the
-SEMANTIC-FIRST-2 synthesis block. The second is the fallback that mis-fires
-in the §3 scenario; it is not a separate risk, it is the same one, recorded
-here because the two recognisers are separate code.
+SEMANTIC-FIRST-2 synthesis block. The second is the fallback that
+mis-fired; it is now gated by the positive-evidence rule above, so the
+two paths can no longer disagree about whether a turn is the customer's
+own record.
 
 ## 5. Slot collection — three state machines
 **SAFE_DUPLICATION_WITH_PARITY_TEST**
@@ -112,12 +125,13 @@ parity telemetry. No read cutover was performed; P3 was not started.
 |---|---|
 | 1. Product-noun extraction | SAFE_DUPLICATION_WITH_PARITY_TEST |
 | 2. Quantity/unit vocabulary | **RESOLVED** (consolidated to one constant) |
-| 3. Intent/family deterministic-vs-LLM | **ACTIVE_BEHAVIORAL_RISK** |
-| 4. Private-state recognition | **ACTIVE_BEHAVIORAL_RISK** (same root as 3) |
+| 3. Intent/family deterministic-vs-LLM | SAFE_DUPLICATION_WITH_PARITY_TEST (**closed by inversion**) |
+| 4. Private-state recognition | SAFE_DUPLICATION_WITH_PARITY_TEST (**closed by inversion**) |
 | 5. Slot collection | SAFE_DUPLICATION_WITH_PARITY_TEST |
 | 6. Conversation state | SAFE_DUPLICATION_WITH_PARITY_TEST |
 
-**One active behavioural risk remains (groups 3/4, one root cause).** It is
-documented above with its exact reproduction scenario and the recommended
-inversion. System-wide conversation intelligence is therefore *not* claimed
-complete: it is complete except for this named, reproducible gap.
+**No ACTIVE_BEHAVIORAL_RISK remains.** The single risk previously recorded
+here (groups 3/4, one root cause) was closed by the private-inquiry
+authority inversion: the public-exception blocklists are deleted and a
+private inquiry now requires positive ownership evidence. Every remaining
+duplication is held by a parity test that fails on drift.

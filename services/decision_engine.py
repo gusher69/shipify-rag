@@ -1641,24 +1641,12 @@ _CANCELLATION_REQUEST_RE = re.compile(r"ยกเลิก|ขอคืนเง
 _ORDER_STATUS_VERB_RE = re.compile(
     r"ติดตาม|เช็ก?สถานะ|เช็คสถานะ|ตรวจสอบสถานะ|ดูสถานะ|สถานะ(?:ล่าสุด|ตอนนี้|ปัจจุบัน)?"
     r"|ร้านส่ง|ร้านจัดส่ง|ร้านยังไม่ส่ง|จัดส่งหรือยัง|ส่งของหรือยัง|ถึงไหน(?:แล้ว)?")
-# a duration / transit-time question is a PUBLIC FAQ, never a private
-# status inquiry.
-_TRANSIT_TIME_Q_RE = re.compile(r"กี่วัน|กี่ชั่วโมง|กี่ชม|ระยะเวลา|ใช้เวลา|นานไหม|นานแค่ไหน|กี่สัปดาห์|เท่าไหร่วัน")
-# PHASE-6 (customer master pass, source: docs/customer_uat_sources'
-# training summary row 10) — "จัดส่งสินค้าถึงหน้าบ้านเลยไหม" (do you deliver
-# TO MY DOOR AT ALL — a general delivery-SERVICE-CAPABILITY/coverage
-# question) is a PUBLIC FAQ, never a private status inquiry, same spirit
-# as _TRANSIT_TIME_Q_RE above. It differs from a genuine "is MY OWN
-# parcel on its way to my house" status question (which always carries an
-# ownership marker — "ของผม", "บิลผม" — or an explicit tense/status verb
-# like "ถึงหรือยัง") by asking whether the SERVICE exists/covers a
-# destination TYPE at all ("...ไหม/มั้ย/ได้ไหม" about a place-type noun),
-# with no ownership signal. Deliberately does not fire on a message that
-# already carries an ownership marker (_PSI_OWNERSHIP_RE) so a real
-# "ของผมจะถึงบ้านไหม" status question is unaffected.
-_DELIVERY_CAPABILITY_Q_RE = re.compile(
-    r"(?:จัดส่ง|ส่ง)\S{0,10}(?:ถึง)?(?:หน้าบ้าน|บ้านเลย|คอนโด|ต่างจังหวัด|ทั่วประเทศ|ที่ทำงาน|ออฟฟิศ)"
-    r"\S{0,8}(?:ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|ได้ไหม|ได้มั้ย|ป่าว|บ่)")
+# NOTE (PHASE 6 FINAL SAFETY CLOSURE): the public-exception blocklists
+# that used to live here (_TRANSIT_TIME_Q_RE, _DELIVERY_CAPABILITY_Q_RE)
+# are GONE. They guarded the LLM-family private synthesis by listing
+# public phrasings to exclude, which could never be complete. That gate
+# now requires POSITIVE ownership evidence instead — see
+# _private_ownership_evidence() below.
 # SEMANTIC-FIRST-2 / FIX-2 BOUNDARY — a bare elliptical possessive /
 # demonstrative follow-up with no referent the engine could resolve
 # ("ของผมล่ะ", "อันนี้ล่ะคะ", "แล้วของผมไหม") is UNCLEAR LANGUAGE, not
@@ -1710,6 +1698,86 @@ _PSI_THIRD_PARTY_RE = re.compile(r"บริษัท(?!.{0,4}ผม)|เพื�
 _PSI_HOWTO_RE = re.compile(r"ยังไง|ยังงัย|อย่างไร|วิธี(การ)?|ขั้นตอน|how\s*to", re.IGNORECASE)
 _PSI_WRITE_VERB_RE = re.compile(r"เปลี่ยน|แก้ไข|แก้จำนวน|ยกเลิก|ถอนเงิน|ถอน|เพิ่ม.{0,4}(vat|VAT|จำนวน)|ลบ|รวมบิล|รีแพ็ค|รีเเพ็ค|ตีลัง|สั่งผลิต|สกรีน")
 _PSI_CHECK_VERB_RE = re.compile(r"เช็ก|เช็ค|เชค|ตรวจสอบ|ดูให้|ขอดู|ขอเช็ก")
+
+
+# PHASE 6 FINAL SAFETY CLOSURE (A) — PRIVATE-INQUIRY AUTHORITY INVERSION.
+#
+# The former rule was "an LLM family name makes this private UNLESS the
+# wording matches one of an enumerated list of public exceptions" — an
+# open-ended blocklist, so every public phrasing nobody had thought of yet
+# became a demand for the customer's identity (exactly how
+# "จัดส่งสินค้าถึงหน้าบ้านเลยไหม" reached production). The rule is now
+# inverted and closed-form:
+#
+#     A PRIVATE INQUIRY REQUIRES POSITIVE PRIVATE-OWNERSHIP EVIDENCE.
+#     An LLM family name is EVIDENCE, never authorization.
+#
+# Accepted positive evidence (any one of):
+#   1. first-person possession OF A RECORD/ASSET — "ของฉัน", "บิลของผม",
+#      "ออเดอร์ฉัน", "ยอดของฉัน". Deliberately NOT a bare pronoun:
+#      "ผมอยากทราบว่าส่งถึงบ้านไหม" is a public question containing "ผม".
+#   2. a concrete record identifier supplied in this turn;
+#   3. an authenticated / active private workflow already running;
+#   4. a compatible slot ANSWER inside an already-established private
+#      journey. Both halves are required — without the "is actually an
+#      answer" half, a fresh public question typed after a stale private
+#      prompt would be swallowed by the old journey (stale takeover).
+_FIRST_PERSON_MARK_RE = r"(?:ผม|ฉัน|ดิฉัน|หนู|เรา|กระผม|ข้าพเจ้า)"
+_OWNED_RECORD_NOUN_RE = (r"(?:บิล|ออเดอร์|คำสั่งซื้อ|พัสดุ|ของ|สินค้า|ล็อต|ยอด|เงิน|"
+                         r"กระเป๋า|วอลเล็ท|วอลเลท|คูปอง|แทรค|แทร็ก|บัญชี|เครดิต|"
+                         r"ใบกำกับ|ใบเสร็จ|รายการ|สถานะ|เลขบิล|แพ็กเกจ)")
+_PRIVATE_POSSESSION_RE = re.compile(
+    _OWNED_RECORD_NOUN_RE + r"\s*(?:ของ\s*)?" + _FIRST_PERSON_MARK_RE)
+_ASSISTANT_ASKED_PRIVATE_ID_RE = re.compile(
+    r"(?:เลขบิล|บิลขนส่ง|บิลสั่งซื้อ|เลขแทรค|แทรคจีน|เลขออเดอร์|เลขพัสดุ|"
+    r"รหัสลูกค้า|เลขที่คำสั่งซื้อ)")
+# the shape of an ANSWER (a bare value), not of a fresh question.
+_BARE_VALUE_ANSWER_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9\-_/]{2,23}\s*(?:ค่ะ|ครับ|คับ|นะ|จ้า)?$")
+_FRESH_QUESTION_TAIL_RE = re.compile(
+    r"(?:ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|หรือไม่|ยังไง|อย่างไร|เท่าไหร่|กี่\S|\?)")
+
+
+# 5. a SELLER-DISPATCH STATUS question ("ต้นทางส่งมาหรือยังครับ", "ฝั่งร้าน
+#    ปล่อยของหรือยัง"): the subject is the supplier/origin and the predicate
+#    asks whether they have dispatched YET. That speech act presupposes an
+#    order the asker themselves placed — you cannot ask it about a stranger's
+#    order — so it is positive ownership evidence, not a public FAQ. Requires
+#    BOTH the origin subject and the dispatch-status predicate: a bare
+#    "ร้านอยู่ที่ไหน" (where is the shop) is a public location question and
+#    matches only the subject half. Required by the SEMANTIC_FIRST_2 source
+#    ("meaning understood + input missing -> ask for the id, never a
+#    no-information dead end").
+_SELLER_DISPATCH_STATUS_RE = re.compile(
+    r"(?:ร้าน|ร้านค้า|ร้านจีน|ต้นทาง|ฝั่งร้าน|โรงงาน|เจ้าของร้าน|shop)"
+    r".{0,18}?(?:ส่ง|จัดส่ง|ปล่อย|ออกของ|ส่งออก)"
+    r".{0,12}?(?:ยัง|แล้ว|หรือเปล่า|รึเปล่า|มั้ย|ไหม)",
+    re.IGNORECASE)
+
+
+def _private_ownership_evidence(message, history=None, customer_context=None):
+    """POSITIVE evidence that this turn concerns the customer's OWN
+    record, or None. Returns the evidence kind so the developer trace can
+    show WHY a turn was treated as private."""
+    t = message or ""
+    if _PRIVATE_POSSESSION_RE.search(t):
+        return "first_person_possession"
+    if any(_validate_generic_identifier(tok) and not tok.isdigit()
+           for tok in _TOKEN_SPLIT_RE.split(t) if tok):
+        return "record_identifier_supplied"
+    ctx = customer_context or {}
+    if ctx.get("last_business_action") or ctx.get("pending_action_id"):
+        return "active_private_workflow"
+    if _SELLER_DISPATCH_STATUS_RE.search(t):
+        return "seller_dispatch_status_question"
+    if _BARE_VALUE_ANSWER_RE.match(t.strip()) and not _FRESH_QUESTION_TAIL_RE.search(t):
+        for turn in reversed(list(history or [])[-4:]):
+            if turn.get("role") != "assistant":
+                continue
+            if _ASSISTANT_ASKED_PRIVATE_ID_RE.search(turn.get("content") or ""):
+                return "private_journey_slot_answer"
+            break
+    return None
 
 
 def _classify_private_state_inquiry(message: str):
@@ -3459,23 +3527,21 @@ class DecisionEngine:
             # to RAG -> Answerability Gate -> Fix-2 -> Human CS. The
             # semantic layer only NAMES the intent; authorization,
             # shipment ownership and the ERP status stay deterministic
-            # downstream. A duration/transit-time question ("กี่วัน",
-            # "ใช้เวลานานไหม") is a PUBLIC FAQ and is excluded, and a
-            # remembered last_business_action is left for the
-            # conversation-reference resolver below to resume (a genuine
-            # continuation, not a fresh synthesized inquiry). A general
-            # delivery-capability/coverage question ("จัดส่งสินค้าถึงหน้าบ้าน
-            # เลยไหม" — PHASE-6, customer master pass) is likewise a PUBLIC
-            # FAQ and excluded UNLESS the customer also names it as THEIR
-            # OWN record (an ownership marker), in which case it is a
-            # genuine private status question and this guard must not
-            # suppress it.
+            # downstream.
+            #
+            # PHASE 6 FINAL SAFETY CLOSURE: the LLM family name is EVIDENCE,
+            # never authorization. This block used to fire on that name alone
+            # unless the wording matched an enumerated public-exception list;
+            # it now requires POSITIVE private-ownership evidence, and the
+            # exception lists are deleted. A remembered last_business_action is
+            # still left to the conversation-reference resolver below (a genuine
+            # continuation, not a fresh synthesized inquiry).
+            _sf2_evidence = _private_ownership_evidence(
+                message, history, customer_context)
             if (private_state_inquiry is None
                     and semantic.intent_family == "SHIPMENT_STATUS"
                     and not customer_context.get("last_business_action")
-                    and not _TRANSIT_TIME_Q_RE.search(message or "")
-                    and not (_DELIVERY_CAPABILITY_Q_RE.search(message or "")
-                             and not _PSI_OWNERSHIP_RE.search(message or ""))):
+                    and _sf2_evidence is not None):
                 _sf2_has_id = any(
                     _validate_generic_identifier(tok) and not tok.isdigit()
                     for tok in _TOKEN_SPLIT_RE.split(message or "") if tok)
@@ -3486,6 +3552,7 @@ class DecisionEngine:
                     "record_scope": "EXPLICIT_RECORD" if _sf2_has_id else "UNSPECIFIED",
                     "confidence": round(max(getattr(semantic, "confidence", 0.0) or 0.0, 0.7), 2),
                     "source": "semantic_first_2",
+                    "ownership_evidence": _sf2_evidence,
                 }
                 developer_trace["private_state_inquiry_semantic_synth"] = private_state_inquiry
 
