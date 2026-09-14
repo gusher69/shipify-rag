@@ -85,8 +85,17 @@ _ASSIST_METHOD_RE = re.compile(r"ขนส่งทาง(?P<m>รถ|เรื�
 # starting right after the unit ("20 คู่กางเกง") — is itself the CORRECT
 # split (quantity=20/unit=คู่, remnant "กางเกง" left for the product noun),
 # never a false positive.
+# PHASE 6 closure gate D/H — ONE count-unit vocabulary for the whole
+# module. Four separate copies of this alternation had drifted apart
+# (only this one carried "ขวด"/"พาเลท"), so a bottle quantity was
+# recognised by the opener and invisible to the bare-slot-answer
+# matchers. Every site below now substitutes this constant, so a new
+# unit can only ever be added in one place.
+_COUNT_UNIT_ALT = ("ตัว|ชิ้น|ชิน|อัน|ใบ|คู่|ชุด|กล่อง|ขวด|โหล|แพ็ค|แพก|แพค|ลัง|ผืน|"
+                   "หลัง|เครื่อง|พาเลท|pcs?")
+
 _USER_QTY_RE = re.compile(
-    r"(?:ประมาณ\s*)?(?P<q>\d{1,7})\s*(ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|ขวด|โหล|แพ็ค|แพค|ลัง|ผืน|หลัง|เครื่อง|พาเลท|pcs?)",
+    r"(?:ประมาณ\s*)?(?P<q>\d{1,7})\s*(" + _COUNT_UNIT_ALT + r")",
     re.IGNORECASE)
 # PHASE-6-SLOT-CONSUMPTION — added the bare "ส่ง<mode>"/"โดย<mode>"
 # phrasings ("ส่งเรือ", "ส่งรถ") alongside the existing "ทาง<mode>" ones;
@@ -252,8 +261,8 @@ _FOLLOWUP_SHAPE_RES = (
     re.compile(r"(ล่ะ|หละ|ละ)\s*(คะ|ครับ|ค่ะ)?\s*$"),
     re.compile(r"^\s*ถ้า(เป็น)?"),
     re.compile(r"^\s*แล้ว(ถ้า|เป็น)?"),
-    re.compile(r"^\s*(ประมาณ\s*)?\d{1,7}\s*(ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|โหล|แพ็ค|แพค|ลัง|ผืน|"
-               r"หลัง|เครื่อง|กก\.?|กิโล|kg|pcs?)?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*(ประมาณ\s*)?\d{1,7}\s*(" + _COUNT_UNIT_ALT
+               + r"|กก\.?|กิโล|kg)?\s*$", re.IGNORECASE),
     re.compile(r"ไม่ใช่\s*\S+\s*(เอา|เป็น)\s*\S+"),
     re.compile(r"งั้น.*(ดีกว่า|แทน|แล้วกัน)"),
     re.compile(r"เปลี่ยน(ไป|เป็น)?(ถาม|เรื่อง)"),
@@ -509,8 +518,8 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
     # a bare quantity answer ("20 คู่", "ประมาณ 300 ชิ้น") fills the slot.
     # COUNT units only — a bare weight ("10 กิโล") is not a quantity.
     _bareq = re.fullmatch(r"\s*(?:ประมาณ\s*)?(\d{1,7})\s*"
-                          r"(?:ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|โหล|แพ็ค|แพค|ลัง|ผืน|หลัง|"
-                          r"เครื่อง|pcs?|ชิน)?\s*(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*", t, re.IGNORECASE)
+                          r"(?:" + _COUNT_UNIT_ALT + r")?\s*"
+                          r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*", t, re.IGNORECASE)
     if _bareq:
         out["op"], out["quantity"] = "SET_QUANTITY", int(_bareq.group(1))
         return out
@@ -1367,6 +1376,9 @@ def _bare_product_noun(t: str) -> Optional[str]:
     for _ in range(3):
         s = _BARE_PRODUCT_STRIP_RE.sub("", s).strip()
     s = re.sub(r"\s+", "", s)
+    # "ๆ" is the Thai repetition mark, never part of a product's name
+    # ("ของเล่นๆ" is still the product "ของเล่น").
+    s = s.rstrip("ๆ").strip()
     if s and _BARE_PRODUCT_PLACEHOLDER_RE.match(s):
         return None
     return s if 2 <= len(s) <= 30 and _THAI_CHAR_RE.search(s) else None
@@ -1449,7 +1461,7 @@ _ASSISTANT_ASKED_METHOD_RE = re.compile(
     r"ทางรถหรือทางเรือ|ทางรถหรือเรือ|ส่งทางไหน|ขนส่งทางไหน|วิธี(?:การ)?จัดส่ง")
 _BARE_QTY_ANSWER_RE = re.compile(
     r"^\s*(?:ประมาณ\s*)?\d{1,7}\s*"
-    r"(?:ตัว|ชิ้น|อัน|ใบ|คู่|ชุด|กล่อง|โหล|แพ็ค|แพก|แพค|ลัง|ผืน|หลัง|เครื่อง|pcs?)?\s*"
+    r"(?:" + _COUNT_UNIT_ALT + r")?\s*"
     r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
 _BARE_METHOD_ANSWER_RE = re.compile(
     r"^\s*(?:เอา|ขอ)?\s*(?:ทางรถ|ทางเรือ|ทางอากาศ|ทางเครื่องบิน|รถ|เรือ|เครื่องบิน|"

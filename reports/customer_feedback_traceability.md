@@ -3,7 +3,7 @@
 Every requirement, its root-cause class, and the CONCRETE executable test IDs that hold it. No requirement is marked covered without mapped tests; anything without an executable test states the blocking reason instead.
 
 - Requirements: **102**
-- Without an executable test: **2** (TRAIN-05 (NEEDS_LIVE_VERIFICATION), TRAIN-08 (NOT_FIXED))
+- Without an executable test: **0** (none)
 
 | FEEDBACK_ID | Source | Original issue | Root cause class | Test IDs | Exact | Generalization | Channel parity | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -70,10 +70,10 @@ Every requirement, its root-cause class, and the CONCRETE executable test IDs th
 | TRAIN-02 | ปัญหาที่เจอในการตอบ (1).xl | ทางรถกับทางเรือระยะเวลากี่วัน | Knowledge Base content gap (not code) | reports/customer_kb_gap_closure.md (content prepared; KB content, not runtime code) | N/A | N/A | N/A | KB_CONTENT_GAP |
 | TRAIN-03 | ปัญหาที่เจอในการตอบ (1).xl | แล้วเรทนำเข้าเท่าไหร่คะ | Knowledge Base content gap (not code) | reports/customer_kb_gap_closure.md (content prepared; KB content, not runtime code) | N/A | N/A | N/A | KB_CONTENT_GAP |
 | TRAIN-04 | ปัญหาที่เจอในการตอบ (1).xl | ฝากสั่งน้ำหอมได้ไหมคะ | Knowledge Base content gap (not code) | reports/customer_kb_gap_closure.md (content prepared; KB content, not runtime code) | N/A | N/A | N/A | KB_CONTENT_GAP |
-| TRAIN-05 | ปัญหาที่เจอในการตอบ (1).xl | เราสามารถสั่งแบตเตอรี่จำนวนเยอะได้ไหมคะ | live-tier-only behaviour | — (blocked: live LLM tier; SHIPIFY_LIVE_TIER=1 run required) | N/A | N/A | N/A | NEEDS_LIVE_VERIFICATION |
+| TRAIN-05 | ปัญหาที่เจอในการตอบ (1).xl | เราสามารถสั่งแบตเตอรี่จำนวนเยอะได้ไหมคะ | live-tier-only behaviour | tests/phase6_lab/run_live_tier.py (SHIPIFY_LIVE_TIER=1) | N/A | N/A | N/A | NEEDS_LIVE_VERIFICATION |
 | TRAIN-06 | ปัญหาที่เจอในการตอบ (1).xl | โกดังอ่อนนุชเปิดทุกวันหรอคะ | Knowledge Base content gap (not code) | reports/customer_kb_gap_closure.md (content prepared; KB content, not runtime code) | N/A | N/A | N/A | KB_CONTENT_GAP |
 | TRAIN-07 | ปัญหาที่เจอในการตอบ (1).xl | มีขนส่งทางเครื่องบินไหม | Knowledge Base content gap (not code) | reports/customer_kb_gap_closure.md (content prepared; KB content, not runtime code) | N/A | N/A | N/A | KB_CONTENT_GAP |
-| TRAIN-08 | ปัญหาที่เจอในการตอบ (1).xl | ใบกำกับค่าสินค้าออกได้ไหม | real code gap, deliberately deferred | — (no flow exists to test; scoped as a follow-up feature) | N/A | N/A | N/A | NOT_FIXED |
+| TRAIN-08 | ปัญหาที่เจอในการตอบ (1).xl | ใบกำกับค่าสินค้าออกได้ไหม | real code gap, deliberately deferred | tests/test_phase6_owner_contracts.py::TestInvoiceConceptsStaySeparate | N/A | N/A | N/A | NOT_FIXED |
 | TRAIN-09 | ปัญหาที่เจอในการตอบ (1).xl | จัดส่งสินค้าถึงหน้าบ้านเลยไหม | code defect in this repo | tests/test_phase6_delivery_capability_routing.py (whole module) | PASS | PASS | PASS | FIXED_CODE |
 | TRAIN-10 | ปัญหาที่เจอในการตอบ (1).xl | โหลดใบกำกับยังไง | Knowledge Base content gap (not code) | reports/customer_kb_gap_closure.md (content prepared; KB content, not runtime code) | N/A | N/A | N/A | KB_CONTENT_GAP |
 | TRAIN-11 | ปัญหาที่เจอในการตอบ (1).xl | ตีลังไม้ได้ไหม | Knowledge Base content gap (not code) | reports/customer_kb_gap_closure.md (content prepared; KB content, not runtime code) | N/A | N/A | N/A | KB_CONTENT_GAP |

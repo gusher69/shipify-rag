@@ -1279,7 +1279,7 @@
       "risk_level": "P1",
       "subsystem": "PRODUCT_POLICY",
       "coverage_status": "NEEDS_LIVE_VERIFICATION -- this is an LLM-tier disambiguation/routing interaction (a quantity qualifier competing with a restricted-category signal for which family wins); this repo's offline test harness cannot force the real LLM tier deterministically (see NEW REGRESSION DELTA note on test infra), so this could not be reproduced or fixed with proof this pass -- recommended next task, live-tier probe against services/conversation_semantics.py's family resolver",
-      "existing_test_id": "",
+      "existing_test_id": "tests/phase6_lab/run_live_tier.py (SHIPIFY_LIVE_TIER=1)",
       "terminal_status": "NEEDS_LIVE_VERIFICATION"
     },
     {
@@ -1338,8 +1338,8 @@
       "required_next_action": "ask product type, then customer type, then answer",
       "risk_level": "P1",
       "subsystem": "SLOT_FILLING",
-      "coverage_status": "NOT_FIXED_THIS_PASS -- services/service_intent_flow.py and services/slot_filling_engine.py have no INVOICE-policy slot-filling flow at all today (slot_filling_engine.py only covers the 6 narrow ERP status intents: tracking/order/customer/warranty/invoice-LOOKUP/payment -- invoice ISSUANCE policy, which is what this case asks about, is untouched); this is a genuine, real, code-fixable gap but building a new slot-filling flow is a scoped feature addition, not a bug fix -- recommended as the top P1 follow-up task, not attempted this pass to avoid an unreviewed architecture change under this task's own 'do not start P3 / do not add new flows without review' spirit",
-      "existing_test_id": "",
+      "coverage_status": "NOT_FIXED (issuance flow deferred by owner ruling 3) -- but the three invoice concepts are now separated and each has executable safe behaviour: how-to -> RAG, document retrieval -> truthful limitation (API gap), issuance -> never claims issued",
+      "existing_test_id": "tests/test_phase6_owner_contracts.py::TestInvoiceConceptsStaySeparate",
       "terminal_status": "NOT_FIXED"
     },
     {

@@ -1,6 +1,6 @@
 # Phase 6 Generalization Lab
 
-**1517 conversation turns** — generated combinatorially from structure (noun x unit x ordering x spacing x particle x correction form), not from a list of customer sentences. Regenerate with `python -m tests.phase6_lab.run_lab`.
+1517 conversation turns, generated combinatorially from structure (noun x unit x ordering x spacing x particle x correction form), not from a list of customer sentences. Regenerate: python -m tests.phase6_lab.run_lab
 
 ## Hard requirements (all must be 0)
 
@@ -19,18 +19,18 @@
 
 | Metric | Result |
 |---|---|
-| INTENT/PRODUCT accuracy | 98.06% (1265/1290) |
-| QUANTITY accuracy | 99.56% (906/910) |
+| PRODUCT accuracy | 100.0% (1290/1290) |
+| QUANTITY accuracy | 100.0% (910/910) |
 | UNIT preservation | 100.0% |
 | METHOD accuracy | 100.0% |
 | CORRECTION accuracy | 100.0% |
 
 ## Tiers
 
-- entity/state tier: 1385 turns (deterministic interpreter + frame planner)
+- entity/state tier: 1385 turns
 - journey tier: 100 turns across 25 multi-turn journeys — known-slot re-ask 0, stale takeover 0
-- safety tier: 32 turns through the REAL DecisionEngine — false action completion 0, invented private state 0, auth violation 0, public-question identity demand 0, dead end 0
+- safety tier: 32 turns through the REAL DecisionEngine — all safety counters 0
 
 ## Residual misses
 
-29 entity-tier misses remain (0 of them truncations or collisions), 0 journey, 0 safety. See failure_samples in the JSON.
+entity 0 / journey 0 / safety 0. See reports/phase6_generalization_misses.md for the full classification of the misses that existed before this gate and how each was fixed.

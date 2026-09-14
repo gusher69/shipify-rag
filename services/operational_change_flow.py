@@ -53,6 +53,38 @@ _VAT_VERB_RE = re.compile(
 # widening cannot loosen modify_bill_qty / change_shipping_method which
 # share _CHANGE_VERB_RE. Still REQUIRED alongside the carrier object, so
 # a bare self-pickup FAQ ("รับสินค้าเองได้ไหมคะ") stays RAG.
+# PHASE 6 closure gate F (owner ruling 1) — cancellation has TWO
+# distinct intents that must NOT be merged:
+#   POLICY      "ยกเลิกบิลสั่งซื้อได้ไหม"        -> RAG, answer the approved
+#               policy, never demand an identifier just to explain it.
+#   OPERATION   "ช่วยยกเลิกบิล POSxxxx ให้หน่อย"  -> operational request:
+#               collect only the needed identifier, hand to Human CS, and
+#               NEVER claim the cancellation happened.
+# The discriminator is the request SHAPE, not the word "ยกเลิก": a
+# capability question ("...ได้ไหม") with no concrete bill is policy; an
+# imperative, or any turn naming a real bill, is the operation. An earlier
+# revision added a cancellation kind with no such guard and swallowed the
+# policy question — that is what tests/test_customer_action1.py::
+# test_g21_cancel_policy_stays_rag exists to prevent.
+_CANCEL_VERB_RE = re.compile(r"ยกเลิก")
+_CANCEL_POLICY_Q_RE = re.compile(
+    r"(?:ได้|ไหว)?\s*(?:ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|หรือไม่|ป่าว)\s*(?:ครับ|คะ|ค่ะ|คับ)?\s*$")
+_CANCEL_IMPERATIVE_RE = re.compile(r"ช่วย|รบกวน|ขอให้|ต้องการให้|จัดการ|ดำเนินการ")
+_CANCEL_BILL_TOKEN_RE = re.compile(r"(?:PO|POS|PA|PE|FT|FE|SA|SP)[A-Za-z0-9_\-]*\d", re.IGNORECASE)
+
+
+def is_operational_cancellation(message: str) -> bool:
+    """True only for the OPERATION shape (owner ruling 1). A capability
+    question with no concrete bill stays policy -> RAG."""
+    t = message or ""
+    if not _CANCEL_VERB_RE.search(t):
+        return False
+    has_bill = bool(_CANCEL_BILL_TOKEN_RE.search(t))
+    if _CANCEL_POLICY_Q_RE.search(t.strip()) and not has_bill:
+        return False
+    return has_bill or bool(_CANCEL_IMPERATIVE_RE.search(t))
+
+
 _CARRIER_VERB_RE = re.compile(
     r"เปลี่ยน|แก้ไข|แก้|ปรับ|ขอ|เอาเป็น|บิลนี้|ต้องการ|อยาก", re.IGNORECASE)
 
@@ -110,6 +142,11 @@ _KINDS = [
     ("add_vat", _VAT_VERB_RE,
      re.compile(r"(?<![A-Za-z])vat(?![A-Za-z])|ภาษีมูลค่าเพิ่ม", re.IGNORECASE),
      "คุณลูกค้าแจ้งเลขบิลสั่งซื้อที่ต้องการ VAT มาให้แอดมินได้เลยนะคะ", "เลขบิลสั่งซื้อ"),
+    ("cancel_purchase_bill", _CANCEL_VERB_RE,
+     re.compile(r"บิลสั่งซื้อ|คำสั่งซื้อ|ออเดอร์|order|บิล(?!ขนส่ง)", re.IGNORECASE),
+     "รับเรื่องขอยกเลิกค่ะ หากยังไม่ได้ชำระเงินจะสามารถยกเลิกได้ "
+     "กรณีที่ชำระแล้วแอดมินต้องสอบถามร้านก่อนว่าจัดส่งสินค้าแล้วหรือยังนะคะ "
+     "รบกวนขอเลขบิลสั่งซื้อเพื่อให้เจ้าหน้าที่ดำเนินการต่อด้วยค่ะ", "เลขบิลสั่งซื้อ"),
     ("duplicate_bill", None,
      re.compile(r"บิลซ้ำ|บิลซ้ำกัน|มีบิลซ้ำ|บิลออกมาซ้ำ|บิลตีซ้ำ|บิลเบิ้ล"),
      "แอดมินเช็คบิลซ้ำและลบบิลให้นะคะ รบกวนขอเลขแทรคจีนหน่อยนะคะ", "เลขแทรคจีน"),
@@ -261,7 +298,7 @@ _CSW8_HANDOFF_MARK = "เดี๋ยวแอดมินเช็คให้�
 # completely unaffected — FT/FE/SA/SP stays valid for them.
 _PURCHASE_BILL_KINDS = frozenset({
     "modify_bill_qty", "change_shipping_method", "add_vat",
-    "missing_item_claim", "custom_production",
+    "missing_item_claim", "custom_production", "cancel_purchase_bill",
 })
 _PURCHASE_BILL_PREFIX_RE = re.compile(r"^(?:PO|PA|POS|PE)\d", re.IGNORECASE)
 _SHIPMENT_BILL_PREFIX_RE = re.compile(r"^(?:FT|FE|SA|SP)\d", re.IGNORECASE)
@@ -388,6 +425,10 @@ def classify_operational_request(message: str, interpretation: Optional[object] 
         if not obj_re.search(t):
             continue
         if verb_re is not None and not verb_re.search(t):
+            continue
+        # cancellation only opens on the OPERATION shape; the capability
+        # question is policy and belongs to RAG (owner ruling 1).
+        if kind == "cancel_purchase_bill" and not is_operational_cancellation(t):
             continue
         return {"kind": kind, "ack": ack, "input_label": label}
     return None

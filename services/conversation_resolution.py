@@ -37,6 +37,7 @@ from services.conversation_semantics import (
     _assistant_asked_for_product as _assistant_asked_for_product,
     _method_label as _method_label,
     _bare_product_noun as _bare_product_noun,
+    _COUNT_UNIT_ALT as _CS_COUNT_UNIT_ALT,
     _HIGH_RISK_PRODUCT_RE as _HIGH_RISK_PRODUCT_RE,
     Frame as _Frame,
 )
@@ -96,20 +97,15 @@ _GREET_CHAT_RE = re.compile(
 _QUESTION_TAIL_RE = re.compile(r"(?:ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|หรือไม่|ยังไง|อย่างไร|เท่าไหร่|กี่\S|\?)\s*$")
 
 # ── multi-entity extraction ─────────────────────────────────────────
-# COUNT units (a bare weight is NOT a quantity). Ordered longest-first.
-# PHASE-6 (customer master pass, Step 13 split-brain audit) — "ขวด" and
-# "พาเลท" added to match services/conversation_semantics.py::_USER_QTY_RE
-# exactly. Found by direct comparison, not assumed: this list had quietly
-# drifted out of sync with the legacy runtime's own quantity+unit
-# vocabulary (a real customer saying "20 ขวดอยากสั่งของจากจีน" was
-# correctly captured by the legacy runtime but produced NO quantity here
-# at all) -- this module is P1's canonical, currently SHADOW-ONLY entity
-# extraction (never read-authoritative; see docs/CONVERSATION_INTELLIGENCE_P1.md),
-# so this fix only improves the P2 structured/legacy frame_parity signal
-# and cannot change any customer-visible behaviour on its own.
-_COUNT_UNIT = (
-    "คู่", "โหล", "แพ็ค", "แพ็ก", "แพค", "กล่อง", "ลัง", "ชุด", "เครื่อง",
-    "ผืน", "หลัง", "ตัว", "ชิ้น", "อัน", "ใบ", "ขวด", "พาเลท", "pcs", "pc",
+# COUNT units (a bare weight is NOT a quantity).
+_COUNT_UNIT = tuple(
+    # PHASE 6 closure gate H — derived from the ONE shared vocabulary in
+    # services/conversation_semantics.py rather than re-listed here, so
+    # P1 can no longer drift out of sync with the legacy runtime (it had:
+    # "ขวด"/"พาเลท" were missing and a bottle quantity was invisible to
+    # the canonical resolver). "pcs?" is a regex alternative, expanded.
+    u for alt in _CS_COUNT_UNIT_ALT.split("|")
+    for u in (("pcs", "pc") if alt == "pcs?" else (alt,))
 )
 _WEIGHT_UNIT = {
     "กก": ("kg", 1.0), "กก.": ("kg", 1.0), "กิโล": ("kg", 1.0), "กิโลกรัม": ("kg", 1.0),

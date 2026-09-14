@@ -480,6 +480,8 @@ def _product_interest_noun(question: str) -> Optional[str]:
     q = _IMPORT_QTY_UNIT_RE.sub(" ", question or "")
     q = _IMPORT_METHOD_WORD_RE.sub(" ", q)
     remnant = _FIX23_STRIP_RE.sub("", q).strip()
+    # "ๆ" is the Thai repetition mark, never part of a product's name.
+    remnant = remnant.rstrip("ๆ").strip()
     if remnant and _FIX23_BARE_PLACEHOLDER_RE.match(remnant):
         return None
     if remnant and _PRODUCT_ANSWER_NOUN_OK_RE.match(remnant):

@@ -252,6 +252,7 @@ def run_all(write=True):
             "false_action_completion": s_m["false_action_completion"],
         },
         "failure_samples": (e_f[:15] + j_f[:10] + s_f[:10]),
+        "all_failures": {"entity": e_f, "journey": j_f, "safety": s_f},
         "failure_counts": {"entity": len(e_f), "journey": len(j_f), "safety": len(s_f)},
     }
     if write:
