@@ -53,6 +53,19 @@ google-auth>=2.20.0
 langgraph==1.2.11
 langfuse==4.15.2
 
+# ── Thai human-language input layer (2026-09-15) ────────────────────────
+# services/language/thai_normalizer.py — typo / spacing / particle /
+# keyboard-layout robustness BEFORE the central interpreter reads a
+# message. PyThaiNLP: Thai normalisation, dictionary tokenisation (newmm),
+# spell candidates, keyboard-layout mapping — the base package only, no
+# optional extras (no model downloads). RapidFuzz: bounded-vocabulary
+# similarity (services/language/vocabulary.py) — never free-text intent
+# matching. Pinned to the versions verified on Python 3.13 here; both are
+# pure additions (only tzdata in common with the existing tree). The
+# layer degrades to character-level passes if either import fails.
+pythainlp==5.3.7
+rapidfuzz==3.14.6
+
 # Utils
 python-dotenv>=1.0.0
 requests>=2.31.0

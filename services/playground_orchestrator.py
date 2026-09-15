@@ -28,6 +28,8 @@ from services.conversation_semantics import PUBLIC_INFO_FAMILIES as _PUBLIC_INFO
 # quantity+unit span is never mistaken for a product noun below.
 from services.conversation_semantics import _USER_QTY_RE as _IMPORT_QTY_UNIT_RE
 from services.conversation_semantics import _METHOD_WORD_RE as _IMPORT_METHOD_WORD_RE
+from services.conversation_semantics import _METHOD_WORD_ALT as _IMPORT_METHOD_WORD_ALT
+_IMPORT_METHOD_STRIP_RE = re.compile(r"(?:ขนส่ง|จัดส่ง|ส่ง|โดย)?\s*(?:" + _IMPORT_METHOD_WORD_ALT + r")")
 # PHASE 6 POST-DEPLOY (defect class A) — the ONE structural entity-span /
 # question-action-span separator, shared with conversation_semantics'
 # own bare-slot extractor so the two can never disagree about where a
@@ -378,7 +380,10 @@ def _product_answer_continuation_noun(followup_type: Optional[str], history, sin
 # journey at all. The compound alternatives are kept (harmless, already
 # subsumed by bare "สั่ง") for readability / history.
 _FIX23_IMPORT_VERB_RE = re.compile(
-    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|สั่ง|ชิปปิ้ง|ขนของ|นำสินค้าเข้า")
+    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่งของ|สั่งสินค้า|สั่ง|ชิปปิ้ง|ขนของ|นำสินค้าเข้า"
+    # THAI-HUMAN-LANGUAGE — the split verb "นำ<object>...เข้า(มา)" ("นำสินค้า
+    # จากจีนเข้ามาขาย") is the same import verb with its object inside it.
+    r"|นำ(?:สินค้า|ของ)\S{0,12}?เข้า")
 _FIX23_INTEREST_RE = re.compile(
     r"สนใจ|อยาก|ต้องการ|วางแผน|เล็ง|กำลังมองหา|กำลังสนใจ|มองหา")
 _FIX23_ABOUT_TO_RE = re.compile(
@@ -407,8 +412,15 @@ _FIX23_STRIP_RE = re.compile(
     # placeholder is handled by the ONE placeholder rule in
     # _product_interest_noun below -- so the compounds were redundant as
     # well as harmful.
-    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่ง|ซื้อ|ชิปปิ้ง|ขน(?=ของ)|นำสินค้าเข้า|"
+    r"นำเข้า|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่ง|ซื้อ|ชิปปิ้ง|ขน(?=ของ)|ส่ง(?=ของ|สินค้า)|นำสินค้าเข้า|"
     r"จาก|เว็บ|จีน|taobao|1688|tmall|เถาเป่า|"
+    # THAI-HUMAN-LANGUAGE — service words ("ใช้บริการ", "บริการ") and the
+    # approximate-quantity qualifiers that precede a number ("ประมาณ",
+    # "จำนวน", "สัก", "ราวๆ") are filler, never part of a goods noun.
+    r"ใช้บริการ|บริการ|ประมาณ|จำนวน|สัก|ราวๆ|ราว|"
+    # the split import verb with a PLACEHOLDER object ("นำสินค้าจากจีน
+    # เข้ามาขาย"); a real noun after "นำ" does not match this shape.
+    r"นำ(?:สินค้า|ของ)(?:จากจีน|จากเว็บ\S{0,6}|จาก)?เข้า(?:มา)?(?:ขาย|ใช้|ไทย)?|"
     r"ครับ|ค่ะ|คะ|นะ|หน่อย|ผม|ฉัน|เรา|\s)+", re.IGNORECASE)
 # the bare generic placeholder noun ("อยากสั่งของจากจีน", "อยากได้สินค้า")
 # with NOTHING else left after the strip above -> no real product was
@@ -438,6 +450,11 @@ _NON_GOODS_OBJECT_RE = re.compile(
     r"วอลเล็ท|ยอดเงิน|เงินคืน|สลิป|ประกัน", re.IGNORECASE)
 
 
+_FIX23_ORIGIN_RE = re.compile(
+    r"(?:จาก|ของ|สินค้า|เว็บ)?\s*(?:(?:ประเทศ)?จีน|1688|เถาเป่า|taobao|tmall|ทีมอลล์|อาลีบาบา)",
+    re.IGNORECASE)
+
+
 def _is_product_import_interest(question: str) -> bool:
     q = question or ""
     if _COMPANY_GUARANTEE_Q_RE.search(q):
@@ -445,6 +462,14 @@ def _is_product_import_interest(question: str) -> bool:
     if _FIX23_ABOUT_TO_RE.search(q):
         return True
     if _FIX23_INTEREST_RE.search(q) and _FIX23_IMPORT_VERB_RE.search(q):
+        return True
+    # THAI-HUMAN-LANGUAGE — an import/order VERB with an explicit China /
+    # platform ORIGIN is an import-interest declaration even without an
+    # "interest" word ("ฝากสั่งของจีน 200 ลัง", "สั่งจากจีนได้ไหม"). The
+    # canonical resolution layer already treated this shape as import
+    # interest (its multi-fact fallback); recognising it HERE keeps the ONE
+    # recogniser and the frame opener in agreement.
+    if _FIX23_IMPORT_VERB_RE.search(q) and _FIX23_ORIGIN_RE.search(q):
         return True
     # PHASE 6 POST-DEPLOY (defect class A) — the non-goods guard is
     # evaluated against the ENTITY SPAN, never the whole turn: a trailing
@@ -507,7 +532,10 @@ def _product_interest_noun(question: str) -> Optional[str]:
     # still read from the ORIGINAL message by their own extractors.
     q, _question_span = _split_question_clause(question or "")
     q = _IMPORT_QTY_UNIT_RE.sub(" ", q)
-    q = _IMPORT_METHOD_WORD_RE.sub(" ", q)
+    # THAI-HUMAN-LANGUAGE — the transport verb that GOVERNS a method
+    # word ("ส่งทางเรือ", "ขนส่งทางรถ") goes with it; left behind it was
+    # welded onto the noun ("กล่องพลาสติกส่ง").
+    q = _IMPORT_METHOD_STRIP_RE.sub(" ", q)
     remnant = _FIX23_STRIP_RE.sub("", q).strip()
     # "ๆ" is the Thai repetition mark, never part of a product's name.
     remnant = remnant.rstrip("ๆ").strip()

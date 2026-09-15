@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
 """Running the graph safely, and comparing it with the current engine.
 
-Three responsibilities:
+Four responsibilities:
 
-  * `run_agent`     — one traced graph run, returning an AgentDecision.
-  * `shadow_run`    — the same, wrapped so that NOTHING it does can affect
-                      the customer's turn: it never raises, and a failure
-                      degrades to "no shadow decision this turn".
-  * `compare`       — classify the graph's decision against the current
-                      engine's for the shadow report (task §18/§24).
+  * `run_agent`         — one traced graph run, returning an AgentDecision.
+  * `shadow_run`        — the same, wrapped so that NOTHING it does can
+                          affect the customer's turn: it never raises, and
+                          a failure degrades to "no shadow decision".
+  * `authoritative_run` — the graph as PRIMARY responder (owner_test /
+                          production), with the current DecisionEngine as
+                          the automatic TECHNICAL / SAFETY fallback. The
+                          engine takes the turn only when the graph raised,
+                          timed out, produced an invalid state, or its own
+                          safety gate flagged the reply — never because the
+                          two would merely have understood the turn
+                          differently.
+  * `compare`           — classify the graph's decision against the
+                          current engine's for the shadow report.
 
 Authority is decided in ONE place, `graph_is_authoritative()`, from the
 explicit `config.LANGGRAPH_MODE`. There is no path by which the graph
@@ -16,8 +24,10 @@ becomes customer-facing without that setting saying so.
 """
 from __future__ import annotations
 
+import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 import config
 from services.agent.graph import get_graph
@@ -30,6 +40,15 @@ COMPARISON_CLASSES = ("MATCH", "LANGGRAPH_IMPROVEMENT", "CURRENT_CORRECT",
 # where LANGGRAPH_WRONG must therefore be zero before any cutover.
 SAFETY_DIMENSIONS = ("auth", "private_access", "action_truth",
                      "customer_isolation", "policy_truth")
+# a graph error with one of these prefixes is a SAFETY verdict from the
+# graph's own gate; every other error is a TECHNICAL failure. Both hand
+# the turn to the engine in authoritative mode.
+SAFETY_FLAG_PREFIXES = ("AUTH_VIOLATION", "PRIVATE_LEAK",
+                        "FALSE_ACTION_COMPLETION", "KNOWN_SLOT_RE_ASK")
+
+# who the graph answers in each mode. `production` is every source —
+# REAL_LINE, OWNER_TEST, ADMIN_AUTO and anything else the webhook labels.
+_OWNER_SOURCES = frozenset({"OWNER_TEST"})
 
 
 def graph_is_authoritative(sample_source: str = "") -> bool:
@@ -38,7 +57,7 @@ def graph_is_authoritative(sample_source: str = "") -> bool:
     if mode == "production":
         return True
     if mode == "owner_test":
-        return (sample_source or "").upper() == "OWNER_TEST"
+        return (sample_source or "").upper() in _OWNER_SOURCES
     return False
 
 
@@ -53,24 +72,30 @@ def graph_should_run(sample_source: str = "") -> bool:
 
 def run_agent(message: str, history=None, context=None) -> AgentDecision:
     """One graph run, traced. Raises only if the graph itself raises —
-    callers on the live path must use `shadow_run`."""
+    callers on the live path must use `shadow_run` / `authoritative_run`."""
     ctx = dict(context or {})
     started = time.time()
     state = new_state(message, history=history, context=ctx)
+    authoritative = graph_is_authoritative(ctx.get("sample_source") or "")
     with lf.trace("shipify.agent.turn",
                   session_id=ctx.get("session_id") or ctx.get("external_user_id"),
                   metadata={"channel": ctx.get("channel"),
                             "sample_source": ctx.get("sample_source"),
                             "langgraph_mode": getattr(config, "LANGGRAPH_MODE", "shadow"),
                             "graph_version": getattr(config, "LANGGRAPH_VERSION", "1"),
-                            "authoritative": graph_is_authoritative(
-                                ctx.get("sample_source") or "")},
+                            "authoritative": authoritative},
                   input_payload={"message": message}) as span:
         out = get_graph().invoke(state)
         decision = AgentDecision.from_state(out)
+        decision.engine_result = out.get("_engine_result")
         # Only the SHAPE of the turn is traced — entity NAMES, not values;
-        # the masking layer redacts anything that slips through.
+        # the masking layer redacts anything that slips through. The
+        # normalisation block is the one place text appears, identifier-
+        # masked by the normaliser itself (task §14: "what did this word
+        # become before it reached intent?").
+        norm = dict(out.get("normalization_trace") or {})
         span.update(output={
+            "normalization": norm,
             "primary_intent": decision.primary_intent,
             "conversation_act": decision.conversation_act,
             "active_journey": decision.active_journey,
@@ -84,10 +109,12 @@ def run_agent(message: str, history=None, context=None) -> AgentDecision:
             "auth_required": decision.auth_required,
             "auth_state": decision.auth_state,
             "handoff_required": decision.handoff_required,
+            "confidence": decision.confidence,
             "grounding": (out.get("response_plan") or {}).get("grounding_status"),
             "safety_flags": (out.get("response_plan") or {}).get("safety_flags") or [],
             "node_path": decision.node_path,
             "errors": decision.errors,
+            "fallback": False,
             "latency_ms": round((time.time() - started) * 1000, 2),
         })
     return decision
@@ -104,6 +131,103 @@ def shadow_run(message: str, history=None, context=None) -> Optional[AgentDecisi
     except Exception as exc:                      # pragma: no cover - safety net
         print(f"[agent] shadow run failed, customer turn unaffected: {exc!r}")
         return None
+
+
+# ── authoritative mode ───────────────────────────────────────────────
+@dataclass
+class AuthoritativeOutcome:
+    """What the webhook acts on when the graph is primary."""
+    used: str                                   # "langgraph" | "engine_fallback"
+    decision: Optional[AgentDecision] = None
+    engine_result: Optional[Dict[str, Any]] = None   # the executed engine result
+    fallback_reason: Optional[str] = None
+    fallback_kind: Optional[str] = None         # "technical" | "safety" | None
+    latency_ms: float = 0.0
+
+
+def validate_decision(decision: Optional[AgentDecision]) -> Tuple[Optional[str], Optional[str]]:
+    """(fallback_kind, reason) if this decision may NOT answer the
+    customer, else (None, None). Technical: no result, empty reply,
+    tool/graph error. Safety: the graph's own gate flagged the reply."""
+    if decision is None:
+        return "technical", "graph returned no decision"
+    safety = [e for e in (decision.errors or [])
+              if e.split(":")[0] in SAFETY_FLAG_PREFIXES]
+    if safety:
+        return "safety", "; ".join(safety)
+    if decision.errors:
+        return "technical", "; ".join(decision.errors)
+    if not (decision.final_response or "").strip():
+        return "technical", "empty final response"
+    if not isinstance(decision.engine_result, dict) or not decision.engine_result:
+        return "technical", "no executed engine result attached"
+    return None, None
+
+
+def authoritative_run(message: str, history=None, context=None, *,
+                      engine_fallback, timeout: Optional[float] = None) -> AuthoritativeOutcome:
+    """The graph answers; the engine is the automatic fallback.
+
+    `engine_fallback` is a zero-argument callable producing the current
+    engine's full result for this turn. It is invoked ONLY when the graph
+    could not validly answer — so the turn is never executed twice on a
+    healthy path (the graph's execute step already IS the engine).
+
+    Timeout: the graph runs on a worker thread and the caller waits at
+    most `timeout` seconds. A run that overruns is abandoned for this
+    turn; its worker finishes in the background with no effect on the
+    reply. Python cannot cancel it, which is why the ceiling is generous
+    and documented as a genuine-hang guard, not a latency budget.
+    """
+    ctx = dict(context or {})
+    started = time.time()
+    limit = float(timeout if timeout is not None
+                  else getattr(config, "LANGGRAPH_TIMEOUT_SECONDS", 60))
+    box: Dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            box["decision"] = run_agent(message, history=history, context=ctx)
+        except BaseException as exc:            # noqa: BLE001 - captured for fallback
+            box["exc"] = exc
+
+    t = threading.Thread(target=_worker, name="langgraph-authoritative", daemon=True)
+    t.start()
+    t.join(limit)
+    kind: Optional[str]
+    reason: Optional[str]
+    decision: Optional[AgentDecision] = None
+    if t.is_alive():
+        kind, reason = "technical", f"graph exceeded {limit:.0f}s"
+    elif "exc" in box:
+        kind, reason = "technical", f"graph raised {box['exc']!r}"
+    else:
+        decision = box.get("decision")
+        kind, reason = validate_decision(decision)
+
+    if kind is None and decision is not None:
+        return AuthoritativeOutcome("langgraph", decision, decision.engine_result, None, None,
+                                    round((time.time() - started) * 1000, 2))
+
+    # ── fallback: the current engine answers, and the reason is traced ──
+    print(f"[agent] authoritative graph fell back to the engine ({kind}): {reason}")
+    _trace_fallback(ctx, kind, reason)
+    result = engine_fallback()
+    return AuthoritativeOutcome("engine_fallback", decision, result, reason, kind,
+                                round((time.time() - started) * 1000, 2))
+
+
+def _trace_fallback(ctx: Dict[str, Any], kind: Optional[str], reason: Optional[str]) -> None:
+    try:
+        with lf.trace("shipify.agent.fallback",
+                      session_id=ctx.get("session_id") or ctx.get("external_user_id"),
+                      metadata={"sample_source": ctx.get("sample_source"),
+                                "langgraph_mode": getattr(config, "LANGGRAPH_MODE", "shadow"),
+                                "graph_version": getattr(config, "LANGGRAPH_VERSION", "1")}) as span:
+            span.update(output={"fallback": True, "fallback_kind": kind,
+                                "fallback_reason": reason})
+    except Exception:                             # pragma: no cover - never fatal
+        pass
 
 
 # ── comparison ───────────────────────────────────────────────────────
@@ -145,9 +269,7 @@ def compare(engine_result: Dict[str, Any], decision: Optional[AgentDecision]) ->
     # ── safety first ──
     if decision.errors:
         safety_flagged = [e for e in decision.errors
-                          if e.split(":")[0] in ("AUTH_VIOLATION", "PRIVATE_LEAK",
-                                                 "FALSE_ACTION_COMPLETION",
-                                                 "KNOWN_SLOT_RE_ASK")]
+                          if e.split(":")[0] in SAFETY_FLAG_PREFIXES]
         if safety_flagged:
             return {"class": "LANGGRAPH_WRONG", "dimension": "auth"
                     if any(f.startswith("AUTH") for f in safety_flagged) else "action_truth",

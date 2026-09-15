@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from services.agent.adapters import existing_engine as engine
+from services.agent.state import effective_message
 
 # The Thai safety vocabulary lives at the adapter boundary
 # (services/agent/adapters/existing_engine.py), not here: nodes stay
@@ -29,7 +30,7 @@ _IDENTITY_ASK_RE = engine.IDENTITY_ASK_RE
 def safety_check(state: Dict[str, Any]) -> Dict[str, Any]:
     node_path = list(state.get("node_path") or []) + ["safety_check"]
     reply = state.get("final_response") or ""
-    msg = state.get("normalized_message") or state.get("raw_message") or ""
+    msg = effective_message(state)
     res = state.get("tool_result") or {}
     erp_called = bool(res.get("erp_called"))
     flags: List[str] = []

@@ -2,7 +2,7 @@
 """The bounded LangGraph (task §5).
 
     START
-      -> normalize_input
+      -> normalize_language          HUMAN LANGUAGE (raw kept, normalised read)
       -> resolve_current_turn        UNDERSTAND (once)
       -> merge_conversation_state    REMEMBER
       -> resolve_precedence
@@ -37,7 +37,7 @@ from services.agent.nodes import (
 )
 
 GRAPH_NODES = (
-    "normalize_input", "resolve_current_turn", "merge_conversation_state",
+    "normalize_language", "resolve_current_turn", "merge_conversation_state",
     "resolve_precedence", "resolve_auth_requirement", "plan_next_action",
     "select_tool", "execute_tool", "validate_tool_result", "ground_response",
     "plan_response", "safety_check", "persist_state",
@@ -58,7 +58,7 @@ def _route_after_select(state: Dict[str, Any]) -> str:
 
 def build_graph():
     g = StateGraph(AgentState)
-    g.add_node("normalize_input", semantics.normalize_input)
+    g.add_node("normalize_language", semantics.normalize_language)
     g.add_node("resolve_current_turn", semantics.resolve_current_turn)
     g.add_node("merge_conversation_state", ctx_nodes.merge_conversation_state)
     g.add_node("resolve_precedence", ctx_nodes.resolve_precedence)
@@ -72,8 +72,8 @@ def build_graph():
     g.add_node("safety_check", safety.safety_check)
     g.add_node("persist_state", persistence.persist_state)
 
-    g.add_edge(START, "normalize_input")
-    g.add_edge("normalize_input", "resolve_current_turn")
+    g.add_edge(START, "normalize_language")
+    g.add_edge("normalize_language", "resolve_current_turn")
     g.add_edge("resolve_current_turn", "merge_conversation_state")
     g.add_edge("merge_conversation_state", "resolve_precedence")
     g.add_edge("resolve_precedence", "resolve_auth_requirement")

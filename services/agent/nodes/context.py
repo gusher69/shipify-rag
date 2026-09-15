@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from services.agent.adapters import existing_engine as engine
+from services.agent.state import effective_history
 
 # which slots each journey needs, in the order they should be asked for.
 _JOURNEY_SLOT_ORDER = {
@@ -58,7 +59,7 @@ def merge_conversation_state(state: Dict[str, Any]) -> Dict[str, Any]:
 
     merged: Dict[str, Any] = {}
     try:
-        merged.update(_frame_slots(engine.active_frame(state.get("history") or [])))
+        merged.update(_frame_slots(engine.active_frame(effective_history(state))))
     except Exception as exc:
         return {"node_path": node_path,
                 "errors": list(state.get("errors") or []) + [f"merge_state: {exc!r}"]}

@@ -1,0 +1,318 @@
+{
+  "pythainlp_version": "5.3.7",
+  "rapidfuzz_version": "3.14.6",
+  "base": {
+    "total": 55,
+    "passed": 55,
+    "failures": []
+  },
+  "typo": {
+    "total": 486,
+    "passed": 482,
+    "recovery_pct": 99.18,
+    "by_operator": {
+      "add_particle": {
+        "passed": 34,
+        "total": 34
+      },
+      "combined": {
+        "passed": 48,
+        "total": 49
+      },
+      "double_final": {
+        "passed": 37,
+        "total": 37
+      },
+      "drop_mark": {
+        "passed": 50,
+        "total": 53
+      },
+      "drop_thanthakhat": {
+        "passed": 4,
+        "total": 4
+      },
+      "dup_mark": {
+        "passed": 55,
+        "total": 55
+      },
+      "elongate": {
+        "passed": 41,
+        "total": 41
+      },
+      "extra_spaces": {
+        "passed": 13,
+        "total": 13
+      },
+      "hand": {
+        "passed": 49,
+        "total": 49
+      },
+      "keyboard": {
+        "passed": 15,
+        "total": 15
+      },
+      "nbsp": {
+        "passed": 13,
+        "total": 13
+      },
+      "particle": {
+        "passed": 19,
+        "total": 19
+      },
+      "remove_spaces": {
+        "passed": 12,
+        "total": 12
+      },
+      "swap_tone": {
+        "passed": 37,
+        "total": 37
+      },
+      "zero_width": {
+        "passed": 55,
+        "total": 55
+      }
+    },
+    "failures": [
+      {
+        "noisy": "อยากสังของจากจีน 15 ชิ้น",
+        "clean": "อยากสั่งของจากจีน 15 ชิ้น",
+        "op": "drop_mark",
+        "normalized": "อยากสังของจากจีน 15 ชิ้น",
+        "intent": "IMPORT_INTEREST",
+        "fails": [
+          "unexpected product 'สังของ'"
+        ]
+      },
+      {
+        "noisy": "สนใจนำเข่ากลองพลาสติก 5 ลัง ส่งทางเรือ",
+        "clean": "สนใจนำเข้ากล่องพลาสติก 5 ลัง ส่งทางเรือ",
+        "op": "combined",
+        "normalized": "สนใจนำเข้ากลองพลาสติก 5 ลัง ส่งทางเรือ",
+        "intent": "IMPORT_INTEREST",
+        "fails": [
+          "product 'กลองพลาสติก' != 'กล่องพลาสติก'"
+        ]
+      },
+      {
+        "noisy": "ตองการนำเข้าของเล่นจากจีน",
+        "clean": "ต้องการนำเข้าของเล่นจากจีน",
+        "op": "drop_mark",
+        "normalized": "ตองการนำเข้าของเล่นจากจีน",
+        "intent": "IMPORT_INTEREST",
+        "fails": [
+          "product 'ตองการของเล่น' != 'ของเล่น'"
+        ]
+      },
+      {
+        "noisy": "ขอเปลี่ยนท่อยู่จัดส่ง",
+        "clean": "ขอเปลี่ยนที่อยู่จัดส่ง",
+        "op": "drop_mark",
+        "normalized": "ขอเปลี่ยนท่อยู่จัดส่ง",
+        "intent": "UNKNOWN",
+        "fails": [
+          "family UNKNOWN != ADDRESS_CHANGE"
+        ]
+      }
+    ]
+  },
+  "paraphrase": {
+    "total": 324,
+    "groups": 40,
+    "passed": 324,
+    "consistency_pct": 100.0,
+    "by_group": {
+      "import_opener": {
+        "passed": 12,
+        "total": 12
+      },
+      "import_qty_opener": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_product_opener": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_product_qty_opener": {
+        "passed": 8,
+        "total": 8
+      },
+      "product_answer": {
+        "passed": 8,
+        "total": 8
+      },
+      "product_answer_compound": {
+        "passed": 8,
+        "total": 8
+      },
+      "method_answer_sea": {
+        "passed": 8,
+        "total": 8
+      },
+      "method_answer_road": {
+        "passed": 8,
+        "total": 8
+      },
+      "qty_answer": {
+        "passed": 8,
+        "total": 8
+      },
+      "qty_correction": {
+        "passed": 8,
+        "total": 8
+      },
+      "policy_rabbit": {
+        "passed": 8,
+        "total": 8
+      },
+      "policy_toys": {
+        "passed": 8,
+        "total": 8
+      },
+      "policy_known_product": {
+        "passed": 8,
+        "total": 8
+      },
+      "private_status": {
+        "passed": 8,
+        "total": 8
+      },
+      "contact": {
+        "passed": 8,
+        "total": 8
+      },
+      "withdrawal": {
+        "passed": 8,
+        "total": 8
+      },
+      "cancel_policy": {
+        "passed": 8,
+        "total": 8
+      },
+      "coupon": {
+        "passed": 8,
+        "total": 8
+      },
+      "invoice": {
+        "passed": 8,
+        "total": 8
+      },
+      "price": {
+        "passed": 8,
+        "total": 8
+      },
+      "address_change": {
+        "passed": 8,
+        "total": 8
+      },
+      "policy_cosmetics": {
+        "passed": 8,
+        "total": 8
+      },
+      "policy_battery": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_qty_ชิ้น": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_box_sea": {
+        "passed": 8,
+        "total": 8
+      },
+      "greeting": {
+        "passed": 8,
+        "total": 8
+      },
+      "policy_gun": {
+        "passed": 8,
+        "total": 8
+      },
+      "duration_road": {
+        "passed": 8,
+        "total": 8
+      },
+      "method_sea_feasibility": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_hat_road": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_lamp": {
+        "passed": 8,
+        "total": 8
+      },
+      "product_answer_bag": {
+        "passed": 8,
+        "total": 8
+      },
+      "product_answer_toys": {
+        "passed": 8,
+        "total": 8
+      },
+      "qty_answer_boxes": {
+        "passed": 8,
+        "total": 8
+      },
+      "public_status": {
+        "passed": 8,
+        "total": 8
+      },
+      "cancel_operation": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_kitchen": {
+        "passed": 8,
+        "total": 8
+      },
+      "policy_supplement": {
+        "passed": 8,
+        "total": 8
+      },
+      "method_answer_air": {
+        "passed": 8,
+        "total": 8
+      },
+      "import_shirt_answer": {
+        "passed": 8,
+        "total": 8
+      }
+    },
+    "failures": []
+  },
+  "identifiers": {
+    "total": 12,
+    "mutations": 0,
+    "failures": []
+  },
+  "unknown_products": {
+    "total": 12,
+    "preserved": 12,
+    "failures": []
+  },
+  "over_correction": {
+    "total": 37,
+    "over_corrections": 0,
+    "failures": []
+  },
+  "journeys": {
+    "journeys": 100,
+    "journeys_passed": 100,
+    "turns": 560,
+    "turns_passed": 560,
+    "continuity_pct": 100.0,
+    "noisy_turns": 333,
+    "known_slot_reask": 0,
+    "stale_context_takeover": 0,
+    "auth_violation": 0,
+    "private_leak": 0,
+    "false_completion": 0,
+    "hallucinated_fact": 0,
+    "failures": []
+  },
+  "elapsed_s": 792.1
+}

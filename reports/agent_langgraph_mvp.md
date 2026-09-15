@@ -25,7 +25,7 @@ for itself.
 
 | Requested | Implemented |
 |---|---|
-| `load_context` | `normalize_input` |
+| `load_context` | `normalize_language` (Thai human-language layer, 2026-09-15) |
 | `resolve_current_turn` | `resolve_current_turn` |
 | `merge_state` | `merge_conversation_state`, `resolve_precedence` |
 | `plan_action` | `resolve_auth_requirement`, `plan_next_action`, `select_tool` |

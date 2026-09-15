@@ -109,7 +109,10 @@ CANCELLATION_POLICY_ANSWER = (
 # conversation_semantics._FRAME_CANCEL_RE, never by this module.
 _CANCEL_OBJECT_RE = re.compile(
     r"บิลสั่งซื้อ|คำสั่งซื้อ|ออเดอร์|order|บิล(?!ขนส่ง)|"
-    r"การถอน|ถอนเงิน|ถอนเครดิต|ถอนยอด|เงื่อนไข", re.IGNORECASE)
+    r"การถอน|ถอนเงิน|ถอนเครดิต|ถอนยอด|เงื่อนไข"
+    # THAI-HUMAN-LANGUAGE — a concrete bill token ("ขอยกเลิก POS123456")
+    # names the object by its identifier; the noun is implied.
+    r"|(?:PO|POS|PA|PE|FT|FE|SA|SP)[A-Za-z0-9_\-]*\d", re.IGNORECASE)
 
 
 def classify_cancellation(message: str) -> Optional[str]:

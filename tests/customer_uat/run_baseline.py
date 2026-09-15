@@ -56,6 +56,12 @@ _TRACKED_OUT_MD = _ROOT / "docs" / "customer_uat_sources" / "CUSTOMER_UAT_BASELI
 _SCRATCH_DIR = _ROOT / "tests" / "customer_uat" / ".gate_scratch"
 _SCRATCH_OUT_JSON = _SCRATCH_DIR / "baseline_results.json"
 _SCRATCH_OUT_MD = _SCRATCH_DIR / "CUSTOMER_UAT_BASELINE_REPORT.md"
+# --langgraph: score the production runtime path (LangGraph primary + engine
+# fallback) with the same scorer; output goes to a separate scratch file.
+_LANGGRAPH_PATH = False
+_LANGGRAPH_STATS = Counter()
+_LANGGRAPH_STATS["fallback_reasons"] = []
+_SCRATCH_OUT_JSON_LG = None
 # resolved per-invocation in main() based on --commit-baseline
 _OUT_JSON = _TRACKED_OUT_JSON
 _OUT_MD = _TRACKED_OUT_MD
@@ -125,12 +131,28 @@ def _run_one(engine, message, history, pending_key=None, customer_context=None, 
     rag_patch = (patch("services.playground_orchestrator.run_playground_turn",
                        return_value=_fake_playground_result(answer="[STUB-RAG-ANSWER]", confidence=0.9))
                  if not real_rag else None)
+    def _decide():
+        # THAI-HUMAN-LANGUAGE — with --langgraph the SAME turn runs through the
+        # production runtime path (LangGraph primary, DecisionEngine as the
+        # technical/safety fallback) instead of decide() directly; the scorer,
+        # ERP fake and RAG fake are unchanged, so the two paths are comparable.
+        if _LANGGRAPH_PATH:
+            from services.agent.runner import authoritative_run
+            out = authoritative_run(message, history=history or [], context=dict(ctx),
+                                    engine_fallback=lambda: engine.decide(
+                                        message, history=history or [], context=ctx))
+            _LANGGRAPH_STATS[out.used] += 1
+            if out.fallback_reason:
+                _LANGGRAPH_STATS["fallback_reasons"].append(out.fallback_reason[:120])
+            return out.engine_result or {}
+        return engine.decide(message, history=history or [], context=ctx)
+
     with erp_patch as erp_http:
         if rag_patch is not None:
             with rag_patch:
-                res = engine.decide(message, history=history or [], context=ctx)
+                res = _decide()
         else:
-            res = engine.decide(message, history=history or [], context=ctx)
+            res = _decide()
     dev = res.get("developer") or {}
     ics = dev.get("information_collection_status") or {}
     return {
@@ -306,6 +328,10 @@ def main(argv=None):
     ap.add_argument("--rag", action="store_true", help="also run the bounded live RAG pass")
     ap.add_argument("--report-only", action="store_true",
                     help="regenerate the .md from the existing baseline_results.json (no re-run)")
+    ap.add_argument("--langgraph", action="store_true",
+                    help="run every case through the production LangGraph runtime path "
+                         "(LANGGRAPH_MODE=production semantics, DecisionEngine as fallback); "
+                         "writes tests/customer_uat/.gate_scratch/langgraph_results.json")
     ap.add_argument("--commit-baseline", action="store_true",
                     help="write the TRACKED tests/customer_uat/baseline_results.json + "
                          "docs/customer_uat_sources/CUSTOMER_UAT_BASELINE_REPORT.md (deliberate "
@@ -314,7 +340,15 @@ def main(argv=None):
                          "run this repeatedly without disturbing the committed measurement.")
     args = ap.parse_args(argv)
 
-    if args.commit_baseline:
+    global _LANGGRAPH_PATH
+    if args.langgraph:
+        _LANGGRAPH_PATH = True
+        import config as _cfg
+        _cfg.LANGGRAPH_MODE = "production"
+        _OUT_JSON = _SCRATCH_DIR / "langgraph_results.json"
+        _OUT_MD = _SCRATCH_DIR / "LANGGRAPH_UAT_REPORT.md"
+        _SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    elif args.commit_baseline:
         _OUT_JSON, _OUT_MD = _TRACKED_OUT_JSON, _TRACKED_OUT_MD
     else:
         _OUT_JSON, _OUT_MD = _SCRATCH_OUT_JSON, _SCRATCH_OUT_MD
@@ -406,6 +440,11 @@ def main(argv=None):
         "aggregates": agg, "rag_probe": rag_probe,
         "per_case": per_case, "per_variant": per_variant,
     }
+    if _LANGGRAPH_PATH:
+        results["langgraph_runtime"] = {
+            "used_langgraph": _LANGGRAPH_STATS["langgraph"],
+            "used_engine_fallback": _LANGGRAPH_STATS["engine_fallback"],
+            "fallback_reasons": _LANGGRAPH_STATS["fallback_reasons"][:20]}
     _OUT_JSON.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_report(results)
     print(f"wrote {_OUT_JSON}")

@@ -146,10 +146,15 @@ _METHOD_WORD_ALT = ("ทางรถ|ทางเรือ|ทางอากา
 _METHOD_WORD_RE = re.compile(_METHOD_WORD_ALT)
 # a bare method ANSWER: an optional verb, a method from the ONE
 # vocabulary above (or the bare mode noun), an optional polite particle.
+# THAI-HUMAN-LANGUAGE — the tail also accepts a feasibility question
+# ("ส่งเรือได้ปะ", "ทางเรือได้ไหมครับ"): in reply to the assistant's own
+# "ทางรถหรือทางเรือ", naming a mode and asking whether it is possible IS
+# choosing that mode. The tail is a sequence so stacked particles work.
 _BARE_METHOD_ANSWER_RE = re.compile(
     r"^\s*(?:ส่ง|เอา|ขอ|ไป|เป็น|ใช้)?\s*(?:" + _METHOD_WORD_ALT
     + r"|รถ|เรือ|เครื่องบิน)\s*"
-    r"(?:ก็ได้|ล่ะ|มั้ย|ไหม|ครับ|ค่ะ|คะ|คับ|นะ|เลย|จ้า)?\s*$", re.IGNORECASE)
+    r"(?:ก็ได้|ได้(?:ไหม|มั้ย|ปะ|ป่ะ|หรอ|เหรอ)?|ล่ะ|มั้ย|ไหม|ครับ|ค่ะ|คะ|คับ|นะ|เลย|จ้า|\s)*$",
+    re.IGNORECASE)
 
 # ── ENTITY SPAN vs QUESTION / ACTION SPAN ─────────────────────────────
 # PHASE 6 POST-DEPLOY (defect class A — entity boundary / multi-intent).
@@ -182,7 +187,10 @@ _BARE_METHOD_ANSWER_RE = re.compile(
 #     only the full transport-MODE spans ("ทางรถ", "โดยเรือ") qualify.
 _QC_INTERROGATIVE_ALT = (
     "เท่าไหร่|เท่าไร|เท่าใด|กี่|ยังไง|ยังงัย|อย่างไร|"
-    "ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|หรือไม่|ป่าว|หรือยัง|รึยัง|"
+    # THAI-HUMAN-LANGUAGE — the colloquial yes/no particles the permission
+    # recogniser (_ACT_PERMIT) already accepts are question markers here
+    # too, so "ส่งเรือได้ปะ" and "ส่งเรือได้ไหม" split identically.
+    "ไหม|มั้ย|มัย|หรือเปล่า|รึเปล่า|หรือไม่|ป่าว|ปะ|ป่ะ|หรอ|เหรอ|หรือยัง|รึยัง|"
     "เมื่อไหร่|เมื่อไร|ที่ไหน|ตรงไหน|อันไหน|แบบไหน|ไหน|อะไร|ทำไม")
 _QC_CLAUSE_FILLER_ALT = (
     # generic predicates / auxiliaries
@@ -368,6 +376,16 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
                 if m and _is_product_carrier_span(m.group("p")):
                     open_idx, open_product = i, m.group("p").strip()
                     break
+            # THAI-HUMAN-LANGUAGE (cross-turn continuity) — the platform's
+            # own QUANTITY / METHOD acknowledgement ("รับทราบ จำนวนประมาณ
+            # 200 ลังนะคะ … รบกวนแจ้งชื่อสินค้า") opens the frame exactly
+            # like a product acknowledgement does: reply wording IS the
+            # state, and a frame that only opened on a product ack lost a
+            # confidently acknowledged quantity the moment the customer
+            # answered the product question ("กล่องพลาสติกครับ" -> re-ask).
+            if open_idx is None and (_ASSIST_QTY_RE.search(content)
+                                     or _ASSIST_METHOD_RE.search(content))                     and _assistant_asked_for_product([t]):
+                open_idx = i
             if open_idx is not None:
                 break
     if open_idx is None:
@@ -452,9 +470,9 @@ _FOLLOWUP_SHAPE_RES = (
     # เป็น~เปน~เป้น. Deliberately NOT matched: a fresh "สนใจนำเข้า X"
     # statement, a topic switch ("ขอเบอร์ติดต่อ"), a policy ask.
     re.compile(r"เปล[ีิ]?[่้]?ย?น\S{0,3}(?:เป[็้]?น|ไป|ของ|มัน)"
-               r"|(?<![ก-๙])เอา\S{1,20}?แทน(?![ก-๙])"
-               r"|^\s*เอ[้๊]?ย[\s\d]"
-               r"|(?:^|[\s,])แก้\S{0,3}เป[็้]?น"),
+               r"|(?<![ก-๙])เอา.{1,20}?แทน(?![ก-๙])"
+               r"|^\s*เอ[้๊่]?ย[\s\d]"
+               r"|(?:^|[\s,]|ขอ|ช่วย)แก้\S{0,3}เป[็้]?น"),
 )
 _FOLLOWUP_MAX_LEN = 36
 
@@ -639,7 +657,7 @@ _FRAME_CORRECTION_SHAPE_RE = re.compile(
     _FZ_CHANGE_VB
     + r"|(?<![ก-๙])เอา\S{0,20}?แทน(?![ก-๙])"
     + r"|(?<![ก-๙])เอา\s*" + _FZ_BE_TH + r"\s*[ก-๙]"     # "เอาเป็น X" (take-as, no แทน)
-    + r"|(?:^|[\s,])เอ[้๊]?ย(?:[\s\d,]|$)"
+    + r"|(?:^|[\s,])เอ[้๊่]?ย(?:[\s\d,]|$)"
     + r"|(?:^|[\s,])แก้\S{0,3}" + _FZ_BE_TH
     + r"|(?:^|\s)ไม[่้]?(?:ใช่|ไช่)\s*\S+.{0,4}(?:" + _FZ_BE_TH + r"|เอา)",
     re.IGNORECASE)
@@ -675,7 +693,7 @@ def _frame_correction_product(t: str, current: Optional[str]) -> Optional[str]:
         _FZ_CHANGE_VB + r"(?:ของ|สินค้า|มัน)?\s*(?:" + _FZ_BE_TH + r")?"
         + r"|(?<![ก-๙])เอา\s*(?:" + _FZ_BE_TH + r")?"
         + r"|(?<![ก-๙])" + _FZ_BE_TH
-        + r"|^\s*เอ[้๊]?ย",
+        + r"|^\s*เอ[้๊่]?ย",
         s))
     if not markers:
         return None
@@ -947,7 +965,7 @@ _WEBSITE_LINK_RE = re.compile(
 # email / LINE / company website / company address). Never an
 # identity-gated ERP lookup.
 _CONTACT_INFO_RE = re.compile(
-    r"ติดต่อ(?:ได้)?(?:ทาง|ช่องทาง|ยัง)?ไหน|ช่องทาง(?:การ)?ติดต่อ|ติดต่อ\S{0,6}ช่องทางไหน"
+    r"ติดต่อ(?:ได้)?(?:ทาง|ช่องทาง|ยัง|ที่|ตรง)?ไหน|ช่องทาง(?:การ)?ติดต่อ|ติดต่อ\S{0,6}ช่องทางไหน"
     r"|ติดต่อ\s*(?:shipify|บริษัท|แอดมิน|เจ้าหน้าที่|ฝ่าย\S{0,10})?\s*(?:ยังไง|อย่างไร|ทางไหน|ช่องทางไหน)"
     r"|ขอ\s*(?:เบอร์(?:โทร)?|โทรศัพท์|อีเมล|อีเมล์|เมล|e-?mail|ไลน์|line\s*id|line|ไอดีไลน์|ไอดี\s*line|เว็บไซต์บริษัท|ที่อยู่บริษัท|แฟนเพจ|เพจ|ช่องทางติดต่อ)"
     r"|มี(?:ไลน์|line|เพจ|แฟนเพจ)\s*(?:ไหม|มั้ย|หรือเปล่า)"
@@ -1053,13 +1071,15 @@ _SHIP_VERB = re.compile(r"ส่งได้|ส่งไหว|นำเข้�
 # the shared _SHIP_VERB. A leading "สั่ง"/"ซื้อ" alone is just an order
 # verb; the noun after it is what makes it a goods-policy question.
 _ORDER_GOODS_VERB = re.compile(r"^(?:อยาก|ขอ|จะ|ต้องการ)?\s*(?:สั่งซื้อ|สั่ง|ซื้อ)(?=\S{0,1}[ก-๙])", re.IGNORECASE)
+# the order verb AFTER a fronted topic noun ("<goods>สั่งจากจีนได้ไหม")
+_ORDER_VERB_FRONTED_RE = re.compile(r"(?<=[ก-๙])\s*(?:สั่งซื้อ|สั่ง|ซื้อ)(?=\s*(?:จาก|ของ|ได้|มา|เข้า|ผ่าน))")
 
 _ROLE_SELF = re.compile(r"ของผม|ของฉัน|ของดิฉัน|ของหนู|ของเรา|ของกระผม|บิลผม|บิลฉัน|ออเดอร์ผม|ออเดอร์ฉัน|พัสดุผม|พัสดุฉัน|บัญชีผม|บัญชีฉัน|เลขบิลผม|ผมสั่ง|ฉันสั่ง|ที่ผมสั่ง|ที่ฉันสั่ง", re.IGNORECASE)
 # a record-identifying private marker — excludes SELF_PICKUP (that stays a
 # public how-to per CUSTOMER-RAG-1.1) but not a bare first-person pronoun.
 _PRIV_RECORD_RE = re.compile(r"เลขบิล|เลขที่บิล|บิลผม|บิลฉัน|ออเดอร์ผม|พัสดุผม|order\s*id", re.IGNORECASE)
 
-_STATUS_STRONG = re.compile(r"ถึงไหน(?:แล้ว)?|ถึง(?:ไทย|จีน|โกดัง)?(?:แล้ว)?(?:หรือ)?ยัง|มาถึงยัง|ไปถึงไหน|ออกจาก(?:จีน|โกดัง|ไทย)?(?:แล้ว)?(?:หรือ)?ยัง|ของถึงยัง|เช็ก\S{0,4}สถานะ|เช็คสถานะ|ตรวจสอบสถานะ|ติดตามพัสดุ|ส่งของให้\S{0,6}(?:หรือ)?ยัง", re.IGNORECASE)
+_STATUS_STRONG = re.compile(r"ถึงไหน(?:แล้ว)?|ถึง(?:ไทย|จีน|โกดัง)?(?:แล้ว)?(?:หรือ|รึ)?ยัง|มาถึงยัง|ไปถึงไหน|ออกจาก(?:จีน|โกดัง|ไทย)?(?:แล้ว)?(?:หรือ)?ยัง|ของถึงยัง|เช็ก\S{0,4}สถานะ|เช็คสถานะ|ตรวจสอบสถานะ|ติดตามพัสดุ|ส่งของให้\S{0,6}(?:หรือ)?ยัง", re.IGNORECASE)
 _EST_COMPOSITE = re.compile(
     r"เสีย(?:เงิน|ค่า)?\S{0,8}(?:เท่าไหร่|เท่าไร|กี่บาท)"
     r"|(?:คิด|ประเมิน|คำนวณ|คำนวน|ตี)\S{0,4}(?:ค่าส่ง|ค่าขนส่ง|ค่านำเข้า|ราคาค่าส่ง)", re.IGNORECASE)
@@ -1399,7 +1419,25 @@ def _compose_family(t: str) -> "tuple[str, float, Dict]":
     # ONLY when a real product noun precedes the verb (so a bare "สั่งได้
     # ไหม" / "ซื้อได้ไหม" with no goods still falls through).
     _v_order_goods = bool(_ORDER_GOODS_VERB.search(t))
-    if a_permit and (v_ship or _v_order_goods) and not (obj_cost or obj_wh or obj_cp or obj_inv):
+    # THAI-HUMAN-LANGUAGE — topic-fronted order ("กระต่ายสั่งจากจีนได้ไหม"):
+    # the goods noun BEFORE the order verb. The same shared extractor reads
+    # the pre-verb span; a quantity, filler, demonstrative or record-object
+    # span is not a goods noun, so "20 คู่สั่งได้ไหม", "อยากสั่งได้ไหม" and
+    # "บิลที่สั่งยกเลิกได้ไหม" keep their own paths.
+    _fronted_noun = None
+    if a_permit and not _v_order_goods:
+        _fm = _ORDER_VERB_FRONTED_RE.search(t)
+        if _fm and _fm.start() > 0:
+            _pre = t[:_fm.start()]
+            if not re.search(r"\d|บิล|ออเดอร์|order|พัสดุ|ที่อยู่|ของผม|ของฉัน"
+                             r"|(?:ฝาก|ช่วย|รับ|กำลัง|อยาก|จะ|ขอ)\s*$", _pre, re.IGNORECASE):
+                _pn = _bare_product_noun(_pre)
+                if (_pn and not _opener_filler_only(_pn)
+                        and not _DEMONSTRATIVE_REF_RE.match(_pn)):
+                    _fronted_noun = _pn
+                    _v_order_goods = True
+    if a_permit and (v_ship or _v_order_goods) and not (obj_cost or obj_wh or obj_cp or obj_inv
+                                                          or (a_change and obj_addr)):
         # the product noun is the phrase BEFORE the ship / order / permit
         # verb. A run-on Thai phrase ("กล่องพลาสติกนำเข้าได้ไหมครับ") has no
         # spaces, so a bare split(" ")[0] would capture the WHOLE
@@ -1419,6 +1457,8 @@ def _compose_family(t: str) -> "tuple[str, float, Dict]":
         _noun = (_bare_product_noun(t[:_cut])
                  or _import_noun(t)
                  or (re.split(r"\s+", t[:_cut].strip())[-1] if _cut else ""))
+        if _noun and _DEMONSTRATIVE_REF_RE.match(re.sub(r"\s+", "", _noun)):
+            _noun = ""        # "ของแบบนี้นำเข้าได้ไหม" refers to the known product
         _noun_ok = bool(_noun and 2 <= len(_noun) <= 30 and _THAI_CHAR_RE.search(_noun))
         # PHASE-5 D15 — Thai "VERB noun" order ("สั่งแบตเตอรี่...ได้ไหม"):
         # the goods noun sits AFTER a leading order verb (never use the
@@ -1428,7 +1468,9 @@ def _compose_family(t: str) -> "tuple[str, float, Dict]":
         # a genuine ≥3-char Thai noun — so a bare "สั่งได้ไหม" / "ซื้อได้ไหม"
         # (no goods) still falls through to the rest of _compose.
         _order_noun_ok = False
-        if _v_order_goods:
+        if _fronted_noun:
+            _noun, _noun_ok, _order_noun_ok = _fronted_noun, True, True
+        elif _v_order_goods:
             _ov = _ORDER_GOODS_VERB.search(t)
             _pm = _ACT_PERMIT.search(t)
             if _ov is not None and _pm is not None and _pm.start() > _ov.end():
@@ -1660,12 +1702,29 @@ _REPLY_IS_QUESTION_RE = re.compile(r"ไหม|มั้ย|หรือเป�
 # blanket strip corrupted these by prefix ("ของเล่น" -> "เล่น") or suffix
 # ("กล่องใส่ของ" -> "กล่อง"). See _bare_product_noun below for how they
 # are still recognised as filler, just no longer unconditionally.
+# THAI-HUMAN-LANGUAGE (2026-09) — the leading alternation also covers the
+# other ways a customer ANSWERS "which product?": "เอา<noun>" (take/want),
+# "อยาก(สั่ง|นำเข้า)<noun>", and the placeholder+copula openers
+# "สินค้าเป็น<noun>" / "ของคือ<noun>". The placeholder is stripped ONLY when
+# a copula follows it (lookahead), so a product whose name begins with
+# "สินค้า"/"ของ" ("ของเล่น", "สินค้ามือสอง") keeps its first syllable.
+# The placeholder+copula opener is tone-mark tolerant ("สินค่าเป็น", "สินคาคือ"):
+# the shape "<placeholder><copula>" has no other reading, and the spelling
+# layer deliberately never rewrites a run of real words ("สิน|ค่า") on its own.
 _BARE_PRODUCT_STRIP_RE = re.compile(
-    r"^(?:เป็น|คือ|ก็|น่าจะ|ประมาณ|พวก|เป็นพวก|จำพวก|ชนิด|ประเภท|อยากได้|ต้องการ|สั่ง|นำเข้า)\s*"
+    r"^(?:สินค[้่]?า(?=เป็น|คือ)|ของ(?=เป็น|คือ)|เป็น|คือ|ก็|น่าจะ|ประมาณ|พวก|เป็นพวก|จำพวก|ชนิด|ประเภท|"
+    r"อยากได้|อยากสั่ง|อยากนำเข้า|อยาก|ต้องการ|จะเอา|เอา|ฝากสั่ง|ฝากนำเข้า|สั่งซื้อ|สั่ง|ซื้อ|นำเข้า|"
+    # the verb+placeholder compounds "ส่งของ"/"ขนของ" name no product
+    r"ส่ง(?=ของ|สินค้า)|ขน(?=ของ))\s*"
     r"|\s*(?:ครับ|ค่ะ|คะ|ค่า|นะ|น่ะ|จ้า|จ้ะ|เลย|อ่ะ|อะ|ล่ะ|หน่อย|ด้วย|ค่ะๆ|ครับๆ)+\s*$")
 # the bare generic placeholder with nothing else left ("เป็นของครับ" ->
 # no real product named at all).
 _BARE_PRODUCT_PLACEHOLDER_RE = re.compile(r"^(?:สินค้า|ของ)+$")
+# THAI-HUMAN-LANGUAGE — a DEMONSTRATIVE reference ("ของแบบนี้", "อันนี้",
+# "สินค้าพวกนี้", "ตัวนั้น") points at goods already under discussion; it
+# is not a product name and must never overwrite the remembered one.
+_DEMONSTRATIVE_REF_RE = re.compile(
+    r"^(?:สินค้า|ของ|อัน|ตัว|ชิ้น)?(?:แบบ|พวก|ประเภท|ชนิด|เหล่า)?(?:นี้|นั้น|นี่|นั่น|ดังกล่าว|โน้น)+$")
 # NOTE (PHASE 6, system-wide pass): an earlier revision ALSO stripped a
 # trailing "ใส่ของ(ได้)?" when what preceded it was "long enough" to look
 # like a self-sufficient noun. That length threshold was brittle by
@@ -1735,6 +1794,8 @@ def _bare_product_noun(t: str) -> Optional[str]:
     # ("ของเล่นๆ" is still the product "ของเล่น").
     s = s.rstrip("ๆ").strip()
     if s and _BARE_PRODUCT_PLACEHOLDER_RE.match(s):
+        return None
+    if s and _DEMONSTRATIVE_REF_RE.match(s):
         return None
     # PHASE 6 POST-DEPLOY (defect class A) — a remnant that is NOTHING but
     # opener filler ("อยาก", "ต้องการ", "จะเอา") is not a product either.
@@ -1830,8 +1891,10 @@ _ASSISTANT_ASKED_QTY_RE = re.compile(
     r"แจ้งจำนวน|จำนวน\S{0,6}(?:เท่าไหร่|กี่|โดยประมาณ|ประมาณเท่าไร)|กี่(?:ชิ้น|ตัว|คู่|อัน|กล่อง|ชุด)")
 _ASSISTANT_ASKED_METHOD_RE = re.compile(
     r"ทางรถหรือทางเรือ|ทางรถหรือเรือ|ส่งทางไหน|ขนส่งทางไหน|วิธี(?:การ)?จัดส่ง")
+# THAI-HUMAN-LANGUAGE — a quantity answer may open with a take/want verb
+# or an approximation word ("เอา 50 ชิ้น", "สัก 3 ลัง", "ขอ 10 คู่ครับ").
 _BARE_QTY_ANSWER_RE = re.compile(
-    r"^\s*(?:ประมาณ\s*)?\d{1,7}\s*"
+    r"^\s*(?:เอา|ขอ|สัก|ราวๆ|ราว|จำนวน)?\s*(?:ประมาณ\s*)?\d{1,7}\s*"
     r"(?:" + _COUNT_UNIT_ALT + r")?\s*"
     r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
 # LANGGRAPH UPGRADE — this file used to define _BARE_METHOD_ANSWER_RE

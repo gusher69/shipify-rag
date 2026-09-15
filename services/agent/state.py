@@ -63,6 +63,17 @@ class AgentState(TypedDict, total=False):
     history: List[Dict[str, Any]]
     customer_context: Dict[str, Any]
 
+    # ── human-language normalisation (services/language) ──
+    # `raw_message` is never overwritten; every semantic layer reads
+    # `normalized_message` / `normalized_history`, responses and audit
+    # may still reference the raw text.
+    normalized_history: List[Dict[str, Any]]
+    normalization_candidates: List[Dict[str, Any]]
+    normalization_confidence: float
+    normalization_applied: bool
+    normalization_method: List[str]
+    normalization_trace: Dict[str, Any]
+
     # ── canonical semantics (filled ONCE by resolve_current_turn) ──
     conversation_act: str
     primary_intent: str
@@ -142,9 +153,20 @@ class AgentDecision:
     node_path: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    # the FULL engine result the graph's execute step produced (routing,
+    # developer block, workflow, confirmation gate...). The webhook needs
+    # it when the graph is the primary responder; it is not part of the
+    # comparable view and is excluded from as_dict().
+    engine_result: Optional[Dict[str, Any]] = field(default=None, repr=False, compare=False)
+    # what the graph actually read, for audit — raw text stays in state.
+    normalized_message: str = ""
+    normalization_applied: bool = False
+    normalization_method: List[str] = field(default_factory=list)
 
     def as_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("engine_result", None)
+        return d
 
     @classmethod
     def from_state(cls, state: Dict[str, Any]) -> "AgentDecision":
@@ -167,7 +189,23 @@ class AgentDecision:
             node_path=list(state.get("node_path") or []),
             errors=list(state.get("errors") or []),
             notes=list(state.get("notes") or []),
+            normalized_message=state.get("normalized_message") or "",
+            normalization_applied=bool(state.get("normalization_applied")),
+            normalization_method=list(state.get("normalization_method") or []),
         )
+
+
+def effective_message(state: Dict[str, Any]) -> str:
+    """What every semantic layer reads: the normalised text, falling
+    back to the raw text only if normalisation produced nothing."""
+    return state.get("normalized_message") or state.get("raw_message") or ""
+
+
+def effective_history(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The history with every USER turn normalised the same way as the
+    current message, so remembered slots are read from the same wording
+    the current turn is."""
+    return list(state.get("normalized_history") or state.get("history") or [])
 
 
 def new_state(message: str, *, history=None, context=None) -> AgentState:
@@ -186,6 +224,12 @@ def new_state(message: str, *, history=None, context=None) -> AgentState:
         "normalized_message": "",
         "history": list(history or []),
         "customer_context": dict(ctx.get("customer_context") or {}),
+        "normalized_history": list(history or []),
+        "normalization_candidates": [],
+        "normalization_confidence": 1.0,
+        "normalization_applied": False,
+        "normalization_method": [],
+        "normalization_trace": {},
         "conversation_act": "UNKNOWN",
         "primary_intent": "UNKNOWN",
         "secondary_intents": [],

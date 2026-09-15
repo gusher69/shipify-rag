@@ -617,6 +617,7 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # ordinary fresh message, unchanged from before this sprint.
     pending = pending_service.get_active(tenant_id=tenant_id, channel=channel, conversation_key=user_id)
     result = None
+    _agent_outcome = None      # set only when the agent graph answered as primary
 
     if pending:
         reply_kind = classify_confirmation_reply(question)
@@ -695,36 +696,59 @@ def _handle_message_via_decision_engine(event: MessageEvent):
                     pass
                 if _fresh and not _accepting_help:
                     result = _expired_result()
+        # ── LANGGRAPH AGENT AS PRIMARY (owner_test / production) ──────
+        # When config.LANGGRAPH_MODE makes the graph authoritative for
+        # this sender, the graph answers the turn: it normalises the human
+        # language, resolves the turn once, plans, and EXECUTES through
+        # the existing DecisionEngine (so nothing is executed twice). The
+        # engine is the automatic technical/safety fallback — it takes
+        # the turn only when the graph raised, timed out, produced an
+        # invalid state, or its own safety gate flagged the reply. A
+        # merely different semantic reading is never a fallback reason.
+        if result is None:
+            try:
+                from services.agent import runner as _agent_runner
+                if _agent_runner.graph_is_authoritative(decide_context.get("sample_source") or ""):
+                    _agent_outcome = _agent_runner.authoritative_run(
+                        question, history=recent_history, context=decide_context,
+                        engine_fallback=lambda: engine.decide(
+                            question, history=recent_history, context=decide_context))
+                    result = _agent_outcome.engine_result
+            except Exception as _agent_exc:
+                print(f"[webhook] authoritative agent run failed, engine answers: {_agent_exc!r}")
+                _agent_outcome = None
+                result = None
         if result is None:
             result = engine.decide(question, history=recent_history, context=decide_context)
 
-    # ── LANGGRAPH AGENT (services/agent/) ────────────────────────────
-    # The current engine has ALREADY produced this customer's answer
-    # above. The graph now runs the same turn beside it, reusing that
-    # result as its execution step (so nothing is executed twice — no
-    # second ERP call, no second notification) and producing a comparable
-    # AgentDecision. In `shadow` mode that decision is telemetry only. In
-    # `owner_test` it replaces the reply for the configured owner/tester
-    # senders only; in `production`, for everyone. Best-effort throughout:
-    # any failure leaves this turn exactly as the current engine decided.
+    # ── LANGGRAPH AGENT IN SHADOW (services/agent/) ──────────────────
+    # When the graph was NOT primary for this turn, the current engine
+    # has ALREADY produced the customer's answer above. The graph now
+    # runs the same turn beside it, reusing that result as its execution
+    # step (so nothing is executed twice — no second ERP call, no second
+    # notification) and producing a comparable AgentDecision that is
+    # telemetry only. Best-effort throughout: any failure leaves this
+    # turn exactly as the current engine decided.
     _agent_decision = None
     _agent_comparison = None
+    _agent_telemetry = None
     try:
         from services.agent import runner as _agent_runner
-        _agent_decision = _agent_runner.shadow_run(
-            question, history=recent_history,
-            context={**decide_context, "_precomputed_engine_result": result})
-        if _agent_decision is not None:
-            _agent_comparison = _agent_runner.compare(result, _agent_decision)
-            if (_agent_runner.graph_is_authoritative(decide_context.get("sample_source") or "")
-                    and not _agent_decision.errors
-                    and (_agent_decision.final_response or "").strip()):
-                # The graph may only take the turn when its OWN safety gate
-                # raised nothing. A flagged turn always falls back to the
-                # current engine's answer.
-                result = {**result,
-                          "reply": {**(result.get("reply") or {}),
-                                    "text": _agent_decision.final_response}}
+        if _agent_outcome is not None:
+            _agent_decision = _agent_outcome.decision
+            _agent_telemetry = {
+                "used": _agent_outcome.used,
+                "fallback_kind": _agent_outcome.fallback_kind,
+                "fallback_reason": _agent_outcome.fallback_reason,
+                "latency_ms": _agent_outcome.latency_ms,
+                "normalization_applied": bool(getattr(_agent_decision, "normalization_applied", False)),
+            }
+        elif not _agent_runner.graph_is_authoritative(decide_context.get("sample_source") or ""):
+            _agent_decision = _agent_runner.shadow_run(
+                question, history=recent_history,
+                context={**decide_context, "_precomputed_engine_result": result})
+            if _agent_decision is not None:
+                _agent_comparison = _agent_runner.compare(result, _agent_decision)
     except Exception as _agent_exc:
         print(f"[webhook] agent graph skipped (non-fatal): {_agent_exc!r}")
 
@@ -732,9 +756,12 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     reply_text = reply.get("text") or ""
     routing_type = (result.get("routing") or {}).get("type")
     is_handoff = routing_type == "HUMAN_HANDOFF"
-    if _agent_comparison is not None and isinstance(result.get("developer"), dict):
+    if isinstance(result.get("developer"), dict):
         # observability only — never read for routing.
-        result["developer"]["langgraph_comparison"] = _agent_comparison
+        if _agent_comparison is not None:
+            result["developer"]["langgraph_comparison"] = _agent_comparison
+        if _agent_telemetry is not None:
+            result["developer"]["langgraph"] = _agent_telemetry
 
     # Persist a NEW pending confirmation whenever THIS turn's result is
     # itself a confirmation-required response (works for any COMMAND-type

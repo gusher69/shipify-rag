@@ -230,12 +230,23 @@ DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "default")
 #               configured OWNER_TEST LINE senders
 #               (OWNER_TEST_LINE_USER_IDS above). Every REAL_LINE
 #               customer still goes through the current engine.
-#   production  the graph is the response authority for all traffic.
+#   production  the graph is the PRIMARY response authority for all
+#               traffic (REAL_LINE, OWNER_TEST, ADMIN_AUTO). The current
+#               DecisionEngine stays in the process as the automatic
+#               TECHNICAL / SAFETY fallback: if the graph raises, exceeds
+#               LANGGRAPH_TIMEOUT_SECONDS, returns an invalid state, or
+#               its own safety gate flags the turn, the engine answers
+#               instead and the customer never sees an error. A merely
+#               different semantic reading is NOT a fallback reason.
 #               Requires a deliberate owner decision; never a default.
 LANGGRAPH_MODE = (os.getenv("LANGGRAPH_MODE", "shadow") or "shadow").strip().lower()
 LANGGRAPH_MODES = ("off", "shadow", "owner_test", "production")
 if LANGGRAPH_MODE not in LANGGRAPH_MODES:
     LANGGRAPH_MODE = "shadow"
+# Hard ceiling on an AUTHORITATIVE graph run before the engine fallback
+# takes the turn. Generous by design: the graph's execution step IS the
+# engine, so this only ever trips on a genuine hang.
+LANGGRAPH_TIMEOUT_SECONDS = float(os.getenv("LANGGRAPH_TIMEOUT_SECONDS", "60"))
 # Kept as a separate boolean because the shadow comparison must be able to
 # run while the graph is ALSO answering owner-test traffic.
 LANGGRAPH_SHADOW_MODE = os.getenv(

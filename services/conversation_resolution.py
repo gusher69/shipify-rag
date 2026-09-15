@@ -434,7 +434,13 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
         ev.append({"kind": "regex_signal", "name": f"entity:{k}"})
     # merge in the semantic layer's own entities (product noun etc.)
     for k, v in (getattr(sem, "entities", {}) or {}).items():
-        if k == "product" and "product" not in ent_raw and isinstance(v, str) and _valid_product_noun(v.strip()):
+        # THAI-HUMAN-LANGUAGE — the central interpreter's product noun WINS
+        # over this module's own order-verb regex read: the interpreter's
+        # extractor is the one that strips quantity qualifiers, method
+        # verbs and service filler ("เสื้อผ้าประมาณ 100 ตัว" -> "เสื้อผ้า",
+        # not "เสื้อผ้าประมาณ"). The regex read stays only as a fallback for
+        # turns where the interpreter named no product at all.
+        if k == "product" and isinstance(v, str) and _valid_product_noun(v.strip()):
             ent_raw["product"] = _slot(v.strip(), raw=v.strip())
         elif k == "method" and "shipping_method" not in ent_raw and v:
             _mv = v if v in ("road", "sea", "air") else _method_label(v)

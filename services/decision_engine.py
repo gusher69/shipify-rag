@@ -4600,7 +4600,9 @@ class DecisionEngine:
                 _no_rag_question = not re.search(
                     r"ไหม|มั้ย|หรือเปล่า|รึเปล่า|อะไรบ้าง|อะไรบาง|ยังไง|อย่างไร|เท่าไหร่|กี่\S|\?", message or "")
                 _broad_china_buy = bool(re.search(
-                    r"(?:อยาก|สนใจ|จะ|ต้องการ|กำลัง)?\s*(?:สั่ง|ซื้อ|หาซื้อ|ช้อป|นำเข้า)\s*"
+                    # THAI-HUMAN-LANGUAGE — "ส่ง/ขน ของจากจีน" (ship / haul goods
+                    # from China) is the same proxy-import interest as สั่ง/ซื้อ.
+                    r"(?:อยาก|สนใจ|จะ|ต้องการ|กำลัง)?\s*(?:สั่ง|ซื้อ|หาซื้อ|ช้อป|นำเข้า|ส่ง|ขน)\s*"
                     r"(?:ของ|สินค้า|สิ่งของ|อะไร)?\s*(?:จาก)?\s*"
                     r"(?:(?:ประเทศ)?จีน|1688|เถาเป่า|taobao|tmall|ทีมอลล์|อาลีบาบา)",
                     message or "", re.IGNORECASE)) and _no_rag_question \
@@ -4626,10 +4628,17 @@ class DecisionEngine:
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))
 
+                # THAI-HUMAN-LANGUAGE — a fresh opener that states a QUANTITY
+                # or METHOD but no product ("สนใจนำเข้า 5 ใบ") is real known
+                # state too (PHASE-6-SLOT-CONSUMPTION): it gets the same
+                # acknowledge-and-ask-product reply as the China-marker
+                # shape above, instead of a RAG detour whose generic ack
+                # discarded the quantity.
                 _svc_pre_rag = _svc_fam in _SERVICE_INTENT_FAMILIES or (
                     _svc_fam == "IMPORT_INTEREST"
                     and getattr(semantic, "follow_up_op", "NONE") == "NONE"
-                    and _svc_ent.get("product")
+                    and (_svc_ent.get("product") or _svc_ent.get("quantity")
+                         or _svc_ent.get("method"))
                     and _no_rag_question
                     # OWNER-REAL-LINE-FIX-06 — a stale frame from earlier
                     # history must not suppress a FRESH IMPORT_INTEREST

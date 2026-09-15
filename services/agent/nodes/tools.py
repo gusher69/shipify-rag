@@ -13,6 +13,7 @@ import time
 from typing import Any, Dict
 
 from services.agent.adapters import existing_engine as engine
+from services.agent.state import effective_history, effective_message
 
 # actions that must never reach a side-effecting or identity-gated tool.
 _PUBLIC_ONLY_ACTIONS = frozenset({"ANSWER_PUBLIC_INFO", "ANSWER_POLICY",
@@ -67,9 +68,10 @@ def execute_tool(state: Dict[str, Any]) -> Dict[str, Any]:
         node_path = node_path[:-1] + ["execute_tool(reused)"]
     else:
         try:
-            result = engine.execute(state.get("normalized_message")
-                                    or state.get("raw_message") or "",
-                                    state.get("history") or [],
+            # The engine executes the NORMALISED turn against the
+            # NORMALISED history — the same wording the graph understood.
+            result = engine.execute(effective_message(state),
+                                    effective_history(state),
                                     {k: v for k, v in (state.get("_decide_context") or {}).items()
                                      if k != "_precomputed_engine_result"})
         except Exception as exc:

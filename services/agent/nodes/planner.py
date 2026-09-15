@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from services.agent.adapters import existing_engine as engine
+from services.agent.state import effective_history, effective_message
 
 _ASK_FOR_SLOT = {
     "product": "ASK_PRODUCT",
@@ -30,8 +31,8 @@ def resolve_auth_requirement(state: Dict[str, Any]) -> Dict[str, Any]:
     never authorization (task §10).
     """
     node_path = list(state.get("node_path") or []) + ["resolve_auth_requirement"]
-    msg = state.get("normalized_message") or state.get("raw_message") or ""
-    det, evidence = engine.private_authority(msg, state.get("history") or [],
+    msg = effective_message(state)
+    det, evidence = engine.private_authority(msg, effective_history(state),
                                              state.get("customer_context") or {})
     family = state.get("primary_intent") or "UNKNOWN"
     is_private = bool(det) or bool(evidence)
