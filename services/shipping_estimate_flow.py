@@ -67,8 +67,8 @@ _METHOD_RE = re.compile(r"ทางรถ|ทางบก|ทางเรือ|
 # "ทางรถค่ะ", "เอารถ", "ขอทางเรือ") — a structural token parser, not a
 # sentence list. Only consulted inside an active calculator context.
 _ROUTE_ANSWER_RE = re.compile(
-    r"^\s*(?:เอา|ขอ|ใช้|เป็น)?\s*(?:ทาง|โดย)?\s*(รถ|บก|เรือ|เครื่องบิน|อากาศ)\s*"
-    r"(?:ครับ|ค่ะ|คะ|นะ|น่ะ|จ้า|จ๊ะ|คับ|ครัช|เลย|ก็ได้|ดีกว่า)*\s*$")
+    r"^\s*(?:ส่ง|เอา|ขอ|ใช้|เป็น)?\s*(?:ทาง|โดย)?\s*(รถ|บก|เรือ|เครื่องบิน|อากาศ)\s*"
+    r"(?:ได้(?:ไหม|มั้ย|ปะ|ป่ะ|หรอ|เหรอ)?|ครับ|ค่ะ|คะ|นะ|น่ะ|จ้า|จ๊ะ|คับ|ครัช|เลย|ก็ได้|ดีกว่า)*\s*$")
 # a CLEAR correction / comparison / anaphoric follow-up of the just-
 # completed estimate — reuse existing SEM-GEN-style correction wording.
 _CORRECTION_RE = re.compile(

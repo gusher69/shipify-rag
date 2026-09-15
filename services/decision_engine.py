@@ -85,6 +85,7 @@ from services.conversation_semantics import (
     PUBLIC_INFO_FAMILIES as _PUBLIC_INFO_FAMILIES,
     _compose as _compose_intent_family,
     _HIGH_RISK_PRODUCT_RE as _HIGH_RISK_PRODUCT_RE,
+    _PRICE_Q_RE as _PRICE_Q_RE,
 )
 # PHASE-6B — pre-RAG conversational / service-intent layer (help /
 # service-discovery / money-transfer / website-link / public-contact /
@@ -126,6 +127,7 @@ from services.shipping_estimate_flow import (
     estimate_reply as _estimate_reply,
     asks_rate_basis as _asks_rate_basis,
     estimate_turn_answers as _estimate_turn_answers,
+    EstimateState as _EstimateState,
 )
 # Hybrid Runtime Service (2026-08-02 Production Integration Sprint, Phase
 # 1 Step B/C) — the SAME synthesis function the AI Playground's Hybrid
@@ -4309,6 +4311,33 @@ class DecisionEngine:
                                 developer_trace=developer_trace, context=context, start=start,
                                 alert=_detect_alert(message, context))
                     # CHANGE_BRAND / UNKNOWN -> fall through to ordinary routing.
+
+                # CUSTOMER 6-SOURCE CLOSURE — a PRICE question asked once
+                # the import-interest frame already knows the weight maps
+                # to the SAME authoritative shipping-cost rule as
+                # AI-API-S1-4.0 / TRAIN-03 (the charge is on whichever of
+                # weight-kg or CBM-volume is higher — RATES /
+                # EstimateState.missing() in services/
+                # shipping_estimate_flow.py, the ONE calculator this repo
+                # has). Before this, frame_ack_reply's own ladder had
+                # nothing left to ask once weight was known, so a price
+                # question here ended on a bare acknowledgement with no
+                # next step. This asks ONLY the genuinely missing input
+                # (dimensions, or method) via the calculator's OWN
+                # wording — never a hand-written copy of it, never an
+                # invented number — and never re-asks weight, which the
+                # seeded EstimateState already carries as known.
+                if (_f5_frame and _f5_frame.product and getattr(_f5_frame, "weight", None)
+                        and _PRICE_Q_RE.search(message or "")):
+                    _price_est = _EstimateState(weight=_f5_frame.weight, method=_f5_frame.method)
+                    if _price_est.missing():
+                        developer_trace["selection_source"] = "frame_weight_known_price_ask"
+                        developer_trace["shipping_estimate_state"] = _price_est.as_dict()
+                        return self._finalize(
+                            reply=_build_response(text=_estimate_missing_prompt(_price_est)),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
 
                 # CUSTOMER-ACTION-1 — an operational CHANGE / VERIFY request
                 # on the customer's own record that has NO executable
