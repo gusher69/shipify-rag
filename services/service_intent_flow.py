@@ -155,7 +155,9 @@ def warehouse_inbound_reply(_wh_kind: Optional[str] = None) -> str:
 
 
 def import_interest_reply(product: Optional[str], *, quantity: Optional[int] = None,
-                          method: Optional[str] = None, unit: Optional[str] = None) -> str:
+                          method: Optional[str] = None, unit: Optional[str] = None,
+                          weight: Optional[float] = None,
+                          weight_unit: Optional[str] = None) -> str:
     """Reuse the frame acknowledgement so ``derive_active_frame`` can read
     the product back on the next turn (same 'reply wording IS the state'
     pattern the import frame already uses).
@@ -167,19 +169,24 @@ def import_interest_reply(product: Optional[str], *, quantity: Optional[int] = N
     slot the customer had just supplied ("20 คู่อยากสั่งของจากจีน" ->
     re-asks quantity). The caller is the single source of these values
     (services/conversation_semantics.py's own IMPORT_INTEREST entity
-    extraction); this function never re-derives them itself."""
+    extraction); this function never re-derives them itself.
+
+    WEIGHT-HOTFIX: `weight`/`weight_unit` are a SEPARATE typed
+    measurement carried the same way — never inferred from, and never
+    overwriting, `quantity`/`unit`."""
     from services.conversation_semantics import Frame, frame_ack_reply
     # PHASE-6-SLOT-CONSUMPTION — a quantity/method-only opener ("20 คู่
     # อยากสั่งของจากจีน", no specific product noun) still has REAL known
     # state; it must acknowledge that and ask for product, never fall
     # back to the fully-generic two-path reply below (which would
     # silently discard the quantity the customer already gave).
-    if product or quantity or method:
+    if product or quantity or method or weight:
         # PHASE 6 POST-DEPLOY (defect class C) — the unit the customer
         # actually supplied travels with the quantity into the ack, so
         # "20 คู่" is never echoed back as "20 ชิ้น".
-        return frame_ack_reply(Frame(product=product, quantity=quantity,
-                                     method=method, unit=unit), changed="none")
+        return frame_ack_reply(Frame(product=product, quantity=quantity, method=method,
+                                     unit=unit, weight=weight, weight_unit=weight_unit),
+                               changed="none")
     # OWNER-REAL-LINE-FIX-01 — a broad "อยากสั่งของจากจีน" must NOT assume
     # the customer already has a product link. Offer BOTH paths in one
     # coherent reply: send a link if they have one, otherwise say what
@@ -216,7 +223,8 @@ def reply_for_family(family: str, *, sb=None, entities: Optional[Dict] = None,
     if family == "IMPORT_INTEREST":
         return import_interest_reply(product or ent.get("product"),
                                       quantity=ent.get("quantity"), method=ent.get("method"),
-                                      unit=ent.get("quantity_unit"))
+                                      unit=ent.get("quantity_unit"),
+                                      weight=ent.get("weight"), weight_unit=ent.get("weight_unit"))
     return None
 
 

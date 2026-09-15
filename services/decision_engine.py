@@ -4241,7 +4241,8 @@ class DecisionEngine:
                             routing_type="GENERAL", workflow=workflow_hint,
                             developer_trace=developer_trace, context=context, start=start,
                             alert=_detect_alert(message, context))
-                    if _f5["op"] in ("CHANGE_TARGET", "CORRECT_QUANTITY", "CHANGE_METHOD"):
+                    if _f5["op"] in ("CHANGE_TARGET", "CORRECT_QUANTITY", "CHANGE_METHOD",
+                                     "SET_WEIGHT"):
                         # the deterministic read of an explicit "เปลี่ยนเป็น
                         # X" / "เอ้ย <n>" correction is high-confidence and
                         # decides directly; the gated LLM resolve_followup()
@@ -4287,6 +4288,23 @@ class DecisionEngine:
                                         _f5_frame,
                                         changed="none" if _use5.get("method_was_unset")
                                         else "method")),
+                                routing_type="GENERAL", workflow=workflow_hint,
+                                developer_trace=developer_trace, context=context, start=start,
+                                alert=_detect_alert(message, context))
+                        elif _use5["op"] == "SET_WEIGHT" and _use5.get("weight") is not None:
+                            # WEIGHT-HOTFIX — a typed measurement, SEPARATE
+                            # from order quantity (task: "10 กิโลกรัม" must
+                            # never be read as, or overwrite, quantity).
+                            # frame.product/quantity/method are untouched;
+                            # frame_ack_reply's own "weight" wording is
+                            # already neutral ("รับทราบค่ะ…") for both a
+                            # first answer and a correction, so no
+                            # was-unset branching is needed here.
+                            _f5_frame.weight = _use5["weight"]
+                            _f5_frame.weight_unit = _use5.get("weight_unit") or "กก."
+                            return self._finalize(
+                                reply=_build_response(
+                                    text=_frame_ack_reply(_f5_frame, changed="weight")),
                                 routing_type="GENERAL", workflow=workflow_hint,
                                 developer_trace=developer_trace, context=context, start=start,
                                 alert=_detect_alert(message, context))
@@ -4451,7 +4469,7 @@ class DecisionEngine:
                         # quantity answer, or a "เปลี่ยนเป็น X" correction.
                         _det = _resolve_frame_correction(message, _sem_frame)
                         if _det["op"] in ("CHANGE_TARGET", "CORRECT_QUANTITY",
-                                          "SET_QUANTITY", "CHANGE_METHOD"):
+                                          "SET_QUANTITY", "CHANGE_METHOD", "SET_WEIGHT"):
                             _sem = {**_sem, **_det}
                     developer_trace["semantic_frame"] = _sem_frame.as_dict()
                     developer_trace["semantic_op"] = _sem["op"]
@@ -4476,6 +4494,18 @@ class DecisionEngine:
                             reply=_build_response(text=_frame_ack_reply(
                                 _sem_frame,
                                 changed="none" if _sem.get("method_was_unset") else "method")),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
+                    elif _op == "SET_WEIGHT" and _sem.get("weight") is not None:
+                        # WEIGHT-HOTFIX — same typed measurement as the
+                        # Fix05 block above; reached only when Fix05 did
+                        # not already handle the turn (e.g. no active frame
+                        # there yet).
+                        _sem_frame.weight = _sem["weight"]
+                        _sem_frame.weight_unit = _sem.get("weight_unit") or "กก."
+                        return self._finalize(
+                            reply=_build_response(text=_frame_ack_reply(_sem_frame, changed="weight")),
                             routing_type="GENERAL", workflow=workflow_hint,
                             developer_trace=developer_trace, context=context, start=start,
                             alert=_detect_alert(message, context))
@@ -4525,7 +4555,13 @@ class DecisionEngine:
                     if _svc_frame is not None and _svc_ent.get("product"):
                         for _fk, _fv in (("quantity", _svc_frame.quantity),
                                          ("quantity_unit", getattr(_svc_frame, "unit", None)),
-                                         ("method", _svc_frame.method)):
+                                         ("method", _svc_frame.method),
+                                         # WEIGHT-HOTFIX — a typed measurement
+                                         # carried the same way quantity/
+                                         # method already are: never inferred
+                                         # from, and never overwrites, them.
+                                         ("weight", getattr(_svc_frame, "weight", None)),
+                                         ("weight_unit", getattr(_svc_frame, "weight_unit", None))):
                             if _fv and not _svc_ent.get(_fk):
                                 _svc_ent[_fk] = _fv
                 except Exception:
@@ -4623,7 +4659,9 @@ class DecisionEngine:
                         reply=_build_response(text=_imp_reply(
                             _svc_ent.get("product"), quantity=_svc_ent.get("quantity"),
                             method=_svc_ent.get("method"),
-                            unit=_svc_ent.get("quantity_unit"))),
+                            unit=_svc_ent.get("quantity_unit"),
+                            weight=_svc_ent.get("weight"),
+                            weight_unit=_svc_ent.get("weight_unit"))),
                         routing_type="GENERAL", workflow=workflow_hint,
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))

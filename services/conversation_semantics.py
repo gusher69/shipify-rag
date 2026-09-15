@@ -92,6 +92,17 @@ def _is_product_carrier_span(span: str) -> bool:
 _COUNT_UNIT_ALT = ("ตัว|ชิ้น|ชิน|อัน|ใบ|คู่|ชุด|กล่อง|ขวด|โหล|แพ็ค|แพก|แพค|ลัง|ผืน|"
                    "หลัง|เครื่อง|พาเลท|pcs?")
 
+# WEIGHT-HOTFIX — the SAME kg-family unit vocabulary
+# services/conversation_resolution.py's own _WEIGHT_UNIT already
+# canonicalises (กก/กก./กิโล/กิโลกรัม/โล/kg all -> kg); this module cannot
+# import that one back (conversation_resolution.py imports FROM this
+# module), so the common subset is restated here, once, as the single
+# alternation every weight recognizer in THIS file is built from. Grams/
+# tonnes are deliberately excluded — they need a unit conversion this
+# hotfix's typed slot does not carry, and neither is in the reported
+# defect's reproduction matrix.
+_WEIGHT_UNIT_ALT = "กิโลกรัม|กิโล|กก\\.?|โล|kg"
+
 # PHASE 6 POST-DEPLOY (defect class C) — also capture the UNIT the
 # acknowledgement carried, so the typed quantity survives a round trip
 # through the conversation exactly like the product and method already do
@@ -101,6 +112,11 @@ _COUNT_UNIT_ALT = ("ตัว|ชิ้น|ชิน|อัน|ใบ|คู่|
 _ASSIST_QTY_RE = re.compile(r"จำนวน(?:ประมาณ)?\s*(?P<q>\d{1,7})\s*(?P<u>"
                             + _COUNT_UNIT_ALT + r")?")
 _ASSIST_METHOD_RE = re.compile(r"ขนส่งทาง(?P<m>รถ|เรือ|อากาศ)")
+# WEIGHT-HOTFIX — the acknowledgement's OWN weight phrasing
+# ("น้ำหนักประมาณ 10 กก."), parsed back by derive_active_frame() exactly
+# the way _ASSIST_QTY_RE/_ASSIST_METHOD_RE already are. Built from
+# frame_ack_reply()'s own wording, not a second guess at it.
+_ASSIST_WEIGHT_RE = re.compile(r"น้ำหนักประมาณ\s*(?P<w>\d+(?:\.\d+)?)\s*(?P<u>กก\.?|kg)?")
 
 #
 # PHASE-6-SLOT-CONSUMPTION — generalized the unit vocabulary (added
@@ -155,6 +171,45 @@ _BARE_METHOD_ANSWER_RE = re.compile(
     + r"|รถ|เรือ|เครื่องบิน)\s*"
     r"(?:ก็ได้|ได้(?:ไหม|มั้ย|ปะ|ป่ะ|หรอ|เหรอ)?|ล่ะ|มั้ย|ไหม|ครับ|ค่ะ|คะ|คับ|นะ|เลย|จ้า|\s)*$",
     re.IGNORECASE)
+
+# WEIGHT-HOTFIX — a bare weight ANSWER, digit form: "10 กิโลกรัม",
+# "10 กก.", "10 กก", "10kg", "10 kg", "10 โล", optionally prefixed by a
+# verb/approximation word. Same shape/style as _BARE_QTY_ANSWER_RE /
+# _BARE_METHOD_ANSWER_RE — a fullmatch-style ^...$ structural pattern,
+# never a phrase list.
+_BARE_WEIGHT_ANSWER_RE = re.compile(
+    r"^\s*(?:เอา|ขอ|หนัก|น้ำหนัก)?\s*(?:ประมาณ\s*)?(?P<w>\d+(?:\.\d+)?)\s*"
+    r"(?:" + _WEIGHT_UNIT_ALT + r")\s*"
+    r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
+# the same shape with a THAI NUMBER WORD instead of digits
+# ("สิบกิโล", "ประมาณยี่สิบกิโล"). The word span is resolved by
+# PyThaiNLP's own thaiword_to_num (services/language is Thai-numeral-
+# aware already) — never a hand-written number-word table, and never
+# raises: an unrecognised span simply fails to parse (see
+# _parse_weight_answer below).
+_WEIGHT_WORD_ANSWER_RE = re.compile(
+    r"^\s*(?:ประมาณ\s*)?(?P<w>[ก-๙]+?)\s*(?:" + _WEIGHT_UNIT_ALT + r")\s*"
+    r"(?:ค่ะ|คะ|ครับ|คับ|นะ)?\s*$", re.IGNORECASE)
+
+
+def _parse_weight_answer(t: str) -> Optional["tuple[float, str]"]:
+    """(value_kg, 'กก.') from a bare weight ANSWER — digit or Thai
+    number-word form — else None. Never raises."""
+    s = (t or "").strip()
+    m = _BARE_WEIGHT_ANSWER_RE.match(s)
+    if m:
+        try:
+            return float(m.group("w")), "กก."
+        except (TypeError, ValueError):
+            return None
+    m = _WEIGHT_WORD_ANSWER_RE.match(s)
+    if m:
+        try:
+            from pythainlp.util import thaiword_to_num
+            return float(thaiword_to_num(m.group("w"))), "กก."
+        except Exception:            # not a recognised Thai numeral -> no answer
+            return None
+    return None
 
 # ── ENTITY SPAN vs QUESTION / ACTION SPAN ─────────────────────────────
 # PHASE 6 POST-DEPLOY (defect class A — entity boundary / multi-intent).
@@ -334,7 +389,16 @@ class Frame:
     # and the customer saw their own words replaced. A quantity is a
     # TYPED value: number + unit.
     unit: Optional[str] = None
-    weight: Optional[str] = None
+    # WEIGHT-HOTFIX — a SECOND typed measurement, independent of order
+    # quantity. Before this fix `weight` was declared here but never
+    # assigned anywhere in the module: derive_active_frame() had no
+    # reader for it, resolve_frame_correction()/frame_ack_reply() had no
+    # writer, so a customer's weight answer ("10 กิโลกรัม") had nowhere to
+    # land and the assistant re-asked for it forever. Typed the same way
+    # quantity already is (value + its own unit), so it can never be
+    # confused with — or silently overwrite — quantity.
+    weight: Optional[float] = None
+    weight_unit: Optional[str] = None
     dimensions: Optional[str] = None
     method: Optional[str] = None
 
@@ -409,10 +473,16 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
     if last_user and _FRAME_EXIT_RE.search(last_user):
         return None
 
-    # 3. accumulate product / quantity / method across the whole window
-    #    (newest wins).
+    # 3. accumulate product / quantity / method / weight across the whole
+    #    window (newest wins).
     product = open_product
     quantity = method = unit = None
+    # WEIGHT-HOTFIX — a SEPARATE typed measurement, read back from BOTH
+    # the assistant's own acknowledgement (_ASSIST_WEIGHT_RE, mirroring
+    # _ASSIST_QTY_RE) and the customer's bare answer turn
+    # (_parse_weight_answer, mirroring _USER_QTY_RE) — never from, and
+    # never written into, quantity/unit.
+    weight = weight_unit = None
     for t in reversed(turns):
         c = t.get("content") or ""
         role = t.get("role")
@@ -431,6 +501,16 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
             mm = (_ASSIST_METHOD_RE.search(c) if role == "assistant" else None)
             if mm:
                 method = _method_label(mm.group("m"))
+        if weight is None:
+            if role == "assistant":
+                mw = _ASSIST_WEIGHT_RE.search(c)
+                if mw:
+                    weight = float(mw.group("w"))
+                    weight_unit = mw.group("u") or "กก."
+            else:
+                _w = _parse_weight_answer(c)
+                if _w:
+                    weight, weight_unit = _w
 
     # LANGGRAPH UPGRADE (cross-turn continuity) — an import journey that
     # has a QUANTITY or a METHOD but not yet a product is still an ACTIVE
@@ -449,9 +529,10 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
     # Every existing consumer guards on `frame.product` before using the
     # frame as a product context, so a product-less frame changes no
     # routing decision — it only stops the KNOWN slots being forgotten.
-    if product is None and quantity is None and method is None:
+    if product is None and quantity is None and method is None and weight is None:
         return None
-    return Frame(product=product, quantity=quantity, unit=unit, method=method)
+    return Frame(product=product, quantity=quantity, unit=unit, method=method,
+                weight=weight, weight_unit=weight_unit)
 
 
 # ── deterministic follow-up-shape gate ────────────────────────────────
@@ -460,11 +541,19 @@ _FOLLOWUP_SHAPE_RES = (
     re.compile(r"^\s*ถ้า(เป็น)?"),
     re.compile(r"^\s*แล้ว(ถ้า|เป็น)?"),
     re.compile(r"^\s*(ประมาณ\s*)?\d{1,7}\s*(" + _COUNT_UNIT_ALT
-               + r"|กก\.?|กิโล|kg)?\s*$", re.IGNORECASE),
+               + r"|" + _WEIGHT_UNIT_ALT + r")?\s*$", re.IGNORECASE),
     re.compile(r"ไม่ใช่\s*\S+\s*(เอา|เป็น)\s*\S+"),
     re.compile(r"งั้น.*(ดีกว่า|แทน|แล้วกัน)"),
     re.compile(r"เปลี่ยน(ไป|เป็น)?(ถาม|เรื่อง)"),
     _BARE_METHOD_ANSWER_RE,
+    # WEIGHT-HOTFIX — a bare weight answer/correction, digit OR Thai
+    # number-word form ("10 กิโลกรัม", "สิบกิโล"). Was previously
+    # unrecognised entirely (the digit-shape entry above only accepted
+    # the bare "กก./กิโล/kg" trailing forms, never the full "กิโลกรัม"
+    # word or "โล"), which is why a weight answer fell all the way
+    # through to the gated LLM / general RAG path instead of being read
+    # as "still inside this frame".
+    _BARE_WEIGHT_ANSWER_RE, _WEIGHT_WORD_ANSWER_RE,
     # OWNER-REAL-LINE-FIX-05 — a slot-CORRECTION shape ("เปลี่ยนเป็น X",
     # "เอา X แทน", "เอ้ย <n>", "แก้เป็น X"). Typo-tolerant: เปลี่ยน~เปลียน,
     # เป็น~เปน~เป้น. Deliberately NOT matched: a fresh "สนใจนำเข้า X"
@@ -580,14 +669,31 @@ ASK_WEIGHT_FOR_RATE = "รบกวนแจ้งน้ำหนักโดย
 ASK_PRODUCT_SLOT = "รบกวนแจ้งชื่อหรือประเภทสินค้าที่สนใจนำเข้าด้วยนะคะ"
 
 
+def _fmt_num(v: Optional[float]) -> str:
+    """10.0 -> '10', 10.5 -> '10.5' — never a trailing '.0' in prose."""
+    if v is None:
+        return ""
+    try:
+        return str(int(v)) if float(v) == int(v) else str(v)
+    except (TypeError, ValueError):
+        return str(v)
+
+
 def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     """Deterministic acknowledgement that re-states the frame IN NATURAL
     PROSE so the next turn's derive_active_frame() can read it back.
     OWNER-REAL-LINE-FIX-06 — no "(สินค้า X)" / state-token parenthetical
-    is ever shown to the customer; the product / quantity / method are
-    carried in plain sentence form that _ASSIST_PRODUCT_RES /
-    _ASSIST_QTY_RE / _ASSIST_METHOD_RE parse. Never a policy claim, never
-    an eligibility verdict."""
+    is ever shown to the customer; the product / quantity / method /
+    weight are carried in plain sentence form that _ASSIST_PRODUCT_RES /
+    _ASSIST_QTY_RE / _ASSIST_METHOD_RE / _ASSIST_WEIGHT_RE parse. Never a
+    policy claim, never an eligibility verdict.
+
+    WEIGHT-HOTFIX — weight is a SEPARATE typed measurement from order
+    quantity (task: "20 คู่" order quantity must never be confused with,
+    or overwritten by, "10 กิโลกรัม" shipment weight). `wt` is built from
+    frame.weight/frame.weight_unit exactly the way `qty` is already built
+    from frame.quantity/frame.unit — never derived from, or written into,
+    the quantity fields."""
     p = frame.product or "สินค้า"
     # the supplied unit wins; "ชิ้น" is the fallback ONLY when the
     # customer never stated one.
@@ -596,21 +702,34 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
     # "ขนส่งทาง…" (NOT "ส่งทาง…") so the trailing "สนใจส่งทางรถหรือทางเรือ"
     # ask clause is never mis-read as a chosen method.
     mth = f" ขนส่ง{_METHOD_TH.get(frame.method, frame.method)}" if frame.method else ""
+    wt = (f" น้ำหนักประมาณ {_fmt_num(frame.weight)} {frame.weight_unit or 'กก.'}"
+         if frame.weight else "")
     # EVERY variant re-states ALL known slots in plain prose so
-    # derive_active_frame() can read product / quantity / method back
-    # without any "(สินค้า X)" state token.
+    # derive_active_frame() can read product / quantity / method / weight
+    # back without any "(สินค้า X)" state token.
     if changed == "quantity":
         head = f"รับทราบค่ะ ปรับเป็นจำนวนประมาณ {frame.quantity} {_u} สำหรับ{p}นะคะ"
         if mth:
             head += f"{mth} ตามเดิมค่ะ"
+        if wt:
+            head += f"{wt} ตามเดิมค่ะ"
     elif changed == "method":
         head = f"รับทราบค่ะ เปลี่ยนเป็นขนส่ง{_METHOD_TH.get(frame.method, frame.method)} สำหรับ{p}นะคะ"
         if qty:
             head += f"{qty} ตามเดิมค่ะ"
+        if wt:
+            head += f"{wt} ตามเดิมค่ะ"
+    elif changed == "weight":
+        # WEIGHT-HOTFIX — the customer just answered (or corrected) the
+        # weight the assistant asked for. product/quantity/method are
+        # restated so the next turn still reads them all back.
+        head = f"รับทราบค่ะ{wt} สำหรับ{p}นะคะ"
+        if qty or mth:
+            head += f"{qty}{mth} ตามเดิมค่ะ"
     elif changed == "product":
         head = f"ได้ค่ะ เปลี่ยนเป็น{p}ได้เลยค่ะ 😊"
-        if qty or mth:
-            head += f"{qty}{mth} ตามเดิมนะคะ"
+        if qty or mth or wt:
+            head += f"{qty}{mth}{wt} ตามเดิมนะคะ"
     elif changed == "none" and not frame.product:
         # PHASE-6-SLOT-CONSUMPTION — a quantity/method-only opener with NO
         # product yet must never claim "ต้องการนำเข้า<placeholder>" — the
@@ -622,14 +741,20 @@ def frame_ack_reply(frame: Frame, *, changed: str) -> str:
         detail = f"{qty}{mth}"
         head = f"ได้ค่ะ รับทราบ{detail}นะคะ 😊" if detail else "ได้ค่ะ 😊"
     else:  # "none"
-        head = f"ได้ค่ะ รับทราบว่าต้องการนำเข้า{p}{qty}{mth}นะคะ 😊"
+        head = f"ได้ค่ะ รับทราบว่าต้องการนำเข้า{p}{qty}{mth}{wt}นะคะ 😊"
     # PHASE-6-SLOT-CONSUMPTION — product is the FIRST missing slot to ask
     # for, ahead of quantity/method/weight. A correction call (changed in
-    # ("quantity", "method", "product")) always already has frame.product
-    # set by the time it reaches here (the frame it corrects already had
-    # an open product) — this only changes behaviour for the "none"
-    # (fresh-turn) case, where a quantity-only opener must not re-ask a
-    # quantity it just gave while product is still genuinely unknown.
+    # ("quantity", "method", "weight", "product")) always already has
+    # frame.product set by the time it reaches here (the frame it
+    # corrects already had an open product) — this only changes behaviour
+    # for the "none" (fresh-turn) case, where a quantity-only opener must
+    # not re-ask a quantity it just gave while product is still genuinely
+    # unknown.
+    #
+    # WEIGHT-HOTFIX — once weight is answered there is nothing left in
+    # this ladder to ask for, so `ask` stays "": the assistant never
+    # re-requests a slot that is already known
+    # (SATISFIED_REQUESTED_SLOT_CANNOT_BE_REASKED).
     ask = ""
     if not frame.product:
         ask = " " + ASK_PRODUCT_SLOT
@@ -719,10 +844,12 @@ def _frame_correction_product(t: str, current: Optional[str]) -> Optional[str]:
 def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
     """Deterministic resolution of a correction / rejection / ambiguous
     turn against an active frame. Returns {op, product, quantity, method,
-    brand}; op in CHANGE_TARGET / CORRECT_QUANTITY / CHANGE_METHOD /
-    CHANGE_BRAND / REJECT / AMBIGUOUS / UNKNOWN. Never raises."""
+    weight, brand}; op in CHANGE_TARGET / CORRECT_QUANTITY / SET_QUANTITY /
+    CHANGE_METHOD / SET_WEIGHT / CHANGE_BRAND / REJECT / AMBIGUOUS /
+    UNKNOWN. Never raises."""
     out = {"op": "UNKNOWN", "product": None, "quantity": None, "unit": None,
-           "method": None, "brand": None, "method_was_unset": False}
+           "method": None, "brand": None, "method_was_unset": False,
+           "weight": None, "weight_unit": None, "weight_was_unset": False}
     t = (message or "").strip()
     if not t or len(t) > 48 or frame is None or not getattr(frame, "product", None):
         return out
@@ -741,6 +868,19 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
         # acknowledgement echoes the unit the customer just used, not the
         # one from the superseded value.
         out["unit"] = _bareq.group(2) or None
+        return out
+    # WEIGHT-HOTFIX — a bare weight ANSWER or CORRECTION ("10 กิโลกรัม",
+    # "10 กก.", "เอ้ย 12 กิโล" once weight is already set) — a SEPARATE
+    # typed measurement from order quantity, exactly parallel to the bare
+    # quantity handling just above (and never reachable there — the
+    # quantity fullmatch above only accepts _COUNT_UNIT_ALT units, so a
+    # weight-shaped string never satisfies it). `weight_was_unset` mirrors
+    # `method_was_unset`: the acknowledgement says "noted" for a first
+    # answer and "changed to" for an actual correction.
+    _w = _parse_weight_answer(t)
+    if _w:
+        out["op"], out["weight"], out["weight_unit"] = "SET_WEIGHT", _w[0], _w[1]
+        out["weight_was_unset"] = not getattr(frame, "weight", None)
         return out
     # LANGGRAPH UPGRADE — a bare method ANSWER ("ส่งเรือครับ", "ทางรถค่ะ")
     # when no method is set yet is a SET, exactly parallel to the bare
@@ -780,6 +920,16 @@ def resolve_frame_correction(message: str, frame: Optional["Frame"]) -> Dict:
         if mth:
             out["op"], out["method"] = "CHANGE_METHOD", mth
             return out
+    # WEIGHT-HOTFIX — a weight CORRECTION inside a correction-shape turn
+    # ("เอ้ย 12 กิโล", "แก้เป็น 8 กก."). The quantity-swap branch below
+    # already refuses to fire when a weight unit is present (its own
+    # guard); this reads that same weight-shaped number as the NEW
+    # weight instead of silently returning UNKNOWN.
+    _wm = re.search(r"(\d+(?:\.\d+)?)\s*(?:" + _WEIGHT_UNIT_ALT + r")", t, re.IGNORECASE)
+    if _wm:
+        out["op"], out["weight"], out["weight_unit"] = "SET_WEIGHT", float(_wm.group(1)), "กก."
+        out["weight_was_unset"] = not getattr(frame, "weight", None)
+        return out
     prod = _frame_correction_product(t, cur_product)
     # quantity swap ("เอ้ย 20", "แก้เป็น 8 อัน", "ไม่ใช่ 5 เป็น 8") — only
     # when no product noun. For an "A เป็น B" shape the NEW value is the
@@ -1891,6 +2041,10 @@ _ASSISTANT_ASKED_QTY_RE = re.compile(
     r"แจ้งจำนวน|จำนวน\S{0,6}(?:เท่าไหร่|กี่|โดยประมาณ|ประมาณเท่าไร)|กี่(?:ชิ้น|ตัว|คู่|อัน|กล่อง|ชุด)")
 _ASSISTANT_ASKED_METHOD_RE = re.compile(
     r"ทางรถหรือทางเรือ|ทางรถหรือเรือ|ส่งทางไหน|ขนส่งทางไหน|วิธี(?:การ)?จัดส่ง")
+# WEIGHT-HOTFIX — matches ASK_WEIGHT_FOR_RATE verbatim ("แจ้งน้ำหนัก"),
+# same style/role as the two detectors above.
+_ASSISTANT_ASKED_WEIGHT_RE = re.compile(
+    r"แจ้งน้ำหนัก|น้ำหนัก\S{0,6}(?:เท่าไหร่|กี่|โดยประมาณ|ประมาณเท่าไร)")
 # THAI-HUMAN-LANGUAGE — a quantity answer may open with a take/want verb
 # or an approximation word ("เอา 50 ชิ้น", "สัก 3 ลัง", "ขอ 10 คู่ครับ").
 _BARE_QTY_ANSWER_RE = re.compile(

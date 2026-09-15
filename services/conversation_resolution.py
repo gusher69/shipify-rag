@@ -342,7 +342,8 @@ def _frame_known_slots(frame: Optional[_Frame]) -> Dict[str, Any]:
     if frame.method:
         ks["shipping_method"] = _slot(frame.method, raw=frame.method)
     if getattr(frame, "weight", None):
-        ks["weight"] = _slot(frame.weight, raw=str(frame.weight))
+        _wu = getattr(frame, "weight_unit", None) or "kg"
+        ks["weight"] = _slot(frame.weight, _wu, raw=f"{frame.weight} {_wu}".strip())
     if getattr(frame, "dimensions", None):
         ks["dimensions"] = _slot(frame.dimensions, raw=str(frame.dimensions))
     return ks
@@ -418,7 +419,9 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
     if frame:
         ev.append({"kind": "frame_signal", "product": frame.product,
                    "quantity": frame.quantity, "unit": getattr(frame, "unit", None),
-                   "method": frame.method})
+                   "method": frame.method,
+                   "weight": getattr(frame, "weight", None),
+                   "weight_unit": getattr(frame, "weight_unit", None)})
 
     fc = _resolve_frame_correction(norm, frame) if (frame and frame.product) else {
         "op": "UNKNOWN", "product": None, "quantity": None, "method": None, "brand": None}
