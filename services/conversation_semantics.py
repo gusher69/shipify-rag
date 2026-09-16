@@ -116,6 +116,28 @@ _ASSIST_METHOD_RE = re.compile(r"ขนส่งทาง(?P<m>รถ|เรื�
 # ("น้ำหนักประมาณ 10 กก."), parsed back by derive_active_frame() exactly
 # the way _ASSIST_QTY_RE/_ASSIST_METHOD_RE already are. Built from
 # frame_ack_reply()'s own wording, not a second guess at it.
+# the calculator's own acknowledgement wording ("(ขนาด 40x30x20 cm • ทางเรือ)")
+_ASSIST_DIMS_RE = re.compile(
+    r"ขนาด\s*(?P<d>\d+(?:\.\d+)?\s*[x×*]\s*\d+(?:\.\d+)?\s*[x×*]\s*\d+(?:\.\d+)?)\s*(?P<u>cm|mm|m|inch|ซม\.?|มม\.?|นิ้ว)?",
+    re.IGNORECASE)
+
+
+def _parse_dims_answer(text: str):
+    """(\"LxWxH\", unit) when the customer's turn supplies all three package
+    dimensions, else None. Uses the ONE calculator parser
+    (shipping_estimate_flow.extract_estimate_fields), so what the Frame
+    remembers is exactly what the calculator would have read. Lazy
+    import: that module imports this one's parser helpers."""
+    try:
+        from services.shipping_estimate_flow import extract_estimate_fields as _eef
+        st = _eef(text or "")
+    except Exception:
+        return None
+    if st.length is None or st.width is None or st.height is None:
+        return None
+    return ("x".join(_fmt_num(v) for v in (st.length, st.width, st.height)), st.dim_unit or "cm")
+
+
 _ASSIST_WEIGHT_RE = re.compile(r"น้ำหนักประมาณ\s*(?P<w>\d+(?:\.\d+)?)\s*(?P<u>กก\.?|kg)?")
 
 #
@@ -438,7 +460,18 @@ class Frame:
     # confused with — or silently overwrite — quantity.
     weight: Optional[float] = None
     weight_unit: Optional[str] = None
+    # REAL LINE 2026-09-16 (final) — the THIRD typed measurement, the
+    # package dimensions the customer supplied to the calculator
+    # ("ขนาด 40 x 30 x 20 ซม." -> "40x30x20", "cm"). Like weight before
+    # its hotfix, this field was declared but never assigned: the
+    # calculator computed from the dimensions once and the next
+    # "ราคาเท่าไหร่" could not see them, so it asked for them again.
+    # User-provided INPUTS are what persist (read from the customer's own
+    # turn first, the calculator's own acknowledgement second); the
+    # estimate itself is always recomputed by the authoritative
+    # calculator, never carried as a price string.
     dimensions: Optional[str] = None
+    dim_unit: Optional[str] = None
     method: Optional[str] = None
 
     def as_dict(self) -> Dict:
@@ -506,6 +539,11 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
         last_user = c
         if is_frame_followup(c) or _USER_QTY_RE.search(c) or _METHOD_WORD_RE.search(c):
             continue
+        # REAL LINE 2026-09-16 (final) — the customer's package dimensions
+        # and a price question are the journey's OWN material (they feed
+        # the calculator for this product), never drift away from it.
+        if _parse_dims_answer(c) or _PRICE_Q_RE.search(c):
+            continue
         drift += 2 if _FRAME_EXIT_RE.search(c) else 1
     if drift >= _FRAME_MAX_GAP:
         return None
@@ -533,6 +571,7 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
     # (_parse_weight_answer, mirroring _USER_QTY_RE) — never from, and
     # never written into, quantity/unit.
     weight = weight_unit = None
+    dimensions = dim_unit = None
     for t in reversed(turns[open_idx:]):
         c = t.get("content") or ""
         role = t.get("role")
@@ -561,6 +600,16 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
                 _w = _parse_weight_answer(c)
                 if _w:
                     weight, weight_unit = _w
+        if dimensions is None:
+            if role == "assistant":
+                md = _ASSIST_DIMS_RE.search(c)
+                if md:
+                    dimensions = re.sub(r"\s*[x×*]\s*", "x", md.group("d"))
+                    dim_unit = (md.group("u") or "cm").rstrip(".")
+            else:
+                _d = _parse_dims_answer(c)
+                if _d:
+                    dimensions, dim_unit = _d
 
     # LANGGRAPH UPGRADE (cross-turn continuity) — an import journey that
     # has a QUANTITY or a METHOD but not yet a product is still an ACTIVE
@@ -579,10 +628,12 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
     # Every existing consumer guards on `frame.product` before using the
     # frame as a product context, so a product-less frame changes no
     # routing decision — it only stops the KNOWN slots being forgotten.
-    if product is None and quantity is None and method is None and weight is None:
+    if (product is None and quantity is None and method is None and weight is None
+            and dimensions is None):
         return None
     return Frame(product=product, quantity=quantity, unit=unit, method=method,
-                weight=weight, weight_unit=weight_unit)
+                weight=weight, weight_unit=weight_unit,
+                dimensions=dimensions, dim_unit=dim_unit)
 
 
 # ── deterministic follow-up-shape gate ────────────────────────────────

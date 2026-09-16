@@ -346,6 +346,9 @@ def _frame_known_slots(frame: Optional[_Frame]) -> Dict[str, Any]:
         _wu = getattr(frame, "weight_unit", None) or "kg"
         ks["weight"] = _slot(frame.weight, _wu, raw=f"{frame.weight} {_wu}".strip())
     if getattr(frame, "dimensions", None):
+        _du = getattr(frame, "dim_unit", None) or "cm"
+        ks["dimensions"] = _slot(frame.dimensions, _du, raw=f"{frame.dimensions} {_du}")
+    if getattr(frame, "dimensions", None):
         ks["dimensions"] = _slot(frame.dimensions, raw=str(frame.dimensions))
     return ks
 

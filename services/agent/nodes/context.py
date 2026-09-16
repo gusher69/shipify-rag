@@ -39,6 +39,9 @@ def _frame_slots(frame) -> Dict[str, Any]:
                                   "raw": frame.method}
     if getattr(frame, "weight", None):
         out["weight"] = {"value": frame.weight, "unit": None, "raw": str(frame.weight)}
+    if getattr(frame, "dimensions", None):
+        out["dimensions"] = {"value": frame.dimensions, "unit": getattr(frame, "dim_unit", None),
+                             "raw": frame.dimensions}
     return out
 
 

@@ -4345,9 +4345,27 @@ class DecisionEngine:
                 if (_f5_frame and _f5_frame.product and getattr(_f5_frame, "weight", None)
                         and _PRICE_Q_RE.search(message or "")):
                     _price_est = _EstimateState(weight=_f5_frame.weight, method=_f5_frame.method)
+                    # REAL LINE 2026-09-16 (final) — the dimensions the
+                    # customer already supplied are a known INPUT of this
+                    # journey (Frame.dimensions); seed them through the
+                    # calculator's OWN parser so a repeated price question
+                    # never re-asks a satisfied input. Complete inputs ->
+                    # the authoritative calculator recomputes a FRESH
+                    # estimate; an old price string is never reused.
+                    if getattr(_f5_frame, "dimensions", None):
+                        _extract_estimate_fields(
+                            f"ขนาด {_f5_frame.dimensions} {getattr(_f5_frame, 'dim_unit', None) or 'cm'}",
+                            _price_est)
+                    developer_trace["shipping_estimate_state"] = _price_est.as_dict()
+                    if _price_est.complete():
+                        developer_trace["selection_source"] = "frame_inputs_known_price_recompute"
+                        return self._finalize(
+                            reply=_build_response(text=_estimate_reply(_price_est)),
+                            routing_type="GENERAL", workflow=workflow_hint,
+                            developer_trace=developer_trace, context=context, start=start,
+                            alert=_detect_alert(message, context))
                     if _price_est.missing():
                         developer_trace["selection_source"] = "frame_weight_known_price_ask"
-                        developer_trace["shipping_estimate_state"] = _price_est.as_dict()
                         return self._finalize(
                             reply=_build_response(text=_estimate_missing_prompt(_price_est)),
                             routing_type="GENERAL", workflow=workflow_hint,

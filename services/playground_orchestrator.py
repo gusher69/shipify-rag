@@ -403,7 +403,16 @@ _FIX23_ABOUT_TO_RE = re.compile(
 # they ARE still recognised as a placeholder — only when nothing else
 # survives the rest of this strip.
 _FIX23_STRIP_RE = re.compile(
-    r"(สนใจ|อยากจะ|อยากได้|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|เอา|ได้|"
+    # REAL LINE 2026-09-16 (final) — journey FILLER is structural, never a
+    # goods noun: "อีก" (another / more, with its bare classifier: "อีกตัว",
+    # "อีกชิ้น"), "ใหม่" as the start-over / again word ("ของใหม่",
+    # "สินค้าใหม่", "เริ่มใหม่") and the request verb "ขอ" governing an
+    # import verb ("ขอสั่งกระเป๋า"). Left in, "อยากสั่งของจากจีนอีก 50 ชิ้น"
+    # yielded the product "ของอีก". A real unknown product name is not
+    # touched: only these closed-class words are stripped, and the ONE
+    # placeholder rule below still decides whether anything real is left.
+    r"(เริ่มใหม่|ขอ(?=สั่ง|นำเข้า|ซื้อ|ฝาก|นำ)|อีก(?:ตัว|ชิ้น|อัน|ใบ|คู่|กล่อง|รอบ|ครั้ง|ที)?|ใหม่|"
+    r"สนใจ|อยากจะ|อยากได้|อยาก|ต้องการ|กำลังจะ|กำลังสนใจ|กำลัง|วางแผนจะ|วางแผน|เล็งจะ|เล็ง|มองหา|จะ|เอา|ได้|"
     # PHASE 6 — the verb+placeholder compounds "สั่งของ"/"สั่งสินค้า" were
     # REMOVED and "ขนของ" given a Thai-letter lookahead: they greedily ate
     # the leading "ของ"/"สินค้า" of a genuine compound product noun
