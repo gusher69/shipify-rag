@@ -86,7 +86,7 @@ from services.conversation_semantics import (
     _compose as _compose_intent_family,
     _HIGH_RISK_PRODUCT_RE as _HIGH_RISK_PRODUCT_RE,
     _PRICE_Q_RE as _PRICE_Q_RE,
-    _is_import_interest as _is_import_opener,
+    is_new_journey_opener as _is_new_journey_opener,
 )
 # PHASE-6B — pre-RAG conversational / service-intent layer (help /
 # service-discovery / money-transfer / website-link / public-contact /
@@ -3632,10 +3632,18 @@ class DecisionEngine:
                 and private_state_inquiry.get("domain") in ("shipment", "order", "tracking")
                 and not _psi_established_detail_referent)
             _social_only = _is_social_only(message)
-            _suppress_stale_workflow = _psi_self_contained or _social_only
+            # REAL LINE 2026-09-16 (P0) — EXPLICIT CURRENT NEW-JOURNEY INTENT
+            # outranks every pending workflow / calculator / collection
+            # (services/conversation_semantics.py::is_new_journey_opener,
+            # the ONE journey boundary). A pending Business-Action
+            # collection, charter or operational thread must never
+            # continue over "อยากสั่งของจากจีน 20 คู่".
+            _new_journey_turn = _is_new_journey_opener(message or "")
+            _suppress_stale_workflow = _psi_self_contained or _social_only or _new_journey_turn
             if _suppress_stale_workflow:
                 developer_trace["stale_workflow_suppressed"] = (
-                    "private_state_self_contained" if _psi_self_contained else "social_greeting")
+                    "private_state_self_contained" if _psi_self_contained
+                    else "social_greeting" if _social_only else "new_journey_opener")
 
             # New execution order: Search Candidate Business Actions ->
             # Select Best Business Action -> Read Business Action
@@ -4071,7 +4079,7 @@ class DecisionEngine:
                 # the identifier-driven Business-Action search so a bill
                 # id supplied here does NOT resurrect `searchdatashipment`.
                 # Deterministic, history-derived — no LLM.
-                _charter = _derive_charter_state(history)
+                _charter = None if _new_journey_turn else _derive_charter_state(history)
                 if _charter is not None:
                     # SYSTEM-STATE-EMERGENCY-1 — the charter collection
                     # opened by a TC19 FAQ answer used to consume EVERY
@@ -4357,7 +4365,7 @@ class DecisionEngine:
                 # delivery-address change (CUS-S09) is excluded — it keeps
                 # its own requestshippingaddresschange flow. Deterministic,
                 # history-derived; Semantic-First supplies the intent.
-                _opreq = _derive_operational_state(history, message, interpretation=semantic)
+                _opreq = _derive_operational_state(None if _new_journey_turn else history, message, interpretation=semantic)
                 _fresh_opreq = _derive_operational_state(None, message, interpretation=semantic)
                 if _opreq is not None and _fresh_opreq is not None and _fresh_opreq.kind != _opreq.kind:
                     # CUSTOMER-RED-REAL-FAIL-1 (RED-4/RED-8) — the CURRENT
@@ -4592,7 +4600,7 @@ class DecisionEngine:
                     # uses as the journey boundary) starts a NEW journey:
                     # nothing measured in the previous one (method / weight)
                     # may be carried into its first acknowledgement either.
-                    _svc_frame = None if _is_import_opener(message or "") else _derive_active_frame(history)
+                    _svc_frame = None if _is_new_journey_opener(message or "") else _derive_active_frame(history)
                     if _svc_frame is not None and _svc_ent.get("product"):
                         for _fk, _fv in (("quantity", _svc_frame.quantity),
                                          ("quantity_unit", getattr(_svc_frame, "unit", None)),

@@ -153,8 +153,8 @@ def is_journey_opener(message: str) -> bool:
     ("อยากสั่งของจากจีน 20 คู่")? The ONE detector derive_active_frame uses
     as its journey boundary, exposed so the graph's state merge does not
     carry a previous journey's measurements into a turn that starts over."""
-    from services.conversation_semantics import _is_import_interest
-    return bool(_is_import_interest(message or ""))
+    from services.conversation_semantics import is_new_journey_opener
+    return bool(is_new_journey_opener(message or ""))
 
 
 # ── deterministic private/public authority ───────────────────────────

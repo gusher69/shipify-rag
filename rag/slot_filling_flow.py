@@ -375,6 +375,15 @@ def resolve_slot_filling_turn(text: str, history: Optional[List[Dict]]) -> Optio
     normalized = (text or "").strip()
     if is_cancellation(normalized):
         return None
+    # REAL LINE 2026-09-16 (P0) — an explicit new import-journey opener
+    # is never a slot-filling continuation (the ONE journey boundary,
+    # services/conversation_semantics.py::is_new_journey_opener).
+    try:
+        from services.conversation_semantics import is_new_journey_opener as _is_new_journey
+        if _is_new_journey(normalized):
+            return None
+    except Exception:
+        pass
 
     flow = detect_active_flow(history)
     if not flow:

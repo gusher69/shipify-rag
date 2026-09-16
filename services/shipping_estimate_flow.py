@@ -362,6 +362,18 @@ def derive_estimate_state(history: Optional[List[Dict]], current_message: str,
     cur_msg = (current_message or "").strip()
     _op = getattr(interpretation, "follow_up_op", "NONE") if interpretation is not None else "NONE"
 
+    # REAL LINE 2026-09-16 (P0) — an explicit NEW import-journey opener
+    # closes any open calculator thread: it is never a calculator turn,
+    # however recent the last estimate prompt was and whatever bare
+    # number it carries ("อยากสั่งของจากจีน 20 คู่" — the "20" is an order
+    # quantity, not a dimension). The ONE journey boundary, shared with
+    # every other state system (services/conversation_semantics.py::
+    # is_new_journey_opener). Lazy import: conversation_semantics
+    # imports this module's parser.
+    from services.conversation_semantics import is_new_journey_opener as _is_new_journey
+    if _is_new_journey(cur_msg):
+        return None
+
     # is there an estimate-flow assistant turn in the recent window
     # (the newest assistant turn only — anything else means the topic
     # moved on)?

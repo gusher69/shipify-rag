@@ -40,7 +40,7 @@ from services.conversation_semantics import (
     _COUNT_UNIT_ALT as _CS_COUNT_UNIT_ALT,
     _HIGH_RISK_PRODUCT_RE as _HIGH_RISK_PRODUCT_RE,
     Frame as _Frame,
-    _is_import_interest as _is_import_opener,
+    is_new_journey_opener as _is_import_opener,
 )
 
 # ── vocabularies ─────────────────────────────────────────────────────

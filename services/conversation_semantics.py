@@ -354,6 +354,39 @@ def _is_import_interest(q: str) -> bool:
     return bool(_import_recognizers()["is"](q or ""))
 
 
+def is_new_journey_opener(message: str) -> bool:
+    """THE journey boundary (REAL LINE 2026-09-16, P0). True when THIS turn
+    is an explicit fresh import-journey opener ("อยากสั่งของจากจีน 20 คู่",
+    "จะสั่งของใหม่ 10 ชิ้น", "ขอสั่งกระเป๋า 5 ใบจากจีน", "เริ่มใหม่ อยากสั่ง
+    รองเท้า 30 คู่") — the ONE import recognizer, never a sentence list.
+
+    Central precedence (mandatory):
+        EXPLICIT CURRENT NEW-JOURNEY INTENT
+          > explicit topic switch / correction
+          > compatible requested-slot answer
+          > pending calculator / workflow
+          > active journey
+          > stale history
+
+    EVERY independently maintained state system obeys this same boundary
+    — the conversation Frame (derive_active_frame), the resolver's known
+    slots, the shipping-cost EstimateState, the charter / operational
+    flows, the Business-Action pending collection, the RAG slot-filling
+    flow and the LangGraph state merge — so there are never two state
+    authorities where one resets and another still carries stale values.
+    A pending calculator prompt in the previous assistant turn must NEVER
+    hijack a turn that starts a new journey: "อยากสั่งของจากจีน 20 คู่" was
+    answered with "(น้ำหนัก 0.03 กก. • ขนาด 40x30x20 cm) ต้องการประเมินทางรถ
+    หรือทางเรือคะ" because the calculator read the bare "20" as a
+    dimension value and had no journey boundary of its own.
+
+    On a new journey every operational slot is cleared (product, method,
+    weight, dimensions, CBM, estimate state, pending workflow, requested
+    slot); only identity and what THIS message states survive.
+    """
+    return _is_import_interest(message or "")
+
+
 def _classify_cancellation(q: str) -> Optional[str]:
     """Lazy bridge to the ONE cancellation discriminator (see
     services/operational_change_flow.py::classify_cancellation). Lazy for
