@@ -237,8 +237,13 @@ _KINDS = [
     # CUSTOMER-RED-8 — CUS-G11 (Ai.xlsx sheet '1.thameuangton' row 11):
     # missing/incomplete item claim. Self-describing (no separate verb
     # needed, same shape as duplicate_bill/topup_not_credited above).
+    # "แตก" (broken/shattered) is the same damage report as "เสียหาย" —
+    # the commonest everyday Thai wording for it — added alongside the
+    # existing signal (REAL LINE 2026-09-16: "ของแตกมา..." fell through
+    # this regex entirely and reached a bare no-info fallback).
     ("missing_item_claim", None,
-     re.compile(r"ได้รับสินค้าไม่ครบ|สินค้าไม่ครบ|ของไม่ครบ|เคลมสินค้า|ขอเคลม|สินค้าเสียหาย|ของเสียหาย|พัสดุเสียหาย"),
+     re.compile(r"ได้รับสินค้าไม่ครบ|สินค้าไม่ครบ|ของไม่ครบ|เคลมสินค้า|ขอเคลม|"
+                r"สินค้าเสียหาย|ของเสียหาย|พัสดุเสียหาย|ของแตก|สินค้าแตก|พัสดุแตก"),
      "สวัสดีค่ะ คุณลูกค้าแจ้งเลขบิลสั่งซื้อ และรูปหน้าแทรคจีนที่ติดข้างกล่อง กับวิดิโอตอนแกะสินค้า "
      "รวมทั้งรูปสินค้าทั้งหมดที่ได้รับมาให้แอดมินได้เลยนะคะ",
      "เลขบิลสั่งซื้อ, รูปหน้าแทรคจีนที่ติดข้างกล่อง, วิดิโอตอนแกะสินค้า, รูปสินค้าทั้งหมด"),
@@ -446,6 +451,16 @@ _CARRIER_PRIVATE_RE = re.compile(
 _CARRIER_PRIVATE_NEG_RE = re.compile(
     r"ไม่(?:ต้อง|เอา|ใช้|อยาก)?\s*(?:จะ)?\s*(?:ส่ง)?\s*(?:เอกชน|flash|แฟลช)", re.IGNORECASE)
 _CARRIER_TARGET_TH = {"self_pickup": "รับเอง", "private_delivery": "ส่งเอกชน"}
+# a FORWARD-LOOKING preference for a future shipment's carrier ("คราวหน้า/
+# รอบหน้า/ครั้งหน้า" + a courier-change mention) — distinct from
+# change_carrier_or_selfpickup above, which changes ONE existing bill.
+# Structural composition (time marker + object), never a phrase list.
+_FUTURE_CARRIER_PREF_RE = re.compile(
+    r"(?:คราวหน้า|รอบหน้า|ครั้งหน้า|ครั้งต่อไป|ครั้งถัดไป)[^\n]{0,20}"
+    r"(?:เปลี่ยน)?[^\n]{0,6}(?:ขนส่ง|บริษัทขนส่ง|เจ้า(?:ขนส่ง)?)(?:อื่น|ใหม่)?"
+    r"|(?:เปลี่ยน)[^\n]{0,6}(?:ขนส่ง|บริษัทขนส่ง|เจ้าขนส่ง)(?:อื่น)?[^\n]{0,20}"
+    r"(?:คราวหน้า|รอบหน้า|ครั้งหน้า|ครั้งต่อไป|ครั้งถัดไป)")
+_FUTURE_CARRIER_PREF_NOTE = "และรับทราบว่าต้องการเปลี่ยนบริษัทขนส่งสำหรับการจัดส่งครั้งต่อไปด้วยนะคะ เดี๋ยวแจ้งเจ้าหน้าที่ให้ดูแลพร้อมกันเลยค่ะ"
 _CARRIER_TARGET_ASK_PROMPT = "รบกวนแจ้งด้วยนะคะว่าต้องการเปลี่ยนเป็นรับเองหรือส่งเอกชนคะ"
 
 
@@ -483,6 +498,17 @@ def classify_operational_request(message: str, interpretation: Optional[object] 
         # question is policy and belongs to RAG (owner ruling 1).
         if kind == "cancel_purchase_bill" and not is_operational_cancellation(t):
             continue
+        # REAL LINE 2026-09-16 (6-source reopen) — a missing/damaged-goods
+        # claim that ALSO names a forward-looking carrier preference in
+        # the SAME message ("...แล้วคราวหน้าส่งขนส่งอื่นได้ไหม") must
+        # acknowledge BOTH: the claim evidence ask stays the primary ack
+        # (staff must review the claim regardless), with one honest,
+        # non-committal line noting the carrier request was received too
+        # -- never a promise that it WILL be changed, never silently
+        # dropped. Scoped to missing_item_claim only; every other kind is
+        # unaffected.
+        if kind == "missing_item_claim" and _FUTURE_CARRIER_PREF_RE.search(t):
+            ack = ack + " " + _FUTURE_CARRIER_PREF_NOTE
         return {"kind": kind, "ack": ack, "input_label": label}
     return None
 

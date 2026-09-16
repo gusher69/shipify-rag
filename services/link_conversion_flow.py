@@ -65,7 +65,15 @@ SUPPORTED_DOMAINS: Dict[str, tuple] = {
 # not parse as a well-formed https?:// URL. Distinct from MISSING_URL
 # (nothing link-shaped mentioned at all).
 _BARE_DOMAIN_RE = re.compile(
-    r"(?<![\w.])(?:1688\.com|taobao\.com|tmall\.com|tb\.cn)(?![\w.])", re.IGNORECASE)
+    r"(?<![\w.])(?:www\.)?(?:1688\.com|taobao\.com|tmall\.com|tb\.cn)(?![\w.])", re.IGNORECASE)
+# the SAME bare-domain mention, but naming WHICH platform, for the
+# scheme-less case ("www.taobao.com", "taobao.com" with no path) — this
+# is exactly a platform-home reference, not merely "attempted but
+# malformed"; reuses classify_link_request's own SUPPORTED_DOMAINS table.
+_BARE_DOMAIN_PLATFORM_RE = re.compile(
+    r"(?<![\w.])(?:www\.)?(1688\.com|taobao\.com|tmall\.com|tb\.cn)(?![\w./])", re.IGNORECASE)
+_BARE_DOMAIN_TO_PLATFORM = {"1688.com": "1688", "taobao.com": "taobao",
+                           "tmall.com": "tmall", "tb.cn": "taobao"}
 
 # an explicit conversion-intent verb/phrase — deterministic, not a large
 # phrase dictionary: one shape ("แปลง" + "ลิงก์/ลิงค์/link"), either order.
@@ -103,8 +111,35 @@ def classify_platform(url: str) -> Optional[str]:
     return None
 
 
+# REAL LINE 2026-09-16 (6-source reopen) — a URL pasted inside Markdown
+# link syntax ("[www.taobao.com](https://www.taobao.com)") or wrapped in
+# trailing punctuation ("check this out: https://taobao.com)." or a
+# quoted "...") had its closing bracket/paren/quote/period swept into the
+# match by `_URL_RE`'s catch-all body, corrupting the hostname
+# ("www.taobao.com)") so classify_platform() found no known domain and
+# the turn fell to the generic UNSUPPORTED_DOMAIN reply instead of the
+# correct PLATFORM_HOME guidance. Trailing punctuation that is not part
+# of a real URL is stripped; a trailing ")" is kept only when the URL
+# itself contains an unmatched "(" (so a URL that legitimately ends in a
+# parenthesised path segment is never truncated).
+_TRAILING_PUNCT_RE = re.compile(r'[.,;:!?\]}"\'。，！？]+$')
+
+
+def _strip_wrapping_punctuation(url: str) -> str:
+    prev = None
+    while url and url != prev:
+        prev = url
+        if url.endswith(")") and url.count("(") < url.count(")"):
+            url = url[:-1]
+            continue
+        stripped = _TRAILING_PUNCT_RE.sub("", url)
+        if stripped != url:
+            url = stripped
+    return url
+
+
 def extract_urls(text: str) -> List[str]:
-    return _URL_RE.findall(text or "")
+    return [_strip_wrapping_punctuation(u) for u in _URL_RE.findall(text or "")]
 
 
 def is_link_conversion_signal(message: str) -> bool:
@@ -168,6 +203,12 @@ def classify_link_request(message: str, history: Optional[List[Dict]] = None) ->
     ever reached)."""
     urls = extract_urls(message)
     if not urls:
+        m = _BARE_DOMAIN_PLATFORM_RE.search(message or "")
+        if m:
+            # a bare domain with NO path is the platform's home page —
+            # the same guidance as a real https:// home-page URL.
+            platform = _BARE_DOMAIN_TO_PLATFORM.get(m.group(1).lower())
+            return {"state": "PLATFORM_HOME_OR_NON_PRODUCT", "url": None, "platform": platform}
         if _BARE_DOMAIN_RE.search(message or ""):
             return {"state": "MALFORMED_URL", "url": None, "platform": None}
         return {"state": "MISSING_URL", "url": None, "platform": None}

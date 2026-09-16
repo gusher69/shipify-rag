@@ -428,6 +428,22 @@ def _count_genuine_retries(registry, history: List[Dict], expected_question: str
     day earlier."""
     count = 0
     recent_history = history[-_RETRY_LOOKBACK_TURNS:] if history else history
+    # REAL LINE 2026-09-16 (6-source reopen) — the ANCHOR private-state
+    # domain this episode actually opened on: the user turn immediately
+    # BEFORE this SAME expected_question's first occurrence in the
+    # window. A reply that is itself a decisive private-state inquiry of
+    # a DIFFERENT domain is a genuine explicit-intent switch (never
+    # counted); one of the SAME domain (or when this episode was never a
+    # private-state inquiry at all) is still the customer restating the
+    # SAME unanswered ask, and must still count exactly as before.
+    _anchor_psi_domain = None
+    for j, _t in enumerate(recent_history):
+        if _t.get("role") == "assistant" and _reply_matches_question(
+                (_t.get("content") or "").strip(), expected_question):
+            if j > 0 and recent_history[j - 1].get("role") == "user":
+                _anchor = _classify_private_state_inquiry(recent_history[j - 1].get("content") or "")
+                _anchor_psi_domain = _anchor.get("domain") if _anchor else None
+            break
     for i, t in enumerate(recent_history):
         if t.get("role") != "assistant" or not _reply_matches_question(
                 (t.get("content") or "").strip(), expected_question):
@@ -456,6 +472,25 @@ def _count_genuine_retries(registry, history: List[Dict], expected_question: str
             # never a new parallel classifier.
             fam, conf, _ent = _compose_intent_family(reply)
             if fam in _ACTIONABLE_INTENT_FAMILIES and conf >= 0.55:
+                continue
+            # REAL LINE 2026-09-16 (6-source reopen) — a private-status
+            # inquiry (SHIPMENT_STATUS / order / tracking / customer_data:
+            # "ร้านส่งหรือยังคะ", "ขอแทรคไทยค่ะ", "วันนี้มีของเข้าไทยไหม",
+            # "คูปองผมมีไหม") resolves through the SEPARATE deterministic
+            # _classify_private_state_inquiry() classifier, never through
+            # _compose_intent_family's family table above — so a customer
+            # switching between DIFFERENT private-record questions (each
+            # its own genuinely fresh identifier ask) had every switch
+            # counted as a failed retry of the FIRST one, saturating
+            # max_retry after two turns and escalating the customer's very
+            # first attempt at a brand-new, unrelated private request
+            # straight to Human CS. Reuses the SAME central classifier
+            # already used everywhere else for this concept — never a new
+            # parallel one. An explicit different private intent does NOT
+            # bypass auth (the identifier is still asked once); it only
+            # resets the retry count for THAT new intent's own turn.
+            _reply_psi = _classify_private_state_inquiry(reply)
+            if _reply_psi is not None and _reply_psi.get("domain") != _anchor_psi_domain:
                 continue
         count += 1
     return count
