@@ -59,7 +59,13 @@ def merge_conversation_state(state: Dict[str, Any]) -> Dict[str, Any]:
 
     merged: Dict[str, Any] = {}
     try:
-        merged.update(_frame_slots(engine.active_frame(effective_history(state))))
+        # REAL LINE 2026-09-16 — an explicit fresh opener starts a NEW
+        # journey: the frame reconstructed from history is the PREVIOUS
+        # journey's (its shipping method / weight, acknowledged hours
+        # earlier in the same LINE session) and is not remembered into
+        # this one. Only what this turn itself says is known.
+        if not engine.is_journey_opener(state.get("normalized_message") or state.get("raw_message") or ""):
+            merged.update(_frame_slots(engine.active_frame(effective_history(state))))
     except Exception as exc:
         return {"node_path": node_path,
                 "errors": list(state.get("errors") or []) + [f"merge_state: {exc!r}"]}

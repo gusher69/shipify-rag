@@ -148,6 +148,15 @@ def active_frame(history: Optional[List[Dict]]):
     return _derive_active_frame(history or [])
 
 
+def is_journey_opener(message: str) -> bool:
+    """REAL LINE 2026-09-16 — is THIS turn an explicit fresh import opener
+    ("อยากสั่งของจากจีน 20 คู่")? The ONE detector derive_active_frame uses
+    as its journey boundary, exposed so the graph's state merge does not
+    carry a previous journey's measurements into a turn that starts over."""
+    from services.conversation_semantics import _is_import_interest
+    return bool(_is_import_interest(message or ""))
+
+
 # ── deterministic private/public authority ───────────────────────────
 def private_authority(message: str, history=None,
                       customer_context=None) -> Tuple[Optional[Dict], Optional[str]]:

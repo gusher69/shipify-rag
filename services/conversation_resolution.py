@@ -40,6 +40,7 @@ from services.conversation_semantics import (
     _COUNT_UNIT_ALT as _CS_COUNT_UNIT_ALT,
     _HIGH_RISK_PRODUCT_RE as _HIGH_RISK_PRODUCT_RE,
     Frame as _Frame,
+    _is_import_interest as _is_import_opener,
 )
 
 # ── vocabularies ─────────────────────────────────────────────────────
@@ -414,7 +415,15 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
     ev.append({"kind": "llm_semantic_signal", "family": fam, "op": op,
                "act": conv_act_sem, "source": src, "confidence": round(conf, 2)})
 
-    frame = _derive_active_frame(history)
+    # REAL LINE 2026-09-16 — a turn that is ITSELF an explicit fresh import
+    # opener starts a NEW journey (the same detector derive_active_frame
+    # uses as its journey boundary). The frame reconstructed from history
+    # is the PREVIOUS journey's state and must not be reported as this
+    # turn's known slots / requested slot / correction target — otherwise
+    # the state model shows "sea + 5 กก." known on the very turn the
+    # customer started over, and a correction resolver runs against a
+    # journey the customer just left.
+    frame = None if _is_import_opener(norm) else _derive_active_frame(history)
     active_journey = "IMPORT_INTEREST" if (frame and frame.product) else None
     if frame:
         ev.append({"kind": "frame_signal", "product": frame.product,

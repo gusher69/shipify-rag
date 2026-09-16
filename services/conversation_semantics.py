@@ -166,8 +166,14 @@ _METHOD_WORD_RE = re.compile(_METHOD_WORD_ALT)
 # ("ส่งเรือได้ปะ", "ทางเรือได้ไหมครับ"): in reply to the assistant's own
 # "ทางรถหรือทางเรือ", naming a mode and asking whether it is possible IS
 # choosing that mode. The tail is a sequence so stacked particles work.
+# REAL LINE 2026-09-16 — a DESIRE verb may precede the send verb
+# ("อยากส่งทางเรือได้ไหมครับ", "ต้องการส่งเรือ", "สนใจทางเรือ"): inside an
+# active import journey, wanting a mode and asking whether it is
+# possible IS choosing that mode, exactly like "ส่งเรือได้ปะ" already was.
+# Without it the turn fell through to the generic "we offer road and
+# sea" information answer and the journey's method slot stayed empty.
 _BARE_METHOD_ANSWER_RE = re.compile(
-    r"^\s*(?:ส่ง|เอา|ขอ|ไป|เป็น|ใช้)?\s*(?:" + _METHOD_WORD_ALT
+    r"^\s*(?:(?:อยาก|ต้องการ|สนใจ|อยากจะ|จะ)\s*)?(?:ส่ง|เอา|ขอ|ไป|เป็น|ใช้|ขนส่ง)?\s*(?:" + _METHOD_WORD_ALT
     + r"|รถ|เรือ|เครื่องบิน)\s*"
     r"(?:ก็ได้|ได้(?:ไหม|มั้ย|ปะ|ป่ะ|หรอ|เหรอ)?|ล่ะ|มั้ย|ไหม|ครับ|ค่ะ|คะ|คับ|นะ|เลย|จ้า|\s)*$",
     re.IGNORECASE)
@@ -473,8 +479,19 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
     if last_user and _FRAME_EXIT_RE.search(last_user):
         return None
 
-    # 3. accumulate product / quantity / method / weight across the whole
-    #    window (newest wins).
+    # 3. accumulate product / quantity / method / weight from the frame
+    #    OPEN onward (newest wins). REAL LINE 2026-09-16 — the open found
+    #    in step 1 IS the journey boundary: reading the whole lookback
+    #    window here let a PREVIOUS journey's shipping method and weight
+    #    ("ขนส่งทางเรือ … น้ำหนักประมาณ 5 กก.", acknowledged hours earlier
+    #    in the same 24-hour LINE session) walk into a brand-new
+    #    "อยากสั่งของจากจีน 20 คู่" journey that had said nothing about
+    #    either. An explicit fresh opener starts a NEW journey: only what
+    #    the customer says from that opener onward (and what the
+    #    platform acknowledged back since) is this frame's state. The
+    #    reply wording IS the state, so an assistant acknowledgement that
+    #    opens the frame already restates every slot known at that point
+    #    — nothing legitimately known is lost by not looking behind it.
     product = open_product
     quantity = method = unit = None
     # WEIGHT-HOTFIX — a SEPARATE typed measurement, read back from BOTH
@@ -483,7 +500,7 @@ def derive_active_frame(history: Optional[List[Dict]]) -> Optional[Frame]:
     # (_parse_weight_answer, mirroring _USER_QTY_RE) — never from, and
     # never written into, quantity/unit.
     weight = weight_unit = None
-    for t in reversed(turns):
+    for t in reversed(turns[open_idx:]):
         c = t.get("content") or ""
         role = t.get("role")
         if product is None and role == "assistant":
@@ -1171,7 +1188,18 @@ _ACT_LOCATE = re.compile(r"ที่ไหน|ตรงไหน|อยู่ไ
 _ACT_STATUS = re.compile(r"ถึงไหน|ถึงหรือยัง|ถึงไทย|ถึงจีน|มาถึงยัง|ไปถึงไหน|สถานะ|คืบหน้า|อัปเดต|อัพเดท|เป็น(?:ยัง)?ไงบ้าง|ออกจากจีนยัง|ส่งของ(?:ให้)?\S{0,6}(?:หรือ)?ยัง|เช็ก\S{0,4}สถานะ|เช็คสถานะ|ตรวจสอบสถานะ|ติดตามพัสดุ|ติดตามสินค้า", re.IGNORECASE)
 _ACT_ISSUE_GET = re.compile(r"ออก\S{0,6}(?:ได้ไหม|ให้|หรือเปล่า|หรือไม่)|ออกให้ได้|ขอ\S{0,3}(?:ใบ|เอกสาร)|มี\S{0,10}(?:ไหม|มั้ย)|ให้\S{0,6}(?:หรือเปล่า|ไหม|มั้ย)|issue|provide", re.IGNORECASE)
 _ACT_HOWTO = re.compile(r"ใช้\S{0,6}(?:ยังไง|อย่างไร|ตรงไหน|ที่ไหน)|วิธีใช้|กดตรงไหน|กดยังไง|กดใช้\S{0,4}(?:ตรงไหน|ยังไง)|ทำยังไง|ขั้นตอน\S{0,6}ใช้|how\s*to\s*use", re.IGNORECASE)
-_ACT_LIST_MINE = re.compile(r"มี\S{0,10}อะไรบ้าง|มี\S{0,6}(?:กี่|เท่าไหร่)|เหลือ\S{0,6}(?:ไหม|เท่าไหร่|กี่)|ของผม\S{0,12}(?:มี|เหลือ)|บัญชีผม|บัญชีฉัน|ในระบบผม", re.IGNORECASE)
+# REAL LINE 2026-09-16 — a FIRST-PERSON possessive right before the
+# have/left verb ("คูปองผมมีไหม", "คูปองฉันเหลือมั้ย", "ของเรามีบ้างไหม") is
+# the customer asking about THEIR OWN record (list-mine), not how the
+# thing works. Without it "คูปองผมมีไหม" read as the public how-to
+# COUPON_USAGE, went to the KB, found nothing and degraded to a Human
+# handoff — an answerable-shape private inquiry must instead follow the
+# private/API-gap path (identifier -> handoff) like every other one.
+_ACT_LIST_MINE = re.compile(
+    r"มี\S{0,10}อะไรบ้าง|มี\S{0,6}(?:กี่|เท่าไหร่)|เหลือ\S{0,6}(?:ไหม|เท่าไหร่|กี่)|ของผม\S{0,12}(?:มี|เหลือ)"
+    r"|บัญชีผม|บัญชีฉัน|ในระบบผม"
+    r"|(?:ของ)?(?:ผม|ฉัน|ดิฉัน|เรา|หนู)\s*(?:มี|เหลือ)\S{0,8}(?:ไหม|มั้ย|มัย|บ้าง|ยัง|ป่ะ|ปะ|หรอ|เหรอ|อยู่)",
+    re.IGNORECASE)
 # LANGGRAPH UPGRADE — the colloquial question particles "หรอ" / "เหรอ" /
 # "ป่ะ" are the spoken-Thai equivalents of "หรือเปล่า" and appear
 # constantly in real LINE ("กระต่ายนำเข้าได้หรอ"). Completing the particle

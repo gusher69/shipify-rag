@@ -86,6 +86,7 @@ from services.conversation_semantics import (
     _compose as _compose_intent_family,
     _HIGH_RISK_PRODUCT_RE as _HIGH_RISK_PRODUCT_RE,
     _PRICE_Q_RE as _PRICE_Q_RE,
+    _is_import_interest as _is_import_opener,
 )
 # PHASE-6B — pre-RAG conversational / service-intent layer (help /
 # service-discovery / money-transfer / website-link / public-contact /
@@ -1601,7 +1602,13 @@ _PSI_STATE_PROBE_RE = re.compile(
 # "which goods are prohibited") — public FAQ, NOT a private state probe.
 # It only signals a private inquiry when the customer is asking what is
 # in THEIR OWN account (owner wording + a customer-data domain).
-_PSI_CATALOG_PROBE_RE = re.compile(r"มี.{0,15}(อะไร|บ้าง)")
+# REAL LINE 2026-09-16 — a POSSESSION probe ("คูปองผมมีไหม", "ยอดผมเหลือ
+# มั้ย") is the same customer-scoped catalog question as "…มีอะไรบ้าง":
+# does MY record hold any? It is only private when owner wording is
+# present (the same `private_catalog = probe and owner` rule below), so a
+# public "มีขั้นต่ำในการสั่งไหม" / "มีบริการอะไรบ้าง" is untouched.
+_PSI_CATALOG_PROBE_RE = re.compile(
+    r"มี.{0,15}(อะไร|บ้าง)|มี.{0,12}(?:ไหม|มั้ย|มัย|ป่ะ|ปะ|หรอ|เหรอ)|เหลือ.{0,8}(?:ไหม|มั้ย|มัย|เท่าไหร่|กี่)")
 # "ขอ<data-noun>" — a bare request for the customer's own record data
 # (ขอแทรคไทย / ขอสถานะ / ขอรายละเอียดออเดอร์) is a status inquiry, not a
 # how-to. "ขอที่อยู่โกดัง" / "ขอเบอร์ติดต่อ" carry no record-domain noun
@@ -4580,7 +4587,12 @@ class DecisionEngine:
                 # over. Only the measurement slots are carried, and only
                 # when this turn did not supply them itself.
                 try:
-                    _svc_frame = _derive_active_frame(history)
+                    # REAL LINE 2026-09-16 — a turn that is ITSELF a fresh
+                    # explicit opener (the same detector derive_active_frame
+                    # uses as the journey boundary) starts a NEW journey:
+                    # nothing measured in the previous one (method / weight)
+                    # may be carried into its first acknowledgement either.
+                    _svc_frame = None if _is_import_opener(message or "") else _derive_active_frame(history)
                     if _svc_frame is not None and _svc_ent.get("product"):
                         for _fk, _fv in (("quantity", _svc_frame.quantity),
                                          ("quantity_unit", getattr(_svc_frame, "unit", None)),

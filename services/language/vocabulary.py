@@ -59,10 +59,24 @@ GROUPS: Tuple[VocabGroup, ...] = (
     ),
     VocabGroup(
         name="count_unit",
-        terms=("ชิ้น", "คู่", "กล่อง", "ลัง", "ขวด", "ชุด", "แพ็ค", "พาเลท", "กิโล",
-               "กิโลกรัม", "กรัม", "ตัว", "อัน", "ใบ", "โหล", "ผืน", "เครื่อง", "หลัง",
-               "คิว"),
+        terms=("ชิ้น", "คู่", "กล่อง", "ลัง", "ขวด", "ชุด", "แพ็ค", "พาเลท",
+               "ตัว", "อัน", "ใบ", "โหล", "ผืน", "เครื่อง", "หลัง", "คิว"),
         left_context=r"\d\s*$|(?:กี่|หลาย|สอง|สาม|สี่|ห้า|สิบ|ร้อย|พัน)\s*$",
+        min_len=2,
+    ),
+    # TYPED MEASUREMENT (REAL LINE 2026-09-16) — weight units are their
+    # OWN group, separate from count units. "โล" (colloquial กิโล) and
+    # "กก" are canonical weight words here, so the matcher's "an exact
+    # vocabulary word is canonical" rule keeps them as they are; before
+    # this they were out-of-vocabulary and "30 โล" was fuzzy-corrected
+    # (edit distance 1, digit context) to the COUNT unit "30 โหล" — the
+    # customer's weight became an order quantity of thirty dozen. The
+    # vocabulary is evidence only: which typed slot a number belongs to
+    # is decided by the semantic layer's measurement parser, never here.
+    VocabGroup(
+        name="weight_unit",
+        terms=("กิโล", "กิโลกรัม", "กรัม", "โล", "กก"),
+        left_context=r"\d\s*$|(?:หนัก|น้ำหนัก|กี่|หลาย|สอง|สาม|สี่|ห้า|สิบ|ร้อย|พัน)\s*$",
         min_len=2,
     ),
     VocabGroup(
