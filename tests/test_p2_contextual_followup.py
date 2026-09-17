@@ -382,3 +382,45 @@ class VerbFirstEligibility(unittest.TestCase):
 
     def test_product_first_unchanged(self):
         self.assertEqual(self._spec("แบตเตอรี่ นำเข้าได้ไหม").entities, ["แบตเตอรี่"])
+
+
+class ListContinuationNeverSwallowsAWhereWhichQuestion(unittest.TestCase):
+    """CUSTOMER SCREENSHOT 2026-09-17 -- reconstruct_product_list_
+    continuation() exists so "ครีมอาบน้ำ นำเข้าได้ไหม" -> "แล้วแชมพูล่ะ"
+    correctly re-asks eligibility for the new bare product name. Its stop
+    guard checked for "ไหม" (the yes/no particle) but not "ไหน" (a
+    DIFFERENT word: which/where), so any real question using "ไหน"
+    ("วันไหน", "ที่ไหน", "ตรงไหน", "ทางไหน") right after an eligibility
+    answer was misread as "another bare product name in the list" and had
+    "...นำเข้าได้ไหม" wrongly appended -- corrupting an unrelated question
+    into a bogus multi-component eligibility request and producing a
+    bundled, off-topic answer (observed: a payment/delivery-date question
+    answered with three unrelated numbered points, one of them a stale
+    liquid-import restriction the customer never asked about this turn)."""
+
+    ELIGIBILITY_HISTORY = [
+        {"role": "user", "content": "เครื่องสำอาง / อาหารเสริม นำเข้าได้ไหม"},
+        {"role": "assistant", "content": "เครื่องสำอางและอาหารเสริมจัดเป็นสินค้าที่ห้ามนำเข้าค่ะ"},
+    ]
+
+    def test_where_which_questions_are_never_reconstructed_as_a_product_list(self):
+        from rag.query_resolution import reconstruct_product_list_continuation
+        for text in ("ชำระบิลขนส่งแล้ว สินค้าจะจัดส่งถึงบ้านวันไหน", "เก็บของไว้ที่ไหน",
+                    "ทางไหนดีกว่า", "เช็คของเข้าไทยตรงไหน"):
+            with self.subTest(text=text):
+                self.assertIsNone(
+                    reconstruct_product_list_continuation(text, self.ELIGIBILITY_HISTORY), text)
+
+    def test_genuine_bare_product_list_still_reconstructs(self):
+        from rag.query_resolution import reconstruct_product_list_continuation
+        for text, expected in (("แชมพู ครีมอาบน้ำ", "แชมพู ครีมอาบน้ำ นำเข้าได้ไหม"),
+                               ("โลชั่น น้ำหอม เจลอาบน้ำ", "โลชั่น น้ำหอม เจลอาบน้ำ นำเข้าได้ไหม")):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    reconstruct_product_list_continuation(text, self.ELIGIBILITY_HISTORY), expected)
+
+    def test_request_decomposition_stays_single_component(self):
+        from rag.query_resolution import decompose_request, build_request_components
+        spec = decompose_request("ชำระบิลขนส่งแล้ว สินค้าจะจัดส่งถึงบ้านวันไหน", self.ELIGIBILITY_HISTORY)
+        self.assertEqual(len(build_request_components(spec)), 0,
+                         "an unrelated payment/delivery question must never become multi-component")

@@ -1066,7 +1066,16 @@ def generic_process_component(question: str) -> Optional["tuple[str, str]"]:
 # its own stays a bare list).
 _LIST_CONT_SEP_RE = re.compile(r"\s*(?:แล้วก็|และก็|แล้ว|และ|ละ|กับ|,|、|/|\+)\s*|\s+")
 _LIST_CONT_STOP_RE = re.compile(
-    r"ไหม|มั้ย|มัย|ยังไง|อย่างไร|เท่าไหร่|เท่าไร|กี่|ทำไม|\?|ราคา|ค่าส่ง|นำเข้าได้|ส่งได้|"
+    # CUSTOMER SCREENSHOT 2026-09-17 -- "ไหน" (which/where: "วันไหน",
+    # "ตรงไหน", "ที่ไหน", "ทางไหน") is a DIFFERENT word from "ไหม" (the
+    # yes/no particle) above, and was missing here entirely. Any real
+    # question using it ("ชำระบิลขนส่งแล้ว สินค้าจะจัดส่งถึงบ้านวันไหน") was
+    # never recognised as a question, so right after an eligibility
+    # answer it was wrongly read as "another bare product name in the
+    # list" and had "...นำเข้าได้ไหม" appended to it -- corrupting an
+    # unrelated delivery/payment question into a 2-component eligibility
+    # request and producing a bundled, off-topic multi-part answer.
+    r"ไหม|ไหน|มั้ย|มัย|ยังไง|อย่างไร|เท่าไหร่|เท่าไร|กี่|ทำไม|\?|ราคา|ค่าส่ง|นำเข้าได้|ส่งได้|"
     r"เข้าได้|ขอบคุณ|สวัสดี|ครับผมขอ")
 _LIST_CONT_DROP = {"ก็", "ละ", "แล้ว", "และ", "กับ", "พวก", "อัน", "ตัว", "นี้", "นั้น", "ด้วย",
                    "อีก", "ที", "หน่อย", "ครับ", "ค่ะ", "คะ", "นะ", "น่ะ"}
