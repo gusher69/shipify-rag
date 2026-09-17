@@ -231,6 +231,29 @@ class TestPurchaseBillPaymentVsWithdrawal(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertNotEqual(_compose(text)[0], "PURCHASE_BILL_PAYMENT", text)
 
+    def test_payment_question_survives_a_pending_different_collection(self):
+        """REAL LINE 2026-09-17 (P0, found by the owner's manual retest,
+        same day as this suite's own first version): a NEWLY added
+        semantic family must be registered in every shared 'is this a
+        decisive intent' set (_ACTIONABLE_INTENT_FAMILIES,
+        _FLOW_ONLY_INTENT_FAMILIES, Fix05's _F5_EXPLICIT) -- omitting it
+        from even one is invisible in an isolated, fresh-history test and
+        only surfaces once a DIFFERENT collection is already pending.
+        Exact repro: three private-tracking questions exhaust the
+        identifier-retry budget and escalate; the customer's NEXT,
+        unrelated payment question must still get the payment answer,
+        never be swallowed as an attempted answer to the stale
+        collection."""
+        eng = DecisionEngine()
+        history = []
+        for text in ("มีเลขแทรคไทยมั้ย", "อยากได้เลขแทรคไทย", "เชคของเข้าไทยตรงไหน"):
+            reply, _ = _reply(eng, text, history)
+            history = history + [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
+        reply, src = _reply(eng, "จ่ายค่าบิลที่ซื้อของไปทำไงคะ", history)
+        self.assertEqual(src, "phase6b_service_intent", reply)
+        self.assertIn("QR Code", reply)
+        self.assertNotIn("รหัสลูกค้า", reply)
+
 
 if __name__ == "__main__":
     unittest.main()

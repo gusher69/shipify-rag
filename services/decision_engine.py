@@ -3017,6 +3017,17 @@ _ACTIONABLE_INTENT_FAMILIES = frozenset({
     # this set; keeping them here preserves the existing break semantics
     # while fixing which family they are.
     "CANCELLATION_POLICY", "CANCELLATION_OPERATION",
+    # REAL LINE 2026-09-17 (P0) — omitting a newly-added family from this
+    # set is silently invisible everywhere it is consulted: a payment
+    # question asked while a DIFFERENT pending collection (e.g. an
+    # unanswered private-status CustCode ask) was already active got
+    # swallowed as an attempted answer to THAT collection instead of
+    # being read as its own decisive intent -- "จ่ายบิลสั่งซื้อยังไง"
+    # answered "กรุณาแจ้งรหัสลูกค้าค่ะ" instead of the payment steps, then
+    # escalated once the SAME stale CustCode retry count saturated. No
+    # Business Action of its own (same reasoning as PURCHASE_WITHDRAWAL
+    # above), so it is also in _FLOW_ONLY_INTENT_FAMILIES below.
+    "PURCHASE_BILL_PAYMENT",
 })
 # The subset that is NEVER itself a Business-Action collection — used
 # where the pending flow's own family is unknown (a generic
@@ -3049,6 +3060,10 @@ _FLOW_ONLY_INTENT_FAMILIES = frozenset({
     # flow-only. CANCELLATION_OPERATION is deliberately EXCLUDED: it IS
     # its own operational collection.
     "CANCELLATION_POLICY",
+    # REAL LINE 2026-09-17 (P0) — PURCHASE_BILL_PAYMENT is a one-turn
+    # deterministic reply with no Business-Action collection of its own,
+    # same reasoning as PURCHASE_WITHDRAWAL above.
+    "PURCHASE_BILL_PAYMENT",
 })
 
 
@@ -4293,6 +4308,10 @@ class DecisionEngine:
                     "PICKUP_LOCATION", "SELF_PICKUP", "COUPON_USAGE", "CHARTER_TRUCK",
                     "SERVICE_DISCOVERY", "HELP_INTENT", "MONEY_TRANSFER_INTEREST",
                     "WEBSITE_LINK_REQUEST", "WAREHOUSE_INBOUND_JOURNEY", "SHIPPING_ESTIMATE",
+                    # REAL LINE 2026-09-17 (P0) — a payment question asked
+                    # INSIDE an active import-interest frame must win too,
+                    # same reasoning as every other explicit family here.
+                    "PURCHASE_BILL_PAYMENT",
                 }
                 if (_f5_frame and _f5_frame.product
                         and getattr(semantic, "intent_family", "UNKNOWN") not in _F5_EXPLICIT
