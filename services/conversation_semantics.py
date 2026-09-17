@@ -1708,6 +1708,25 @@ def _compose_family(t: str) -> "tuple[str, float, Dict]":
     if obj_cp:
         return "COUPON_USAGE", 0.5, ent
 
+    # REAL LINE 2026-09-17 — a GENERAL "what CAN be imported/shipped"
+    # question ("นำเข้าอะไรได้บ้างคะ", "นำเข้าไรได้บ้างคะ" — "ไร" is the
+    # everyday colloquial contraction of "อะไร") names NO specific goods
+    # at all; it is a LIST-shaped eligibility question, not a yes/no
+    # permission check, so it never reached _ACT_PERMIT below (which only
+    # matches "ได้ไหม/ได้มั้ย" shapes) and fell to UNKNOWN -> the gated
+    # LLM disambiguation call, which is where the inconsistency lived:
+    # the correctly-spelled "อะไร" form was read correctly most of the
+    # time, the colloquial "ไร" contraction was not, and once the LLM
+    # missed it the active-frame follow-up attribution (elsewhere in this
+    # function) wrongly folded a totally general policy question into
+    # continuing whatever specific product the frame happened to be
+    # discussing. Resolved deterministically here, before any LLM call,
+    # so it is consistent for every history/frame state. No product is
+    # ever named for this shape (a specific "<goods>นำเข้าได้ไหม" stays on
+    # the existing branch below).
+    if re.search(r"(?:นำเข้า|ส่ง|ขนส่ง)\S{0,2}(?:อะไร|ไร)\S{0,2}ได้บ้าง", t):
+        return "PRODUCT_POLICY", 0.75, ent
+
     # PRODUCT POLICY — a can-I-ship / can-I-import / can-I-order move on
     # some goods, without a cost / warehouse / coupon / invoice object.
     # PHASE-5 D15 — "สั่ง(ซื้อ) <goods> (จำนวนเยอะ) ได้ไหม" counts too, but
