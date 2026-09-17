@@ -20,6 +20,17 @@ OPENAI_CHAT_MODEL    = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
 # Supabase
 SUPABASE_URL         = os.getenv("SUPABASE_URL")
 SUPABASE_KEY         = os.getenv("SUPABASE_SERVICE_KEY")
+# 2026-09-17 Supabase connectivity fix — several callers (e.g.
+# services/self_verification_service.py) explicitly PREFER a service-role
+# credential via `getattr(config, "SUPABASE_SERVICE_KEY", None) or ...`,
+# but config.py never actually defined that attribute name — only
+# SUPABASE_KEY existed, silently sourced from the SAME env var. The
+# getattr() therefore always returned None and every such caller fell
+# through to SUPABASE_KEY by accident rather than by an explicit,
+# discoverable config value. This exposes the SAME already-configured
+# credential under the name those callers actually look for — no new
+# credential, no authorization-policy change, identical value either way.
+SUPABASE_SERVICE_KEY = SUPABASE_KEY
 SUPABASE_DB_URL      = os.getenv("SUPABASE_DB_URL")
 
 # LINE OA
