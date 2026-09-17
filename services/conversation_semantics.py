@@ -473,6 +473,16 @@ class Frame:
     dimensions: Optional[str] = None
     dim_unit: Optional[str] = None
     method: Optional[str] = None
+    # CUSTOMER SCREENSHOT 2026-09-17 — a customization add-on named
+    # alongside the opener ("...สั่งพิมพ์โลโก้ด้วย"), kept SEPARATE from
+    # `product` so it is acknowledged rather than silently discarded.
+    # Read back only from the SAME turn's own acknowledgement wording
+    # (frame_ack_reply's "และรับทราบว่าต้องการ<X>ด้วยนะคะ" clause);
+    # unlike weight/dimensions this is not yet re-derived from history by
+    # derive_active_frame(), so it does not survive a LATER turn — it is
+    # never lost on the turn it is named on, which is what every current
+    # test actually exercises.
+    customization: Optional[str] = None
 
     def as_dict(self) -> Dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -1151,10 +1161,23 @@ _OBJ_ADDRESS = re.compile(r"ที่อยู่จัดส่ง|ที่อ
 # own decisive verb+object composite, same shape as every other family
 # here — never a bare keyword-in-message check.
 _WITHDRAWAL_VERB_RE = re.compile(
-    r"ถอนเงิน|ถอนเครดิต|ถอนยอด|จะถอนยังไง|จะถอนมายังไง|ถอนได้ไหม|ถอนยังไง|ถอนออกมา|ขอถอน",
+    r"ถอนเงิน|ถอนเครดิต|ถอนยอด|จะถอนยังไง|จะถอนมายังไง|ถอนได้ไหม|ถอนยังไง|ถอนออกมา|ขอถอน|"
+    r"เอา(?:เงิน|เครดิต|ยอด)\S{0,4}ออกมา",
     re.IGNORECASE)
 _PURCHASE_WITHDRAWAL_OBJ_RE = re.compile(r"สั่งซื้อ|ร้าน.{0,6}คืน|เครดิตสั่งซื้อ", re.IGNORECASE)
 _SHIPPING_WITHDRAWAL_OBJ_RE = re.compile(r"ขนส่ง|ค่าส่ง|ค่าขนส่ง|เครดิตขนส่ง", re.IGNORECASE)
+# CUSTOMER SCREENSHOT 2026-09-17 — PAYING a purchase bill (จ่าย/ชำระ +
+# the bill/goods) is the OPPOSITE direction of a WITHDRAWAL (ถอน) and
+# must resolve to its own family BEFORE either reaches RAG, so vector
+# similarity never has to choose between them. Structural composition —
+# a payment verb + a purchase-bill/goods object — never a phrase list.
+_PAYMENT_VERB_RE = re.compile(r"จ่าย|ชำระ")
+_PURCHASE_BILL_PAYMENT_OBJ_RE = re.compile(
+    r"บิล(?:ที่)?สั่งซื้อ|บิล(?:ที่)?ซื้อ(?:ของ)?|ค่าบิล(?:ที่)?ซื้อของ|ค่าของ|ค่าสินค้า|บิลนี้|"
+    r"ที่(?:สั่ง|ซื้อ)ของ.{0,4}ไป|ที่สั่งซื้อไป")
+# excludes the SEPARATE shipping-bill/import-cost payment concept
+# ("ชำระบิลขนส่งยังไง", "จ่ายค่านำเข้า") — its own existing FAQ answer.
+_SHIPPING_BILL_PAYMENT_OBJ_RE = re.compile(r"ขนส่ง|ค่าส่ง|ค่านำเข้า", re.IGNORECASE)
 
 # ── PHASE-6B pre-RAG conversational / service-intent markers ──────────
 # Compositional & anchored, never a bare keyword scan. They fire only
@@ -1552,6 +1575,16 @@ def _compose_family(t: str) -> "tuple[str, float, Dict]":
     if _cancel_kind == "OPERATION":
         return "CANCELLATION_OPERATION", 0.85, ent
 
+    # CUSTOMER SCREENSHOT 2026-09-17 — PURCHASE_BILL_PAYMENT resolved
+    # BEFORE the withdrawal check: a payment verb never fires the
+    # withdrawal branch even if a shared word later coincides, and this
+    # gives RAG a stable, pre-resolved target instead of choosing between
+    # the payment-steps chunk and the wallet-withdrawal chunk by
+    # embedding similarity.
+    if (_PAYMENT_VERB_RE.search(t) and _PURCHASE_BILL_PAYMENT_OBJ_RE.search(t)
+            and not _SHIPPING_BILL_PAYMENT_OBJ_RE.search(t)):
+        return "PURCHASE_BILL_PAYMENT", 0.85, ent
+
     if _WITHDRAWAL_VERB_RE.search(t):
         if _SHIPPING_WITHDRAWAL_OBJ_RE.search(t):
             return "SHIPPING_WITHDRAWAL", 0.85, ent
@@ -1789,6 +1822,15 @@ def _compose_family(t: str) -> "tuple[str, float, Dict]":
             _meth = _method_label(_mm.group(0))
             if _meth:
                 ent["method"] = _meth
+        # CUSTOMER SCREENSHOT 2026-09-17 — a customization add-on named
+        # in the SAME opening turn ("...สั่งพิมพ์โลโก้ด้วย") is a SEPARATE
+        # fact, never part of the product noun (_import_noun already
+        # strips it before extracting the noun) and never silently
+        # discarded here either.
+        from services.playground_orchestrator import extract_customization_clause as _extract_customization
+        _cz = _extract_customization(t)
+        if _cz:
+            ent["customization"] = _cz
         return "IMPORT_INTEREST", 0.7, ent
 
     # PHASE-6B — SERVICE_DISCOVERY: "what services do you offer" / a broad

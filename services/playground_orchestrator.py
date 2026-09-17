@@ -451,7 +451,7 @@ _FIX23_BARE_PLACEHOLDER_RE = re.compile(r"^(?:สินค้า|ของ|ข�
 # INVOICE, "อยากได้ที่อยู่โกดัง" is PICKUP_LOCATION, "อยากได้ความช่วยเหลือ"
 # is HELP_INTENT) — so this widens recognition without stealing any
 # other family's traffic.
-_FIX23_WANT_GOODS_RE = re.compile(r"อยากได้|อยากซื้อ")
+_FIX23_WANT_GOODS_RE = re.compile(r"อยากได้|อยากซื้อ|ต้องการ")
 _NON_GOODS_OBJECT_RE = re.compile(
     r"ที่อยู่|โกดัง|คลัง|ข้อมูล|รายละเอียด|ใบกำกับ|ใบเสร็จ|ใบแจ้งหนี้|เอกสาร|"
     r"เบอร์|ลิงก์|ลิงค์|เว็บ|อีเมล|email|รหัส|สถานะ|แทรค|tracking|บิล|ออเดอร์|"
@@ -506,6 +506,44 @@ def _is_product_import_interest(question: str) -> bool:
     return False
 
 
+# CUSTOMER SCREENSHOT 2026-09-17 — a CUSTOMIZATION add-on ("...พิมพ์โลโก้
+# ด้วย", "...สกรีนโลโก้", "พร้อมพิมพ์แบรนด์") named alongside a fresh
+# product+quantity opener is a SEPARATE request, not part of the product
+# noun ("กระเป๋าผ้า 100 ใบสั่งพิมพ์โลโก้ด้วย" must extract product
+# "กระเป๋าผ้า", never "กระเป๋าผ้าพิมพ์โลโก้ด้วย"). Structural composition
+# (a customization VERB + a brand/logo OBJECT), never a phrase list. A
+# NEGATED mention ("ไม่เอาโลโก้") is the opposite of a request and must
+# never be read as one.
+_CUSTOMIZATION_NEG_RE = re.compile(r"ไม่(?:เอา|ต้องการ|ใส่|สั่ง)?\s*(?:พิมพ์|สกรีน|ทำ)?\s*(?:โลโก้|แบรนด์|ยี่ห้อ)")
+_CUSTOMIZATION_CLAUSE_RE = re.compile(
+    r"(?:สั่ง|ขอ|เอา|ต้องการ|พร้อม)?\s*(พิมพ์|สกรีน|ทำ)\s*(โลโก้|แบรนด์|ยี่ห้อ)(?:ด้วย|ให้|ให้ด้วย)?")
+
+
+def extract_customization_clause(text: str) -> Optional[str]:
+    """The customization request named in `text` ("พิมพ์โลโก้", "สกรีน
+    โลโก้", "ทำแบรนด์"), or None when there isn't one or it is explicitly
+    NEGATED. Never invents a customization capability; only reports that
+    the customer named one — routing/staff-handoff is the caller's job."""
+    t = text or ""
+    if _CUSTOMIZATION_NEG_RE.search(t):
+        return None
+    m = _CUSTOMIZATION_CLAUSE_RE.search(t)
+    if not m:
+        return None
+    return f"{m.group(1)}{m.group(2)}"
+
+
+def _strip_customization_clause(text: str) -> str:
+    """Removes any customization mention -- negated or not -- from
+    `text` so it is never welded onto the product noun ("กระเป๋าผ้าไม่เอา
+    โลโก้" must extract product "กระเป๋าผ้า" too). Whether it was
+    negated is decided separately by extract_customization_clause(),
+    never re-derived here."""
+    t = text or ""
+    t = _CUSTOMIZATION_NEG_RE.sub(" ", t)
+    return _CUSTOMIZATION_CLAUSE_RE.sub(" ", t)
+
+
 def _product_interest_noun(question: str) -> Optional[str]:
     """The bare product noun in a product/import-interest declarative,
     or None (-> a generic acknowledgement). Deterministic generic-token
@@ -540,6 +578,7 @@ def _product_interest_noun(question: str) -> Optional[str]:
     # the turn: quantity / method / the question's own family are all
     # still read from the ORIGINAL message by their own extractors.
     q, _question_span = _split_question_clause(question or "")
+    q = _strip_customization_clause(q)
     q = _IMPORT_QTY_UNIT_RE.sub(" ", q)
     # THAI-HUMAN-LANGUAGE — the transport verb that GOVERNS a method
     # word ("ส่งทางเรือ", "ขนส่งทางรถ") goes with it; left behind it was

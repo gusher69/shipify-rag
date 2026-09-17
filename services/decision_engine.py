@@ -1628,7 +1628,7 @@ _PSI_STATE_PROBE_RE = re.compile(
     + r"|มา.{0,4}(?:" + _YET + r")|เข้า.{0,6}(?:" + _YET + r")"
     + r"|ได้รับ.{0,8}(?:" + _YET + r")"
     + r"|มี.{0,12}(ของ|สินค้า|พัสดุ|บิล).{0,8}(เข้า|ถึง|มา)ไทย"
-    + r"|สถานะ|คืบหน้า|ค้างอยู่|(?<!ที่)อยู่(ที่)?ไหน|ถึงไทยรึยัง"
+    + r"|สถานะ|คืบหน้า|ค้างอยู่|(?<!ที่)อยู่(ที่)?ไหน|ตรงไหน|ถึงไทยรึยัง"
     + r"|เป็นไง|เป็นยังไงบ้าง|เป็นอย่างไรบ้าง|เป็นไงบ้าง|เป็นยังไงบ้าง"
     + r"|เหลือ.{0,12}(ไหม|มั้ย|บ้าง|กี่|เท่า)|เหลือเท่า(ไหร่|ไร)|เหลือกี่|มีเท่า(ไหร่|ไร)|กี่บาท"
     + r"|เป็นของ.{0,10}(บิล|ออเดอร์|คำสั่งซื้อ).{0,4}ไหน|ของบิลสั่งซื้อ.{0,3}ไหน"
@@ -1649,14 +1649,15 @@ _PSI_CATALOG_PROBE_RE = re.compile(
 # how-to. "ขอที่อยู่โกดัง" / "ขอเบอร์ติดต่อ" carry no record-domain noun
 # and are filtered out by the domain gate.
 _PSI_DATA_REQUEST_RE = re.compile(
-    r"ขอ.{0,3}(เลข)?(แทรค|แทร็ก|แทรก|ติดตาม|tracking|สถานะ|ราย(การ|ละเอียด)|ข้อมูล|ยอด)", re.IGNORECASE)
+    r"(?:ขอ|อยากได้|อยากทราบ)\S{0,3}(เลข)?(แทรค|แทร็ก|แทรก|ติดตาม|tracking|สถานะ|ราย(การ|ละเอียด)|ข้อมูล|ยอด)",
+    re.IGNORECASE)
 # generic record-domain nouns -> coarse capability domain
 _PSI_DOMAIN_RES = (
     # CUSTOMER-TRACK-TH-1: "ติดตาม" (a plain-Thai synonym for "track") added
     # alongside the existing transliterations/loanword so "ขอเลขติดตาม
     # ฝั่งไทยหน่อยครับ" collapses to the same "tracking" domain as
     # "ขอแทรคไทยค่ะ" — one word, not a phrase dictionary.
-    ("tracking", re.compile(r"แทรค|แทร็ก|แทรก|tracking|ติดตาม|เลขพัสดุจีน|เลขจีน", re.IGNORECASE)),
+    ("tracking", re.compile(r"แทรค|แทร็ก|แทรก|tracking|ติดตาม|เลขพัสดุ|เลขจีน", re.IGNORECASE)),
     ("order", re.compile(r"ออเดอร์|คำสั่งซื้อ|บิลสั่งซื้อ|ร้าน.{0,6}ส่ง|ที่สั่งไป|ที่สั่งไว้|order", re.IGNORECASE)),
     ("customer_data", re.compile(
         r"วอลเล็ท|wallet|ยอดเงิน|เงินในระบบ|เงินที่เติม|เติมเงิน|เครดิต|คูปอง|coupon|ยอดของ"
@@ -1722,6 +1723,10 @@ _PRIVATE_REFERENT_OFFER_RE = re.compile(
 _PSI_FACILITY_LOC_RE = re.compile(
     r"(โกดัง|คลังสินค้า|คลังไทย|สาขา|จุดรับสินค้า|จุดส่ง|จุดรับของ|ออฟฟิศ|สำนักงาน|บริษัท)"
     r"[^\n]{0,16}(อยู่(ที่)?ไหน|อยู่ตรงไหน|ที่ไหน|พิกัด|แผนที่|เปิดกี่โมง|เปิดทำการ|เวลาทำการ|เปิดวันไหน|ปิดวันไหน|เปิดทุกวัน)")
+# a PROHIBITED/POLICY-category question ("สินค้าที่ห้ามนำเข้ามีอะไรบ้าง")
+# names a company RULE, never a personal record, however generic the
+# goods noun in it looks (see the catalog-probe relaxation below).
+_PSI_POLICY_TOPIC_RE = re.compile(r"ห้ามนำเข้า|สินค้าต้องห้าม|ต้องห้ามนำเข้า|นำเข้าไม่ได้|ที่ห้าม")
 # PPC — a direct "คืออะไร / เป็นอะไร" value question about the customer's
 # OWN on-file datum ("เบอร์ที่ผมลงทะเบียนไว้คืออะไร"). Counts as a probe
 # only together with owner wording (guarded in the evidence rule), so a
@@ -1849,6 +1854,15 @@ def _classify_private_state_inquiry(message: str):
     if _PSI_FACILITY_LOC_RE.search(text):
         # a warehouse/branch LOCATION or hours question — public FAQ
         return None
+    if _PSI_POLICY_TOPIC_RE.search(text):
+        # CUSTOMER SCREENSHOT 2026-09-17 — a PROHIBITED/POLICY-category
+        # question ("สินค้าที่ห้ามนำเข้ามีอะไรบ้าง") names a company RULE,
+        # never a personal record, however generic the shipment/goods noun
+        # in it looks. Needed once the tracking/shipment/order catalog-
+        # probe relaxation below dropped the owner-wording requirement for
+        # those domains — this keeps that widened check from also
+        # catching a policy question that happens to use "สินค้า"/"ของ".
+        return None
     has_probe = bool(_PSI_STATE_PROBE_RE.search(text))
     has_howto = bool(_PSI_HOWTO_RE.search(text))
     has_check_verb = bool(_PSI_CHECK_VERB_RE.search(text) or _PSI_DATA_REQUEST_RE.search(text))
@@ -1871,7 +1885,19 @@ def _classify_private_state_inquiry(message: str):
     # "ในบัญชีผมมีคูปองอะไร") — the owner wording is what separates it from
     # a public catalog question ("สินค้าที่ห้ามนำเข้ามีอะไรบ้าง"). It is a
     # LIST_ALL-scope inquiry (handled in the record_scope block below).
-    private_catalog = has_catalog_probe and has_owner
+    # CUSTOMER SCREENSHOT 2026-09-17 — the owner-wording requirement is
+    # dropped for "order"/"tracking" specifically: their domain-defining
+    # words (ออเดอร์/คำสั่งซื้อ, แทรค/tracking/ติดตาม) have NO meaningful
+    # public/company-wide reading — "มีเลขแทรคไทยมั้ย" can only ever mean
+    # THIS customer's own tracking number. "shipment" is deliberately
+    # EXCLUDED here: its domain regex also matches bare "สินค้า"/"ของ",
+    # which genuinely public catalog/policy questions use too
+    # ("สินค้าที่ห้ามนำเข้ามีอะไรบ้าง", "มีสินค้าอะไรบ้างที่ลดราคา") — an
+    # ID-shaped shipment noun ("เลขพัสดุ") is covered by widening the
+    # "tracking" domain itself instead (below), not by relaxing this
+    # gate for the whole "shipment" domain. customer_data (coupon/wallet)
+    # also keeps the owner-wording requirement for the same reason.
+    private_catalog = has_catalog_probe and (has_owner or domain in ("order", "tracking"))
     # PPC — a direct "…คืออะไร" value question about the customer's OWN
     # on-file datum ("เบอร์ที่ผมลงทะเบียนไว้คืออะไร"). Only counts with
     # owner wording, so a public "CBM คืออะไร" (no owner, no record-domain

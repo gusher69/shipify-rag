@@ -44,6 +44,11 @@ SERVICE_INTENT_FAMILIES = frozenset({
     # sibling keeps its existing operational-collection path and is NOT
     # listed here.
     "CANCELLATION_POLICY",
+    # CUSTOMER SCREENSHOT 2026-09-17 — a purchase-bill PAYMENT question
+    # (never the withdrawal procedure) gets a stable, deterministic
+    # answer instead of RAG choosing between chunks by embedding
+    # similarity.
+    "PURCHASE_BILL_PAYMENT",
 })
 
 # ── deterministic replies ────────────────────────────────────────────
@@ -103,6 +108,20 @@ CONTACT_FALLBACK = (
     "ฝ่ายพัฒนาธุรกิจ 080-289-3956, อีเมล info@shipify.co.th ค่ะ"
 )
 
+# CUSTOMER SCREENSHOT 2026-09-17 (PURCHASE_BILL_PAYMENT) — composed
+# VERBATIM from the SAME trusted KB answer that already correctly serves
+# "วิธีการชำระบิลสั่งซื้อ"/"จ่ายบิลสั่งซื้อยังไง" via RAG (AI_API_
+# Requirement_For_Client.xlsx sheet "2.ต้องเช็คในระบบ" row: click the
+# bill -> pay -> QR code -> scan -> confirm). Never the money-WITHDRAWAL
+# procedure — that is a different family (PURCHASE_WITHDRAWAL/
+# SHIPPING_WITHDRAWAL) with its own answer. Given here as a deterministic
+# reply so every equivalent phrasing gets the SAME correct steps instead
+# of RAG choosing between chunks by embedding similarity.
+PURCHASE_BILL_PAYMENT_REPLY = (
+    "คลิกเข้าไปที่เลขบิล จะมีให้กดชำระยอด จากนั้นจะมี QR Code ให้แสกนจ่ายได้เลยนะคะ "
+    "หากแสกนจ่ายเรียบร้อยแล้วกดยืนยันการชำระยอดใต้ QR Code ได้เลยค่ะ"
+)
+
 # a re-evaluation prompt used when the customer REJECTED the previous
 # answer and the current message alone does not resolve to a concrete
 # family — ask a genuine clarifying question, never resend the old reply.
@@ -157,7 +176,8 @@ def warehouse_inbound_reply(_wh_kind: Optional[str] = None) -> str:
 def import_interest_reply(product: Optional[str], *, quantity: Optional[int] = None,
                           method: Optional[str] = None, unit: Optional[str] = None,
                           weight: Optional[float] = None,
-                          weight_unit: Optional[str] = None) -> str:
+                          weight_unit: Optional[str] = None,
+                          customization: Optional[str] = None) -> str:
     """Reuse the frame acknowledgement so ``derive_active_frame`` can read
     the product back on the next turn (same 'reply wording IS the state'
     pattern the import frame already uses).
@@ -184,9 +204,20 @@ def import_interest_reply(product: Optional[str], *, quantity: Optional[int] = N
         # PHASE 6 POST-DEPLOY (defect class C) — the unit the customer
         # actually supplied travels with the quantity into the ack, so
         # "20 คู่" is never echoed back as "20 ชิ้น".
-        return frame_ack_reply(Frame(product=product, quantity=quantity, method=method,
-                                     unit=unit, weight=weight, weight_unit=weight_unit),
-                               changed="none")
+        reply = frame_ack_reply(Frame(product=product, quantity=quantity, method=method,
+                                      unit=unit, weight=weight, weight_unit=weight_unit,
+                                      customization=customization),
+                                changed="none")
+        # CUSTOMER SCREENSHOT 2026-09-17 — a customization add-on named
+        # alongside this opener ("...สั่งพิมพ์โลโก้ด้วย") is acknowledged
+        # with one honest, non-committal line -- never a promise it IS
+        # done, never silently dropped. Routes like every other spec/
+        # custom-production request: staff must confirm the details
+        # (same posture as operational_change_flow.py's custom_production
+        # kind), never an instant self-service confirmation.
+        if customization:
+            reply += f" และรับทราบว่าต้องการ{customization}ด้วยนะคะ เดี๋ยวแจ้งเจ้าหน้าที่ประสานเรื่องสเปคให้ค่ะ"
+        return reply
     # OWNER-REAL-LINE-FIX-01 — a broad "อยากสั่งของจากจีน" must NOT assume
     # the customer already has a product link. Offer BOTH paths in one
     # coherent reply: send a link if they have one, otherwise say what
@@ -214,6 +245,8 @@ def reply_for_family(family: str, *, sb=None, entities: Optional[Dict] = None,
         return contact_info_reply(sb)
     if family == "WAREHOUSE_INBOUND_JOURNEY":
         return warehouse_inbound_reply(ent.get("wh_kind"))
+    if family == "PURCHASE_BILL_PAYMENT":
+        return PURCHASE_BILL_PAYMENT_REPLY
     if family == "CANCELLATION_POLICY":
         # rendered from the SAME approved statement the operational
         # cancellation ack uses, so policy and operation can never state
@@ -224,7 +257,8 @@ def reply_for_family(family: str, *, sb=None, entities: Optional[Dict] = None,
         return import_interest_reply(product or ent.get("product"),
                                       quantity=ent.get("quantity"), method=ent.get("method"),
                                       unit=ent.get("quantity_unit"),
-                                      weight=ent.get("weight"), weight_unit=ent.get("weight_unit"))
+                                      weight=ent.get("weight"), weight_unit=ent.get("weight_unit"),
+                                      customization=ent.get("customization"))
     return None
 
 

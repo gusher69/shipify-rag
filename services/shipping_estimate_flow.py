@@ -43,7 +43,18 @@ _BOTH_METHOD_RE = re.compile(
     r"ทั้งรถและเรือ|ทั้งเรือและรถ|ทั้งรถทั้งเรือ|ทั้งเรือทั้งรถ|"
     r"รถกับเรือ|เรือกับรถ|"
     r"ทั้งสองแบบ|ทั้งสองทาง|ทั้งสองวิธี|"
-    r"ทางรถและทางเรือ|ทางเรือและทางรถ")
+    r"ทางรถและทางเรือ|ทางเรือและทางรถ|"
+    # CUSTOMER SCREENSHOT 2026-09-17 -- ONE canonical COMPARE_SHIPPING_
+    # METHODS class: an explicit comparison/superlative question ("which
+    # way is cheaper/better") means exactly the same thing as naming both
+    # methods -- compare road AND sea, never ask the customer to pick one
+    # first. Structural composition (an object naming the choice + a
+    # comparison/superlative predicate, either order), never a sentence
+    # list, so it generalizes past this exact wording.
+    r"(?:ทาง|ขนส่ง|ส่ง(?:แบบ)?|อัน|แบบ)ไหน.{0,10}"
+    r"(?:ดีกว่า|ถูกกว่า|ประหยัดกว่า|คุ้มกว่า|ถูกสุด|คุ้มสุด|ประหยัดสุด|ดีที่สุด)|"
+    r"(?:ดีกว่า|ถูกกว่า|ประหยัดกว่า|คุ้มกว่า).{0,10}(?:ทาง|ขนส่ง|ส่ง(?:แบบ)?|อัน|แบบ)ไหน|"
+    r"(?:เทียบ|ช่วยเทียบ).{0,15}(?:สองแบบ|ราคา|ค่าขนส่ง|ค่าส่ง)")
 
 # ── intent / signal patterns ─────────────────────────────────────────
 # a calculator VERB — the customer explicitly asks for a calculation.
@@ -291,14 +302,19 @@ def is_bare_dims_triple(message: str) -> bool:
 def opens_estimate_flow(message: str, state: EstimateState) -> bool:
     """A turn opens the flow when it explicitly asks for a calculation,
     names a shipping-cost topic together with a concrete input, is
-    essentially just a box-dimensions triple, OR already supplies enough
-    structured values to compute (weight + >=2 dims, or a method +
-    weight/dims). A bare "เรทเท่าไหร่" / "ค่านำเข้าเท่าไหร่" (no value, no
-    calc verb) stays a rate FAQ."""
+    essentially just a box-dimensions triple, explicitly asks to COMPARE
+    both shipping methods (a comparison question is itself enough -- no
+    value need be present yet, since the flow's own missing-input prompt
+    is exactly what answers it), OR already supplies enough structured
+    values to compute (weight + >=2 dims, or a method + weight/dims). A
+    bare "เรทเท่าไหร่" / "ค่านำเข้าเท่าไหร่" (no value, no calc verb) stays
+    a rate FAQ."""
     t = (message or "").strip()
     if _OTHER_BUSINESS_INTENT_RE.search(t):
         return False
     if is_bare_dims_triple(t):
+        return True
+    if _method_of(t) == "both":
         return True
     has_value = state.weight is not None or state._dims_present() >= 2
     if has_value and (_CALC_VERB_RE.search(t) or _CALC_TOPIC_RE.search(t)
