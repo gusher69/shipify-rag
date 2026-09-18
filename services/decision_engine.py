@@ -3387,6 +3387,90 @@ class DecisionEngine:
             except Exception as _e:
                 developer_trace["typo_normalization_error"] = str(_e)
 
+            # P0 LATENCY FIX (2026-09-18, owner real-LINE retest) — resolve
+            # a PENDING delivery-date ambiguity clarification BEFORE the
+            # expensive semantic interpretation below, never after it.
+            # Root cause of the reported "response arrives one turn late":
+            # every turn already pays for TWO full semantic-interpretation
+            # passes (the LangGraph node `resolve_current_turn` runs one
+            # before `decide()` is even called; `_interpret_message()` two
+            # lines below repeats the same work, including its own gated
+            # LLM disambiguation call) -- confirmed via production logs
+            # showing 8-12s per turn with a strict per-user FIFO queue, so
+            # a customer typing several quick replies inevitably sees each
+            # bot reply land noticeably behind whatever they just typed.
+            # This block used to sit AFTER `_interpret_message()`, paying
+            # its half of that cost for every reply to this clarification
+            # even though it is 100% deterministic and needs neither the
+            # LLM disambiguation nor `semantic` itself. The full duplicate-
+            # interpretation cost on the LangGraph side is a separate,
+            # larger architectural fix (services/agent/nodes/semantics.py)
+            # out of scope here; this closes decide()'s own half for
+            # exactly the turns this report reproduced.
+            _last_asst_for_delivery = next(
+                (t.get("content") or "" for t in reversed(history or [])
+                 if t.get("role") == "assistant"), "")
+            _delivery_clarify_pending = (
+                _DELIVERY_DATE_CLARIFY_QUESTION in _last_asst_for_delivery
+                or _DELIVERY_DATE_CLARIFY_QUESTION_SHORT in _last_asst_for_delivery)
+            if _delivery_clarify_pending:
+                if _DELIVERY_CHOOSE_PRIVATE_RE.search(message or ""):
+                    # Auth + private lookup: ask for the ONE identifier
+                    # needed to verify ownership before any private
+                    # shipment data is ever given — the same authorization
+                    # boundary every other private-state inquiry in this
+                    # engine already enforces (services/decision_engine.py
+                    # ::_classify_private_state_inquiry's own identifier-
+                    # collection path). Providing the identifier next turn
+                    # is ordinary private-state-inquiry territory from
+                    # here on — never re-invents that machinery here.
+                    developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_private"
+                    return self._finalize(
+                        reply=_build_response(text=(
+                            "รบกวนขอเลขที่บิลหรือหมายเลขคำสั่งซื้อ เพื่อตรวจสอบวันที่จัดส่งของคุณให้ค่ะ")),
+                        routing_type="WORKFLOW", workflow=None,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+                if _DELIVERY_CHOOSE_GENERAL_RE.search(message or ""):
+                    # Public policy: an authoritative KB source or an
+                    # honest no-information reply — never an invented
+                    # specific date.
+                    developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_general"
+                    return self._finalize(
+                        reply=_build_response(text=_delivery_timeframe_general_reply(self.registry._sb)),
+                        routing_type="WORKFLOW", workflow=None,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+                # REGRESSION FIX (2026-09-18, owner real-LINE retest) —
+                # neither choice matched. An EXPLICIT topic switch (the
+                # SAME deterministic _TOPIC_RE decision_engine's own
+                # _current_intent_breaks_pending_flow uses everywhere else
+                # — checked directly here, cheaply, rather than via the
+                # full semantic interpreter, since that is exactly the
+                # expensive call this hoist avoids) still escapes to the
+                # normal pipeline so a customer who genuinely abandons this
+                # question for something else is never trapped re-
+                # answering it. Everything else — including a bare
+                # acknowledgement ("ใช่ค่ะ", "ค่ะ", "โอเค", "ได้", "อืม",
+                # "ถูก", "ประมาณนั้น") that answers NOTHING about which of
+                # the two readings the customer means — asks again with
+                # explicit numbered choices, rather than falling through to
+                # RAG/the generic clarification-state engine (whose OWN
+                # _YES_NO_RE would have accepted "ใช่ค่ะ" as a valid answer
+                # to the FIRST clarification question, since it also
+                # happens to match that engine's generic "...หรือ...คะ"
+                # shape, and silently picked some answer by embedding
+                # similarity to the ORIGINAL ambiguous question without
+                # ever confirming which reading the customer meant).
+                from services.conversation_semantics import _TOPIC_RE as _delivery_topic_re
+                if not _delivery_topic_re.search(message or ""):
+                    developer_trace["selection_source"] = "delivery_date_ambiguity_reclarify"
+                    return self._finalize(
+                        reply=_build_response(text=_DELIVERY_DATE_CLARIFY_QUESTION_SHORT),
+                        routing_type="WORKFLOW", workflow=None,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+
             # 1-2. read message + history are inputs; 3. conversation state
             # is recomputed from `history` (no separate persistence layer
             # in this codebase — same convention every other
@@ -3633,73 +3717,6 @@ class DecisionEngine:
             # _classify_private_state_inquiry, so a genuine continuation
             # ("FT318…", "12 กก.") is unaffected.
             private_state_inquiry = _classify_private_state_inquiry(message)
-
-            # SYSTEMIC AUDIT (2026-09-18) — resolve a PENDING delivery-
-            # date ambiguity clarification (asked below) BEFORE the
-            # ambiguity check can fire again on the reply itself. The
-            # customer's short choice ("ทั่วไปค่ะ" / "เช็กของฉัน") answers
-            # the exact clarification question this same engine just
-            # asked, never a fresh unrelated message.
-            _last_asst_for_delivery = next(
-                (t.get("content") or "" for t in reversed(history or [])
-                 if t.get("role") == "assistant"), "")
-            _delivery_clarify_pending = (
-                _DELIVERY_DATE_CLARIFY_QUESTION in _last_asst_for_delivery
-                or _DELIVERY_DATE_CLARIFY_QUESTION_SHORT in _last_asst_for_delivery)
-            if _delivery_clarify_pending:
-                if _DELIVERY_CHOOSE_PRIVATE_RE.search(message or ""):
-                    # Auth + private lookup: ask for the ONE identifier
-                    # needed to verify ownership before any private
-                    # shipment data is ever given — the same authorization
-                    # boundary every other private-state inquiry in this
-                    # engine already enforces (services/decision_engine.py
-                    # ::_classify_private_state_inquiry's own identifier-
-                    # collection path). Providing the identifier next turn
-                    # is ordinary private-state-inquiry territory from
-                    # here on — never re-invents that machinery here.
-                    developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_private"
-                    return self._finalize(
-                        reply=_build_response(text=(
-                            "รบกวนขอเลขที่บิลหรือหมายเลขคำสั่งซื้อ เพื่อตรวจสอบวันที่จัดส่งของคุณให้ค่ะ")),
-                        routing_type="WORKFLOW", workflow=workflow_hint,
-                        developer_trace=developer_trace, context=context, start=start,
-                        alert=_detect_alert(message, context))
-                if _DELIVERY_CHOOSE_GENERAL_RE.search(message or ""):
-                    # Public policy: an authoritative KB source or an
-                    # honest no-information reply — never an invented
-                    # specific date.
-                    developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_general"
-                    return self._finalize(
-                        reply=_build_response(text=_delivery_timeframe_general_reply(self.registry._sb)),
-                        routing_type="WORKFLOW", workflow=workflow_hint,
-                        developer_trace=developer_trace, context=context, start=start,
-                        alert=_detect_alert(message, context))
-                # REGRESSION FIX (2026-09-18, owner real-LINE retest) —
-                # neither choice matched. An EXPLICIT topic switch
-                # (op == "TOPIC_CHANGE", the same signal decision_engine's
-                # own _current_intent_breaks_pending_flow uses everywhere
-                # else) still escapes to the normal pipeline so a customer
-                # who genuinely abandons this question for something else
-                # is never trapped re-answering it. Everything else —
-                # including a bare acknowledgement ("ใช่ค่ะ", "ค่ะ", "โอเค",
-                # "ได้", "อืม", "ถูก", "ประมาณนั้น") that answers NOTHING
-                # about which of the two readings the customer means — asks
-                # again with explicit numbered choices, rather than falling
-                # through to RAG/the generic clarification-state engine
-                # (whose OWN _YES_NO_RE would have accepted "ใช่ค่ะ" as a
-                # valid answer to the FIRST clarification question, since
-                # it also happens to match that engine's generic "...หรือ
-                # ...คะ" shape, and silently picked some answer by
-                # embedding similarity to the ORIGINAL ambiguous question
-                # without ever confirming which reading the customer
-                # meant).
-                if getattr(semantic, "follow_up_op", "NONE") != "TOPIC_CHANGE":
-                    developer_trace["selection_source"] = "delivery_date_ambiguity_reclarify"
-                    return self._finalize(
-                        reply=_build_response(text=_DELIVERY_DATE_CLARIFY_QUESTION_SHORT),
-                        routing_type="WORKFLOW", workflow=workflow_hint,
-                        developer_trace=developer_trace, context=context, start=start,
-                        alert=_detect_alert(message, context))
 
             # SYSTEMIC AUDIT (2026-09-18) — a genuinely AMBIGUOUS delivery-
             # timing question (see _DELIVERY_TIMING_Q_RE's module note
