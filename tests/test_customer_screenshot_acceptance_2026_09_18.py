@@ -154,6 +154,82 @@ class TestAmbiguousDeliveryDate(unittest.TestCase):
         from services.decision_engine import _classify_private_state_inquiry
         self.assertIsNotNone(_classify_private_state_inquiry("ของผมจะถึงไทยยัง"))
 
+    def test_check_verb_request_is_unambiguously_private_not_ambiguous(self):
+        """REGRESSION (found by the bounded suite, LINE-02 in
+        tests/test_phase6_api_gap_fallback.py) -- an explicit check-verb
+        request ("รบกวนเช็คให้หน่อยค่ะ ถึงไทยวันไหน") must never be treated
+        as the general-vs-private ambiguity; it is unambiguously private
+        even on phrasings _classify_private_state_inquiry itself does not
+        yet recognise."""
+        eng = DecisionEngine()
+        reply, src = _reply(eng, "รบกวนเช็คให้หน่อยค่ะ ถึงไทยวันไหน")
+        self.assertNotEqual(src, "delivery_date_ambiguity_clarify", reply)
+
+
+class TestAmbiguousDeliveryDateGenericAffirmation(unittest.TestCase):
+    """OWNER REAL-LINE RETEST (2026-09-18) -- a bare acknowledgement
+    ("ใช่ค่ะ", "ค่ะ", "โอเค", "ได้", "อืม", "ถูก", "ประมาณนั้น") answers
+    NOTHING about which of the two ambiguity readings the customer means.
+    Before this fix, the FIRST clarification question ("...หรือ...คะ")
+    happened to also match rag/clarification_state.py's OWN generic
+    "A หรือ B" detector, so "ใช่ค่ะ" was accepted as a valid answer by
+    THAT engine and fed into RAG's resolution machinery, which silently
+    picked some answer by embedding similarity to the ORIGINAL question
+    without ever confirming which reading the customer meant. The fix
+    re-asks with explicit numbered choices instead of guessing."""
+
+    AMBIGUOUS_QUESTION = "ชำระบิลขนส่งแล้ว สินค้าจะจัดส่งถึงบ้านวันไหน"
+    CLARIFY_QUESTION = "หมายถึงสอบถามระยะเวลาจัดส่งโดยทั่วไป หรือให้เช็กวันถึงของบิลของคุณคะ"
+    SHORT_CLARIFY = "ต้องการแบบไหนคะ\n1. ระยะเวลาจัดส่งโดยทั่วไป\n2. เช็กวันถึงของบิลของคุณ"
+
+    def test_generic_affirmations_never_select_a_branch(self):
+        eng = DecisionEngine()
+        history = [{"role": "user", "content": self.AMBIGUOUS_QUESTION},
+                  {"role": "assistant", "content": self.CLARIFY_QUESTION}]
+        for text in ("ใช่", "ใช่ค่ะ", "ค่ะ", "ครับ", "โอเค", "ได้", "อืม", "ถูก", "ประมาณนั้น"):
+            with self.subTest(text=text):
+                reply, src = _reply(eng, text, history)
+                self.assertEqual(src, "delivery_date_ambiguity_reclarify", (text, reply))
+                self.assertEqual(reply, self.SHORT_CLARIFY, (text, reply))
+
+    def test_persisted_session_affirmation_then_explicit_choice_general(self):
+        eng = DecisionEngine()
+        history = []
+        reply1, _ = _reply(eng, self.AMBIGUOUS_QUESTION, history)
+        history += [{"role": "user", "content": self.AMBIGUOUS_QUESTION},
+                   {"role": "assistant", "content": reply1}]
+        reply2, src2 = _reply(eng, "ใช่ค่ะ", history)
+        self.assertEqual(src2, "delivery_date_ambiguity_reclarify")
+        history += [{"role": "user", "content": "ใช่ค่ะ"},
+                   {"role": "assistant", "content": reply2}]
+        reply3, src3 = _reply(eng, "ข้อ 1", history)
+        self.assertEqual(src3, "delivery_date_ambiguity_resolved_general")
+        self.assertNotRegex(reply3, r"\d+\s*วัน")
+
+    def test_persisted_session_fresh_explicit_choice_private_asks_identifier(self):
+        eng = DecisionEngine()
+        history = []
+        reply1, _ = _reply(eng, self.AMBIGUOUS_QUESTION, history)
+        history += [{"role": "user", "content": self.AMBIGUOUS_QUESTION},
+                   {"role": "assistant", "content": reply1}]
+        reply2, src2 = _reply(eng, "ข้อ 2", history)
+        self.assertEqual(src2, "delivery_date_ambiguity_resolved_private")
+        self.assertIn("เลขที่บิล", reply2)
+
+    def test_all_valid_general_and_private_phrasings(self):
+        eng_hist = [{"role": "user", "content": self.AMBIGUOUS_QUESTION},
+                   {"role": "assistant", "content": self.CLARIFY_QUESTION}]
+        for text in ("ทั่วไป", "ระยะเวลาทั่วไป", "ถามโดยทั่วไป", "ข้อ 1", "อันแรก"):
+            with self.subTest(text=text):
+                eng = DecisionEngine()
+                _, src = _reply(eng, text, eng_hist)
+                self.assertEqual(src, "delivery_date_ambiguity_resolved_general", text)
+        for text in ("เช็กของฉัน", "ของบิลฉัน", "เช็กวันถึงของ", "ข้อ 2", "อันหลัง"):
+            with self.subTest(text=text):
+                eng = DecisionEngine()
+                _, src = _reply(eng, text, eng_hist)
+                self.assertEqual(src, "delivery_date_ambiguity_resolved_private", text)
+
 
 class TestPersistedSessionFiveTurnAcceptance(unittest.TestCase):
     """The systemic audit's own PERSISTED-SESSION ACCEPTANCE script, run

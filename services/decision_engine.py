@@ -1749,10 +1749,24 @@ _DELIVERY_TIMING_Q_RE = re.compile(
 _DELIVERY_GENERAL_MARKER_RE = re.compile(r"โดยทั่วไป|ทั่วไป|ปกติ|ปรกติ|โดยเฉลี่ย")
 _DELIVERY_DATE_CLARIFY_QUESTION = (
     "หมายถึงสอบถามระยะเวลาจัดส่งโดยทั่วไป หรือให้เช็กวันถึงของบิลของคุณคะ")
-_DELIVERY_CHOOSE_GENERAL_RE = re.compile(r"ทั่วไป")
+# REGRESSION FIX (2026-09-18, owner real-LINE retest) — the FIRST
+# clarification question ("...หรือ...คะ") itself matches rag/
+# clarification_state.py's OWN generic _CLARIFICATION_QUESTION_RE, so a
+# bare acknowledgement ("ใช่ค่ะ") was being accepted as a valid answer by
+# THAT generic engine (its _YES_NO_RE) and fed into RAG's own resolution
+# machinery -- which then silently picked SOME answer by embedding
+# similarity to the ORIGINAL ambiguous question, never actually
+# confirming which of the two readings the customer meant. A short,
+# explicitly-numbered re-ask makes the two choices unambiguous and gives
+# the customer something concrete to point at.
+_DELIVERY_DATE_CLARIFY_QUESTION_SHORT = (
+    "ต้องการแบบไหนคะ\n1. ระยะเวลาจัดส่งโดยทั่วไป\n2. เช็กวันถึงของบิลของคุณ")
+_DELIVERY_CHOOSE_GENERAL_RE = re.compile(
+    r"ทั่วไป|ข้อ\s*(?:1|หนึ่ง)\b|อันแรก|^\s*1\s*\.?\s*$")
 _DELIVERY_CHOOSE_PRIVATE_RE = re.compile(
-    r"ของ(?:ผม|ฉัน|เรา|หนู|ดิฉัน)|บิลของ(?:ผม|ฉัน)|เช็ก.{0,6}ของ(?:ผม|ฉัน)|"
-    r"บิลนี้|เช็กบิล|ของฉัน|เช็กของฉัน")
+    r"ของ(?:ผม|ฉัน|เรา|หนู|ดิฉัน)|บิลของ(?:ผม|ฉัน)|ของบิล(?:ผม|ฉัน)|เช็ก.{0,6}ของ(?:ผม|ฉัน)|"
+    r"บิลนี้|เช็กบิล|ของฉัน|เช็กของฉัน|เช็กวันถึงของ|"
+    r"ข้อ\s*(?:2|สอง)\b|อันหลัง|อันที่สอง|^\s*2\s*\.?\s*$")
 # PPC — a direct "คืออะไร / เป็นอะไร" value question about the customer's
 # OWN on-file datum ("เบอร์ที่ผมลงทะเบียนไว้คืออะไร"). Counts as a probe
 # only together with owner wording (guarded in the evidence rule), so a
@@ -3629,7 +3643,10 @@ class DecisionEngine:
             _last_asst_for_delivery = next(
                 (t.get("content") or "" for t in reversed(history or [])
                  if t.get("role") == "assistant"), "")
-            if _DELIVERY_DATE_CLARIFY_QUESTION in _last_asst_for_delivery:
+            _delivery_clarify_pending = (
+                _DELIVERY_DATE_CLARIFY_QUESTION in _last_asst_for_delivery
+                or _DELIVERY_DATE_CLARIFY_QUESTION_SHORT in _last_asst_for_delivery)
+            if _delivery_clarify_pending:
                 if _DELIVERY_CHOOSE_PRIVATE_RE.search(message or ""):
                     # Auth + private lookup: ask for the ONE identifier
                     # needed to verify ownership before any private
@@ -3657,8 +3674,32 @@ class DecisionEngine:
                         routing_type="WORKFLOW", workflow=workflow_hint,
                         developer_trace=developer_trace, context=context, start=start,
                         alert=_detect_alert(message, context))
-                # neither choice recognised -- fall through to the normal
-                # pipeline rather than guess.
+                # REGRESSION FIX (2026-09-18, owner real-LINE retest) —
+                # neither choice matched. An EXPLICIT topic switch
+                # (op == "TOPIC_CHANGE", the same signal decision_engine's
+                # own _current_intent_breaks_pending_flow uses everywhere
+                # else) still escapes to the normal pipeline so a customer
+                # who genuinely abandons this question for something else
+                # is never trapped re-answering it. Everything else —
+                # including a bare acknowledgement ("ใช่ค่ะ", "ค่ะ", "โอเค",
+                # "ได้", "อืม", "ถูก", "ประมาณนั้น") that answers NOTHING
+                # about which of the two readings the customer means — asks
+                # again with explicit numbered choices, rather than falling
+                # through to RAG/the generic clarification-state engine
+                # (whose OWN _YES_NO_RE would have accepted "ใช่ค่ะ" as a
+                # valid answer to the FIRST clarification question, since
+                # it also happens to match that engine's generic "...หรือ
+                # ...คะ" shape, and silently picked some answer by
+                # embedding similarity to the ORIGINAL ambiguous question
+                # without ever confirming which reading the customer
+                # meant).
+                if getattr(semantic, "follow_up_op", "NONE") != "TOPIC_CHANGE":
+                    developer_trace["selection_source"] = "delivery_date_ambiguity_reclarify"
+                    return self._finalize(
+                        reply=_build_response(text=_DELIVERY_DATE_CLARIFY_QUESTION_SHORT),
+                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
 
             # SYSTEMIC AUDIT (2026-09-18) — a genuinely AMBIGUOUS delivery-
             # timing question (see _DELIVERY_TIMING_Q_RE's module note
