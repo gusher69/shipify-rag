@@ -1111,6 +1111,7 @@ INTENT_FAMILIES = (
     # cannot continue).
     "HELP_INTENT", "SERVICE_DISCOVERY", "MONEY_TRANSFER_INTEREST",
     "WEBSITE_LINK_REQUEST", "CONTACT_INFO", "WAREHOUSE_INBOUND_JOURNEY",
+    "PURCHASE_BILL_PAYMENT", "META_AUTH_REQUIREMENT",
     "GENERAL", "UNKNOWN",
 )
 
@@ -1178,6 +1179,27 @@ _PURCHASE_BILL_PAYMENT_OBJ_RE = re.compile(
 # excludes the SEPARATE shipping-bill/import-cost payment concept
 # ("ชำระบิลขนส่งยังไง", "จ่ายค่านำเข้า") — its own existing FAQ answer.
 _SHIPPING_BILL_PAYMENT_OBJ_RE = re.compile(r"ขนส่ง|ค่าส่ง|ค่านำเข้า", re.IGNORECASE)
+
+# SYSTEMIC AUDIT (2026-09-18) — META_AUTH_REQUIREMENT: the customer is
+# asking WHETHER/WHY they must give an identifier ("ต้องแจ้งรหัสด้วยหรอคะ",
+# "ทำไมต้องขอรหัส", "ไม่แจ้งรหัสได้ไหม", "ถามทั่วไปต้องบอกรหัสไหม",
+# "ต้องใช้รหัสลูกค้าด้วยเหรอ") — a question ABOUT the identifier ask
+# itself, never a value FOR it. Before this family existed, this exact
+# shape had no home: the deterministic tier named no family for it, so it
+# fell through to whatever pending state was active, most often the
+# stale-continuation bug this same audit round fixed (see
+# rag.query_resolution.is_self_contained_question) or a repeat of the
+# same "กรุณาแจ้งรหัสลูกค้าค่ะ" ask that never answers the real question.
+# Structural composition — a REQUIREMENT/NEGATION-ABOUT-GIVING shape
+# (ต้อง.../ทำไมต้อง.../ไม่...ได้ไหม/ถามทั่วไป...ต้อง...) over the
+# identifier NOUN itself — never a phrase dictionary, and never matching
+# a turn that actually SUPPLIES an identifier value.
+_META_AUTH_CODE_NOUN_RE = re.compile(r"รหัส(?:ลูกค้า)?|customer\s*code|custcode", re.IGNORECASE)
+_META_AUTH_REQUIREMENT_RE = re.compile(
+    r"ทำไม.{0,10}(?:ต้อง|จำเป็น).{0,15}(?:ขอ|แจ้ง|บอก|ใช้)"
+    r"|(?:ต้อง|จำเป็น(?:ต้อง)?).{0,15}(?:แจ้ง|บอก|ใช้).{0,20}(?:หรอ|เหรอ|ไหม|มั้ย)"
+    r"|ไม่.{0,10}(?:แจ้ง|บอก).{0,15}ได้(?:ไหม|มั้ย)"
+    r"|ถาม(?:เรื่อง)?ทั่วไป.{0,20}(?:ต้อง|จำเป็น).{0,15}(?:แจ้ง|บอก)")
 
 # ── PHASE-6B pre-RAG conversational / service-intent markers ──────────
 # Compositional & anchored, never a bare keyword scan. They fire only
@@ -1584,6 +1606,14 @@ def _compose_family(t: str) -> "tuple[str, float, Dict]":
     if (_PAYMENT_VERB_RE.search(t) and _PURCHASE_BILL_PAYMENT_OBJ_RE.search(t)
             and not _SHIPPING_BILL_PAYMENT_OBJ_RE.search(t)):
         return "PURCHASE_BILL_PAYMENT", 0.85, ent
+
+    # SYSTEMIC AUDIT (2026-09-18) — META_AUTH_REQUIREMENT resolved early
+    # and decisively so it can never be swallowed by a pending identifier
+    # collection or a stale product/import continuation (the exact defect
+    # this audit round traced live). A question about needing to GIVE an
+    # identifier is never itself a VALUE for one.
+    if _META_AUTH_CODE_NOUN_RE.search(t) and _META_AUTH_REQUIREMENT_RE.search(t):
+        return "META_AUTH_REQUIREMENT", 0.85, ent
 
     if _WITHDRAWAL_VERB_RE.search(t):
         if _SHIPPING_WITHDRAWAL_OBJ_RE.search(t):
@@ -2461,6 +2491,11 @@ FAMILY_TO_ACTIONABLE_INTENT = {
     "WEBSITE_LINK_REQUEST": None,
     "CONTACT_INFO": None,
     "WAREHOUSE_INBOUND_JOURNEY": None,
+    "PURCHASE_BILL_PAYMENT": None,
+    # SYSTEMIC AUDIT (2026-09-18) — answered from its own deterministic
+    # policy reply by the Decision Engine, never forced into a RAG intent
+    # bucket and never treated as a value for a pending identifier ask.
+    "META_AUTH_REQUIREMENT": None,
     "GENERAL": None,
     "UNKNOWN": None,
 }
@@ -2488,4 +2523,9 @@ PUBLIC_INFO_FAMILIES = frozenset({
     # question: public, and never an identity-gated lookup. The
     # OPERATION sibling is deliberately NOT public.
     "CANCELLATION_POLICY",
+    # SYSTEMIC AUDIT (2026-09-18) — a question about WHETHER/WHY an
+    # identifier is required is itself public: explaining the policy must
+    # never demand the very identifier it is explaining, so this family
+    # must never be offered an identity-gated Business Action either.
+    "META_AUTH_REQUIREMENT",
 })

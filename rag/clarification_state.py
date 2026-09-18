@@ -28,6 +28,7 @@ from typing import Dict, List, Optional
 from rag.query_resolution import (
     extract_entities, _strip_suffix,
     _ELICIT_MARKER_RE, _IMPORT_INTEREST_RE, _PRODUCT_REPLY_STRIP_RE,
+    is_self_contained_question,
 )
 
 # A clarification question this codebase asks is either an "A หรือ B"
@@ -48,17 +49,22 @@ _ORDINAL_RE = re.compile(r"^(อันแรก|อันที่\s?1|อัน
 _BRAND_RE = re.compile(r"shipify|fasttrade", re.IGNORECASE)
 _MAX_CLARIFICATION_REPLY_LEN = 20
 
-# A message carrying its own interrogative marker (Thai "ไหม"/"มั้ย"/
-# "เท่าไหร่"/"กี่..."/"ยังไง"/"หรือเปล่า"/"รึเปล่า", or a literal "?") is a
-# complete, self-contained question that owns its own answer — it is
-# NEVER a bare reply to the assistant's previous clarification, however
-# short and however much it also happens to name a product/place. Without
-# this guard, "น้ำหอมนำเข้าได้ไหม" right after an A6 answer that ended
-# "...ต้องการขนส่งสินค้าประเภทไหนคะ" was mis-resolved as a clarification
-# answer, prepending A6's stale air-freight core into the retrieval query.
-# Same marker set the elicit-product composer below already applies
-# (`_compose_clarification_answer`) — kept in sync deliberately.
-_SELF_CONTAINED_QUESTION_RE = re.compile(r"ไหม|มั้ย|\?|ยังไง|เท่าไหร่|กี่|หรือเปล่า|รึเปล่า")
+# A message that stands on its own as a complete Thai question (a
+# literal "?", a recognised interrogative particle/word, or a genuine
+# verb-bearing clause with none of those — see
+# rag/query_resolution.py::is_self_contained_question, the ONE shared
+# detector this module and reconstruct_product_list_continuation() both
+# consume) owns its own answer — it is NEVER a bare reply to the
+# assistant's previous clarification, however short and however much it
+# also happens to name a product/place. Without this guard,
+# "น้ำหอมนำเข้าได้ไหม" right after an A6 answer that ended "...ต้องการ
+# ขนส่งสินค้าประเภทไหนคะ" was mis-resolved as a clarification answer,
+# prepending A6's stale air-freight core into the retrieval query.
+# CUSTOMER SCREENSHOT 2026-09-18 — this module used to keep its own
+# separate copy of this particle list (missing "หรอ", a different word
+# from "ไหม"), so "ต้องแจ้งรหัสด้วยหรอคะ" right after an unrelated
+# "...หรือทางเรือคะ" clarification was misread as a bare answer to it and
+# resurfaced a stale product from several turns earlier.
 
 
 def _is_clarification_question(text: str) -> bool:
@@ -70,8 +76,8 @@ def _looks_like_clarification_reply(text: str, entities: Dict) -> bool:
     if not text:
         return False
     # Current-turn authority: a fully-formed standalone question answers
-    # itself, not the prior clarification — see note on the regex above.
-    if _SELF_CONTAINED_QUESTION_RE.search(text):
+    # itself, not the prior clarification — see note above.
+    if is_self_contained_question(text):
         return False
     if _YES_NO_RE.match(text) or _ORDINAL_RE.match(text) or _BRAND_RE.search(text):
         return True

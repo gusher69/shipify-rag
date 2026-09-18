@@ -99,6 +99,7 @@ from services.service_intent_flow import (
     is_help_affirmation as _is_help_affirmation,
     CLARIFY_REPLY as _SERVICE_CLARIFY_REPLY,
     HELP_REPLY as _SERVICE_HELP_REPLY,
+    delivery_timeframe_general_reply as _delivery_timeframe_general_reply,
 )
 # CUSTOMER-RAG-2.1 — charter-truck (เหมารถ / TC19) multi-turn slot
 # collection (deterministic, history-derived — no LLM, no pending table).
@@ -1727,6 +1728,31 @@ _PSI_FACILITY_LOC_RE = re.compile(
 # names a company RULE, never a personal record, however generic the
 # goods noun in it looks (see the catalog-probe relaxation below).
 _PSI_POLICY_TOPIC_RE = re.compile(r"ห้ามนำเข้า|สินค้าต้องห้าม|ต้องห้ามนำเข้า|นำเข้าไม่ได้|ที่ห้าม")
+
+# SYSTEMIC AUDIT (2026-09-18) — a delivery-TIMING question ("...จัดส่งถึง
+# บ้านวันไหน", "ของจะมาถึงเมื่อไหร่") is genuinely ambiguous between a
+# GENERAL delivery-timeframe policy question and a PRIVATE "when will MY
+# specific parcel arrive" status question. Before this check, this shape
+# reached neither the private-state machinery (no owner pronoun, no
+# identifier) NOR a grounded public-policy answer -- it fell to Hybrid
+# RAG's general LLM synthesis, which produced a plausible-sounding but
+# UNGROUNDED guess citing no source and checking no identity either way.
+# Guessing at either reading is worse than asking ONE clarification
+# question. Only engages when _classify_private_state_inquiry() already
+# found no decisive private read for this message (a message that DOES
+# carry ownership/identifier evidence stays on the existing private path
+# untouched) and the message carries no explicit general-policy wording
+# of its own (which would already make it unambiguous).
+_DELIVERY_TIMING_Q_RE = re.compile(
+    r"(?:จัดส่ง|ส่ง(?:ของ)?|ถึง(?:บ้าน|ที่)?|มาถึง).{0,15}"
+    r"(?:วันไหน|เมื่อไหร่|เมื่อไร|กี่วัน|กี่โมง|เวลาไหน|ใช้เวลา(?:เท่าไหร่|เท่าไร|กี่วัน)?)")
+_DELIVERY_GENERAL_MARKER_RE = re.compile(r"โดยทั่วไป|ทั่วไป|ปกติ|ปรกติ|โดยเฉลี่ย")
+_DELIVERY_DATE_CLARIFY_QUESTION = (
+    "หมายถึงสอบถามระยะเวลาจัดส่งโดยทั่วไป หรือให้เช็กวันถึงของบิลของคุณคะ")
+_DELIVERY_CHOOSE_GENERAL_RE = re.compile(r"ทั่วไป")
+_DELIVERY_CHOOSE_PRIVATE_RE = re.compile(
+    r"ของ(?:ผม|ฉัน|เรา|หนู|ดิฉัน)|บิลของ(?:ผม|ฉัน)|เช็ก.{0,6}ของ(?:ผม|ฉัน)|"
+    r"บิลนี้|เช็กบิล|ของฉัน|เช็กของฉัน")
 # PPC — a direct "คืออะไร / เป็นอะไร" value question about the customer's
 # OWN on-file datum ("เบอร์ที่ผมลงทะเบียนไว้คืออะไร"). Counts as a probe
 # only together with owner wording (guarded in the evidence rule), so a
@@ -3028,6 +3054,14 @@ _ACTIONABLE_INTENT_FAMILIES = frozenset({
     # Business Action of its own (same reasoning as PURCHASE_WITHDRAWAL
     # above), so it is also in _FLOW_ONLY_INTENT_FAMILIES below.
     "PURCHASE_BILL_PAYMENT",
+    # SYSTEMIC AUDIT (2026-09-18) — a question about needing to GIVE an
+    # identifier must be just as decisive as PURCHASE_BILL_PAYMENT above,
+    # for the exact same reason: it has no Business-Action collection of
+    # its own, so omitting it here would let it be silently swallowed by
+    # ANY pending identifier/collection ask active at the moment it
+    # arrives -- precisely the stale-continuation failure mode this
+    # audit round traced live.
+    "META_AUTH_REQUIREMENT",
 })
 # The subset that is NEVER itself a Business-Action collection — used
 # where the pending flow's own family is unknown (a generic
@@ -3064,6 +3098,9 @@ _FLOW_ONLY_INTENT_FAMILIES = frozenset({
     # deterministic reply with no Business-Action collection of its own,
     # same reasoning as PURCHASE_WITHDRAWAL above.
     "PURCHASE_BILL_PAYMENT",
+    # SYSTEMIC AUDIT (2026-09-18) — META_AUTH_REQUIREMENT is likewise a
+    # one-turn deterministic reply with no collection of its own.
+    "META_AUTH_REQUIREMENT",
 })
 
 
@@ -3582,6 +3619,74 @@ class DecisionEngine:
             # _classify_private_state_inquiry, so a genuine continuation
             # ("FT318…", "12 กก.") is unaffected.
             private_state_inquiry = _classify_private_state_inquiry(message)
+
+            # SYSTEMIC AUDIT (2026-09-18) — resolve a PENDING delivery-
+            # date ambiguity clarification (asked below) BEFORE the
+            # ambiguity check can fire again on the reply itself. The
+            # customer's short choice ("ทั่วไปค่ะ" / "เช็กของฉัน") answers
+            # the exact clarification question this same engine just
+            # asked, never a fresh unrelated message.
+            _last_asst_for_delivery = next(
+                (t.get("content") or "" for t in reversed(history or [])
+                 if t.get("role") == "assistant"), "")
+            if _DELIVERY_DATE_CLARIFY_QUESTION in _last_asst_for_delivery:
+                if _DELIVERY_CHOOSE_PRIVATE_RE.search(message or ""):
+                    # Auth + private lookup: ask for the ONE identifier
+                    # needed to verify ownership before any private
+                    # shipment data is ever given — the same authorization
+                    # boundary every other private-state inquiry in this
+                    # engine already enforces (services/decision_engine.py
+                    # ::_classify_private_state_inquiry's own identifier-
+                    # collection path). Providing the identifier next turn
+                    # is ordinary private-state-inquiry territory from
+                    # here on — never re-invents that machinery here.
+                    developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_private"
+                    return self._finalize(
+                        reply=_build_response(text=(
+                            "รบกวนขอเลขที่บิลหรือหมายเลขคำสั่งซื้อ เพื่อตรวจสอบวันที่จัดส่งของคุณให้ค่ะ")),
+                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+                if _DELIVERY_CHOOSE_GENERAL_RE.search(message or ""):
+                    # Public policy: an authoritative KB source or an
+                    # honest no-information reply — never an invented
+                    # specific date.
+                    developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_general"
+                    return self._finalize(
+                        reply=_build_response(text=_delivery_timeframe_general_reply(self.registry._sb)),
+                        routing_type="WORKFLOW", workflow=workflow_hint,
+                        developer_trace=developer_trace, context=context, start=start,
+                        alert=_detect_alert(message, context))
+                # neither choice recognised -- fall through to the normal
+                # pipeline rather than guess.
+
+            # SYSTEMIC AUDIT (2026-09-18) — a genuinely AMBIGUOUS delivery-
+            # timing question (see _DELIVERY_TIMING_Q_RE's module note
+            # above) asks ONE clarification question instead of letting
+            # Hybrid RAG guess. Never engages when the existing private-
+            # state classifier already found a decisive private read, or
+            # when the message already states which reading it means.
+            if (private_state_inquiry is None
+                    and _DELIVERY_TIMING_Q_RE.search(message or "")
+                    and not _DELIVERY_GENERAL_MARKER_RE.search(message or "")
+                    # REGRESSION FIX (2026-09-18, found by the bounded
+                    # suite) — a message that already carries an EXPLICIT
+                    # check-verb request ("รบกวนเช็คให้หน่อยค่ะ ถึงไทยวันไหน",
+                    # LINE-02) is unambiguously a PRIVATE status check, not
+                    # a general-vs-private ambiguity, even on the turns
+                    # _classify_private_state_inquiry's own record-noun/
+                    # domain gate does not yet recognise (a separate,
+                    # pre-existing gap this change must not paper over by
+                    # intercepting the message earlier). The genuinely
+                    # ambiguous screenshot case ("ชำระบิลขนส่งแล้ว สินค้าจะ
+                    # จัดส่งถึงบ้านวันไหน") carries no check-verb of its own.
+                    and not _PSI_CHECK_VERB_RE.search(message or "")):
+                developer_trace["selection_source"] = "delivery_date_ambiguity_clarify"
+                return self._finalize(
+                    reply=_build_response(text=_DELIVERY_DATE_CLARIFY_QUESTION),
+                    routing_type="WORKFLOW", workflow=workflow_hint,
+                    developer_trace=developer_trace, context=context, start=start,
+                    alert=_detect_alert(message, context))
 
             # SYSTEM-STATE-EMERGENCY-1 (2nd blocker) — a bare possessive /
             # demonstrative follow-up with NO resolvable referent
@@ -4312,6 +4417,13 @@ class DecisionEngine:
                     # INSIDE an active import-interest frame must win too,
                     # same reasoning as every other explicit family here.
                     "PURCHASE_BILL_PAYMENT",
+                    # SYSTEMIC AUDIT (2026-09-18) — the exact scenario this
+                    # audit traced live: a META_AUTH_REQUIREMENT question
+                    # asked INSIDE an active import-interest frame (e.g.
+                    # right after a product ack + transport-mode
+                    # elicitation) must win too, never be re-absorbed into
+                    # that frame's stale product.
+                    "META_AUTH_REQUIREMENT",
                 }
                 if (_f5_frame and _f5_frame.product
                         and getattr(semantic, "intent_family", "UNKNOWN") not in _F5_EXPLICIT

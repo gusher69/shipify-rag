@@ -1057,6 +1057,86 @@ def generic_process_component(question: str) -> Optional["tuple[str, str]"]:
     return None
 
 
+# ── Shared self-contained-question detector ─────────────────────────────
+# CUSTOMER SCREENSHOT 2026-09-17/18 -- this module's own list-continuation
+# stop-word regex and rag/clarification_state.py's own bare-reply guard
+# each independently hand-maintained a list of Thai question particles,
+# and each was missing a DIFFERENT one ("ไหน" here, "หรอ" there) -- the
+# same customer-visible defect (a genuine new question misread as a bare
+# continuation of stale context) kept recurring because there were two
+# lists to keep in sync instead of one. This is now the ONE place that
+# decides "does this Thai message stand on its own as a complete
+# question, or is it a bare value/continuation fragment" -- consumed by
+# reconstruct_product_list_continuation() below and by
+# rag/clarification_state.py's _looks_like_clarification_reply(). Combines
+# independent signals so no single hand-maintained list has to be
+# exhaustive:
+#   1. a literal "?"
+#   2. a broad set of Thai interrogative particles/question-words,
+#      matched against TOKENS (via PyThaiNLP word_tokenize), never raw
+#      substrings -- so a particle can never be a false-positive
+#      fragment glued inside an unrelated compound word (e.g. bare "ไร"
+#      inside a longer noun).
+#   3. verb-bearing clause evidence (PyThaiNLP POS tags) for a genuine
+#      multi-word sentence that carries NO recognised particle at all --
+#      the safety net so an as-yet-unlisted particle/phrasing doesn't
+#      silently regress to the old per-list failure mode. Requires >= 3
+#      content tokens (a real clause, not a 2-word verb+object micro-
+#      reply like "ส่งทางเรือ"/"เอาทางเรือ") and ignores common
+#      value-supplying lead-in verbs (เอา/คือ/ระบุ/ให้/บอก/ใช้/เลือก) so a
+#      short slot-filling reply ("เอา SP1008", "ใช้ทางเรือ") is never
+#      misread as a fresh question merely for having a verb.
+_QUESTION_TOKEN_SET = {
+    "ไหม", "มั้ย", "มัย", "หรอ", "เหรอ", "ป่ะ", "ปะ", "หรือเปล่า", "รึเปล่า",
+    "ไหน", "อะไร", "ไร", "ยังไง", "อย่างไร",
+    "เมื่อไหร่", "เมื่อไร", "เท่าไหร่", "เท่าไร", "กี่", "ทำไม",
+}
+_VALUE_LEAD_VERB_TOKENS = {"เอา", "คือ", "ระบุ", "ให้", "บอก", "ใช้", "เลือก"}
+_BARE_TRANSPORT_WORD_RE = re.compile(r"^(ทางรถ|ทางเรือ|ทางอากาศ|รถ|เรือ|เครื่องบิน)\.?$")
+_BARE_QTY_UNIT_RE = re.compile(
+    r"^\d+(?:[.,]\d+)?\s*(?:x|X|\*)?\s*\d*\s*"
+    r"(?:ชิ้น|กล่อง|อัน|คู่|ตัว|kg|กก\.?|กรัม|g|cm|ซม\.?|m|เมตร|โล)?\.?$")
+_BARE_IDENTIFIER_RE = re.compile(r"^[A-Za-z]{1,4}\d{3,}$")
+
+
+def is_self_contained_question(text: str) -> bool:
+    """True when `text` stands on its own as a complete Thai question and
+    must never be treated as a bare reply/continuation fragment for some
+    OTHER pending question. See module note above -- the shared
+    replacement for two previously-separate, independently-incomplete
+    particle regexes."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if "?" in t:
+        return True
+    if (_BARE_QTY_UNIT_RE.match(t) or _BARE_TRANSPORT_WORD_RE.match(t)
+            or _BARE_IDENTIFIER_RE.match(t)):
+        return False
+    try:
+        from pythainlp.tokenize import word_tokenize as _pt_tokenize
+        tokens = [tok for tok in _pt_tokenize(t, engine="newmm") if tok.strip()]
+    except Exception:
+        tokens = [t]
+    # The tokenizer sometimes glues "ไหน" onto a preceding word as one
+    # compound dictionary entry ("ที่ไหน", "ตรงไหน") instead of splitting
+    # it out ("ทาง", "ไหน") -- checked as a token SUFFIX, never a raw
+    # whole-string substring search, so it still can't false-positive on
+    # an unrelated word that merely contains these letters.
+    if any(tok in _QUESTION_TOKEN_SET or tok.endswith("ไหน") for tok in tokens):
+        return True
+    if len(tokens) >= 3:
+        try:
+            from pythainlp.tag import pos_tag as _pt_pos_tag
+            tags = _pt_pos_tag(tokens, engine="perceptron", corpus="orchid_ud")
+            for tok, tag in tags:
+                if tag in ("VERB", "AUX") and tok not in _VALUE_LEAD_VERB_TOKENS:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
 # ── Bare product-list continuation of an import-eligibility thread ──────
 # "น้ำปลา นำเข้าได้ไหม" -> "น้ำเปล่า ละ น้ำมัน น้ำมันงา": the second turn
 # is just a short list of product nouns, no question of its own. When the
@@ -1065,20 +1145,15 @@ def generic_process_component(question: str) -> Optional["tuple[str, str]"]:
 # behaviour to N items. Never fires without that context (a bare list on
 # its own stays a bare list).
 _LIST_CONT_SEP_RE = re.compile(r"\s*(?:แล้วก็|และก็|แล้ว|และ|ละ|กับ|,|、|/|\+)\s*|\s+")
-_LIST_CONT_STOP_RE = re.compile(
-    # CUSTOMER SCREENSHOT 2026-09-17 -- "ไหน" (which/where: "วันไหน",
-    # "ตรงไหน", "ที่ไหน", "ทางไหน") is a DIFFERENT word from "ไหม" (the
-    # yes/no particle) above, and was missing here entirely. Any real
-    # question using it ("ชำระบิลขนส่งแล้ว สินค้าจะจัดส่งถึงบ้านวันไหน") was
-    # never recognised as a question, so right after an eligibility
-    # answer it was wrongly read as "another bare product name in the
-    # list" and had "...นำเข้าได้ไหม" appended to it -- corrupting an
-    # unrelated delivery/payment question into a 2-component eligibility
-    # request and producing a bundled, off-topic multi-part answer.
-    r"ไหม|ไหน|มั้ย|มัย|ยังไง|อย่างไร|เท่าไหร่|เท่าไร|กี่|ทำไม|\?|ราคา|ค่าส่ง|นำเข้าได้|ส่งได้|"
-    r"เข้าได้|ขอบคุณ|สวัสดี|ครับผมขอ")
 _LIST_CONT_DROP = {"ก็", "ละ", "แล้ว", "และ", "กับ", "พวก", "อัน", "ตัว", "นี้", "นั้น", "ด้วย",
                    "อีก", "ที", "หน่อย", "ครับ", "ค่ะ", "คะ", "นะ", "น่ะ"}
+# Non-question stop markers: a price/cost mention, a greeting, or a
+# completed-statement phrasing ("นำเข้าได้ค่ะ") are not bare product
+# names either, but they are not part of the question-particle
+# duplication this module and rag/clarification_state.py used to share
+# separately -- kept as their own small, stable check.
+_LIST_CONT_OTHER_STOP_RE = re.compile(
+    r"ราคา|ค่าส่ง|นำเข้าได้|ส่งได้|เข้าได้|ขอบคุณ|สวัสดี|ครับผมขอ")
 
 
 def reconstruct_product_list_continuation(message: str, history: Optional[List[Dict]]) -> Optional[str]:
@@ -1092,7 +1167,8 @@ def reconstruct_product_list_continuation(message: str, history: Optional[List[D
     if not _ELIGIBILITY_INTENT_RE.search(last_user):
         return None
     txt = message.strip()
-    if len(txt) > 60 or _LIST_CONT_STOP_RE.search(txt) or _ELIGIBILITY_INTENT_RE.search(txt):
+    if (len(txt) > 60 or is_self_contained_question(txt)
+            or _LIST_CONT_OTHER_STOP_RE.search(txt) or _ELIGIBILITY_INTENT_RE.search(txt)):
         return None
     tokens: List[str] = []
     for raw in _LIST_CONT_SEP_RE.split(txt):

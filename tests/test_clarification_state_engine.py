@@ -206,6 +206,46 @@ class TestSelfContainedQuestionIsNotAClarificationReply(unittest.TestCase):
         self.assertEqual(r["followup_type"], "clarification-answer")
 
 
+class TestMetaAuthQuestionIsNotAClarificationReply(unittest.TestCase):
+    """CUSTOMER SCREENSHOT 2026-09-18 -- reconstruct_product_list_
+    continuation's own particle regex was missing "ไหน" (fixed 2026-09-17);
+    rag/clarification_state.py kept a SEPARATE local copy of the same kind
+    of particle list (_SELF_CONTAINED_QUESTION_RE) that was missing a
+    DIFFERENT particle, "หรอ" -- a distinct colloquial "...really?" marker
+    from "ไหม". After an ack+"...หรือทางเรือคะ" transport-mode elicitation
+    for an earlier product ("น้ำเชื่อม"), the customer's real next question
+    "ต้องแจ้งรหัสด้วยหรอคะ" (do I really have to give my code?) was misread
+    as a bare answer to the stale transport-mode question, resurfacing the
+    old product several turns later in an unrelated reply. Both call sites
+    now share ONE detector (rag.query_resolution.is_self_contained_question)
+    so this class of defect can only be fixed once, not per-file."""
+
+    def test_meta_auth_question_does_not_inherit_stale_transport_clarification(self):
+        history = [
+            {"role": "user", "content": "น้ำเชื่อมนำเข้าได้ไหม"},
+            {"role": "assistant", "content": (
+                "รับทราบค่ะ เป็นน้ำเชื่อมนะคะ 😊 หากต้องการนำเข้ากับ Shipify "
+                "มีบริการขนส่งทั้งทางรถและทางเรือค่ะ ต้องการขนส่งทางรถหรือทางเรือคะ")},
+        ]
+        r = resolve_conversation("ต้องแจ้งรหัสด้วยหรอคะ", history)
+        self.assertEqual(r["resolved_question"], "ต้องแจ้งรหัสด้วยหรอคะ")
+        self.assertNotEqual(r["followup_type"], "clarification-answer")
+        self.assertNotIn("น้ำเชื่อม", r["resolved_question"])
+
+    def test_other_meta_auth_phrasings_are_also_self_contained(self):
+        history = [
+            {"role": "user", "content": "น้ำเชื่อมนำเข้าได้ไหม"},
+            {"role": "assistant", "content": (
+                "รับทราบค่ะ เป็นน้ำเชื่อมนะคะ 😊 หากต้องการนำเข้ากับ Shipify "
+                "มีบริการขนส่งทั้งทางรถและทางเรือค่ะ ต้องการขนส่งทางรถหรือทางเรือคะ")},
+        ]
+        for text in ("ทำไมต้องขอรหัส", "ไม่แจ้งรหัสได้ไหม",
+                    "ถามทั่วไปต้องบอกรหัสไหม", "ต้องใช้รหัสลูกค้าด้วยเหรอ"):
+            with self.subTest(text=text):
+                r = resolve_conversation(text, history)
+                self.assertNotEqual(r["followup_type"], "clarification-answer", text)
+
+
 class TestClarificationQuestionWording(unittest.TestCase):
     """The clarification question itself must match what was actually
     asked (phone vs address vs map), not always say "ที่อยู่"."""

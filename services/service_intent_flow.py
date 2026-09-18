@@ -49,6 +49,9 @@ SERVICE_INTENT_FAMILIES = frozenset({
     # answer instead of RAG choosing between chunks by embedding
     # similarity.
     "PURCHASE_BILL_PAYMENT",
+    # SYSTEMIC AUDIT (2026-09-18) — a question about WHETHER/WHY an
+    # identifier is required. Public policy: explain, never demand.
+    "META_AUTH_REQUIREMENT",
 })
 
 # ── deterministic replies ────────────────────────────────────────────
@@ -122,6 +125,18 @@ PURCHASE_BILL_PAYMENT_REPLY = (
     "หากแสกนจ่ายเรียบร้อยแล้วกดยืนยันการชำระยอดใต้ QR Code ได้เลยค่ะ"
 )
 
+# SYSTEMIC AUDIT (2026-09-18) — META_AUTH_REQUIREMENT. States the actual
+# authorization boundary this codebase already enforces (public/general
+# questions never require an identifier; private/customer-specific
+# lookups do) without ever demanding the identifier itself just to
+# explain that boundary — same posture as CANCELLATION_POLICY_ANSWER
+# above (explain the rule, ask for nothing).
+META_AUTH_REQUIREMENT_REPLY = (
+    "คำถามทั่วไปไม่จำเป็นต้องแจ้งรหัสลูกค้าค่ะ 😊 "
+    "จะขอรหัสก็ต่อเมื่อต้องตรวจสอบข้อมูลเฉพาะของคุณลูกค้า เช่น สถานะพัสดุหรือคำสั่งซื้อ "
+    "มีอะไรให้ช่วยสอบถามเพิ่มเติมไหมคะ"
+)
+
 # a re-evaluation prompt used when the customer REJECTED the previous
 # answer and the current message alone does not resolve to a concrete
 # family — ask a genuine clarifying question, never resend the old reply.
@@ -164,6 +179,45 @@ def fetch_contact_kb_answer(sb) -> Optional[str]:
 
 def contact_info_reply(sb) -> str:
     return fetch_contact_kb_answer(sb) or CONTACT_FALLBACK
+
+
+# SYSTEMIC AUDIT (2026-09-18) — after the customer explicitly chooses
+# "general delivery timeframe" out of the ambiguity clarification
+# (services/decision_engine.py's delivery-date-ambiguity check), the
+# answer must come from an authoritative KB source or be an honest
+# no-information reply — never an ungrounded LLM guess about a specific
+# date, which is what previously answered this shape.
+_NO_DELIVERY_TIMEFRAME_INFO_REPLY = (
+    "ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องระยะเวลาจัดส่งโดยทั่วไปที่แน่ชัดค่ะ "
+    "หากต้องการทราบวันที่บิลของคุณจะถึง แจ้งเลขบิล/คำสั่งซื้อมาได้เลยค่ะ จะช่วยตรวจสอบให้ค่ะ"
+)
+
+
+def fetch_delivery_timeframe_kb_answer(sb) -> Optional[str]:
+    """The active PUBLIC general-delivery-timeframe chunk, by a direct
+    content lookup (same pattern as fetch_contact_kb_answer -- never a
+    vector-similarity search, which is exactly what let an ungrounded
+    LLM guess answer this shape before). Returns the cleaned Answer text
+    or None when no such KB entry exists."""
+    if sb is None:
+        return None
+    for needle in ("ระยะเวลาจัดส่ง", "ใช้เวลาจัดส่งกี่วัน", "ระยะเวลาการจัดส่ง",
+                   "จัดส่งถึงบ้านกี่วัน", "ใช้เวลาในการจัดส่ง"):
+        try:
+            r = (sb.table("knowledge_chunks").select("content")
+                 .ilike("content", f"%{needle}%").eq("is_active", True)
+                 .limit(1).execute())
+        except Exception:
+            return None
+        if r.data:
+            ans = _clean_kb_answer(r.data[0].get("content") or "")
+            if ans:
+                return ans
+    return None
+
+
+def delivery_timeframe_general_reply(sb) -> str:
+    return fetch_delivery_timeframe_kb_answer(sb) or _NO_DELIVERY_TIMEFRAME_INFO_REPLY
 
 
 def warehouse_inbound_reply(_wh_kind: Optional[str] = None) -> str:
@@ -247,6 +301,8 @@ def reply_for_family(family: str, *, sb=None, entities: Optional[Dict] = None,
         return warehouse_inbound_reply(ent.get("wh_kind"))
     if family == "PURCHASE_BILL_PAYMENT":
         return PURCHASE_BILL_PAYMENT_REPLY
+    if family == "META_AUTH_REQUIREMENT":
+        return META_AUTH_REQUIREMENT_REPLY
     if family == "CANCELLATION_POLICY":
         # rendered from the SAME approved statement the operational
         # cancellation ack uses, so policy and operation can never state
