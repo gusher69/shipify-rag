@@ -162,6 +162,11 @@ class AgentDecision:
     normalized_message: str = ""
     normalization_applied: bool = False
     normalization_method: List[str] = field(default_factory=list)
+    # OBSERVABILITY (2026-09-18) — how long resolve_current_turn's own
+    # semantic-interpretation pass took, so a slow turn can be attributed
+    # to the graph's own understanding step vs. the tool/decision step
+    # (tool_result.latency_ms, already on engine_result["developer"]).
+    resolve_current_turn_ms: float = 0.0
 
     def as_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -192,6 +197,7 @@ class AgentDecision:
             normalized_message=state.get("normalized_message") or "",
             normalization_applied=bool(state.get("normalization_applied")),
             normalization_method=list(state.get("normalization_method") or []),
+            resolve_current_turn_ms=float(state.get("resolve_current_turn_ms") or 0.0),
         )
 
 

@@ -276,6 +276,16 @@ class ConversationResolution:
     frame_correction: Dict = field(default_factory=dict)
     is_in_frame_followup: bool = False
     semantic_family: str = "UNKNOWN"
+    # P0 LATENCY FIX (2026-09-18) — the raw Interpretation object this
+    # resolution was built from (`sem` below), exposed so a caller that
+    # already has ITS OWN reason to call resolve_conversation (the
+    # LangGraph `resolve_current_turn` node) can hand this exact object
+    # forward to DecisionEngine.decide() via context, which then reuses
+    # it instead of calling _interpret_message() a second time -- the
+    # confirmed root cause of every production turn paying for two full
+    # semantic-interpretation passes (one gated LLM call each) instead of
+    # one. Never part of as_dict() / the public contract.
+    resolved_semantic: Optional[object] = None
 
     def as_dict(self) -> Dict:
         return {
@@ -643,4 +653,5 @@ def resolve_conversation(message: str, history: Optional[List[Dict]] = None,
         grounding_requirement=grounding, execution_hint=hint,
         confidence=round(conf, 2), precedence_winner=winner, evidence=ev,
         frame_correction=fc, is_in_frame_followup=in_ffup, semantic_family=fam,
+        resolved_semantic=sem,
     )

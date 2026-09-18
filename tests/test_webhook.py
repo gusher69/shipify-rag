@@ -1581,6 +1581,35 @@ class TestPerUserConcurrencyDispatch(unittest.IsolatedAsyncioTestCase):
             await self._drain([uid])
         self.assertEqual(call_order, ["Q0", "Q1", "Q2", "Q3"])
 
+    async def test_three_rapid_same_user_events_each_get_exactly_one_reply(self):
+        """P0 LATENCY INVESTIGATION (2026-09-18) — the requested regression
+        for the FIFO ordering invariant this whole investigation depends
+        on: three rapid, genuinely different messages from the SAME user
+        must (a) stay in strict arrival order, (b) each produce exactly
+        one handle_message() call (no turn dropped, none collapsed, none
+        duplicated), and (c) never share state — each call receives its
+        own distinct event object, never a copy/reference mutated by an
+        earlier turn's processing."""
+        uid = "U_p0_three_turn_burst"
+        texts = ["ชำระบิลขนส่งแล้ว สินค้าจะจัดส่งถึงบ้านวันไหน", "ใช่ค่ะ", "ข้อ 2"]
+        events = [_fake_event(text=t, user_id=uid, webhook_event_id=f"evt-p0-burst-{i}")
+                 for i, t in enumerate(texts)]
+        seen = []
+
+        def _record(event):
+            # each call must see its OWN event's text, never a stale or
+            # borrowed one from an earlier/later turn in this burst.
+            seen.append((event.message.text, event is events[len(seen)]))
+
+        with patch.object(webhook_module, "handle_message", side_effect=_record):
+            for ev in events:
+                webhook_module._dispatch_event(ev)
+            await self._drain([uid])
+        self.assertEqual(len(seen), 3, "every event must produce exactly one handle_message call")
+        self.assertEqual([t for t, _ in seen], texts, "strict FIFO order")
+        self.assertTrue(all(is_own_event for _, is_own_event in seen),
+                        "each call must receive its own event, never another turn's")
+
     async def test_different_rapid_questions_are_never_collapsed(self):
         """Section 6 — four genuinely DIFFERENT questions from the same
         user must each be answered exactly once, never dropped."""

@@ -70,10 +70,26 @@ def execute_tool(state: Dict[str, Any]) -> Dict[str, Any]:
         try:
             # The engine executes the NORMALISED turn against the
             # NORMALISED history — the same wording the graph understood.
+            _exec_ctx = {k: v for k, v in (state.get("_decide_context") or {}).items()
+                        if k != "_precomputed_engine_result"}
+            # P0 LATENCY FIX (2026-09-18) — resolve_current_turn (the
+            # semantics node, upstream of this one) already computed the
+            # ONE semantic interpretation for this turn and stashed the
+            # full ConversationResolution at state["_resolution"]
+            # (services/agent/nodes/semantics.py). Hand its raw
+            # Interpretation object to decide() via context so it reuses
+            # it instead of re-running _interpret_message() (and its own
+            # gated LLM call) from scratch — confirmed root cause of every
+            # production turn paying for two full semantic-interpretation
+            # passes. decide() falls back to computing its own whenever
+            # this key is absent or not Interpretation-shaped (every
+            # direct/test caller, unchanged).
+            _resolution_obj = state.get("_resolution")
+            _pre_sem = getattr(_resolution_obj, "resolved_semantic", None)
+            if _pre_sem is not None:
+                _exec_ctx["_pre_resolved_semantic"] = _pre_sem
             result = engine.execute(effective_message(state),
-                                    effective_history(state),
-                                    {k: v for k, v in (state.get("_decide_context") or {}).items()
-                                     if k != "_precomputed_engine_result"})
+                                    effective_history(state), _exec_ctx)
         except Exception as exc:
             return {"node_path": node_path,
                     "tool_result": {"error": repr(exc)},

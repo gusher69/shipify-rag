@@ -146,8 +146,11 @@ def resolve_current_turn(state: Dict[str, Any]) -> Dict[str, Any]:
     text, so two parts of the graph can no longer disagree about what the
     customer just said.
     """
+    import time as _time
+    _t0 = _time.time()
     out: Dict[str, Any] = {"node_path": list(state.get("node_path") or [])
-                           + ["resolve_current_turn"]}
+                           + ["resolve_current_turn"],
+                           "resolve_current_turn_ms": 0.0}
     try:
         recovered = _semantic_recovery(state)
     except Exception as exc:                       # evidence only; never fatal
@@ -161,6 +164,7 @@ def resolve_current_turn(state: Dict[str, Any]) -> Dict[str, Any]:
         res = engine.resolve_turn(msg, effective_history(state),
                                   state.get("_decide_context") or {})
     except Exception as exc:
+        out["resolve_current_turn_ms"] = round((_time.time() - _t0) * 1000, 2)
         return {**out, "errors": list(state.get("errors") or [])
                 + [f"resolve_current_turn: {exc!r}"]}
 
@@ -183,6 +187,7 @@ def resolve_current_turn(state: Dict[str, Any]) -> Dict[str, Any]:
                                     "raw": str(_val)}
 
     act = res.conversation_act or "UNKNOWN"
+    out["resolve_current_turn_ms"] = round((_time.time() - _t0) * 1000, 2)
     return {
         **out,
         "conversation_act": act,

@@ -104,22 +104,35 @@ async def _user_worker(user_id: str):
     import time as _time
     queue = _user_queues[user_id]
     loop = asyncio.get_running_loop()
+    user_hash = _anonymize_user_id(user_id)
     try:
         while True:
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=_USER_WORKER_IDLE_TIMEOUT_SECONDS)
+                event, enqueued_at = await asyncio.wait_for(
+                    queue.get(), timeout=_USER_WORKER_IDLE_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
                 break
-            # TEMP LATENCY DIAGNOSTIC (2026-08-31) — remove once the
-            # production slowness investigation is resolved.
             _t0 = _time.time()
-            print(f"[LATENCY_DEBUG] dequeued for {user_id!r} at {_t0:.3f}, submitting to executor")
+            event_id = getattr(event, "webhook_event_id", None)
+            queue_wait_ms = round((_t0 - enqueued_at) * 1000, 2)
+            # OBSERVABILITY (2026-09-18) — one structured line per turn,
+            # correlated by event_id across this queue boundary and the
+            # decision-level line _handle_message_via_decision_engine
+            # emits. Superseded the old bare "[LATENCY_DEBUG] dequeued..."
+            # print (2026-08-31) with the same information plus the fields
+            # the P0 latency investigation asked for. Never logs message
+            # text, tokens or any other customer content — user_id is
+            # hashed, never printed raw.
+            print(f"[TURN] event_id={event_id!r} user_hash={user_hash} "
+                 f"stage=dequeued queue_wait_ms={queue_wait_ms}")
             try:
                 await loop.run_in_executor(_EXECUTOR, handle_message, event)
             except Exception as e:
                 print(f"[webhook] per-user worker error for {user_id!r}: {e}")
             finally:
-                print(f"[LATENCY_DEBUG] executor call for {user_id!r} finished after {_time.time()-_t0:.3f}s")
+                total_turn_ms = round((_time.time() - _t0) * 1000, 2)
+                print(f"[TURN] event_id={event_id!r} user_hash={user_hash} "
+                     f"stage=complete total_turn_ms={total_turn_ms}")
                 text = _normalize_for_dedup(getattr(event.message, "text", None))
                 _pending_texts_by_user[user_id].discard(text)
                 queue.task_done()
@@ -130,6 +143,16 @@ async def _user_worker(user_id: str):
             _pending_texts_by_user.pop(user_id, None)
 
 
+def _anonymize_user_id(user_id: str) -> str:
+    """OBSERVABILITY (2026-09-18) — a stable, non-reversible identifier for
+    log correlation across a user's turns, without ever printing the real
+    LINE user id. Truncated: enough to distinguish users in a log search,
+    not a full cryptographic digest (not a security boundary — this is
+    for reading logs, never for authorization)."""
+    import hashlib
+    return hashlib.sha256((user_id or "").encode("utf-8")).hexdigest()[:16]
+
+
 def _dispatch_event(event) -> None:
     """Fast, non-blocking dispatch — called synchronously from the async
     webhook() route on the event loop thread for every parsed MessageEvent/
@@ -138,6 +161,7 @@ def _dispatch_event(event) -> None:
     serialized processing or — if this is a duplicate of an already
     pending message from the SAME user — skips it entirely (same user +
     same normalized text + first request still queued/processing)."""
+    import time as _time
     user_id = event.source.user_id if event.source else None
     if not user_id:
         # No isolable per-user identity (e.g. a group/room event) —
@@ -152,11 +176,15 @@ def _dispatch_event(event) -> None:
         print(f"[webhook] duplicate pending message from {user_id!r} ({text!r}) — skipping duplicate execution")
         return
 
-    # TEMP LATENCY DIAGNOSTIC (2026-08-31) — remove once the production
-    # slowness investigation is resolved.
-    import time as _time
-    print(f"[LATENCY_DEBUG] dispatch_event enqueueing for {user_id!r} at {_time.time():.3f}, "
-          f"existing_queue={_user_queues.get(user_id) is not None}, active_users={len(_user_queues)}")
+    # OBSERVABILITY (2026-09-18) — event_id/user_hash correlate this line
+    # with the "[TURN] ... stage=dequeued/complete" lines _user_worker
+    # emits and the "[TURN_DECISION] ..." line _handle_message_via_
+    # decision_engine emits, so a single turn's full lifecycle (enqueue ->
+    # dequeue -> decide -> reply) can be reconstructed from logs alone.
+    # Never logs message text, tokens or any other customer content.
+    print(f"[TURN] event_id={getattr(event, 'webhook_event_id', None)!r} "
+         f"user_hash={_anonymize_user_id(user_id)} stage=enqueued "
+         f"existing_queue={_user_queues.get(user_id) is not None} active_users={len(_user_queues)}")
 
     queue = _user_queues.get(user_id)
     if queue is None:
@@ -166,7 +194,7 @@ def _dispatch_event(event) -> None:
 
     if text:
         _pending_texts_by_user[user_id].add(text)
-    queue.put_nowait(event)
+    queue.put_nowait((event, _time.time()))
 
 
 def send_line_notify(message: str):
@@ -769,6 +797,31 @@ def _handle_message_via_decision_engine(event: MessageEvent):
     # services/decision_engine.py::_requires_confirmation's own generic
     # classification).
     dev = result.get("developer") or {}
+
+    # OBSERVABILITY (2026-09-18) — the decision-level half of this turn's
+    # structured log, correlated by event_id with the queue-level
+    # "[TURN] ... stage=enqueued/dequeued/complete" lines emitted around
+    # this call. Every field here is either a duration, a classification
+    # label, or an already-anonymized identifier — never message text,
+    # tokens, or any other customer content.
+    try:
+        _sem = dev.get("semantic_interpretation") or {}
+        print(
+            "[TURN_DECISION] "
+            f"event_id={getattr(event, 'webhook_event_id', None)!r} "
+            f"user_hash={_anonymize_user_id(user_id)} "
+            f"reply_source={'langgraph' if (_agent_telemetry or {}).get('used') == 'langgraph' else ('engine_fallback' if _agent_telemetry else 'engine')} "
+            f"decision_type={_sem.get('intent_family')} "
+            f"selection_source={dev.get('selection_source')} "
+            f"semantic_interpretation_source={dev.get('semantic_interpretation_source')} "
+            f"resolve_current_turn_ms={getattr(_agent_decision, 'resolve_current_turn_ms', None)} "
+            f"decision_ms={dev.get('decision_ms')} "
+            f"pending_state_before={dev.get('pending_state_before')} "
+            f"pending_state_after={dev.get('pending_state_after')} "
+            f"routing_type={routing_type}")
+    except Exception as _log_exc:                      # never break the reply for a log line
+        print(f"[webhook] turn-decision log skipped (non-fatal): {_log_exc!r}")
+
     gate = dev.get("confirmation_gate")
     ics = dev.get("information_collection_status") or {}
     if gate and gate.get("required") and not gate.get("confirmed") and gate.get("action_id"):

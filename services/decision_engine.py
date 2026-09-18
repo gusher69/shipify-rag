@@ -3391,28 +3391,34 @@ class DecisionEngine:
             # a PENDING delivery-date ambiguity clarification BEFORE the
             # expensive semantic interpretation below, never after it.
             # Root cause of the reported "response arrives one turn late":
-            # every turn already pays for TWO full semantic-interpretation
+            # every turn was paying for TWO full semantic-interpretation
             # passes (the LangGraph node `resolve_current_turn` runs one
             # before `decide()` is even called; `_interpret_message()` two
-            # lines below repeats the same work, including its own gated
+            # lines below repeated the same work, including its own gated
             # LLM disambiguation call) -- confirmed via production logs
             # showing 8-12s per turn with a strict per-user FIFO queue, so
-            # a customer typing several quick replies inevitably sees each
+            # a customer typing several quick replies inevitably saw each
             # bot reply land noticeably behind whatever they just typed.
-            # This block used to sit AFTER `_interpret_message()`, paying
-            # its half of that cost for every reply to this clarification
-            # even though it is 100% deterministic and needs neither the
-            # LLM disambiguation nor `semantic` itself. The full duplicate-
-            # interpretation cost on the LangGraph side is a separate,
-            # larger architectural fix (services/agent/nodes/semantics.py)
-            # out of scope here; this closes decide()'s own half for
-            # exactly the turns this report reproduced.
+            # The LangGraph-side half of that duplication is now also
+            # closed (services/agent/nodes/tools.py::execute_tool threads
+            # resolve_current_turn's own Interpretation through
+            # context["_pre_resolved_semantic"]; see the reuse check right
+            # below), so semantic interpretation happens at most ONCE per
+            # production turn. This block staying hoisted here means these
+            # specific turns skip that interpretation step entirely (never
+            # needed it, being 100% deterministic history/text matching).
             _last_asst_for_delivery = next(
                 (t.get("content") or "" for t in reversed(history or [])
                  if t.get("role") == "assistant"), "")
             _delivery_clarify_pending = (
                 _DELIVERY_DATE_CLARIFY_QUESTION in _last_asst_for_delivery
                 or _DELIVERY_DATE_CLARIFY_QUESTION_SHORT in _last_asst_for_delivery)
+            # OBSERVABILITY (2026-09-18) — a scoped pending_state_before/
+            # _after pair for this specific deterministic clarification
+            # flow (not yet a general pending-state tracker across every
+            # flow in this module -- that is future work).
+            developer_trace["pending_state_before"] = (
+                "delivery_date_ambiguity" if _delivery_clarify_pending else None)
             if _delivery_clarify_pending:
                 if _DELIVERY_CHOOSE_PRIVATE_RE.search(message or ""):
                     # Auth + private lookup: ask for the ONE identifier
@@ -3425,6 +3431,7 @@ class DecisionEngine:
                     # is ordinary private-state-inquiry territory from
                     # here on — never re-invents that machinery here.
                     developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_private"
+                    developer_trace["pending_state_after"] = "private_identifier_ask"
                     return self._finalize(
                         reply=_build_response(text=(
                             "รบกวนขอเลขที่บิลหรือหมายเลขคำสั่งซื้อ เพื่อตรวจสอบวันที่จัดส่งของคุณให้ค่ะ")),
@@ -3436,6 +3443,7 @@ class DecisionEngine:
                     # honest no-information reply — never an invented
                     # specific date.
                     developer_trace["selection_source"] = "delivery_date_ambiguity_resolved_general"
+                    developer_trace["pending_state_after"] = None
                     return self._finalize(
                         reply=_build_response(text=_delivery_timeframe_general_reply(self.registry._sb)),
                         routing_type="WORKFLOW", workflow=None,
@@ -3465,6 +3473,7 @@ class DecisionEngine:
                 from services.conversation_semantics import _TOPIC_RE as _delivery_topic_re
                 if not _delivery_topic_re.search(message or ""):
                     developer_trace["selection_source"] = "delivery_date_ambiguity_reclarify"
+                    developer_trace["pending_state_after"] = "delivery_date_ambiguity"
                     return self._finalize(
                         reply=_build_response(text=_DELIVERY_DATE_CLARIFY_QUESTION_SHORT),
                         routing_type="WORKFLOW", workflow=None,
@@ -3485,7 +3494,31 @@ class DecisionEngine:
             # compositional meaning model + one gated LLM disambiguation
             # that degrades to the deterministic result. Structural inputs
             # (bare ids / URLs / numeric-only / postbacks) skip it.
-            semantic = _interpret_message(message, history, context)
+            #
+            # P0 LATENCY FIX (2026-09-18) — when the caller is the
+            # LangGraph authoritative path, its own resolve_current_turn
+            # node already ran this EXACT interpretation (same message,
+            # same history — services/agent/nodes/tools.py::execute_tool
+            # passes the graph's own normalised message/history as this
+            # call's message/history arguments) and hands its result
+            # through via context["_pre_resolved_semantic"]. Reusing it
+            # here is what makes semantic interpretation happen at most
+            # ONCE per production turn instead of twice (confirmed root
+            # cause of the reported "reply arrives one turn late" defect —
+            # each turn was paying for two full interpretation passes,
+            # including up to two gated LLM calls). Any caller that does
+            # NOT supply this (every direct DecisionEngine.decide() call —
+            # tests, the admin playground, the legacy webhook adapter)
+            # computes its own interpretation exactly as before; this is
+            # purely additive and never changes what gets computed, only
+            # whether it gets computed twice.
+            _pre_resolved_semantic = context.get("_pre_resolved_semantic")
+            if _pre_resolved_semantic is not None and hasattr(_pre_resolved_semantic, "intent_family"):
+                semantic = _pre_resolved_semantic
+                developer_trace["semantic_interpretation_source"] = "reused_from_graph"
+            else:
+                semantic = _interpret_message(message, history, context)
+                developer_trace["semantic_interpretation_source"] = "computed"
             developer_trace["semantic_interpretation"] = semantic.as_dict()
 
             # INVOICE-PRODUCT-REGRESSION-2 (Problem B) — the central layer
@@ -3740,6 +3773,7 @@ class DecisionEngine:
                     # จัดส่งถึงบ้านวันไหน") carries no check-verb of its own.
                     and not _PSI_CHECK_VERB_RE.search(message or "")):
                 developer_trace["selection_source"] = "delivery_date_ambiguity_clarify"
+                developer_trace["pending_state_after"] = "delivery_date_ambiguity"
                 return self._finalize(
                     reply=_build_response(text=_DELIVERY_DATE_CLARIFY_QUESTION),
                     routing_type="WORKFLOW", workflow=workflow_hint,
@@ -7561,7 +7595,14 @@ class DecisionEngine:
             response["conversation_frame"] = _sf
         if bool(context.get("developer_mode")):
             developer_trace.setdefault("confidence", None)
-            response["developer"] = {**developer_trace, "latency_ms": round((time.time() - start) * 1000, 2)}
+            _elapsed_ms = round((time.time() - start) * 1000, 2)
+            # OBSERVABILITY (2026-09-18) — "decision_ms" is the requested
+            # instrumentation name for this same measurement; kept as an
+            # explicit alias alongside the pre-existing "latency_ms" key
+            # rather than renaming it, so nothing already reading
+            # latency_ms breaks.
+            response["developer"] = {**developer_trace, "latency_ms": _elapsed_ms,
+                                     "decision_ms": _elapsed_ms}
         return response
 
 
